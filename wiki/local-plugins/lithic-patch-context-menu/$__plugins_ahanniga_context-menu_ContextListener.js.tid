@@ -87,9 +87,9 @@ This widgets implements context menus to tiddlers
             return true;
         }
 
-        // Ignore right-clicks on Streams node handles to let the specialized menu handle it
+        var isStreamNode = false;
         if (event.target.closest(".stream-node-handle")) {
-            return true;
+            isStreamNode = true;
         }
 
         // Skip when the whiteboard layout is active - TLDraw manages its own context menu.
@@ -111,7 +111,7 @@ This widgets implements context menus to tiddlers
 
         // Reverted to UL structure
         var menuHtml = ["<ul>"];
-        var titles = $tw.wiki.getTiddlersWithTag("$:/tags/tiddlercontextmenu");
+        var titles = isStreamNode ? $tw.wiki.getTiddlersWithTag("$:/tags/streams/contextmenu") : $tw.wiki.getTiddlersWithTag("$:/tags/tiddlercontextmenu");
         var label, action, icon, tid, targ, text, separator, paramFilter, customParam;
 
         // Check if we can find a closer tiddler title (e.g. Streams node)
@@ -146,47 +146,58 @@ This widgets implements context menus to tiddlers
             return true;
         }
 
+        if (isStreamNode) {
+            // Add default Streams options
+            menuHtml.push(`<li><a action="streams-action-string" data-action-string="&lt;$action-navigate/&gt;" targ="${targ}" href="#!">Open</a></li>`);
+            menuHtml.push(`<li><a action="streams-action-string" data-action-string="&lt;&lt;rename-node-actions&gt;&gt;" targ="${targ}" href="#!">Rename <span style="opacity:0.5; font-size:0.8em; margin-left:8px;">((streams-rename))</span></a></li>`);
+            menuHtml.push(`<li class="menu-separator"></li>`);
+        }
+
         for (var a = 0; a < titles.length; a++) {
             tid = $tw.wiki.getTiddler(titles[a]);
             text = sanitize(tid.getFieldString("text", "hide"));
 
-            if (text !== "show") {
+            if (!isStreamNode && text !== "show") {
                 continue;
             }
 
-            label = sanitize(tid.getFieldString("caption", "Unlabelled Option"));
-            action = sanitize(tid.getFieldString("tm-message", "tm-dummy"));
-            icon = $tw.wiki.getTiddlerText(tid.getFieldString("icon", "$:/core/images/blank"));
-            if (icon) {
-                icon = parseParameters(icon);
-            } else {
+            if (isStreamNode) {
+                label = sanitize(tid.getFieldString("sq-contextmenu-name", tid.fields.title));
+                action = "streams-action-string";
+                var actionString = sanitize(tid.fields.text || "");
+                var subtitle = sanitize(tid.getFieldString("sq-contextmenu-subtitle", ""));
                 icon = "";
-            }
-            // Use original separator class
-            separator = tid.fields["separate-after"] === undefined ? "" : "menu-separator";
-
-            // --- PATCH START ---
-            // Check for param-filter and pre-calculate the text to copy
-            paramFilter = tid.getFieldString("param-filter");
-            customParam = "";
-            if (paramFilter) {
-                // TiddlyWiki filterTiddlers often fails variable resolution (<currentTiddler>) when called outside a real Widget DOM tree.
-                // We bypass this entirely by text-replacing <currentTiddler> with our known target row title.
-                var resolvedFilter = paramFilter.replace(/<currentTiddler>/g, "[" + targ + "]");
-
-                var iterator = function (callback) {
-                    callback($tw.wiki.getTiddler(targ), targ);
-                };
-
-                var results = $tw.wiki.filterTiddlers(resolvedFilter, null, iterator);
-                if (results.length > 0) {
-                    customParam = sanitize(results.join('\n'));
+                separator = tid.fields["separate-after"] === undefined ? "" : "menu-separator";
+                
+                menuHtml.push(`<li class="${separator}"><a action="${action}" data-action-string="${actionString}" targ="${targ}" href="#!">${label} <span style="opacity:0.5; font-size:0.8em; margin-left:8px;">${subtitle}</span></a></li>`);
+            } else {
+                label = sanitize(tid.getFieldString("caption", "Unlabelled Option"));
+                action = sanitize(tid.getFieldString("tm-message", "tm-dummy"));
+                icon = $tw.wiki.getTiddlerText(tid.getFieldString("icon", "$:/core/images/blank"));
+                if (icon) {
+                    icon = parseParameters(icon);
+                } else {
+                    icon = "";
                 }
-            }
-            // --- PATCH END ---
+                separator = tid.fields["separate-after"] === undefined ? "" : "menu-separator";
 
-            // Reverted to LI structure. Note icons will be reversed via CSS.
-            menuHtml.push(`<li class="${separator}"><a action="${action}" targ="${targ}" data-custom-param="${customParam}" href="#!">${icon} ${label}</a></li>`);
+                // --- PATCH START ---
+                paramFilter = tid.getFieldString("param-filter");
+                customParam = "";
+                if (paramFilter) {
+                    var resolvedFilter = paramFilter.replace(/<currentTiddler>/g, "[" + targ + "]");
+                    var iterator = function (callback) {
+                        callback($tw.wiki.getTiddler(targ), targ);
+                    };
+                    var results = $tw.wiki.filterTiddlers(resolvedFilter, null, iterator);
+                    if (results.length > 0) {
+                        customParam = sanitize(results.join('\n'));
+                    }
+                }
+                // --- PATCH END ---
+
+                menuHtml.push(`<li class="${separator}"><a action="${action}" targ="${targ}" data-custom-param="${customParam}" href="#!">${icon} ${label}</a></li>`);
+            }
         }
 
         menuHtml.push("</ul>");
@@ -243,6 +254,23 @@ This widgets implements context menus to tiddlers
         this.hideMenu();
 
         switch (action) {
+            case "streams-action-string":
+                var actionString = targetAction.getAttribute("data-action-string");
+                if (actionString) {
+                    // Unsanitize logic: Convert HTML entities back so TW can parse the macro properly
+                    var unescapeHtml = function(unsafe) {
+                        return unsafe
+                            .replace(/&amp;/g, "&")
+                            .replace(/&lt;/g, "<")
+                            .replace(/&gt;/g, ">")
+                            .replace(/&quot;/g, '"')
+                            .replace(/&#x27;/g, "'")
+                            .replace(/&#x2F;/g, "/");
+                    };
+                    actionString = unescapeHtml(actionString);
+                    this.invokeActionString(actionString, this, event, { currentTiddler: targ });
+                }
+                break;
             case "tm-fold-tiddler":
                 stid = `$:/state/folded/${targ}`;
                 state = $tw.wiki.getTiddlerText(stid, "show") === "show" ? "hide" : "show";

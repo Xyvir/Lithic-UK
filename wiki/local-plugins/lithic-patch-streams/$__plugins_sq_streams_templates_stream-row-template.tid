@@ -36,8 +36,7 @@ title: $:/plugins/sq/streams/templates/stream-row-template
 			</button>
 			<$list filter="[<currentTiddler>type[application/tldr]]" variable="null">
 				<$button
-					class="tc-btn-invisible stream-node-handle tc-popup-handle stream-node-ctrl-btn"
-					oncontextmenu=<<oncontext-menu-actions>>
+					class="tc-btn-invisible stream-node-handle stream-node-ctrl-btn"
 					title={{{ [<currentTiddler>split[/]last[]] }}}
 					data-btn-role="stream-node-decorator"
 					data-node-title=<<currentTiddler>>
@@ -51,7 +50,7 @@ title: $:/plugins/sq/streams/templates/stream-row-template
 				</$button>
 			</$list>
 			<$list filter="[<currentTiddler>!type[application/tldr]]" variable="null">
-				<div class="stream-node-handle tc-popup-handle tc-btn-invisible stream-node-ctrl-btn" oncontextmenu=<<oncontext-menu-actions>> title={{{ [<currentTiddler>split[/]last[]] }}} data-btn-role="stream-node-decorator" data-node-title=<<currentTiddler>>>
+				<div class="stream-node-handle tc-btn-invisible stream-node-ctrl-btn" title={{{ [<currentTiddler>split[/]last[]] }}} data-btn-role="stream-node-decorator" data-node-title=<<currentTiddler>>>
 					<div class="stream-node-handle-inner"/>
 				</div>
 			</$list>
