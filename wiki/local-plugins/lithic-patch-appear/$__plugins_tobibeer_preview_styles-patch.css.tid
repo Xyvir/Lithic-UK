@@ -1,0 +1,22 @@
+title: $:/plugins/tobibeer/preview/styles-patch
+tags: $:/tags/Stylesheet
+type: text/vnd.tiddlywiki
+
+.tc-popup.appear {
+    max-width: 90vw;
+    width: max-content;
+    box-sizing: border-box;
+    white-space: normal;
+    word-wrap: break-word;
+    overflow-wrap: break-word;
+}
+
+.tc-popup.appear .stream-row {
+    max-width: 100%;
+    overflow-x: hidden;
+}
+
+.tc-popup.appear .tc-tiddler-body {
+    max-width: 100%;
+    overflow-x: hidden;
+}
