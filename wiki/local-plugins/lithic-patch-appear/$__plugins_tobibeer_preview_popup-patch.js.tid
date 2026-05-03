@@ -1,0 +1,35 @@
+title: $:/plugins/tobibeer/preview/popup-patch.js
+type: application/javascript
+module-type: startup
+
+/*\
+title: $:/plugins/tobibeer/preview/popup-patch.js
+type: application/javascript
+module-type: startup
+
+Safeguard the Popup.prototype.show method against null domNodes.
+\*/
+(function(){
+
+exports.name = "appear-popup-patch";
+exports.platforms = ["browser"];
+exports.after = ["startup"];
+exports.synchronous = true;
+
+exports.startup = function() {
+    var Popup = require("$:/core/modules/utils/dom/popup.js").Popup;
+    var originalShow = Popup.prototype.show;
+
+    Popup.prototype.show = function(options) {
+        // Only run the original show if options.domNode is valid or if it doesn't try to crash.
+        // TiddlyWiki core might crash if Appear monkey-patched it and left it fragile.
+        // We ensure options.domNode is never strictly null if it needs a classList check.
+        if (options && !options.domNode) {
+            // Provide a dummy element so classList checks don't throw TypeError
+            options.domNode = document.createElement("div");
+        }
+        return originalShow.call(this, options);
+    };
+};
+
+})();

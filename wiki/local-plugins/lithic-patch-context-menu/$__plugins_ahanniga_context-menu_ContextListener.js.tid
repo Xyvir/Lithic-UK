@@ -155,6 +155,29 @@ This widgets implements context menus to tiddlers
 
         for (var a = 0; a < titles.length; a++) {
             tid = $tw.wiki.getTiddler(titles[a]);
+            
+            // --- SHADOW TIDDLER FALLBACK ---
+            if (!tid && $tw.wiki.isShadowTiddler) {
+                if ($tw.wiki.isShadowTiddler(titles[a])) {
+                    var shadowSource = $tw.wiki.getShadowSource ? $tw.wiki.getShadowSource(titles[a]) : null;
+                    if (shadowSource) {
+                        var pluginTiddler = $tw.wiki.getTiddler(shadowSource);
+                        if (pluginTiddler && pluginTiddler.fields && pluginTiddler.fields.text) {
+                            try {
+                                var pluginInfo = JSON.parse(pluginTiddler.fields.text);
+                                if (pluginInfo.tiddlers && pluginInfo.tiddlers[titles[a]]) {
+                                    tid = new $tw.Tiddler(pluginInfo.tiddlers[titles[a]]);
+                                }
+                            } catch (e) {
+                                // Ignore JSON parse errors for plugins
+                            }
+                        }
+                    }
+                }
+            }
+            if (!tid) continue;
+            // -------------------------------
+            
             text = sanitize(tid.getFieldString("text", "hide"));
 
             if (!isStreamNode && text !== "show") {
