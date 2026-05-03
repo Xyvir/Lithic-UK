@@ -13,6 +13,7 @@ This widgets implements context menus to tiddlers
 (function () {
 
     var sanitize = function (string) {
+        if (!string) return "";
         const map = {
             '&': '&amp;',
             '<': '&lt;',
@@ -112,7 +113,7 @@ This widgets implements context menus to tiddlers
         // Reverted to UL structure
         var menuHtml = ["<ul>"];
         var titles = isStreamNode ? $tw.wiki.getTiddlersWithTag("$:/tags/streams/contextmenu") : $tw.wiki.getTiddlersWithTag("$:/tags/tiddlercontextmenu");
-        var label, action, icon, tid, targ, text, separator, paramFilter, customParam;
+        var label, action, icon, targ, text, separator, paramFilter, customParam;
 
         // Check if we can find a closer tiddler title (e.g. Streams node)
         // Streams uses data-node-title, standard TW uses data-tiddler-title
@@ -153,59 +154,56 @@ This widgets implements context menus to tiddlers
             menuHtml.push(`<li class="menu-separator"></li>`);
         }
 
-        for (var a = 0; a < titles.length; a++) {
-            tid = $tw.wiki.getTiddler(titles[a]);
-            
-            // --- SHADOW TIDDLER FALLBACK ---
-            if (!tid && $tw.wiki.isShadowTiddler) {
-                if ($tw.wiki.isShadowTiddler(titles[a])) {
-                    var shadowSource = $tw.wiki.getShadowSource ? $tw.wiki.getShadowSource(titles[a]) : null;
-                    if (shadowSource) {
-                        var pluginTiddler = $tw.wiki.getTiddler(shadowSource);
-                        if (pluginTiddler && pluginTiddler.fields && pluginTiddler.fields.text) {
-                            try {
-                                var pluginInfo = JSON.parse(pluginTiddler.fields.text);
-                                if (pluginInfo.tiddlers && pluginInfo.tiddlers[titles[a]]) {
-                                    tid = new $tw.Tiddler(pluginInfo.tiddlers[titles[a]]);
-                                }
-                            } catch (e) {
-                                // Ignore JSON parse errors for plugins
-                            }
-                        }
-                    }
+        // Safely fetch field values bypassing Tiddler instantiation, solving the Shadow Tiddler problem in Node.js builds
+        var getFieldString = function(title, fieldName, defaultVal) {
+            var val = $tw.wiki.filterTiddlers("[[" + title + "]get[" + fieldName + "]]")[0];
+            if (val === undefined || val === null) {
+                if (fieldName === "title") return title;
+                if (fieldName === "text") {
+                    var textVal = $tw.wiki.getTiddlerText(title);
+                    if (textVal !== undefined && textVal !== null) return textVal;
                 }
+                var hasField = $tw.wiki.filterTiddlers("[[" + title + "]has[" + fieldName + "]]")[0];
+                if (hasField) return "";
+                return defaultVal;
             }
-            if (!tid) continue;
-            // -------------------------------
-            
-            text = sanitize(tid.getFieldString("text", "hide"));
+            return val;
+        };
+
+        var hasField = function(title, fieldName) {
+            return $tw.wiki.filterTiddlers("[[" + title + "]has[" + fieldName + "]]").length > 0;
+        };
+
+        for (var a = 0; a < titles.length; a++) {
+            var currentTitle = titles[a];
+            text = sanitize(getFieldString(currentTitle, "text", "hide")).trim();
 
             if (!isStreamNode && text !== "show") {
                 continue;
             }
 
             if (isStreamNode) {
-                label = sanitize(tid.getFieldString("sq-contextmenu-name", tid.fields.title));
+                label = sanitize(getFieldString(currentTitle, "sq-contextmenu-name", currentTitle));
                 action = "streams-action-string";
-                var actionString = sanitize(tid.fields.text || "");
-                var subtitle = sanitize(tid.getFieldString("sq-contextmenu-subtitle", ""));
+                var actionString = sanitize(getFieldString(currentTitle, "text", ""));
+                var subtitle = sanitize(getFieldString(currentTitle, "sq-contextmenu-subtitle", ""));
                 icon = "";
-                separator = tid.fields["separate-after"] === undefined ? "" : "menu-separator";
+                separator = hasField(currentTitle, "separate-after") ? "menu-separator" : "";
                 
                 menuHtml.push(`<li class="${separator}"><a action="${action}" data-action-string="${actionString}" targ="${targ}" href="#!">${label} <span style="opacity:0.5; font-size:0.8em; margin-left:8px;">${subtitle}</span></a></li>`);
             } else {
-                label = sanitize(tid.getFieldString("caption", "Unlabelled Option"));
-                action = sanitize(tid.getFieldString("tm-message", "tm-dummy"));
-                icon = $tw.wiki.getTiddlerText(tid.getFieldString("icon", "$:/core/images/blank"));
+                label = sanitize(getFieldString(currentTitle, "caption", "Unlabelled Option"));
+                action = sanitize(getFieldString(currentTitle, "tm-message", "tm-dummy"));
+                icon = $tw.wiki.getTiddlerText(getFieldString(currentTitle, "icon", "$:/core/images/blank"));
                 if (icon) {
                     icon = parseParameters(icon);
                 } else {
                     icon = "";
                 }
-                separator = tid.fields["separate-after"] === undefined ? "" : "menu-separator";
+                separator = hasField(currentTitle, "separate-after") ? "menu-separator" : "";
 
                 // --- PATCH START ---
-                paramFilter = tid.getFieldString("param-filter");
+                paramFilter = getFieldString(currentTitle, "param-filter", "");
                 customParam = "";
                 if (paramFilter) {
                     var resolvedFilter = paramFilter.replace(/<currentTiddler>/g, "[" + targ + "]");
@@ -224,7 +222,26 @@ This widgets implements context menus to tiddlers
         }
 
         menuHtml.push("</ul>");
-        menu.append(htmlToElement(menuHtml.join("")))
+        var finalHtml = menuHtml.join("");
+        
+        // Debug fallback just in case HTML parsing strips it out
+        if (finalHtml.indexOf("<li>") === -1) {
+            finalHtml = "<ul><li><a href='#!' style='color:white; padding: 8px;'>No Options Found</a></li></ul>";
+        }
+
+        // Bypass htmlToElement to ensure raw string parsing works completely
+        menu.innerHTML = finalHtml;
+
+        // Force inline styles on links just in case CSS is failing for these specific dynamic links
+        var links = menu.querySelectorAll("a");
+        for (var i = 0; i < links.length; i++) {
+            links[i].style.color = "#c8ced8";
+            links[i].style.display = "flex";
+            links[i].style.justifyContent = "space-between";
+            links[i].style.flexDirection = "row-reverse";
+            links[i].style.alignItems = "center";
+            links[i].style.textDecoration = "none";
+        }
 
         if (menu.style.display == "block") {
             this.hideMenu();
@@ -235,10 +252,8 @@ This widgets implements context menus to tiddlers
             });
 
             if (link) {
-                // If a specific link was clicked, only highlight the link
                 link.classList.add("lithic-context-menu-active");
             } else if (closestTiddler) {
-                // Otherwise, check if it's a stream node
                 var droppable = closestTiddler.closest(".stream-droppable");
                 if (droppable) {
                     droppable.classList.add("lithic-context-menu-active");
@@ -252,8 +267,13 @@ This widgets implements context menus to tiddlers
             // --- HIGHLIGHT PATCH END ---
 
             menu.style.display = 'block';
-            menu.style.left = event.clientX + "px";
-            menu.style.top = event.clientY + "px";
+            
+            // Safe coordinate placement with fallbacks for weird events
+            var posX = (event.clientX !== undefined && event.clientX > 0) ? event.clientX : 100;
+            var posY = (event.clientY !== undefined && event.clientY > 0) ? event.clientY : 100;
+            
+            menu.style.left = posX + "px";
+            menu.style.top = posY + "px";
         }
 
         event.preventDefault();
@@ -273,7 +293,7 @@ This widgets implements context menus to tiddlers
         // Retrieve our custom param
         var customParam = targetAction.getAttribute("data-custom-param");
 
-        var tid, stid, state, text, ptid;
+        var stid, state, text, ptid;
         this.hideMenu();
 
         switch (action) {
@@ -317,7 +337,6 @@ This widgets implements context menus to tiddlers
                 var exportData = [];
                 var filter = "[[" + targ + "]] [[" + targ + "]get-stream-nodes[]]";
                 var tiddlerTitles = $tw.wiki.filterTiddlers(filter);
-                var baseTarg = targ;
                 for (var t = 0; t < tiddlerTitles.length; t++) {
                     var tidObj = $tw.wiki.getTiddler(tiddlerTitles[t]);
                     if (tidObj) {
@@ -332,7 +351,6 @@ This widgets implements context menus to tiddlers
                         var flattenedText = tidObj.fields.text || "";
                         if (flattenedText.indexOf("{{") !== -1) {
                             // Render transclusions as plain text using the core wikifier
-                            // We use text/plain output so we don't carry over HTML structure, just the raw content resolved.
                             flattenedText = $tw.wiki.renderText("text/plain", "text/vnd.tiddlywiki", flattenedText, {
                                 parseAsInline: false,
                                 variables: { currentTiddler: tidObj.fields.title }
@@ -391,11 +409,9 @@ This widgets implements context menus to tiddlers
                             widgetNode.dispatchEvent({ type: "tm-notify", param: "$:/core/ui/Notifications/CopiedToClipboard" });
                         }
                     }).catch(function (err) {
-                        // Fallback if writing multiple blob types fails due to strict OS/Browser security
                         widgetNode.dispatchEvent({ type: "tm-copy-to-clipboard", param: plainContent });
                     });
                 } else {
-                    // Fallback for older browsers or non-secure contexts (HTTP vs HTTPS)
                     this.dispatchEvent({ type: "tm-copy-to-clipboard", param: plainContent });
                 }
                 // --- RICH CLIPBOARD IMPLEMENTATION END ---
@@ -409,7 +425,7 @@ This widgets implements context menus to tiddlers
                 if (ptid !== undefined) {
                     var list = ptid.getFieldList("list");
                     if (Array.isArray(list) && list.indexOf(targ) < 0) {
-                        for (a = 0; a < list.length; a++) {
+                        for (var a = 0; a < list.length; a++) {
                             curEntries.push(list[a]);
                         }
                     }
