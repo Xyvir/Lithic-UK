@@ -50,7 +50,7 @@ title: $:/plugins/sq/streams/templates/stream-row-template
 				</$button>
 			</$list>
 			<$list filter="[<currentTiddler>!type[application/tldr]]" variable="null">
-				<div class="stream-node-handle tc-btn-invisible stream-node-ctrl-btn" title={{{ [<currentTiddler>split[/]last[]] }}} data-btn-role="stream-node-decorator" data-node-title=<<currentTiddler>>>
+				<div class="stream-node-handle tc-btn-invisible stream-node-ctrl-btn" oncontextmenu="var e = new MouseEvent('contextmenu', {bubbles: true, clientX: event.clientX, clientY: event.clientY}); document.dispatchEvent(e); event.stopPropagation(); event.preventDefault(); return false;" title={{{ [<currentTiddler>split[/]last[]] }}} data-btn-role="stream-node-decorator" data-node-title=<<currentTiddler>>>
 					<div class="stream-node-handle-inner"/>
 				</div>
 			</$list>

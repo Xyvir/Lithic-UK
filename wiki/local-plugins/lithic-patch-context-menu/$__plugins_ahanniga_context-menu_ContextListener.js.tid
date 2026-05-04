@@ -57,7 +57,6 @@ This widgets implements context menus to tiddlers
     }
 
     var Widget = require("$:/core/modules/widgets/widget.js").widget;
-    // Reverted to original class name
     var template = `<div id="contextMenu" class="context-menu" style="display: none; z-index: 10000;"></div>`;
 
     var ContextListener = function (parseTreeNode, options) {
@@ -69,7 +68,6 @@ This widgets implements context menus to tiddlers
     ContextListener.prototype.render = function (parent, nextSibling) {
         this.parentDomNode = parent;
         var self = this;
-        // Guard: only attach once to prevent stacking listeners across layout switches.
         if (!ContextListener._listenerAttached) {
             ContextListener._contextMenuHandler = function (event) { self.contextmenu.call(self, event); };
             ContextListener._clickHandler = function () { self.hideMenu.call(self); };
@@ -82,9 +80,10 @@ This widgets implements context menus to tiddlers
     ContextListener.prototype.contextmenu = function (event) {
         var self = this;
         var menu = document.getElementById("contextMenu");
+        
+        console.log("[ContextListener] Raw Event clientX/Y:", event.clientX, event.clientY, "target:", event.target);
 
         if (getSelection().toString().trim().length > 0) {
-            // User has selected text, so don't trigger this menu
             return true;
         }
 
@@ -92,13 +91,13 @@ This widgets implements context menus to tiddlers
         if (event.target.closest(".stream-node-handle")) {
             isStreamNode = true;
         }
+        
+        console.log("[ContextListener] isStreamNode:", isStreamNode);
 
-        // Skip when the whiteboard layout is active - TLDraw manages its own context menu.
         if (event.target && event.target.closest && event.target.closest(".tw-whiteboard-layout-container")) {
             return true;
         }
 
-        // Allow default context menu for unieditor elements to use spell check
         if (event.target && event.target.closest && event.target.closest(".unieditor__textarea")) {
             return true;
         }
@@ -110,16 +109,14 @@ This widgets implements context menus to tiddlers
         }
         menu.innerHTML = "";
 
-        // Reverted to UL structure
         var menuHtml = ["<ul>"];
         var titles = isStreamNode ? $tw.wiki.getTiddlersWithTag("$:/tags/streams/contextmenu") : $tw.wiki.getTiddlersWithTag("$:/tags/tiddlercontextmenu");
+        
+        console.log("[ContextListener] Tag found length:", titles ? titles.length : 0);
+        
         var label, action, icon, targ, text, separator, paramFilter, customParam;
-
-        // Check if we can find a closer tiddler title (e.g. Streams node)
-        // Streams uses data-node-title, standard TW uses data-tiddler-title
         var closestTiddler = event.target.closest("[data-tiddler-title], [data-node-title]");
 
-        // Priority 1: Check if we clicked on a link directly
         var link = event.target.closest(".tc-tiddlylink");
         if (link) {
             var title = link.getAttribute("data-tiddler-title");
@@ -134,27 +131,27 @@ This widgets implements context menus to tiddlers
             }
         }
 
-        // Priority 2: Fallback to container if no link found
         if (!targ) {
             if (closestTiddler) {
-                // Prioritize node-title if it exists (it's likely the specific row)
                 targ = closestTiddler.getAttribute("data-node-title") || closestTiddler.getAttribute("data-tiddler-title");
             }
         }
+        
+        console.log("[ContextListener] Resolved targ:", targ);
 
-        // If still no target, return true to allow default browser context menu
         if (!targ) {
+            console.log("[ContextListener] No target found, falling back to browser context menu");
+            // HIDE the menu here to prevent ghost menus from previous clicks
+            this.hideMenu();
             return true;
         }
 
         if (isStreamNode) {
-            // Add default Streams options
             menuHtml.push(`<li><a action="streams-action-string" data-action-string="&lt;$action-navigate/&gt;" targ="${targ}" href="#!">Open</a></li>`);
             menuHtml.push(`<li><a action="streams-action-string" data-action-string="&lt;&lt;rename-node-actions&gt;&gt;" targ="${targ}" href="#!">Rename <span style="opacity:0.5; font-size:0.8em; margin-left:8px;">((streams-rename))</span></a></li>`);
             menuHtml.push(`<li class="menu-separator"></li>`);
         }
 
-        // Safely fetch field values bypassing Tiddler instantiation, solving the Shadow Tiddler problem in Node.js builds
         var getFieldString = function(title, fieldName, defaultVal) {
             var val = $tw.wiki.filterTiddlers("[[" + title + "]get[" + fieldName + "]]")[0];
             if (val === undefined || val === null) {
@@ -202,7 +199,6 @@ This widgets implements context menus to tiddlers
                 }
                 separator = hasField(currentTitle, "separate-after") ? "menu-separator" : "";
 
-                // --- PATCH START ---
                 paramFilter = getFieldString(currentTitle, "param-filter", "");
                 customParam = "";
                 if (paramFilter) {
@@ -215,7 +211,6 @@ This widgets implements context menus to tiddlers
                         customParam = sanitize(results.join('\n'));
                     }
                 }
-                // --- PATCH END ---
 
                 menuHtml.push(`<li class="${separator}"><a action="${action}" targ="${targ}" data-custom-param="${customParam}" href="#!">${icon} ${label}</a></li>`);
             }
@@ -224,15 +219,14 @@ This widgets implements context menus to tiddlers
         menuHtml.push("</ul>");
         var finalHtml = menuHtml.join("");
         
-        // Debug fallback just in case HTML parsing strips it out
+        console.log("[ContextListener] finalHtml before fallback: ", finalHtml);
+        
         if (finalHtml.indexOf("<li>") === -1) {
             finalHtml = "<ul><li><a href='#!' style='color:white; padding: 8px;'>No Options Found</a></li></ul>";
         }
 
-        // Bypass htmlToElement to ensure raw string parsing works completely
         menu.innerHTML = finalHtml;
 
-        // Force inline styles on links just in case CSS is failing for these specific dynamic links
         var links = menu.querySelectorAll("a");
         for (var i = 0; i < links.length; i++) {
             links[i].style.color = "#c8ced8";
@@ -243,38 +237,35 @@ This widgets implements context menus to tiddlers
             links[i].style.textDecoration = "none";
         }
 
-        if (menu.style.display == "block") {
-            this.hideMenu();
-        } else {
-            // --- HIGHLIGHT PATCH START ---
-            document.querySelectorAll(".lithic-context-menu-active, .lithic-context-menu-active-children").forEach(function (el) {
-                el.classList.remove("lithic-context-menu-active", "lithic-context-menu-active-children");
-            });
+        // Clean up old highlights
+        document.querySelectorAll(".lithic-context-menu-active, .lithic-context-menu-active-children").forEach(function (el) {
+            el.classList.remove("lithic-context-menu-active", "lithic-context-menu-active-children");
+        });
 
-            if (link) {
-                link.classList.add("lithic-context-menu-active");
-            } else if (closestTiddler) {
-                var droppable = closestTiddler.closest(".stream-droppable");
-                if (droppable) {
-                    droppable.classList.add("lithic-context-menu-active");
-                    if (droppable.nextElementSibling && droppable.nextElementSibling.classList.contains("stream-row-children")) {
-                        droppable.nextElementSibling.classList.add("lithic-context-menu-active-children");
-                    }
-                } else {
-                    closestTiddler.classList.add("lithic-context-menu-active");
+        if (link) {
+            link.classList.add("lithic-context-menu-active");
+        } else if (closestTiddler) {
+            var droppable = closestTiddler.closest(".stream-droppable");
+            if (droppable) {
+                droppable.classList.add("lithic-context-menu-active");
+                if (droppable.nextElementSibling && droppable.nextElementSibling.classList.contains("stream-row-children")) {
+                    droppable.nextElementSibling.classList.add("lithic-context-menu-active-children");
                 }
+            } else {
+                closestTiddler.classList.add("lithic-context-menu-active");
             }
-            // --- HIGHLIGHT PATCH END ---
-
-            menu.style.display = 'block';
-            
-            // Safe coordinate placement with fallbacks for weird events
-            var posX = (event.clientX !== undefined && event.clientX > 0) ? event.clientX : 100;
-            var posY = (event.clientY !== undefined && event.clientY > 0) ? event.clientY : 100;
-            
-            menu.style.left = posX + "px";
-            menu.style.top = posY + "px";
         }
+
+        // ALWAYS show and move the menu to the new location, even if it was already open!
+        menu.style.display = 'block';
+        
+        var posX = (event.clientX !== undefined && event.clientX > 0) ? event.clientX : 100;
+        var posY = (event.clientY !== undefined && event.clientY > 0) ? event.clientY : 100;
+        
+        console.log("[ContextListener] Final calculated coordinates:", posX, posY);
+        
+        menu.style.left = posX + "px";
+        menu.style.top = posY + "px";
 
         event.preventDefault();
         return false;
@@ -290,7 +281,6 @@ This widgets implements context menus to tiddlers
 
         var action = targetAction.getAttribute("action");
         var targ = targetAction.getAttribute("targ");
-        // Retrieve our custom param
         var customParam = targetAction.getAttribute("data-custom-param");
 
         var stid, state, text, ptid;
@@ -300,7 +290,6 @@ This widgets implements context menus to tiddlers
             case "streams-action-string":
                 var actionString = targetAction.getAttribute("data-action-string");
                 if (actionString) {
-                    // Unsanitize logic: Convert HTML entities back so TW can parse the macro properly
                     var unescapeHtml = function(unsafe) {
                         return unsafe
                             .replace(/&amp;/g, "&")
@@ -320,14 +309,11 @@ This widgets implements context menus to tiddlers
                 $tw.wiki.setText(stid, "text", null, state);
                 break;
             case "tm-copy-to-clipboard":
-                // --- PATCH START ---
-                // If we have a custom param, use it. Otherwise default to body text.
                 if (customParam && customParam !== "") {
                     text = customParam;
                 } else {
                     text = $tw.wiki.getTiddlerText(targ);
                 }
-                // --- PATCH END ---
                 this.dispatchEvent({ type: action, param: text });
                 break;
             case "tm-print":
@@ -347,10 +333,8 @@ This widgets implements context menus to tiddlers
                             newTags.push("$:/tags/PayloadURL");
                         }
 
-                        // Parse and Wikify to handle transclusions (flattened to plain text)
                         var flattenedText = tidObj.fields.text || "";
                         if (flattenedText.indexOf("{{") !== -1) {
-                            // Render transclusions as plain text using the core wikifier
                             flattenedText = $tw.wiki.renderText("text/plain", "text/vnd.tiddlywiki", flattenedText, {
                                 parseAsInline: false,
                                 variables: { currentTiddler: tidObj.fields.title }
@@ -373,7 +357,6 @@ This widgets implements context menus to tiddlers
                 var encodedPayload = btoa(unescape(encodeURIComponent(jsonPayload)));
                 var shareUrl = "https://lithic.uk/?json=" + encodedPayload;
 
-                // --- RICH CLIPBOARD IMPLEMENTATION START ---
                 var linkText = targ + " on Lithic.uk";
                 var htmlContent = '<a href="' + shareUrl + '">' + linkText + '</a>';
                 var plainContent = shareUrl;
@@ -388,7 +371,6 @@ This widgets implements context menus to tiddlers
 
                     var widgetNode = this;
                     navigator.clipboard.write([item]).then(function () {
-                        // Check URL length and notify if too long
                         if (shareUrl.length > 2000) {
                             var alertTitle = "$:/temp/alerts/ShareUrlTooLong";
                             var warningText = "Warning: Share URL is " + shareUrl.length + " chars. ";
@@ -405,7 +387,6 @@ This widgets implements context menus to tiddlers
                             });
                             widgetNode.dispatchEvent({ type: "tm-notify", param: alertTitle });
                         } else {
-                            // Trigger standard TW visual notification
                             widgetNode.dispatchEvent({ type: "tm-notify", param: "$:/core/ui/Notifications/CopiedToClipboard" });
                         }
                     }).catch(function (err) {
@@ -414,7 +395,6 @@ This widgets implements context menus to tiddlers
                 } else {
                     this.dispatchEvent({ type: "tm-copy-to-clipboard", param: plainContent });
                 }
-                // --- RICH CLIPBOARD IMPLEMENTATION END ---
                 break;
             case "tm-unfold-all-tiddlers":
                 this.dispatchEvent({ type: action, param: targ, foldedStatePrefix: "$:/state/folded/" });
@@ -454,11 +434,9 @@ This widgets implements context menus to tiddlers
         if (menu != null) {
             menu.style.display = "none";
         }
-        // --- HIGHLIGHT PATCH START ---
         document.querySelectorAll(".lithic-context-menu-active, .lithic-context-menu-active-children").forEach(function (el) {
             el.classList.remove("lithic-context-menu-active", "lithic-context-menu-active-children");
         });
-        // --- HIGHLIGHT PATCH END ---
     };
 
     exports.contextMenu = ContextListener;
