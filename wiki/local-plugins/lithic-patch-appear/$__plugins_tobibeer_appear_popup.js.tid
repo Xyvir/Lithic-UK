@@ -1,5 +1,3 @@
-created: 20260504031804972
-modified: 20260504033000082
 module-type: utils
 title: $:/plugins/tobibeer/appear/popup.js
 type: application/javascript
@@ -8,11 +6,56 @@ type: application/javascript
 title: $:/plugins/tobibeer/appear/popup.js
 type: application/javascript
 module-type: utils
-
-Lobotomized by Jane to protect the modern TiddlyWiki core.
 \*/
-(function(){
-    "use strict";
-    // Do absolutely nothing. Let the modern TiddlyWiki core do its job.
-    exports.name = "appear-popup-obsolete-fix";
+(function(){("use strict");
+var t=require("$:/core/modules/utils/dom/popup.js").Popup,
+    e=require("$:/core/modules/widgets/reveal.js").reveal,
+    s=e.prototype.refresh;
+
+t.prototype.show = function(options) {
+    var domNode = options.domNode;
+    // THE LOGIC GATE: Check for Tobias's legacy flag safely
+    var isAbsolute = domNode ? $tw.utils.hasClass(domNode,"tc-popup-absolute") : false;
+    var o = this.popupInfo(domNode);
+    var popupLevel = o.popupLevel;
+
+    if(o.isHandle) { popupLevel++; }
+    this.cancel(popupLevel);
+
+    if(this.findPopup(options.title) === -1) {
+        this.popups.push({title: options.title, wiki: options.wiki, domNode: domNode});
+    }
+
+    if(isAbsolute && domNode) {
+        // QUICKVIEW LEGACY MATH: Triggered only by 'tc-popup-absolute'
+        var absoluteMath = function(node){
+            var curr = node, left = 0, top = 0;
+            do {
+                left += curr.offsetLeft || 0;
+                top += curr.offsetTop || 0;
+                curr = curr.offsetParent;
+            } while(curr);
+            return {left: left, top: top};
+        };
+        var coords = absoluteMath(domNode);
+        options.wiki.setTextReference(options.title, "(" + coords.left + "," + coords.top + "," + domNode.offsetWidth + "," + domNode.offsetHeight + ")");
+    } else if (domNode) {
+        // MODERN TW DOM NODE MATH
+        options.wiki.setTextReference(options.title, "(" + domNode.offsetLeft + "," + domNode.offsetTop + "," + domNode.offsetWidth + "," + domNode.offsetHeight + ")");
+    } else if ("x" in options && "y" in options) {
+        // STREAMS COORDINATE MATH: Stops the crash!
+        options.wiki.setTextReference(options.title, "(" + options.x + "," + options.y + "," + (options.width || 0) + "," + (options.height || 0) + ")");
+    } else {
+        // FAILSAFE
+        options.wiki.setTextReference(options.title,"(-1,-1,-1,-1)");
+    }
+
+    if(this.popups.length > 0) {
+        this.rootElement.addEventListener("click", this, true);
+    }
+};
+
+t.prototype.popupInfo=function(t){var e,s=false,p=t;while(p&&e===undefined){if($tw.utils.hasClass(p,"tc-popup-handle")||$tw.utils.hasClass(p,"tc-popup-keep")){s=true}if($tw.utils.hasClass(p,"tc-reveal")&&($tw.utils.hasClass(p,"tc-popup")||$tw.utils.hasClass(p,"tc-popup-handle"))){e=parseInt(p.style.zIndex)-1e3}p=p.parentNode}var o={popupLevel:e||0,isHandle:s};return o};
+t.prototype.handleEvent=function(t){if(t.type==="click"){var e=this.popupInfo(t.target),s=e.popupLevel-1;if(e.isHandle){if(s<0){s=1}else{s++}}this.cancel(s)}};
+e.prototype.refresh=function(){var t,e,p=this.isOpen;e=s.apply(this,arguments);t=this.domNodes[0];if(this.isOpen&&(p!==this.isOpen||!t.style.zIndex)&&t&&(this.type==="popup"||$tw.utils.hasClass(t,"tc-block-dropdown")&&$tw.utils.hasClass(t,"tc-reveal"))){t.style.zIndex=1e3+$tw.popup.popups.length}return e}
 })();
