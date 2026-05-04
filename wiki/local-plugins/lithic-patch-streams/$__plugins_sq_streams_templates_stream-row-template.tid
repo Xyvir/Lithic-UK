@@ -37,7 +37,7 @@ title: $:/plugins/sq/streams/templates/stream-row-template
 			<$list filter="[<currentTiddler>type[application/tldr]]" variable="null">
 				<$button
 					class="tc-btn-invisible stream-node-handle stream-node-ctrl-btn"
-					title={{{ [<currentTiddler>split[/]last[]] }}}
+					title={{{ [<currentTiddler>split[@]last[]] }}}
 					data-btn-role="stream-node-decorator"
 					data-node-title=<<currentTiddler>>
 					tooltip="Open in Whiteboard"
@@ -50,22 +50,22 @@ title: $:/plugins/sq/streams/templates/stream-row-template
 				</$button>
 			</$list>
 			<$list filter="[<currentTiddler>!type[application/tldr]]" variable="null">
-				<div class="stream-node-handle tc-btn-invisible stream-node-ctrl-btn" title={{{ [<currentTiddler>split[/]last[]] }}} data-btn-role="stream-node-decorator" data-node-title=<<currentTiddler>>>
+				<div class="stream-node-handle tc-btn-invisible stream-node-ctrl-btn" title={{{ [<currentTiddler>split[@]last[]] }}} data-btn-role="stream-node-decorator" data-node-title=<<currentTiddler>>>
 					<div class="stream-node-handle-inner"/>
 				</div>
 			</$list>
 
             <$list filter="[<storyTiddler>tag[Journal]]" variable="ignore">
              <$let 
-                parent={{{ [<currentTiddler>split[/]butlast[]join[/]] }}}
+                parent={{{ [<currentTiddler>get[parent]] }}}
                 next-node={{{ [<parent>get[stream-list]enlist-input[]after<currentTiddler>] }}}
                 
-                time-str-1={{{ [<currentTiddler>split[/]last[]trim[]] }}}
+                time-str-1={{{ [<currentTiddler>split[@]last[]trim[]] }}}
                 h1={{{ [<time-str-1>split[:]nth[1]trim[]] }}}
                 m1={{{ [<time-str-1>split[:]nth[2]trim[]] }}}
                 total-1={{{ [<h1 >multiply[60]add<m1>] }}}
                 
-                time-str-2={{{ [<next-node>split[/]last[]trim[]] }}}
+                time-str-2={{{ [<next-node>split[@]last[]trim[]] }}}
                 h2={{{ [<time-str-2>split[:]nth[1]trim[]] }}}
                 m2={{{ [<time-str-2>split[:]nth[2]trim[]] }}}
                 total-2={{{ [<h2 >multiply[60]add<m2>] }}}

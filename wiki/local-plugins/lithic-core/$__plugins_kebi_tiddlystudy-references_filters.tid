@@ -11,7 +11,9 @@ title: $:/plugins/kebi/tiddlystudy-references/filters
     <$list filter="$filter$ -[is[blank]]">
       <li class="$class$">
         <$link to={{!!title}}>
-          <$view field="title"/>
+          <$let regex=":[0-9][0-9][.][0-9][0-9][0-9]$">
+            <$text text={{{ [{!!title}search-replace:g:regexp<regex>,[]] }}}/>
+          </$let>
         </$link>
       </li>
     </$list>

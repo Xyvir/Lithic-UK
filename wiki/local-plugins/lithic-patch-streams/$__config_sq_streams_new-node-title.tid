@@ -6,4 +6,4 @@ settings-template: $:/plugins/sq/streams/ui/templates/settings/input
 tags: 
 title: $:/config/sq/streams/new-node-title
 
-<<stream-root-title>>/<<now "hh:0mm:0ss.XXX">>
+<<stream-root-title>>@<<now "hh:0mm:0ss.XXX">>
