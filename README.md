@@ -1,5 +1,5 @@
 # Lithic UK
-## Unitary Knowledge 
+## Unary Knowledge 
 
 **A Portability-First Outliner Knowledgebase**
 
