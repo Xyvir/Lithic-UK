@@ -14,7 +14,13 @@ type: text/vnd.tiddlywiki
 \end
 
 \procedure embed-stream(parent)
-<$tiddler tiddler=<<parent>>>
+<$let
+  left="[["
+  right="]]"
+  clean={{{ [<parent>removeprefix<left>removesuffix<right>] ~[<parent>] }}}
+>
+<$tiddler tiddler=<<clean>>>
   <<.stream-recurse>>
 </$tiddler>
+</$let>
 \end

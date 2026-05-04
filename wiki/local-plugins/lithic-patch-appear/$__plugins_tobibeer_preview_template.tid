@@ -4,9 +4,9 @@ title: $:/plugins/tobibeer/preview/template
 {{||$:/core/ui/ViewTemplate/subtitle}}
 {{||$:/core/ui/ViewTemplate/tags}}
 
-<$list filter="[all[current]has[streams-list]!has[text]]" variable="ignore">
-  <<transclude-streams>>
+<$list filter="[all[current]has[stream-list]!has[text]]" variable="ignore">
+  <$macrocall $name="embed-stream" parent=<<currentTiddler>>/>
 </$list>
-<$list filter="[all[current]!has[streams-list]] [all[current]has[text]] +[limit[1]]" variable="ignore">
+<$list filter="[all[current]!has[stream-list]] [all[current]has[text]] +[limit[1]]" variable="ignore">
   <$transclude mode="block"/>
 </$list>
