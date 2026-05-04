@@ -2,8 +2,9 @@
 - [ ] Extend hover-over 'appear' plugin behavior to be more intuitive
     - [ ] modify behavior to show todo when highlighting calendar datelinks
     - [ ] Modify behavior to use <<embed-stream>> macro on parent stream-nodes that do not have their own body.
-    - [ ] add guardrails so only a bit of context is shown. 
-- [ ] Add a viewfilter or somethign so transcluded nodestream parents show their children.
+    - [ ] add guardrails so only a bit of context is shown on hoverover.
+- [ ] Replace the regular searchbox in notebook UI with byper "Advanced Search" also extend it a bit to allow searching shadow tiddlers etc?
+- [ ] Add a viewfilter or somethign so transcluded nodestream parents show their children?
 - [ ] Add "Alpha Sort" option to tiddler right-click menu.
     (Do twice to toggle ascending/descending)
 - [ ] Create simple "Presentation" view / layout based on existing backlink nav pills.
