@@ -1,0 +1,18 @@
+created: 20260504031804972
+modified: 20260504033000082
+module-type: utils
+title: $:/plugins/tobibeer/appear/popup.js
+type: application/javascript
+
+/*\
+title: $:/plugins/tobibeer/appear/popup.js
+type: application/javascript
+module-type: utils
+
+Lobotomized by Jane to protect the modern TiddlyWiki core.
+\*/
+(function(){
+    "use strict";
+    // Do absolutely nothing. Let the modern TiddlyWiki core do its job.
+    exports.name = "appear-popup-obsolete-fix";
+})();
