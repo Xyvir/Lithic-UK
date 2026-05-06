@@ -1,4 +1,4 @@
-﻿created: 20260108185413437
+created: 20260108185413437
 modified: 20260108192142038
 module-type: widget
 tags: 
@@ -119,7 +119,12 @@ OverType Editor Widget for TiddlyWiki + Streams + CompText
                 autofocus: shouldFocus,
                 minHeight: attrMinHeight,
                 onChange: function (value) {
-                    self.saveChanges(value, editTitle, editField);
+                    if (self.saveTimeout) {
+                        clearTimeout(self.saveTimeout);
+                    }
+                    self.saveTimeout = setTimeout(function() {
+                        self.saveChanges(value, editTitle, editField);
+                    }, 250);
                 }
             });
 
@@ -140,6 +145,13 @@ OverType Editor Widget for TiddlyWiki + Streams + CompText
                 ta.style.setProperty("background", "transparent", "important");
                 ta.style.setProperty("color", "transparent", "important");
                 ta.style.setProperty("caret-color", "var(--cursor, #f95738)", "important");
+
+                ta.addEventListener("blur", function() {
+                    if (self.saveTimeout) {
+                        clearTimeout(self.saveTimeout);
+                    }
+                    self.saveChanges(ta.value, editTitle, editField);
+                });
 
                 // --- COMPTEXT INTEGRATION ---
                 if (CompletionLib && CompletionLib.Completion) {

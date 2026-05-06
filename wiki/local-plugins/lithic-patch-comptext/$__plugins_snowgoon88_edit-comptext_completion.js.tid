@@ -1,4 +1,4 @@
-﻿created: 20251203170029120
+created: 20251203170029120
 modified: 20260123164549587
 module-type: library
 title: $:/plugins/snowgoon88/edit-comptext/completion.js
@@ -566,7 +566,8 @@ TODO : CHECK if needed
 					// We append a search + limit to the filter. 
 					var searchPart = " +[search:" + fieldMode + "[" + cleanPat + "]limit[" + (this._maxMatch + 5) + "]]";
 
-					allOptions = this._widget.wiki.filterTiddlers(baseFilter + searchPart);
+					var excludePart = " +[!is[image]!type[application/tldr]]";
+					allOptions = this._widget.wiki.filterTiddlers(baseFilter + excludePart + searchPart);
 					// ============================================
 					// JANE OPTIMIZATION END
 					// ============================================
@@ -692,8 +693,10 @@ TODO : CHECK if needed
 			((pos_prevOpen > pos_prevClosed) ||  // not closed yet
 				(pos_prevClosed === pos))) {          // closed at cursor
 			//DEBUG console.log("     pat="+text.slice( pos_prevOpen+sPat.length, pos) );
+			var ext = text.slice(pos_prevOpen + sPat.length, pos);
+			if (ext.length > 120 || ext.indexOf("\n") !== -1 || (ePat === "" && ext.indexOf(" ") !== -1)) return undefined;
 			return {
-				text: text.slice(pos_prevOpen + sPat.length, pos),
+				text: ext,
 				start: pos_prevOpen,
 				end: pos_nextClosed
 			};

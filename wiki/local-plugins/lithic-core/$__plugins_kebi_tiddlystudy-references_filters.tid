@@ -29,13 +29,13 @@ title: $:/plugins/kebi/tiddlystudy-references/filters
 <$let 
   lbrack="[[" rbrack="]]" pipe="|"
   hardLinks={{{ [enlist<targets>addprefix<lbrack>addsuffix<rbrack>] [enlist<targets>addprefix<pipe>addsuffix<rbrack>] +[format:titlelist[]join[ ]] }}}
-  textBacklinks={{{ [enlist<hardLinks>] :map[all[tiddlers]!is[system]search:text:literal<currentTiddler>] +[format:titlelist[]join[ ]] }}}
+  textBacklinks={{{ [enlist<hardLinks>] :map[all[tiddlers]!is[system]!is[image]!type[application/tldr]search:text:literal<currentTiddler>] +[format:titlelist[]join[ ]] }}}
   allBacklinks={{{ [enlist<targets>backlinks[]] [enlist<textBacklinks>] +[format:titlelist[]join[ ]] }}}
 >
 <<generate-list statetiddler:"$:/plugins/kebi/tiddlystudy-references/config/filters/transclusions" filter:"[enlist<targets>backtranscludes[]] -[is[current]] -[is[system]] -[all[shadows]] -[is[image]]" class:"filtertransclude">>
 <<generate-list statetiddler:"$:/plugins/kebi/tiddlystudy-references/config/filters/tags" filter:"[enlist<targets>tagging[]] -[enlist<targets>backtranscludes[]] -[is[current]] -[is[system]] -[all[shadows]]" class:"filtertag">>
 <<generate-list statetiddler:"$:/plugins/kebi/tiddlystudy-references/config/filters/backlinks" filter:"[enlist<allBacklinks>] -[enlist<targets>backtranscludes[]] -[enlist<targets>tagging[]] -[is[current]] -[is[system]] -[all[shadows]] -[is[image]] +[unique[]]" class:"filterbacklink">>
-<<generate-list statetiddler:"$:/plugins/kebi/tiddlystudy-references/config/filters/mentions-title" filter:"[all[tiddlers]!is[system]search:title:literal<targetTitle>] [all[tiddlers]!is[system]search:title:literal<safeAlias>] +[unique[]] -[enlist<allBacklinks>] -[enlist<targets>backtranscludes[]] -[enlist<targets>tagging[]] -[has[parent]] -[is[current]] -[all[shadows]]" class:"filtertitle">>
+<<generate-list statetiddler:"$:/plugins/kebi/tiddlystudy-references/config/filters/mentions-title" filter:"[all[tiddlers]!is[system]!is[image]!type[application/tldr]search:title:literal<targetTitle>] [all[tiddlers]!is[system]!is[image]!type[application/tldr]search:title:literal<safeAlias>] +[unique[]] -[enlist<allBacklinks>] -[enlist<targets>backtranscludes[]] -[enlist<targets>tagging[]] -[has[parent]] -[is[current]] -[all[shadows]]" class:"filtertitle">>
 </$let>
 </$vars>
 </ul>

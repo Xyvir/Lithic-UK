@@ -43,8 +43,14 @@ TextNodeWidget.prototype.execute = function () {
         type: "plain-text",
         text: this.getAttribute("text", this.parseTreeNode.text || "")
     }];
+
+    var currentTiddlerTitle = this.getVariable("currentTiddler");
+    var currentTiddler = self.wiki.getTiddler(currentTiddlerTitle);
+    var tiddlerType = currentTiddler ? currentTiddler.fields.type : "";
+    var isExcludedType = tiddlerType === "application/tldr" || (typeof tiddlerType === "string" && tiddlerType.indexOf("image/") === 0);
+
     // Only process links if not disabled and we're not within a button or link widget
-    if (this.getVariable("tv-wikilinks", { defaultValue: "yes" }).trim() !== "no" && this.getVariable("tv-freelinks", { defaultValue: "no" }).trim() === "yes" && !this.isWithinButtonOrLink()) {
+    if (!isExcludedType && this.getVariable("tv-wikilinks", { defaultValue: "yes" }).trim() !== "no" && this.getVariable("tv-freelinks", { defaultValue: "no" }).trim() === "yes" && !this.isWithinButtonOrLink()) {
         // Get the information about the current tiddler titles, and construct a regexp
         this.tiddlerTitleInfo = this.wiki.getGlobalCache("tiddler-title-info-aliases-" + (ignoreCase ? "insensitive" : "sensitive"), function () {
             var targetFilterText = self.wiki.getTiddlerText(TITLE_TARGET_FILTER),
@@ -55,11 +61,16 @@ TextNodeWidget.prototype.execute = function () {
             var candidates = [];
 
             $tw.utils.each(sourceTitles, function (title) {
+                // Check for Aliases field and type exclusion
+                var tiddler = self.wiki.getTiddler(title);
+                var tType = tiddler ? tiddler.fields.type : "";
+                if (tType === "application/tldr" || (tType && tType.indexOf("image/") === 0)) {
+                    return; // skip adding these heavy binary/json types to freelinks dictionary
+                }
+
                 // Add the title itself
                 candidates.push({ text: title, target: title });
 
-                // Check for Aliases field
-                var tiddler = self.wiki.getTiddler(title);
                 if (tiddler && tiddler.fields.aliases) {
                     // Parse the aliases list (handles spaces/brackets standard TW list format)
                     var aliases = $tw.utils.parseStringArray(tiddler.fields.aliases);
