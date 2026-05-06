@@ -136,6 +136,9 @@ elif [[ "$REQUEST_URI" == */status* ]]; then
         if [ -f "${DATA_DIR}/.git/backup_status" ]; then
             LAST_SYNC=$(grep "last_sync=" "${DATA_DIR}/.git/backup_status" | cut -d= -f2)
         fi
+        if [ -z "$LAST_SYNC" ]; then
+            LAST_SYNC=0
+        fi
         echo "{\"connected\":true,\"repo\":\"$REPO\",\"last_sync\":$LAST_SYNC}"
     fi
 

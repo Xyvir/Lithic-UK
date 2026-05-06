@@ -80,8 +80,19 @@ sync_now() {
     # Update remote URL with latest token
     git -C "${DATA_DIR}" remote set-url origin "https://oauth2:${TOKEN}@github.com/${REPO_NAME}.git"
 
+    # Remove stale git lock if it exists and is older than 5 minutes
+    if [ -f "${DATA_DIR}/.git/index.lock" ]; then
+        if [ "$(( $(date +%s) - $(stat -c %Y "${DATA_DIR}/.git/index.lock") ))" -gt 300 ]; then
+            echo "[Watcher] Removing stale git index.lock..."
+            rm -f "${DATA_DIR}/.git/index.lock"
+        fi
+    fi
+
+    SYNC_SUCCESS=true
+
     echo "[Watcher] Checking for updates..."
-    git -C "${DATA_DIR}" fetch origin main >/dev/null 2>&1
+    git -C "${DATA_DIR}" fetch origin main >/dev/null 2>&1 || SYNC_SUCCESS=false
+
     
     REMOTE_HASH=$(git -C "${DATA_DIR}" rev-parse origin/main 2>/dev/null)
     LOCAL_HASH=$(git -C "${DATA_DIR}" rev-parse HEAD 2>/dev/null)
@@ -126,19 +137,19 @@ sync_now() {
         # 3. Normal Sync Path (No conflict)
         if [ "$HAS_LOCAL_CHANGES" = true ]; then
             echo "[Watcher] Committing local changes..."
-            git -C "${DATA_DIR}" commit -m "Automated Sync: $(date +'%Y-%m-%d %H:%M:%S')"
+            git -C "${DATA_DIR}" commit -m "Automated Sync: $(date +'%Y-%m-%d %H:%M:%S')" || SYNC_SUCCESS=false
             echo "[Watcher] Pushing to GitHub..."
-            git -C "${DATA_DIR}" push origin main
+            git -C "${DATA_DIR}" push origin main || SYNC_SUCCESS=false
         fi
 
         # If remote is ahead but it's a clean fast-forward (or we were behind)
         if [ -n "$REMOTE_HASH" ] && ! git -C "${DATA_DIR}" merge-base --is-ancestor HEAD "$REMOTE_HASH"; then
             echo "[Watcher] Pulling remote updates..."
-            git -C "${DATA_DIR}" pull --rebase origin main
+            git -C "${DATA_DIR}" pull --rebase origin main || SYNC_SUCCESS=false
         fi
     fi
 
-    if [ $? -eq 0 ]; then
+    if [ "$SYNC_SUCCESS" = true ]; then
         echo "[Watcher] Sync successful: $(date)"
         echo "last_sync=$(date +%s)" > "${DATA_DIR}/.git/backup_status"
     else
