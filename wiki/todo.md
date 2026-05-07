@@ -1,5 +1,5 @@
 
-- [ ] Add "apply anchor template" to empty nonjournal streamparents.
+- [ ] Add "apply anchor template" filtered UI widget dropdownsearch to stub view / placeholder tiddlers.
 - [ ] Improve anchors behavior and workflow.
 - [ ] Extend hover-over 'appear' plugin behavior to be more intuitive
     - [ ] modify behavior to show todo when highlighting calendar datelinks
@@ -14,8 +14,9 @@
 - [ ] Create simple "Presentation" view / layout based on existing backlink nav pills.
    - [ ] possibly apply "prinstyles.css" to this view.
 - [ ] Create/Integrate EPUB Serialization based on current to_lithic logic (but have user provide shortcode instead of AI-generated one)
+- [ ] Freeze external plugin integrations once I'm happy with the base featureset.
+- [ ] Create unit tests for all lithic.html and launcher.html UI elements, logic and functions
 - [ ] Modularize launcher.html into seperate javascript / html / css files
-    - [ ] create unit tests for all launcher.html UI elements, logic and functions.
     - [ ] being modularizing launcher.html and test packaging into prelauncher.html
     - [ ] once all unit tests pass, update the build-wiki to package launcher.html into the build
     - [ ] archive original launcher.html and being using new modularized build process moving forward.
@@ -28,3 +29,4 @@
 - [X] Create some way to disambiguate if someone wants to self-host multiple backends for different groups of wikis.
 - [ ] Add agents.md to back-end server if anyone wants to clone the github sync in their own LLM-IDE.
 - [ ] Switch or create an option to use double markdown pagebreak for printing newpage isntead of one (Incase user wants to include visual page-spanning pagebreaks)
+- [ ] Create "Lithic for Teams" backend version based on Mult-Wiki Server.
