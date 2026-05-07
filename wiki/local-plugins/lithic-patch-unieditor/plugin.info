@@ -1,0 +1,9 @@
+{
+    "title": "$:/plugins/xyvir/lithic-patch-unieditor",
+    "author": "Xyvir",
+    "description": "Patches BJ's UniEditor widget to support CompText auto-completion (link completion, slash commands, etc.)",
+    "plugin-type": "plugin",
+    "version": "0.0.1",
+    "parent-plugin": "$:/plugins/bj/unieditor",
+    "plugin-priority": "2"
+}
