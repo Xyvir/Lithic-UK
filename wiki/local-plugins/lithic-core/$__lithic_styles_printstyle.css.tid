@@ -131,14 +131,25 @@ type: text/css
 
     /* =======================================================
        5. CODEBLOCK BORDER FIX
-       (Prevents double-bordering from pre and code tags)
+       (Left-only barber-pole border for code blocks in print)
        ======================================================= */
 
-    /* Enforce a single, solid border on the outer pre container */
+    /* Left-only border with diagonal barber-pole stripe pattern */
     pre.hljs,
     pre {
-        border: 1px solid #cccccc !important;
+        border: none !important;
+        border-left: 6px solid #000 !important;
+        border-image: repeating-linear-gradient(
+            -45deg,
+            #999999 0px,
+            #999999 3.5px,
+            #ffffff 4px,
+            #ffffff 7.5px,
+            #999999 8px
+        ) 6 !important;
+        border-image-width: 0 0 0 6px !important;
         padding: 10px !important;
+        padding-left: 14px !important;
         background-color: #fcfcfc !important;
     }
 
@@ -197,7 +208,28 @@ type: text/css
     }
 
     /* =======================================================
-       9. PRINT SCALING
+       9. CENTER IMAGES
+       (Centers images and image containers instead of left-aligning)
+       ======================================================= */
+
+    /* Make all images block-level and auto-margin centered.
+       display:block + margin:auto centers a block element within its
+       parent regardless of the parent's text-align. */
+    .tc-tiddler-body img,
+    .markdown img {
+        display: block !important;
+        margin-left: auto !important;
+        margin-right: auto !important;
+    }
+
+    /* Center only dedicated image wrapper elements, not all paragraphs */
+    .tc-tiddler-body .tc-image-wrapper,
+    .tc-tiddler-body [class*="image-container"] {
+        text-align: center !important;
+    }
+
+    /* =======================================================
+       10. PRINT SCALING
        ======================================================= */
 
     /* Bake in 75% zoom scaling for Chrome */

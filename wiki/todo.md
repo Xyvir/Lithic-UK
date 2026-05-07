@@ -27,3 +27,4 @@
 - [ ] Add local 2fa topt for backend wiki access.
 - [X] Create some way to disambiguate if someone wants to self-host multiple backends for different groups of wikis.
 - [ ] Add agents.md to back-end server if anyone wants to clone the github sync in their own LLM-IDE.
+- [ ] Switch or create an option to use double markdown pagebreak for printing newpage isntead of one (Incase user wants to include visual page-spanning pagebreaks)
