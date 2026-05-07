@@ -162,6 +162,29 @@ OverType Editor Widget for TiddlyWiki + Streams + CompText
                 ta.style.setProperty("color", "transparent", "important");
                 ta.style.setProperty("caret-color", "var(--cursor, #f95738)", "important");
 
+                // Intercept programmatic textarea.value changes (e.g. from
+                // CompText completions) so OverType recalculates its height
+                // and updates the preview overlay. Without this, multi-line
+                // insertions from CompText leave the editor at stale height.
+                var nativeValueDescriptor = Object.getOwnPropertyDescriptor(
+                    HTMLTextAreaElement.prototype, 'value'
+                );
+                Object.defineProperty(ta, 'value', {
+                    get: nativeValueDescriptor.get,
+                    set: function(val) {
+                        nativeValueDescriptor.set.call(this, val);
+                        if (self.editor) {
+                            if (self.editor._updateAutoHeight) {
+                                self.editor._updateAutoHeight();
+                            }
+                            if (self.editor.updatePreview) {
+                                self.editor.updatePreview();
+                            }
+                        }
+                    },
+                    configurable: true
+                });
+
                 // Streams Enter key handling:
                 // 1. Flush any pending debounced save so the tiddler text is
                 //    current before $keyboard-plus runs save-node-actions.
