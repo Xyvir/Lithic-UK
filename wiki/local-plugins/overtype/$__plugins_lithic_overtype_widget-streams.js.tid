@@ -119,10 +119,15 @@ OverType Editor Widget for TiddlyWiki + Streams + CompText
                 autofocus: shouldFocus,
                 minHeight: attrMinHeight,
                 onChange: function (value) {
+                    console.log('[OT-DEBUG] onChange fired, value length:', value.length, 'preview:', JSON.stringify(value.substring(0, 80)));
                     if (self.saveTimeout) {
                         clearTimeout(self.saveTimeout);
+                        console.log('[OT-DEBUG] onChange: cleared previous saveTimeout');
                     }
+                    self.pendingSaveValue = value;
                     self.saveTimeout = setTimeout(function() {
+                        console.log('[OT-DEBUG] DEBOUNCE FIRED - writing to tiddler:', editTitle, 'value:', JSON.stringify(value.substring(0, 80)));
+                        self.pendingSaveValue = null;
                         self.saveChanges(value, editTitle, editField);
                     }, 250);
                 }
@@ -132,6 +137,17 @@ OverType Editor Widget for TiddlyWiki + Streams + CompText
 
             if (this.editor && this.editor.textarea) {
                 var ta = this.editor.textarea;
+
+                // Read streams caret-position state (set by save-node-actions
+                // after a split) and position the cursor accordingly.
+                var caretState = this.wiki.getTiddlerText("$:/state/sq/streams/caret-position");
+                if (caretState !== undefined && caretState !== null && caretState !== "") {
+                    var caretPos = parseInt(caretState, 10);
+                    if (!isNaN(caretPos)) {
+                        ta.setSelectionRange(caretPos, caretPos);
+                    }
+                    this.wiki.deleteTiddler("$:/state/sq/streams/caret-position");
+                }
 
                 if (this.editor.wrapper) {
                     this.editor.wrapper.style.setProperty("min-height", attrMinHeight, "important");
@@ -146,9 +162,47 @@ OverType Editor Widget for TiddlyWiki + Streams + CompText
                 ta.style.setProperty("color", "transparent", "important");
                 ta.style.setProperty("caret-color", "var(--cursor, #f95738)", "important");
 
+                // Streams Enter key handling:
+                // 1. Flush any pending debounced save so the tiddler text is
+                //    current before $keyboard-plus runs save-node-actions.
+                // 2. preventDefault to stop the browser inserting a newline
+                //    into the textarea — that would trigger another onChange
+                //    which queues a debounced save that overwrites the split.
+                // Shift+Enter is excluded: it inserts a newline within the node.
+                ta.addEventListener("keydown", function(e) {
+                    if (e.key === "Enter") {
+                        console.log('[OT-DEBUG] ENTER keydown:', { shift: e.shiftKey, hasPending: self.saveTimeout !== null, pendingValue: self.pendingSaveValue ? JSON.stringify(self.pendingSaveValue.substring(0, 80)) : null, taValue: JSON.stringify(ta.value.substring(0, 80)), selStart: ta.selectionStart, selEnd: ta.selectionEnd, tiddlerText: JSON.stringify((self.wiki.getTiddlerText(editTitle) || '').substring(0, 80)) });
+                    }
+                    if (e.key === "Enter" && !e.shiftKey) {
+                        e.preventDefault();
+                        self.isNodeSplitting = true;
+                        console.log('[OT-DEBUG] ENTER: preventDefault called, isNodeSplitting=true, flushing...');
+                        if (self.saveTimeout) {
+                            clearTimeout(self.saveTimeout);
+                            self.saveTimeout = null;
+                            console.log('[OT-DEBUG] ENTER: cleared saveTimeout');
+                        }
+                        if (self.pendingSaveValue != null) {
+                            console.log('[OT-DEBUG] ENTER: flushing pending save to tiddler');
+                            self.saveChanges(self.pendingSaveValue, editTitle, editField);
+                            self.pendingSaveValue = null;
+                        } else {
+                            console.log('[OT-DEBUG] ENTER: no pending save to flush');
+                        }
+                        console.log('[OT-DEBUG] ENTER: tiddler text AFTER flush:', JSON.stringify((self.wiki.getTiddlerText(editTitle) || '').substring(0, 80)));
+                    }
+                });
+
                 ta.addEventListener("blur", function() {
+                    console.log('[OT-DEBUG] BLUR fired, isNodeSplitting:', !!self.isNodeSplitting, 'taValue:', JSON.stringify(ta.value.substring(0, 80)));
                     if (self.saveTimeout) {
                         clearTimeout(self.saveTimeout);
+                        self.saveTimeout = null;
+                    }
+                    self.pendingSaveValue = null;
+                    if (self.isNodeSplitting) {
+                        console.log('[OT-DEBUG] BLUR: skipping save — node split in progress');
+                        return;
                     }
                     self.saveChanges(ta.value, editTitle, editField);
                 });
@@ -178,6 +232,7 @@ OverType Editor Widget for TiddlyWiki + Streams + CompText
     };
 
     OverTypeWidget.prototype.saveChanges = function (text, title, field) {
+        console.log('[OT-DEBUG] saveChanges called:', title, 'text:', JSON.stringify((text || '').substring(0, 80)), new Error().stack.split('\n').slice(1, 4).join(' <- '));
         this.wiki.setText(title, field, null, text);
     };
 
@@ -198,7 +253,9 @@ OverType Editor Widget for TiddlyWiki + Streams + CompText
         // 2. Check for Content Changes
         if (changedTiddlers[this.editTitle]) {
             var newText = this.wiki.getTiddlerText(this.editTitle);
+            console.log('[OT-DEBUG] refresh: tiddler changed:', this.editTitle, 'newText:', JSON.stringify((newText || '').substring(0, 80)), 'editorValue:', JSON.stringify((this.editor ? this.editor.getValue() : '').substring(0, 80)), 'match:', this.editor && this.editor.getValue() === newText);
             if (this.editor && this.editor.getValue() !== newText) {
+                console.log('[OT-DEBUG] refresh: calling setValue with new text');
                 this.editor.setValue(newText);
                 handled = true;
             }
@@ -206,6 +263,21 @@ OverType Editor Widget for TiddlyWiki + Streams + CompText
 
         // If we handled the update internally (theme or text), return false to avoid re-render
         return handled ? false : this.computeAttributes();
+    };
+
+    // Cancel any pending debounced save when this widget is removed from the
+    // DOM tree (e.g. when the $list widget swaps to a different node editor).
+    // Without this, a stale setTimeout could fire after destruction and
+    // overwrite the tiddler with pre-split content.
+    OverTypeWidget.prototype.removeChildDomNodes = function () {
+        console.log('[OT-DEBUG] removeChildDomNodes called for:', this.editTitle, 'hasPendingTimeout:', !!this.saveTimeout);
+        if (this.saveTimeout) {
+            clearTimeout(this.saveTimeout);
+            this.saveTimeout = null;
+            this.pendingSaveValue = null;
+        }
+        // Call the parent implementation
+        EditTextWidget.prototype.removeChildDomNodes.call(this);
     };
 
     exports["overtype-streams-editor"] = OverTypeWidget;
