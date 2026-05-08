@@ -1,25 +1,57 @@
 tags: $:/tags/Stylesheet
 title: $:/plugins/xyvir/lithic-patch-unieditor/ui-tweaks.css
 
-/* UniEditor UI tweaks: border + hide scrollbars */
+/* UniEditor UI tweaks: border, background, hide scrollbars */
 
 .unieditor {
 	border: 1.5px solid <<colour primary>>;
 	border-radius: 4px;
+	background: <<colour tiddler-editor-fields-odd>>;
+}
+.unieditor textarea,
+.unieditor textarea.unieditor__textarea,
+.unieditor textarea.unieditor_controlwrap {
+	caret-color: <<colour primary>> !important;
 }
 
-/* Hide scrollbars — textarea auto-expands so they're unnecessary clutter */
-.unieditor .unieditor__textarea::-webkit-scrollbar {
-	display: none;
+/* Override upstream .overflowy { overflow-y: scroll !important } —
+   the textarea auto-expands so forced scroll is just visual clutter. */
+.unieditor .overflowy {
+	overflow-y: auto !important;
+	scrollbar-width: none !important;
+	-ms-overflow-style: none !important;
 }
-.unieditor .unieditor__textarea {
-	scrollbar-width: none; /* Firefox */
-	-ms-overflow-style: none; /* IE/Edge */
+.unieditor .overflowy::-webkit-scrollbar {
+	display: none !important;
 }
-.unieditor .unieditor__pre::-webkit-scrollbar {
-	display: none;
+
+/* --- Floating preview toggle button --- */
+.uni-preview-toggle {
+	position: absolute !important;
+	top: 4px !important;
+	right: 4px !important;
+	left: auto !important;
+	z-index: 10;
+	background: transparent;
+	border: none;
+	cursor: pointer;
+	opacity: 0.25;
+	padding: 2px;
+	width: 22px !important;
+	height: 22px !important;
+	line-height: 0;
+	transition: opacity 0.2s ease;
 }
-.unieditor .unieditor__pre {
-	scrollbar-width: none;
-	-ms-overflow-style: none;
+.uni-preview-toggle:hover {
+	opacity: 0.8;
+}
+.uni-preview-toggle p {
+	margin: 0;
+	padding: 0;
+	line-height: 0;
+}
+.uni-preview-toggle svg {
+	width: 100%;
+	height: 100%;
+	fill: <<colour foreground>>;
 }

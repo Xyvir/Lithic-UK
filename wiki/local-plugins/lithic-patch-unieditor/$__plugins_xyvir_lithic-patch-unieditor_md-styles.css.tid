@@ -1,14 +1,14 @@
 tags: $:/tags/Stylesheet
 title: $:/plugins/xyvir/lithic-patch-unieditor/md-styles.css
-type: text/css
 
 /* =============================================
-   Styled Markdown Highlighting for UniEditor
-   OverType-style rendering: semantic styling
-   with dimmed syntax markers.
+   Styled Markdown + Wikitext Highlighting
+   for UniEditor canvas overlay.
+   Palette-responsive colours matching
+   lithic-wikitext-highlight conventions.
    ============================================= */
 
-/* --- Syntax markers (##, **, ~~, etc.) --- */
+/* --- Syntax markers (##, **, ~~, <<, etc.) --- */
 .unieditor .md-marker {
 	opacity: 0.35;
 }
@@ -17,51 +17,51 @@ type: text/css
 .unieditor .md-h {
 	font-weight: bold;
 }
-.unieditor .md-h1 { color: #f95738; }
-.unieditor .md-h2 { color: #ee964b; }
-.unieditor .md-h3 { color: #3d8a51; }
-.unieditor .md-h4 { color: #5a7a9b; }
-.unieditor .md-h5 { color: #5a7a9b; }
-.unieditor .md-h6 { color: #5a7a9b; }
+.unieditor .md-h1 { color: <<colour code-foreground>>; }
+.unieditor .md-h2 { color: <<colour code-foreground>>; }
+.unieditor .md-h3 { color: <<colour sidebar-controls-foreground-hover>>; }
+.unieditor .md-h4 { color: <<colour sidebar-controls-foreground-hover>>; }
+.unieditor .md-h5 { color: <<colour sidebar-controls-foreground-hover>>; }
+.unieditor .md-h6 { color: <<colour sidebar-controls-foreground-hover>>; }
 
 /* --- Bold --- */
 .unieditor .md-strong {
 	font-weight: bold;
-	color: #ee964b;
+	color: <<colour code-foreground>>;
 }
 
 /* --- Italic --- */
 .unieditor .md-em {
 	font-style: italic;
-	color: #f95738;
+	color: <<colour sidebar-controls-foreground-hover>>;
 }
 
 /* --- Strikethrough --- */
 .unieditor .md-del {
 	text-decoration: line-through;
-	color: #999;
+	color: <<colour alert-muted-foreground>>;
 }
 
 /* --- Inline code --- */
 .unieditor .md-code {
-	background: rgba(244, 211, 94, 0.25);
+	background: rgba(128, 128, 128, 0.15);
 	border-radius: 2px;
+	color: <<colour external-link-foreground-visited>>;
 }
 
 /* --- Code fences & blocks --- */
 .unieditor .md-code-fence {
-	color: #999;
-	opacity: 0.7;
+	color: <<colour alert-muted-foreground>>;
 }
 .unieditor .md-code-block {
-	background: rgba(244, 211, 94, 0.12);
+	background: rgba(128, 128, 128, 0.08);
+	color: <<colour external-link-foreground-visited>>;
 }
 
-/* --- Links --- */
-.unieditor .md-link,
-.unieditor .md-tw-link {
+/* --- Markdown links --- */
+.unieditor .md-link {
 	text-decoration: underline;
-	color: #4a9eda;
+	color: <<colour external-link-foreground-visited>>;
 }
 .unieditor .md-url {
 	opacity: 0.5;
@@ -69,44 +69,61 @@ type: text/css
 
 /* --- Images --- */
 .unieditor .md-image {
-	color: #9b59b6;
+	color: <<colour dirty-indicator>>;
 }
 
 /* --- Blockquotes --- */
 .unieditor .md-blockquote {
-	color: #5a7a9b;
+	color: <<colour alert-muted-foreground>>;
 	font-style: italic;
 }
 
 /* --- List markers --- */
 .unieditor .md-list-marker {
-	color: #ee964b;
+	color: <<colour dropzone-background>>;
 }
 
 /* --- Horizontal rules --- */
 .unieditor .md-hr {
-	color: #5a7a9b;
+	color: <<colour alert-muted-foreground>>;
 	opacity: 0.5;
 }
 
 /* =============================================
-   Dark theme overrides
+   TiddlyWiki Wikitext Extensions
+   Colours follow lithic-wikitext-highlight
    ============================================= */
-.tc-body.tc-dark .unieditor .md-h1 { color: #d4a5ff; }
-.tc-body.tc-dark .unieditor .md-h2 { color: #f6ae2d; }
-.tc-body.tc-dark .unieditor .md-h3 { color: #9fcfec; }
-.tc-body.tc-dark .unieditor .md-strong { color: #f6ae2d; }
-.tc-body.tc-dark .unieditor .md-em { color: #9fcfec; }
-.tc-body.tc-dark .unieditor .md-code {
-	background: rgba(159, 207, 236, 0.15);
+
+/* --- Wiki links [[...]] --- */
+.unieditor .md-tw-link {
+	text-decoration: underline;
+	color: <<colour tiddler-link-foreground>>;
 }
-.tc-body.tc-dark .unieditor .md-code-block {
-	background: rgba(159, 207, 236, 0.08);
+
+/* --- #Hashtag links --- */
+.unieditor .md-tw-hashtag {
+	color: <<colour tiddler-link-foreground>>;
 }
-.tc-body.tc-dark .unieditor .md-link,
-.tc-body.tc-dark .unieditor .md-tw-link {
-	color: #9fcfec;
+
+/* --- Macros <<...>> --- */
+.unieditor .md-tw-macro {
+	color: <<colour dirty-indicator>>;
 }
-.tc-body.tc-dark .unieditor .md-blockquote {
-	color: #9fcfec;
+
+/* --- Embeds {{...}} and transcludes {{{...}}} --- */
+.unieditor .md-tw-embed {
+	color: <<colour sidebar-controls-foreground-hover>>;
+}
+
+/* --- KaTeX $...$ and $$...$$ --- */
+.unieditor .md-katex,
+.unieditor .md-katex-fence,
+.unieditor .md-katex-block {
+	color: <<colour dropzone-background>>;
+}
+
+/* --- Pragma lines (\define, \procedure, etc.) --- */
+.unieditor .md-tw-pragma {
+	color: <<colour dropzone-background>>;
+	font-weight: bold;
 }

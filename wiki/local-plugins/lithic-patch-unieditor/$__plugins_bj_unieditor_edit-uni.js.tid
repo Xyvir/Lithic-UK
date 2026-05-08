@@ -75,9 +75,10 @@ uniEditorWidget.prototype.render = function(parent,nextSibling) {
 		return;
 	}
 	
- 	// create toolbarNode so that toolbar is above
+ 	// create toolbarNode — hidden but kept in DOM for keyboard shortcuts
 	this.toolbarNode = this.document.createElement("div");
 	this.toolbarNode.className = "tc-editor-toolbar";
+	this.toolbarNode.style.display = "none";
 	parent.insertBefore(this.toolbarNode,nextSibling);
 	this.domNodes.push(this.toolbarNode);
 	this.editInfo = this.getEditInfo();
@@ -119,6 +120,36 @@ uniEditorWidget.prototype.render = function(parent,nextSibling) {
 			{type: "tm-edit-text-operation", handler: "handleEditTextOperationMessage"}
 		]);
 
+	// --- FLOATING PREVIEW TOGGLE ---
+	// Insert into domNode (outer wrapper) rather than .unieditor to avoid
+	// the overflow:hidden and z-index stacking issues from upstream CSS.
+	this.domNode.style.position = "relative";
+	var previewBtn = this.document.createElement("button");
+	previewBtn.className = "uni-preview-toggle";
+	previewBtn.setAttribute("title", "Toggle Preview");
+
+	var updatePreviewIcon = function() {
+		var isPreview = self.wiki.getTiddlerText("$:/state/showeditpreview", "no") === "yes";
+		var iconTitle = isPreview
+			? "$:/core/images/preview-open"
+			: "$:/core/images/preview-closed";
+		previewBtn.innerHTML = self.wiki.renderTiddler("text/html", iconTitle);
+	};
+	updatePreviewIcon();
+	this._updatePreviewIcon = updatePreviewIcon;
+
+	previewBtn.addEventListener("click", function(e) {
+		e.preventDefault();
+		e.stopPropagation();
+		var current = self.wiki.getTiddlerText("$:/state/showeditpreview", "no");
+		self.wiki.setText("$:/state/showeditpreview", "text", null,
+			current === "yes" ? "no" : "yes");
+		updatePreviewIcon();
+	});
+
+	this.domNode.appendChild(previewBtn);
+	// --- END FLOATING PREVIEW TOGGLE ---
+
 	// --- COMPTEXT INTEGRATION ---
 	// After the uniEditor instance is created, find the textarea and attach CompText
 	if (CompletionLib && CompletionLib.Completion) {
@@ -135,6 +166,37 @@ uniEditorWidget.prototype.render = function(parent,nextSibling) {
 			this.completionInstance = new CompletionLib.Completion(
 				this, textarea, config, document.body, 0, 0
 			);
+
+			// FIX 1: Monkey-patch uniEditor's doIndents so Enter key is
+			// yielded to CompText when the completion popup is active.
+			// Without this, handleIndents consumes Enter first and inserts
+			// a newline instead of confirming the selected completion.
+			var originalDoIndents = this.instance.textLayer.doIndents.bind(this.instance.textLayer);
+			var compRef = this.completionInstance;
+			this.instance.textLayer.doIndents = function(e) {
+				if (compRef._state === "PATTERN" || compRef._state === "SELECT") {
+					return false; // Let CompText handle Enter
+				}
+				return originalDoIndents(e);
+			};
+
+			// FIX 2: Intercept programmatic textarea.value changes (from
+			// CompText completions) so the canvas overlay and auto-resize
+			// stay in sync. Without this, inserted text only appears in
+			// the invisible textarea until the next keystroke.
+			var nativeValueDescriptor = Object.getOwnPropertyDescriptor(
+				HTMLTextAreaElement.prototype, 'value'
+			);
+			Object.defineProperty(textarea, 'value', {
+				get: nativeValueDescriptor.get,
+				set: function(val) {
+					nativeValueDescriptor.set.call(this, val);
+					if (self.instance && self.instance.textLayer) {
+						self.instance.textLayer.updateEditor(val);
+					}
+				},
+				configurable: true
+			});
 		}
 	}
 	// --- END COMPTEXT INTEGRATION ---

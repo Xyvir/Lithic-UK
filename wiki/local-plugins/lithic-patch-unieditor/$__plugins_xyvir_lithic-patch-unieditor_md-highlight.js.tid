@@ -7,9 +7,11 @@ title: $:/plugins/xyvir/lithic-patch-unieditor/md-highlight.js
 type: application/javascript
 module-type: library
 
-Styled markdown highlighter for UniEditor canvas overlay.
+Styled markdown+wikitext highlighter for UniEditor canvas overlay.
 Produces OverType-style rendering: bold is bold, italic is italic,
-syntax markers are dimmed. Preserves character-for-character alignment.
+syntax markers are dimmed. Also highlights TiddlyWiki wikitext
+constructs that are valid inside markdown (macros, links, embeds,
+transcludes, KaTeX). Preserves character-for-character alignment.
 \*/
 (function(){
 
@@ -38,39 +40,57 @@ function parseInline(text) {
 		return '\uE000' + idx + '\uE001';
 	});
 
-	// 2. Images ![alt](url) — before links
+	// 2. KaTeX: matches both $$...$$ and $...$ in one pass
+	text = text.replace(/(\${1,2})([^$\n]+?)\1/g, function(_match, delim, content) {
+		return '<span class="md-katex">' + m(delim) + content + m(delim) + '</span>';
+	});
+
+	// 3. TiddlyWiki embeds/transcludes: matches both {{{...}}} and {{...}}
+	text = text.replace(/(\{{2,3})([^{}]+?)(\}{2,3})/g, function(_match, open, content, close) {
+		return '<span class="md-tw-embed">' + m(open) + content + m(close) + '</span>';
+	});
+
+	// 6. TiddlyWiki macros <<...>>
+	text = text.replace(/&lt;&lt;(.+?)&gt;&gt;/g,
+		'<span class="md-tw-macro">' + m('&lt;&lt;') + '$1' + m('&gt;&gt;') + '</span>');
+
+	// 7. Images ![alt](url) — before links
 	text = text.replace(/!\[([^\]]*)\]\(([^)]+)\)/g,
 		'<span class="md-image">' + m('![') + '$1' + m('](') + '<span class="md-url">$2</span>' + m(')') + '</span>');
 
-	// 3. Links [text](url)
+	// 8. Markdown links [text](url)
 	text = text.replace(/\[([^\]]+)\]\(([^)]+)\)/g,
 		'<span class="md-link">' + m('[') + '$1' + m('](') + '<span class="md-url">$2</span>' + m(')') + '</span>');
 
-	// 4. TiddlyWiki links [[text]]
+	// 9. TiddlyWiki links [[text]]
 	text = text.replace(/\[\[([^\]]+)\]\]/g,
 		'<span class="md-tw-link">' + m('[[') + '$1' + m(']]') + '</span>');
 
-	// 5. Bold **text**
+	// 10. #hashtag links (camelCase or hyphenated)
+	text = text.replace(/(^|[\s(])#([a-zA-Z][a-zA-Z0-9_\-\/]*)/g,
+		'$1<span class="md-tw-hashtag">' + m('#') + '$2</span>');
+
+	// 11. Bold **text**
 	text = text.replace(/\*\*(.+?)\*\*/g,
 		'<span class="md-strong">' + m('**') + '$1' + m('**') + '</span>');
 
-	// 6. Bold __text__
+	// 12. Bold __text__
 	text = text.replace(/__(.+?)__/g,
 		'<span class="md-strong">' + m('__') + '$1' + m('__') + '</span>');
 
-	// 7. Strikethrough ~~text~~
+	// 13. Strikethrough ~~text~~
 	text = text.replace(/~~(.+?)~~/g,
 		'<span class="md-del">' + m('~~') + '$1' + m('~~') + '</span>');
 
-	// 8. Italic *text*
+	// 14. Italic *text*
 	text = text.replace(/(^|[^*])\*([^*\n]+)\*(?!\*)/g,
 		'$1<span class="md-em">' + m('*') + '$2' + m('*') + '</span>');
 
-	// 9. Italic _text_
+	// 15. Italic _text_
 	text = text.replace(/(^|\s)_([^_\n]+)_(?=\s|$)/g,
 		'$1<span class="md-em">' + m('_') + '$2' + m('_') + '</span>');
 
-	// 10. Restore protected code spans
+	// 16. Restore protected code spans
 	for (var i = 0; i < codeSpans.length; i++) {
 		text = text.replace('\uE000' + i + '\uE001', codeSpans[i]);
 	}
@@ -86,10 +106,23 @@ function highlight(code) {
 	var lines = code.split('\n');
 	var result = [];
 	var inCodeBlock = false;
+	var inKatexBlock = false;
 
 	for (var i = 0; i < lines.length; i++) {
 		var line = lines[i];
 		var escaped = htmlEscape(line);
+
+		// KaTeX block delimiters $$
+		if (/^\$\$$/.test(line.trim())) {
+			inKatexBlock = !inKatexBlock;
+			result.push('<span class="md-katex-fence">' + escaped + '</span>');
+			continue;
+		}
+
+		if (inKatexBlock) {
+			result.push('<span class="md-katex-block">' + escaped + '</span>');
+			continue;
+		}
 
 		// Code fences
 		if (/^`{3}/.test(line)) {
@@ -100,6 +133,12 @@ function highlight(code) {
 
 		if (inCodeBlock) {
 			result.push('<span class="md-code-block">' + escaped + '</span>');
+			continue;
+		}
+
+		// TiddlyWiki pragma lines (\define, \procedure, etc.)
+		if (/^\\[a-zA-Z]/.test(line)) {
+			result.push('<span class="md-tw-pragma">' + escaped + '</span>');
 			continue;
 		}
 
