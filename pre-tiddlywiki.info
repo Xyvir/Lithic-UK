@@ -1,7 +1,5 @@
 {
     "description": "Lithic (Pre)",
-    "plugins": [
-        "xyvir/lithic-patch-unieditor"
-    ],
+    "plugins": [],
     "themes": []
 }
