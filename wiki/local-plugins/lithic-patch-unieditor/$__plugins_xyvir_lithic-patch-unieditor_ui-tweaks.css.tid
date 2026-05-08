@@ -1,0 +1,25 @@
+tags: $:/tags/Stylesheet
+title: $:/plugins/xyvir/lithic-patch-unieditor/ui-tweaks.css
+
+/* UniEditor UI tweaks: border + hide scrollbars */
+
+.unieditor {
+	border: 1.5px solid <<colour primary>>;
+	border-radius: 4px;
+}
+
+/* Hide scrollbars — textarea auto-expands so they're unnecessary clutter */
+.unieditor .unieditor__textarea::-webkit-scrollbar {
+	display: none;
+}
+.unieditor .unieditor__textarea {
+	scrollbar-width: none; /* Firefox */
+	-ms-overflow-style: none; /* IE/Edge */
+}
+.unieditor .unieditor__pre::-webkit-scrollbar {
+	display: none;
+}
+.unieditor .unieditor__pre {
+	scrollbar-width: none;
+	-ms-overflow-style: none;
+}
