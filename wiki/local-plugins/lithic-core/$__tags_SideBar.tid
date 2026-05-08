@@ -1,4 +1,4 @@
 created: 20251209162340978
-list: $:/core/ui/SideBar/Open $:/core/ui/SideBar/Recent $:/core/ui/SideBar/More $:/core/ui/SideBar/Tools
+list: $:/core/ui/SideBar/Open $:/lithic/ui/SideBar/Pyramid $:/core/ui/SideBar/Recent $:/core/ui/SideBar/More $:/core/ui/SideBar/Tools
 modified: 20251209162411417
 title: $:/tags/SideBar

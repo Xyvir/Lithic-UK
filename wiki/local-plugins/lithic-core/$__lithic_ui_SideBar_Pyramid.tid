@@ -1,0 +1,45 @@
+title: $:/lithic/ui/SideBar/Pyramid
+tags: $:/tags/SideBar $:/tags/Macro
+caption: Pyramid
+description: Displays a hierarchical pyramid of the active stream node
+
+\define traverse(node, parentId, depth)
+<$list filter="[<__depth__>compare:number:gt[0]]" variable="ignore">
+    <$list filter="[<__node__>get[stream-list]enlist-input[]]" variable="childNode" counter="nodeIndex">
+        <$set name="currentId" value={{{ [<__parentId__>addsuffix[_]addsuffix<nodeIndex>] }}}>
+        <$set name="nodeClass" value={{{ [<childNode>match<activeNode>then[activeStyle]else[childStyle]] }}}>
+            <<__parentId__>> <$text text="---" /> <<currentId>>["<$view tiddler=<<childNode>> field='text'><$view tiddler=<<childNode>> field='title'/></$view> "]:::<<nodeClass>>
+            <$macrocall $name="traverse" node=<<childNode>> parentId=<<currentId>> depth={{{ [<__depth__>subtract[1]] }}} />
+        </$set>
+        </$set>
+    </$list>
+</$list>
+\end
+
+\define build-pyramid-chart(rootNode)
+graph TD
+    linkStyle default stroke:#d3d3d3,stroke-width:2px;
+    <$set name="parentClass" value={{{ [<__rootNode__>match<activeNode>then[activeStyle]else[parentStyle]] }}}>
+    Parent["<$view tiddler=<<__rootNode__>> field='text'><$view tiddler=<<__rootNode__>> field='title'/></$view> "]:::<<parentClass>>
+    </$set>
+    <$macrocall $name="traverse" node=<<__rootNode__>> parentId="Parent" depth="4" />
+    classDef parentStyle fill:#444,stroke:#fff,stroke-width:2px,color:#fff;
+    classDef childStyle fill:#666,stroke:#ccc,stroke-width:1px,color:#fff;
+    classDef activeStyle fill:#aaa,stroke:#fff,stroke-width:2px,color:#111;
+\end
+
+\define pyramid(tiddler)
+<$set name="targetNode" value={{{ [<__tiddler__>!is[blank]else<currentTiddler>] }}}>
+<$set name="activeNode" value={{{ [prefix[$:/state/sq/streams/current-edit-tiddler]get[text]first[]] }}}>
+    <$list filter="[<targetNode>has[stream-list]]" emptyMessage="*No child streams to display for this node.*">
+        <$wikify name="evaluatedChart" text="<$macrocall $name='build-pyramid-chart' rootNode=<<targetNode>> />">
+            <$mermaid text=<<evaluatedChart>> />
+        </$wikify>
+    </$list>
+</$set>
+</$set>
+\end
+
+<$tiddler tiddler={{{ [list[$:/StoryList]first[]] }}}>
+    <$macrocall $name="pyramid" tiddler=<<currentTiddler>> />
+</$tiddler>

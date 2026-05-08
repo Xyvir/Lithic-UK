@@ -36,8 +36,10 @@
         "xyvir/lithic-python-codeblocks",
         "xyvir/lithic-pdf-to-whiteboard",
         "xyvir/lithic-patch-appear",
-        "xyvir/lithic-patch-unieditor"
+        "xyvir/lithic-patch-unieditor",
+        "orange/mermaid-tw5"
     ],
+
     "themes": [
         "tiddlywiki/vanilla",
         "tiddlywiki/snowwhite",
