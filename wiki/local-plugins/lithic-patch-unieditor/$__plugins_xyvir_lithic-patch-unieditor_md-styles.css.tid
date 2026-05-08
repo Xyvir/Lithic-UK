@@ -1,0 +1,112 @@
+tags: $:/tags/Stylesheet
+title: $:/plugins/xyvir/lithic-patch-unieditor/md-styles.css
+type: text/css
+
+/* =============================================
+   Styled Markdown Highlighting for UniEditor
+   OverType-style rendering: semantic styling
+   with dimmed syntax markers.
+   ============================================= */
+
+/* --- Syntax markers (##, **, ~~, etc.) --- */
+.unieditor .md-marker {
+	opacity: 0.35;
+}
+
+/* --- Headers --- */
+.unieditor .md-h {
+	font-weight: bold;
+}
+.unieditor .md-h1 { color: #f95738; }
+.unieditor .md-h2 { color: #ee964b; }
+.unieditor .md-h3 { color: #3d8a51; }
+.unieditor .md-h4 { color: #5a7a9b; }
+.unieditor .md-h5 { color: #5a7a9b; }
+.unieditor .md-h6 { color: #5a7a9b; }
+
+/* --- Bold --- */
+.unieditor .md-strong {
+	font-weight: bold;
+	color: #ee964b;
+}
+
+/* --- Italic --- */
+.unieditor .md-em {
+	font-style: italic;
+	color: #f95738;
+}
+
+/* --- Strikethrough --- */
+.unieditor .md-del {
+	text-decoration: line-through;
+	color: #999;
+}
+
+/* --- Inline code --- */
+.unieditor .md-code {
+	background: rgba(244, 211, 94, 0.25);
+	border-radius: 2px;
+}
+
+/* --- Code fences & blocks --- */
+.unieditor .md-code-fence {
+	color: #999;
+	opacity: 0.7;
+}
+.unieditor .md-code-block {
+	background: rgba(244, 211, 94, 0.12);
+}
+
+/* --- Links --- */
+.unieditor .md-link,
+.unieditor .md-tw-link {
+	text-decoration: underline;
+	color: #4a9eda;
+}
+.unieditor .md-url {
+	opacity: 0.5;
+}
+
+/* --- Images --- */
+.unieditor .md-image {
+	color: #9b59b6;
+}
+
+/* --- Blockquotes --- */
+.unieditor .md-blockquote {
+	color: #5a7a9b;
+	font-style: italic;
+}
+
+/* --- List markers --- */
+.unieditor .md-list-marker {
+	color: #ee964b;
+}
+
+/* --- Horizontal rules --- */
+.unieditor .md-hr {
+	color: #5a7a9b;
+	opacity: 0.5;
+}
+
+/* =============================================
+   Dark theme overrides
+   ============================================= */
+.tc-body.tc-dark .unieditor .md-h1 { color: #d4a5ff; }
+.tc-body.tc-dark .unieditor .md-h2 { color: #f6ae2d; }
+.tc-body.tc-dark .unieditor .md-h3 { color: #9fcfec; }
+.tc-body.tc-dark .unieditor .md-strong { color: #f6ae2d; }
+.tc-body.tc-dark .unieditor .md-em { color: #9fcfec; }
+.tc-body.tc-dark .unieditor .md-code {
+	background: rgba(159, 207, 236, 0.15);
+}
+.tc-body.tc-dark .unieditor .md-code-block {
+	background: rgba(159, 207, 236, 0.08);
+}
+.tc-body.tc-dark .unieditor .md-link,
+.tc-body.tc-dark .unieditor .md-tw-link {
+	color: #9fcfec;
+}
+.tc-body.tc-dark .unieditor .md-blockquote {
+	color: #9fcfec;
+}

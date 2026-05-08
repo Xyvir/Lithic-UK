@@ -7,7 +7,8 @@ title: $:/plugins/bj/unieditor/edit-uni.js
 type: application/javascript
 module-type: widget
 
-Patched adapter for uniEditor — adds CompText auto-completion support.
+Patched adapter for uniEditor — adds CompText auto-completion
+and styled markdown highlighting support.
 This shadows the original edit-uni.js from $:/plugins/bj/unieditor.
 
 \*/
@@ -27,6 +28,13 @@ try {
 	CompletionLib = require("$:/plugins/snowgoon88/edit-comptext/completion.js");
 } catch (e) { console.log("CompText library not found (optional)."); }
 // ----------------------------
+
+// --- STYLED MARKDOWN HIGHLIGHTING ---
+var mdHighlight;
+try {
+	mdHighlight = require("$:/plugins/xyvir/lithic-patch-unieditor/md-highlight.js");
+} catch (e) { console.log("MD highlight library not found (optional)."); }
+// ------------------------------------
 
 var newid=0;
 var uniEditorWidget = function(parseTreeNode,options) {
@@ -90,6 +98,20 @@ uniEditorWidget.prototype.render = function(parent,nextSibling) {
 		this.instance = new uniEditor(this.domNode, (code) => {
 			self.saveChanges(code);
 		}, this.handleKeydownEvent.bind(this), this.editopts);
+
+	// --- STYLED MARKDOWN HIGHLIGHTING ---
+	// Monkey-patch the canvas layer to use styled markdown rendering
+	// instead of Prism when editing markdown content.
+	if (mdHighlight && mdHighlight.highlight && this.editInfo.type === 'md') {
+		var canvasEl = this.instance.canvasLayer.canvas;
+		var styledUpdate = function(code) {
+			canvasEl.innerHTML = mdHighlight.highlight(code);
+		};
+		this.instance.canvasLayer.updateCanvas = styledUpdate;
+		this.instance.textLayer.updateCanvas = styledUpdate;
+	}
+	// --- END STYLED MARKDOWN HIGHLIGHTING ---
+
 	//gurumed the following causes an indirect save -- should be sorted out
 	this.instance.setCode(this.editInfo.value);consolelog("rend " + this.editInfo.value)
  
@@ -322,6 +344,10 @@ uniEditorWidget.prototype.execute = function() {
 
 	this.editopts=$tw.wiki.getTiddlerData("$:/plugins/bj/unieditor/edoptions.json");
 	this.mappings=$tw.wiki.getTiddlerData("$:/plugins/bj/unieditor/mappings.json");
+	// Ensure text/x-markdown maps to 'md' for highlighting
+	if (this.mappings && !("text/x-markdown" in this.mappings)) {
+		this.mappings["text/x-markdown"] = "md";
+	}
  this.makeChildWidgets();
 };
 

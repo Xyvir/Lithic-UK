@@ -1,0 +1,166 @@
+module-type: library
+title: $:/plugins/xyvir/lithic-patch-unieditor/md-highlight.js
+type: application/javascript
+
+/*\
+title: $:/plugins/xyvir/lithic-patch-unieditor/md-highlight.js
+type: application/javascript
+module-type: library
+
+Styled markdown highlighter for UniEditor canvas overlay.
+Produces OverType-style rendering: bold is bold, italic is italic,
+syntax markers are dimmed. Preserves character-for-character alignment.
+\*/
+(function(){
+
+"use strict";
+
+function htmlEscape(str) {
+	return str
+		.replace(/&/g, '&amp;')
+		.replace(/</g, '&lt;')
+		.replace(/>/g, '&gt;')
+		.replace(/"/g, '&quot;')
+		.replace(/'/g, '&#39;');
+}
+
+// Wrap markdown markers in a dim span
+function m(text) {
+	return '<span class="md-marker">' + text + '</span>';
+}
+
+function parseInline(text) {
+	// 1. Protect inline code spans first
+	var codeSpans = [];
+	text = text.replace(/`([^`\n]+)`/g, function(_match, content) {
+		var idx = codeSpans.length;
+		codeSpans.push('<span class="md-code">' + m('`') + content + m('`') + '</span>');
+		return '\uE000' + idx + '\uE001';
+	});
+
+	// 2. Images ![alt](url) — before links
+	text = text.replace(/!\[([^\]]*)\]\(([^)]+)\)/g,
+		'<span class="md-image">' + m('![') + '$1' + m('](') + '<span class="md-url">$2</span>' + m(')') + '</span>');
+
+	// 3. Links [text](url)
+	text = text.replace(/\[([^\]]+)\]\(([^)]+)\)/g,
+		'<span class="md-link">' + m('[') + '$1' + m('](') + '<span class="md-url">$2</span>' + m(')') + '</span>');
+
+	// 4. TiddlyWiki links [[text]]
+	text = text.replace(/\[\[([^\]]+)\]\]/g,
+		'<span class="md-tw-link">' + m('[[') + '$1' + m(']]') + '</span>');
+
+	// 5. Bold **text**
+	text = text.replace(/\*\*(.+?)\*\*/g,
+		'<span class="md-strong">' + m('**') + '$1' + m('**') + '</span>');
+
+	// 6. Bold __text__
+	text = text.replace(/__(.+?)__/g,
+		'<span class="md-strong">' + m('__') + '$1' + m('__') + '</span>');
+
+	// 7. Strikethrough ~~text~~
+	text = text.replace(/~~(.+?)~~/g,
+		'<span class="md-del">' + m('~~') + '$1' + m('~~') + '</span>');
+
+	// 8. Italic *text*
+	text = text.replace(/(^|[^*])\*([^*\n]+)\*(?!\*)/g,
+		'$1<span class="md-em">' + m('*') + '$2' + m('*') + '</span>');
+
+	// 9. Italic _text_
+	text = text.replace(/(^|\s)_([^_\n]+)_(?=\s|$)/g,
+		'$1<span class="md-em">' + m('_') + '$2' + m('_') + '</span>');
+
+	// 10. Restore protected code spans
+	for (var i = 0; i < codeSpans.length; i++) {
+		text = text.replace('\uE000' + i + '\uE001', codeSpans[i]);
+	}
+
+	return text;
+}
+
+/**
+ * Main highlighter: takes raw markdown text, returns styled HTML
+ * that is character-for-character aligned with the original.
+ */
+function highlight(code) {
+	var lines = code.split('\n');
+	var result = [];
+	var inCodeBlock = false;
+
+	for (var i = 0; i < lines.length; i++) {
+		var line = lines[i];
+		var escaped = htmlEscape(line);
+
+		// Code fences
+		if (/^`{3}/.test(line)) {
+			inCodeBlock = !inCodeBlock;
+			result.push('<span class="md-code-fence">' + escaped + '</span>');
+			continue;
+		}
+
+		if (inCodeBlock) {
+			result.push('<span class="md-code-block">' + escaped + '</span>');
+			continue;
+		}
+
+		// Headers
+		var headerMatch = line.match(/^(#{1,6})\s/);
+		if (headerMatch) {
+			var level = headerMatch[1].length;
+			var markerLen = headerMatch[0].length;
+			var markerText = escaped.substring(0, markerLen);
+			var content = parseInline(escaped.substring(markerLen));
+			result.push('<span class="md-h md-h' + level + '">' + m(markerText) + content + '</span>');
+			continue;
+		}
+
+		// Blockquote
+		if (/^>\s/.test(line)) {
+			var content = parseInline(escaped.substring(2));
+			result.push('<span class="md-blockquote">' + m(escaped.substring(0, 2)) + content + '</span>');
+			continue;
+		}
+
+		// Horizontal rule
+		if (/^(-{3,}|\*{3,}|_{3,})\s*$/.test(line)) {
+			result.push('<span class="md-hr">' + escaped + '</span>');
+			continue;
+		}
+
+		// Task list: - [ ] or - [x] (with optional indent)
+		var taskMatch = line.match(/^(\s*[-*+]\s\[[ xX]\]\s)/);
+		if (taskMatch) {
+			var mLen = taskMatch[0].length;
+			var content = parseInline(escaped.substring(mLen));
+			result.push('<span class="md-list-marker">' + escaped.substring(0, mLen) + '</span>' + content);
+			continue;
+		}
+
+		// Bullet list (with optional indent)
+		var bulletMatch = line.match(/^(\s*[-*+])\s/);
+		if (bulletMatch) {
+			var mLen = bulletMatch[0].length;
+			var content = parseInline(escaped.substring(mLen));
+			result.push('<span class="md-list-marker">' + escaped.substring(0, mLen) + '</span>' + content);
+			continue;
+		}
+
+		// Numbered list (with optional indent)
+		var numMatch = line.match(/^(\s*\d+\.)\s/);
+		if (numMatch) {
+			var mLen = numMatch[0].length;
+			var content = parseInline(escaped.substring(mLen));
+			result.push('<span class="md-list-marker">' + escaped.substring(0, mLen) + '</span>' + content);
+			continue;
+		}
+
+		// Regular line
+		result.push(parseInline(escaped));
+	}
+
+	return result.join('\n');
+}
+
+exports.highlight = highlight;
+
+})();
