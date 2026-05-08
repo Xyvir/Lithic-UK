@@ -344,9 +344,10 @@ uniEditorWidget.prototype.execute = function() {
 
 	this.editopts=$tw.wiki.getTiddlerData("$:/plugins/bj/unieditor/edoptions.json");
 	this.mappings=$tw.wiki.getTiddlerData("$:/plugins/bj/unieditor/mappings.json");
-	// Ensure text/x-markdown maps to 'md' for highlighting
-	if (this.mappings && !("text/x-markdown" in this.mappings)) {
-		this.mappings["text/x-markdown"] = "md";
+	// Ensure markdown types map to 'md' for highlighting
+	if (this.mappings) {
+		if (!this.mappings["text/x-markdown"]) this.mappings["text/x-markdown"] = "md";
+		if (!this.mappings["text/markdown"]) this.mappings["text/markdown"] = "md";
 	}
  this.makeChildWidgets();
 };
