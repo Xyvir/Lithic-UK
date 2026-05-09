@@ -2,8 +2,6 @@
 title: $:/plugins/lithic/overtype/widget-streams.js
 type: application/javascript
 module-type: widget
-
-OverType Editor Widget for TiddlyWiki + Streams + CompText
 \*/
 (function () {
 
