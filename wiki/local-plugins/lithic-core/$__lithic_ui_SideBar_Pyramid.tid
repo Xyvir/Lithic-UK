@@ -4,28 +4,36 @@ caption: Pyramid
 description: Displays a hierarchical pyramid of the active stream node
 
 \define traverse(node, parentId, depth)
+<$let dq='"' quot="#quot;" lcb="{" rcb="}" lp="(" rp=")" nbsp="&nbsp;&nbsp;">
 <$list filter="[<__depth__>compare:number:gt[0]]" variable="ignore">
     <$list filter="[<__node__>get[stream-list]enlist-input[]]" variable="childNode" counter="nodeIndex">
         <$set name="currentId" value={{{ [<__parentId__>addsuffix[_]addsuffix<nodeIndex>] }}}>
         <$set name="nodeClass" value={{{ [<childNode>match<activeNode>then[activeStyle]else[childStyle]] }}}>
-            <<__parentId__>> <$text text="---" /> <<currentId>>["<$view tiddler=<<childNode>> field='text'><$view tiddler=<<childNode>> field='title'/></$view> "]:::<<nodeClass>>
+        <$set name="safeText" value={{{ [<childNode>get[text]else<childNode>splitregexp[\r?\n]first[]search-replace:g<dq>,<quot>search-replace:g<lcb>,<lp>search-replace:g<rcb>,<rp>addsuffix<nbsp>] }}}>
+            <<__parentId__>> <$text text="---" /> <<currentId>>["<<safeText>>"]:::<<nodeClass>>
             <$macrocall $name="traverse" node=<<childNode>> parentId=<<currentId>> depth={{{ [<__depth__>subtract[1]] }}} />
+        </$set>
         </$set>
         </$set>
     </$list>
 </$list>
+</$let>
 \end
 
 \define build-pyramid-chart(rootNode)
 graph TD
     linkStyle default stroke:#d3d3d3,stroke-width:2px;
+    <$let dq='"' quot="#quot;" lcb="{" rcb="}" lp="(" rp=")" nbsp="&nbsp;&nbsp;">
     <$set name="parentClass" value={{{ [<__rootNode__>match<activeNode>then[activeStyle]else[parentStyle]] }}}>
-    Parent["<$view tiddler=<<__rootNode__>> field='text'><$view tiddler=<<__rootNode__>> field='title'/></$view> "]:::<<parentClass>>
-    </$set>
+    <$set name="safeParentText" value={{{ [<__rootNode__>get[text]else<__rootNode__>splitregexp[\r?\n]first[]search-replace:g<dq>,<quot>search-replace:g<lcb>,<lp>search-replace:g<rcb>,<rp>addsuffix<nbsp>] }}}>
+    Parent["<<safeParentText>>"]:::<<parentClass>>
     <$macrocall $name="traverse" node=<<__rootNode__>> parentId="Parent" depth="4" />
-    classDef parentStyle fill:#444,stroke:#fff,stroke-width:2px,color:#fff;
-    classDef childStyle fill:#666,stroke:#ccc,stroke-width:1px,color:#fff;
-    classDef activeStyle fill:#aaa,stroke:#fff,stroke-width:2px,color:#111;
+    </$set>
+    </$set>
+    </$let>
+    classDef parentStyle fill:#444,stroke:#fff,stroke-width:2px,color:#fff,font-weight:normal;
+    classDef childStyle fill:#666,stroke:#ccc,stroke-width:1px,color:#fff,font-weight:normal;
+    classDef activeStyle fill:#aaa,stroke:#fff,stroke-width:2px,color:#111,font-weight:bold;
 \end
 
 \define pyramid(tiddler)
