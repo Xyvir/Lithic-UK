@@ -1,190 +1,175 @@
-/*\
 title: $:/plugins/lithic/overtype/widget-streams.js
 type: application/javascript
 module-type: widget
-\*/
-(function () {
 
-    /*jslint node: true, browser: true */
-    /*global $tw: false */
-    "use strict";
+/*jslint node: true, browser: true */
+/*global $tw: false */
+"use strict";
 
-    var EditTextWidget = require("$:/core/modules/widgets/edit-text.js")["edit-text"];
+var EditTextWidget = require("$:/core/modules/widgets/edit-text.js")["edit-text"];
 
-    // 1. Load OverType Library
-    try {
-        require("$:/plugins/lithic/overtype/overtype.js");
-    } catch (e) { console.warn("OverType library failed to load:", e); }
+// 1. Load OverType Library
+try {
+    require("$:/plugins/lithic/overtype/overtype.js");
+} catch (e) { console.warn("OverType library failed to load:", e); }
 
-    // 2. Load CompText Library
-    var CompletionLib;
-    try {
-        CompletionLib = require("$:/plugins/snowgoon88/edit-comptext/completion.js");
-    } catch (e) { console.log("CompText library not found (optional)."); }
+// 2. Load CompText Library
+var CompletionLib;
+try {
+    CompletionLib = require("$:/plugins/snowgoon88/edit-comptext/completion.js");
+} catch (e) { console.log("CompText library not found (optional)."); }
 
-    var getOverTypeClass = function () {
-        var OT = window.OverType;
-        if (!OT) return null;
-        if (typeof OT.init === "function") return OT;
-        if (OT.default && typeof OT.default.init === "function") return OT.default;
-        return null;
-    };
+var getOverTypeClass = function () {
+    var OT = window.OverType;
+    if (!OT) return null;
+    if (typeof OT.init === "function") return OT;
+    if (OT.default && typeof OT.default.init === "function") return OT.default;
+    return null;
+};
 
-    // 3. Highlighter Bridge for Code Blocks
-    var highlighterBridge = function (code, lang) {
-        var highlighter = $tw.utils.getHighlighter ? $tw.utils.getHighlighter() : null;
-        if (highlighter && lang) {
-            try {
-                var result = highlighter.highlight(lang, code);
-                if (result && result.value) return result.value;
-            } catch (e) { }
-        }
-        return $tw.utils.htmlEncode(code);
-    };
+// 3. Highlighter Bridge for Code Blocks
+var highlighterBridge = function (code, lang) {
+    var highlighter = $tw.utils.getHighlighter ? $tw.utils.getHighlighter() : null;
+    if (highlighter && lang) {
+        try {
+            var result = highlighter.highlight(lang, code);
+            if (result && result.value) return result.value;
+        } catch (e) { }
+    }
+    return $tw.utils.htmlEncode(code);
+};
 
-    // 4. Helper: Determine Theme based on TW Palette
-    var getThemeFromPalette = function (wiki) {
-        var paletteTitle = wiki.getTiddlerText("$:/palette");
-        var paletteTiddler = wiki.getTiddler(paletteTitle);
+// 4. Helper: Determine Theme based on TW Palette
+var getThemeFromPalette = function (wiki) {
+    var paletteTitle = wiki.getTiddlerText("$:/palette");
+    var paletteTiddler = wiki.getTiddler(paletteTitle);
 
-        if (paletteTiddler && paletteTiddler.fields["color-scheme"] === "dark") {
-            return "cave";
-        }
+    if (paletteTiddler && paletteTiddler.fields["color-scheme"] === "dark") {
+        return "cave";
+    }
 
-        if (paletteTitle && paletteTitle.toLowerCase().indexOf("dark") !== -1) {
-            return "cave";
-        }
+    if (paletteTitle && paletteTitle.toLowerCase().indexOf("dark") !== -1) {
+        return "cave";
+    }
 
-        return "solar";
-    };
+    return "solar";
+};
 
-    var OverTypeWidget = function (parseTreeNode, options) {
-        this.initialise(parseTreeNode, options);
-    };
+var OverTypeWidget = function (parseTreeNode, options) {
+    this.initialise(parseTreeNode, options);
+};
 
-    OverTypeWidget.prototype = new EditTextWidget();
+OverTypeWidget.prototype = new EditTextWidget();
 
-    OverTypeWidget.prototype.render = function (parent, nextSibling) {
-        this.parentDomNode = parent;
-        this.computeAttributes();
-        this.execute();
+OverTypeWidget.prototype.render = function (parent, nextSibling) {
+    this.parentDomNode = parent;
+    this.computeAttributes();
+    this.execute();
 
-        var container = this.document.createElement("div");
-        container.style.height = "auto";
-        container.style.width = "100%";
-        container.style.minHeight = "0px";
-        container.style.position = "relative";
+    var container = this.document.createElement("div");
+    container.style.height = "auto";
+    container.style.width = "100%";
+    container.style.minHeight = "0px";
+    container.style.position = "relative";
 
-        parent.insertBefore(container, nextSibling);
-        this.domNodes.push(container);
+    parent.insertBefore(container, nextSibling);
+    this.domNodes.push(container);
 
-        var editTitle = this.getAttribute("tiddler", this.getVariable("currentTiddler"));
-        var editField = this.getAttribute("field", "text");
-        var initialText = this.wiki.getTiddlerText(editTitle, "") || "";
-        var passedClass = this.getAttribute("class", "");
-        var shouldFocus = this.getAttribute("focus") === "yes";
-        var attrMinHeight = this.getAttribute("minHeight") || "0px";
+    var editTitle = this.getAttribute("tiddler", this.getVariable("currentTiddler"));
+    var editField = this.getAttribute("field", "text");
+    var initialText = this.wiki.getTiddlerText(editTitle, "") || "";
+    var passedClass = this.getAttribute("class", "");
+    var shouldFocus = this.getAttribute("focus") === "yes";
+    var attrMinHeight = this.getAttribute("minHeight") || "0px";
 
-        var self = this;
-        var OverTypeClass = getOverTypeClass();
+    var self = this;
+    var OverTypeClass = getOverTypeClass();
 
-        var currentTheme = getThemeFromPalette(this.wiki);
-        this.currentOverTypeTheme = currentTheme;
+    var currentTheme = getThemeFromPalette(this.wiki);
+    this.currentOverTypeTheme = currentTheme;
 
-        if (OverTypeClass) {
-            var instances = OverTypeClass.init(container, {
-                value: initialText,
-                theme: currentTheme,
-                autoResize: true,
-                toolbar: false,
-                smartLists: true,
-                showStats: false,
-                fontFamily: "inherit",
-                fontSize: "inherit",
-                lineHeight: "inherit",
-                padding: "8px",
-                codeHighlighter: highlighterBridge,
-                autofocus: shouldFocus,
-                minHeight: attrMinHeight,
-                onChange: function (value) {
-                    if (self.saveTimeout) {
-                        clearTimeout(self.saveTimeout);
-                    }
-                    self.pendingSaveValue = value;
-                    self.saveTimeout = setTimeout(function() {
-                        self.saveTimeout = null;
-                        var textToSave = self.pendingSaveValue;
-                        self.pendingSaveValue = null;
-                        if (textToSave !== null && textToSave !== undefined) {
-                            self.saveChanges(textToSave, editTitle, editField);
-                        }
-                    }, 250);
+    if (OverTypeClass) {
+        var instances = OverTypeClass.init(container, {
+            value: initialText,
+            theme: currentTheme,
+            autoResize: true,
+            toolbar: false,
+            smartLists: true,
+            showStats: false,
+            fontFamily: "inherit",
+            fontSize: "inherit",
+            lineHeight: "inherit",
+            padding: "8px",
+            codeHighlighter: highlighterBridge,
+            autofocus: shouldFocus,
+            minHeight: attrMinHeight,
+            onChange: function (value) {
+                if (self.saveTimeout) {
+                    clearTimeout(self.saveTimeout);
                 }
+                self.pendingSaveValue = value;
+                self.saveTimeout = setTimeout(function() {
+                    self.saveTimeout = null;
+                    var textToSave = self.pendingSaveValue;
+                    self.pendingSaveValue = null;
+                    if (textToSave !== null && textToSave !== undefined) {
+                        self.saveChanges(textToSave, editTitle, editField);
+                    }
+                }, 250);
+            }
+        });
+
+        this.editor = instances[0];
+
+        if (this.editor && this.editor.textarea) {
+            var ta = this.editor.textarea;
+
+            var caretState = this.wiki.getTiddlerText("$:/state/sq/streams/caret-position");
+            if (caretState !== undefined && caretState !== null && caretState !== "") {
+                var caretPos = parseInt(caretState, 10);
+                if (!isNaN(caretPos)) {
+                    requestAnimationFrame(function() {
+                        ta.setSelectionRange(caretPos, caretPos);
+                    });
+                }
+                this.wiki.deleteTiddler("$:/state/sq/streams/caret-position");
+            }
+
+            if (this.editor.wrapper) {
+                this.editor.wrapper.style.setProperty("min-height", attrMinHeight, "important");
+            }
+
+            ta.classList.add("tc-edit-texteditor");
+            if (passedClass) {
+                passedClass.split(" ").forEach(function (c) { if (c) ta.classList.add(c); });
+            }
+
+            ta.style.setProperty("background", "transparent", "important");
+            ta.style.setProperty("color", "transparent", "important");
+            ta.style.setProperty("caret-color", "var(--cursor, #f95738)", "important");
+
+            var nativeValueDescriptor = Object.getOwnPropertyDescriptor(
+                HTMLTextAreaElement.prototype, 'value'
+            );
+            Object.defineProperty(ta, 'value', {
+                get: nativeValueDescriptor.get,
+                set: function(val) {
+                    nativeValueDescriptor.set.call(this, val);
+                    if (self.editor) {
+                        if (self.editor._updateAutoHeight) {
+                            self.editor._updateAutoHeight();
+                        }
+                        if (self.editor.updatePreview) {
+                            self.editor.updatePreview();
+                        }
+                    }
+                },
+                configurable: true
             });
 
-            this.editor = instances[0];
-
-            if (this.editor && this.editor.textarea) {
-                var ta = this.editor.textarea;
-
-                var caretState = this.wiki.getTiddlerText("$:/state/sq/streams/caret-position");
-                if (caretState !== undefined && caretState !== null && caretState !== "") {
-                    var caretPos = parseInt(caretState, 10);
-                    if (!isNaN(caretPos)) {
-                        requestAnimationFrame(function() {
-                            ta.setSelectionRange(caretPos, caretPos);
-                        });
-                    }
-                    this.wiki.deleteTiddler("$:/state/sq/streams/caret-position");
-                }
-
-                if (this.editor.wrapper) {
-                    this.editor.wrapper.style.setProperty("min-height", attrMinHeight, "important");
-                }
-
-                ta.classList.add("tc-edit-texteditor");
-                if (passedClass) {
-                    passedClass.split(" ").forEach(function (c) { if (c) ta.classList.add(c); });
-                }
-
-                ta.style.setProperty("background", "transparent", "important");
-                ta.style.setProperty("color", "transparent", "important");
-                ta.style.setProperty("caret-color", "var(--cursor, #f95738)", "important");
-
-                var nativeValueDescriptor = Object.getOwnPropertyDescriptor(
-                    HTMLTextAreaElement.prototype, 'value'
-                );
-                Object.defineProperty(ta, 'value', {
-                    get: nativeValueDescriptor.get,
-                    set: function(val) {
-                        nativeValueDescriptor.set.call(this, val);
-                        if (self.editor) {
-                            if (self.editor._updateAutoHeight) {
-                                self.editor._updateAutoHeight();
-                            }
-                            if (self.editor.updatePreview) {
-                                self.editor.updatePreview();
-                            }
-                        }
-                    },
-                    configurable: true
-                });
-
-                // Streams Enter key handling:
-                ta.addEventListener("keydown", function(e) {
-                    if (e.key === "Enter") {
-                        if (self.saveTimeout) {
-                            clearTimeout(self.saveTimeout);
-                            self.saveTimeout = null;
-                        }
-                        if (self.pendingSaveValue !== null && self.pendingSaveValue !== undefined) {
-                            self.saveChanges(self.pendingSaveValue, editTitle, editField);
-                            self.pendingSaveValue = null;
-                        }
-                    }
-                });
-
-                ta.addEventListener("blur", function() {
+            // Streams Enter key handling:
+            ta.addEventListener("keydown", function(e) {
+                if (e.key === "Enter") {
                     if (self.saveTimeout) {
                         clearTimeout(self.saveTimeout);
                         self.saveTimeout = null;
@@ -193,71 +178,81 @@ module-type: widget
                         self.saveChanges(self.pendingSaveValue, editTitle, editField);
                         self.pendingSaveValue = null;
                     }
-                });
-
-                // --- COMPTEXT INTEGRATION ---
-                if (CompletionLib && CompletionLib.Completion) {
-                    var configText = this.wiki.getTiddlerText("$:/plugins/snowgoon88/edit-comptext/config");
-                    var config = {};
-                    if (configText) {
-                        try { config = JSON.parse(configText); } catch (e) { }
-                    }
-
-                    this.completionInstance = new CompletionLib.Completion(
-                        this, ta, config, document.body, 0, 0
-                    );
                 }
-            }
+            });
 
-        } else {
-            container.innerHTML = "Error: OverType library not found.";
-        }
+            ta.addEventListener("blur", function() {
+                if (self.saveTimeout) {
+                    clearTimeout(self.saveTimeout);
+                    self.saveTimeout = null;
+                }
+                if (self.pendingSaveValue !== null && self.pendingSaveValue !== undefined) {
+                    self.saveChanges(self.pendingSaveValue, editTitle, editField);
+                    self.pendingSaveValue = null;
+                }
+            });
 
-        this.editTitle = editTitle;
-        this.editField = editField;
-    };
+            // --- COMPTEXT INTEGRATION ---
+            if (CompletionLib && CompletionLib.Completion) {
+                var configText = this.wiki.getTiddlerText("$:/plugins/snowgoon88/edit-comptext/config");
+                var config = {};
+                if (configText) {
+                    try { config = JSON.parse(configText); } catch (e) { }
+                }
 
-    OverTypeWidget.prototype.saveChanges = function (text, title, field) {
-        this.wiki.setText(title, field, null, text);
-    };
-
-    OverTypeWidget.prototype.refresh = function (changedTiddlers) {
-        var handled = false;
-
-        var paletteTitle = this.wiki.getTiddlerText("$:/palette");
-        if (changedTiddlers["$:/palette"] || (paletteTitle && changedTiddlers[paletteTitle])) {
-            var newTheme = getThemeFromPalette(this.wiki);
-            if (this.editor && newTheme !== this.currentOverTypeTheme) {
-                this.editor.setTheme(newTheme);
-                this.currentOverTypeTheme = newTheme;
-                handled = true;
-            }
-        }
-
-        if (changedTiddlers[this.editTitle]) {
-            var newText = this.wiki.getTiddlerText(this.editTitle);
-            if (this.editor && this.editor.getValue() !== newText) {
-                this.editor.setValue(newText);
-                handled = true;
+                this.completionInstance = new CompletionLib.Completion(
+                    this, ta, config, document.body, 0, 0
+                );
             }
         }
 
-        return handled ? false : this.computeAttributes();
-    };
+    } else {
+        container.innerHTML = "Error: OverType library not found.";
+    }
 
-    // Safely flush any pending saves before TW rips the widget out of the DOM.
-    OverTypeWidget.prototype.removeChildDomNodes = function () {
-        if (this.saveTimeout) {
-            clearTimeout(this.saveTimeout);
-            this.saveTimeout = null;
+    this.editTitle = editTitle;
+    this.editField = editField;
+};
+
+OverTypeWidget.prototype.saveChanges = function (text, title, field) {
+    this.wiki.setText(title, field, null, text);
+};
+
+OverTypeWidget.prototype.refresh = function (changedTiddlers) {
+    var handled = false;
+
+    var paletteTitle = this.wiki.getTiddlerText("$:/palette");
+    if (changedTiddlers["$:/palette"] || (paletteTitle && changedTiddlers[paletteTitle])) {
+        var newTheme = getThemeFromPalette(this.wiki);
+        if (this.editor && newTheme !== this.currentOverTypeTheme) {
+            this.editor.setTheme(newTheme);
+            this.currentOverTypeTheme = newTheme;
+            handled = true;
         }
-        if (this.pendingSaveValue !== null && this.pendingSaveValue !== undefined) {
-            this.saveChanges(this.pendingSaveValue, this.editTitle, this.editField);
-            this.pendingSaveValue = null;
+    }
+
+    if (changedTiddlers[this.editTitle]) {
+        var newText = this.wiki.getTiddlerText(this.editTitle);
+        if (this.editor && this.editor.getValue() !== newText) {
+            this.editor.setValue(newText);
+            handled = true;
         }
-        EditTextWidget.prototype.removeChildDomNodes.call(this);
-    };
+    }
 
-    exports["overtype-streams-editor"] = OverTypeWidget;
+    return handled ? false : this.computeAttributes();
+};
 
-})();
+// Safely flush any pending saves before TW rips the widget out of the DOM.
+OverTypeWidget.prototype.removeChildDomNodes = function () {
+    if (this.saveTimeout) {
+        clearTimeout(this.saveTimeout);
+        this.saveTimeout = null;
+    }
+    if (this.pendingSaveValue !== null && this.pendingSaveValue !== undefined) {
+        this.saveChanges(this.pendingSaveValue, this.editTitle, this.editField);
+        this.pendingSaveValue = null;
+    }
+    EditTextWidget.prototype.removeChildDomNodes.call(this);
+};
+
+exports["overtype-streams-editor"] = OverTypeWidget;
