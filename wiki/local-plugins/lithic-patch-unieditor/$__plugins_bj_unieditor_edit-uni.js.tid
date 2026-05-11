@@ -95,9 +95,25 @@ uniEditorWidget.prototype.render = function(parent,nextSibling) {
 		if (mode ==="fixed") this.editopts.height = $tw.wiki.getTiddlerText(Heighttid)
 		else this.editopts.height =""
 	this.editopts.language=this.editInfo.type;
+	
+	var isStreams = (this.editClass && this.editClass.indexOf("streams-editor") !== -1);
+	if (isStreams) {
+		this.editopts.minHeight = "20px";
+	}
 	//if (!this.instance) - need to destroy?? gurumed
 		this.instance = new uniEditor(this.domNode, (code) => {
-			self.saveChanges(code);
+			if (self.saveTimeout) {
+				clearTimeout(self.saveTimeout);
+			}
+			self.pendingSaveValue = code;
+			self.saveTimeout = setTimeout(function() {
+				self.saveTimeout = null;
+				var textToSave = self.pendingSaveValue;
+				self.pendingSaveValue = null;
+				if (textToSave !== null && textToSave !== undefined) {
+					self.saveChanges(textToSave);
+				}
+			}, 250);
 		}, this.handleKeydownEvent.bind(this), this.editopts);
 
 	// --- STYLED MARKDOWN HIGHLIGHTING ---
@@ -124,37 +140,195 @@ uniEditorWidget.prototype.render = function(parent,nextSibling) {
 	// Insert into domNode (outer wrapper) rather than .unieditor to avoid
 	// the overflow:hidden and z-index stacking issues from upstream CSS.
 	this.domNode.style.position = "relative";
+	
 	var previewBtn = this.document.createElement("button");
 	previewBtn.className = "uni-preview-toggle";
 	previewBtn.setAttribute("title", "Toggle Preview");
 
-	var updatePreviewIcon = function() {
-		var isPreview = self.wiki.getTiddlerText("$:/state/showeditpreview", "no") === "yes";
-		var iconTitle = isPreview
-			? "$:/core/images/preview-open"
-			: "$:/core/images/preview-closed";
-		previewBtn.innerHTML = self.wiki.renderTiddler("text/html", iconTitle);
-	};
-	updatePreviewIcon();
-	this._updatePreviewIcon = updatePreviewIcon;
-
-	previewBtn.addEventListener("click", function(e) {
-		e.preventDefault();
-		e.stopPropagation();
-		var current = self.wiki.getTiddlerText("$:/state/showeditpreview", "no");
-		self.wiki.setText("$:/state/showeditpreview", "text", null,
-			current === "yes" ? "no" : "yes");
+		var updatePreviewIcon = function() {
+			var isPreview = self.wiki.getTiddlerText("$:/state/showeditpreview", "no") === "yes";
+			var iconTitle = isPreview
+				? "$:/core/images/preview-open"
+				: "$:/core/images/preview-closed";
+			previewBtn.innerHTML = self.wiki.renderTiddler("text/html", iconTitle);
+		};
 		updatePreviewIcon();
-	});
+		this._updatePreviewIcon = updatePreviewIcon;
 
-	this.domNode.appendChild(previewBtn);
+		previewBtn.addEventListener("click", function(e) {
+			e.preventDefault();
+			e.stopPropagation();
+			var current = self.wiki.getTiddlerText("$:/state/showeditpreview", "no");
+			self.wiki.setText("$:/state/showeditpreview", "text", null,
+				current === "yes" ? "no" : "yes");
+			updatePreviewIcon();
+		});
+
+		this.domNode.appendChild(previewBtn);
 	// --- END FLOATING PREVIEW TOGGLE ---
 
 	// --- COMPTEXT INTEGRATION ---
 	// After the uniEditor instance is created, find the textarea and attach CompText
-	if (CompletionLib && CompletionLib.Completion) {
-		var textarea = this.domNode.querySelector('textarea');
-		if (textarea) {
+	var textarea = this.domNode.querySelector('textarea');
+	if (textarea) {
+		// Streams Caret Positioning
+		var shouldFocus = self.getAttribute("focus") === "yes";
+		var caretState = self.wiki.getTiddlerText("$:/state/sq/streams/caret-position");
+		if (caretState !== undefined && caretState !== null && caretState !== "") {
+			var caretPos = parseInt(caretState, 10);
+			if (!isNaN(caretPos)) {
+				requestAnimationFrame(function() {
+					textarea.focus();
+					textarea.setSelectionRange(caretPos, caretPos);
+				});
+			}
+			self.wiki.deleteTiddler("$:/state/sq/streams/caret-position");
+		} else if (shouldFocus) {
+			requestAnimationFrame(function() {
+				textarea.focus();
+				var len = textarea.value.length;
+				textarea.setSelectionRange(len, len);
+			});
+		}
+
+		if (isStreams) {
+			var twoLineHeight = 46; // fallback
+			try {
+				var oldVal = textarea.value;
+				var oldStart = textarea.selectionStart;
+				var oldEnd = textarea.selectionEnd;
+				textarea.value = 'A\nB';
+				textarea.style.height = '1px';
+				twoLineHeight = textarea.scrollHeight;
+				textarea.value = oldVal;
+				textarea.setSelectionRange(oldStart, oldEnd);
+			} catch(e) {}
+
+			var fixHeight = function() {
+				var currentHeight = textarea.style.height;
+				textarea.style.height = '1px';
+				var sh = Math.max(textarea.scrollHeight, twoLineHeight);
+				if (sh > 0) {
+					textarea.style.height = sh + 'px';
+					var wrappers = self.domNode.querySelectorAll('.unieditor, .unieditor > div, .unieditor canvas, .unieditor__textarea');
+					for (var i = 0; i < wrappers.length; i++) {
+						wrappers[i].style.height = sh + 'px';
+					}
+				} else {
+					textarea.style.height = currentHeight;
+				}
+			};
+
+			var heightObserver = new MutationObserver(function(mutations) {
+				heightObserver.disconnect();
+				fixHeight();
+				heightObserver.observe(self.domNode, { attributes: true, attributeFilter: ['style'], subtree: true });
+			});
+			
+			heightObserver.observe(self.domNode, { attributes: true, attributeFilter: ['style'], subtree: true });
+			
+			textarea.addEventListener("input", function() {
+				heightObserver.disconnect();
+				fixHeight();
+				heightObserver.observe(self.domNode, { attributes: true, attributeFilter: ['style'], subtree: true });
+			});
+			
+			requestAnimationFrame(fixHeight);
+		}
+
+		// Streams Enter/Tab/Blur handling for debounce save and node split/indent
+		textarea.addEventListener("keydown", function(e) {
+			if (e.__isStreamsCloned) return;
+			
+			if (e.key === "'") {
+				// Prevent uniEditor's double-quote auto-close feature
+				e.preventDefault();
+				e.stopImmediatePropagation();
+				
+				var start = textarea.selectionStart;
+				var end = textarea.selectionEnd;
+				var val = textarea.value;
+				
+				textarea.value = val.substring(0, start) + "'" + val.substring(end);
+				textarea.selectionStart = textarea.selectionEnd = start + 1;
+				
+				// Dispatch input event so uniEditor's textLayer updates the canvas
+				var inputEvent = new Event("input", { bubbles: true, cancelable: true });
+				textarea.dispatchEvent(inputEvent);
+				
+				// Flush save
+				if (self.saveTimeout) {
+					clearTimeout(self.saveTimeout);
+				}
+				self.pendingSaveValue = textarea.value;
+				self.saveTimeout = setTimeout(function() {
+					self.saveTimeout = null;
+					if (self.pendingSaveValue !== null && self.pendingSaveValue !== undefined) {
+						self.saveChanges(self.pendingSaveValue);
+						self.pendingSaveValue = null;
+					}
+				}, 250);
+				return;
+			}
+
+			var isCompTextActive = self.completionInstance && 
+				(self.completionInstance._state === "PATTERN" || self.completionInstance._state === "SELECT");
+			
+			if (e.key === "Enter" || e.key === "Tab") {
+				// Flush debounce immediately
+				if (self.saveTimeout) {
+					clearTimeout(self.saveTimeout);
+					self.saveTimeout = null;
+				}
+				if (self.pendingSaveValue !== null && self.pendingSaveValue !== undefined) {
+					self.saveChanges(self.pendingSaveValue);
+					self.pendingSaveValue = null;
+				}
+				
+				var shouldIntercept = false;
+				if (e.key === "Enter" && isStreams && !e.shiftKey && !isCompTextActive) {
+					shouldIntercept = true;
+				} else if (e.key === "Tab" && isStreams && !isCompTextActive) {
+					shouldIntercept = true;
+				}
+
+				if (shouldIntercept) {
+					// Prevent uniEditor from handling Enter/Tab
+					e.stopImmediatePropagation();
+					e.preventDefault();
+					
+					// Forward event to textarea so Streams' keyboard widget can catch it
+					// with the correct event.target (required for reading selectionStart)
+					var newEvent = new KeyboardEvent("keydown", {
+						key: e.key,
+						code: e.code,
+						keyCode: e.keyCode,
+						bubbles: true,
+						cancelable: true,
+						composed: true,
+						shiftKey: e.shiftKey
+					});
+					newEvent.__isStreamsCloned = true;
+					newEvent.preventDefault = function() {};
+					newEvent.stopPropagation = function() {};
+					newEvent.stopImmediatePropagation = function() {};
+					textarea.dispatchEvent(newEvent);
+				}
+			}
+		}, true); // Capture phase to run before uniEditor's own listeners
+
+		textarea.addEventListener("blur", function() {
+			if (self.saveTimeout) {
+				clearTimeout(self.saveTimeout);
+				self.saveTimeout = null;
+			}
+			if (self.pendingSaveValue !== null && self.pendingSaveValue !== undefined) {
+				self.saveChanges(self.pendingSaveValue);
+				self.pendingSaveValue = null;
+			}
+		});
+
+		if (CompletionLib && CompletionLib.Completion) {
 			var configText = this.wiki.getTiddlerText("$:/plugins/snowgoon88/edit-comptext/config");
 			var config = {};
 			if (configText) {
@@ -174,6 +348,7 @@ uniEditorWidget.prototype.render = function(parent,nextSibling) {
 			var originalDoIndents = this.instance.textLayer.doIndents.bind(this.instance.textLayer);
 			var compRef = this.completionInstance;
 			this.instance.textLayer.doIndents = function(e) {
+				if (e.__isStreamsCloned) return false;
 				if (compRef._state === "PATTERN" || compRef._state === "SELECT") {
 					return false; // Let CompText handle Enter
 				}
@@ -197,8 +372,8 @@ uniEditorWidget.prototype.render = function(parent,nextSibling) {
 				},
 				configurable: true
 			});
-		}
-	}
+		} // end if CompletionLib
+	} // end if textarea
 	// --- END COMPTEXT INTEGRATION ---
 };
 	uniEditorWidget.prototype.handleEditTextOperationMessage = function(event) {
@@ -452,6 +627,18 @@ uniEditorWidget.prototype.saveChanges = function(text) {
 	if(text !== editInfo.value) {
 		editInfo.update(text);
 	}
+};
+
+uniEditorWidget.prototype.removeChildDomNodes = function () {
+	if (this.saveTimeout) {
+		clearTimeout(this.saveTimeout);
+		this.saveTimeout = null;
+	}
+	if (this.pendingSaveValue !== null && this.pendingSaveValue !== undefined) {
+		this.saveChanges(this.pendingSaveValue);
+		this.pendingSaveValue = null;
+	}
+	Widget.prototype.removeChildDomNodes.call(this);
 };
 
 exports["edit-uni"] = uniEditorWidget;

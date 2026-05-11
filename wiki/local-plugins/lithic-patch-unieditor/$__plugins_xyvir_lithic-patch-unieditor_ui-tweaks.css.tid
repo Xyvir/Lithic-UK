@@ -55,3 +55,55 @@ title: $:/plugins/xyvir/lithic-patch-unieditor/ui-tweaks.css
 	height: 100%;
 	fill: <<colour foreground>>;
 }
+
+/* --- Streams Preview Wrapping --- */
+.streams-unieditor-wrapper.preview-yes {
+	border: 1.5px solid <<colour primary>>;
+	border-radius: 4px;
+	overflow: hidden;
+	display: flex;
+	flex-direction: column;
+}
+.streams-unieditor-wrapper.preview-yes .tc-edit-texteditor,
+.streams-unieditor-wrapper.preview-yes .unieditor,
+.streams-unieditor-wrapper.preview-yes .streams-editor,
+.streams-unieditor-wrapper.preview-yes textarea {
+	border-top-color: transparent !important;
+	border-left-color: transparent !important;
+	border-right-color: transparent !important;
+	box-shadow: none !important;
+	outline: none !important;
+}
+.streams-unieditor-wrapper.preview-yes .unieditor {
+	border-bottom: 1px dashed <<colour tiddler-editor-border>> !important;
+	border-bottom-left-radius: 0 !important;
+	border-bottom-right-radius: 0 !important;
+	/* Keep its darker shading */
+}
+.streams-unieditor-wrapper.preview-yes .streams-preview {
+	background: <<colour background>>;
+	margin-top: 0 !important;
+	border-top: none !important;
+	padding: 10px;
+}
+
+/* --- Streams Minimal Height --- */
+.streams-unieditor-wrapper .tc-edit-texteditor,
+.streams-unieditor-wrapper .unieditor,
+.streams-unieditor-wrapper .unieditor textarea,
+.streams-unieditor-wrapper .unieditor canvas,
+.streams-unieditor-wrapper .unieditor .textlayer {
+	min-height: 46px !important;
+}
+
+/* --- Ensure Embedded Highlights Don't Break Canvas Alignment --- */
+.unieditor .md-code-block.hljs {
+	display: inline !important;
+	padding: 0 !important;
+	margin: 0 !important;
+	border: none !important;
+	background: transparent !important;
+	line-height: inherit !important;
+	font-size: inherit !important;
+	font-family: inherit !important;
+}

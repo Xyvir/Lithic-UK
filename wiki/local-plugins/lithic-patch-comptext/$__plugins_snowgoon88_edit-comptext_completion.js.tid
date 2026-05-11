@@ -361,8 +361,12 @@ TODO : CHECK if needed
 
 		// ENTER while selecting
 		if ((this._state === "PATTERN" || this._state === "SELECT") && key === 13) {
-			event.preventDefault();
-			event.stopPropagation();
+			if (this._bestMatches && this._bestMatches.length > 0) {
+				event.preventDefault();
+				event.stopPropagation();
+			} else {
+				this._abortPattern(this._popNode);
+			}
 		}
 		// ESC while selecting
 		else if ((this._state === "PATTERN" || this._state === "SELECT") && key === 27) {
@@ -680,9 +684,9 @@ TODO : CHECK if needed
 	 */
 	var extractPattern = function (text, pos, template) {
 		// Detect previous and next ]]=>STOP or [[=>START
-		var sPat = template.pat ? template.pat : '[[';
+		var sPat = template.pat !== undefined ? template.pat : '[[';
 		var pos_prevOpen = text.lastIndexOf(sPat, pos);
-		var ePat = template.end ? template.end : ']]';
+		var ePat = template.end !== undefined ? template.end : ']]';
 		var pos_prevClosed = text.lastIndexOf(ePat, pos);
 		var pos_nextClosed = text.indexOf(ePat, pos);
 		//DEBUG console.log("__CALC st="+sPat+" -> en="+ePat );

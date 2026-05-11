@@ -17,6 +17,13 @@ transcludes, KaTeX). Preserves character-for-character alignment.
 
 "use strict";
 
+var hljsLib;
+if (typeof window !== "undefined") hljsLib = window.hljs;
+if (!hljsLib && typeof require !== "undefined") {
+	try { hljsLib = require("$:/plugins/tiddlywiki/highlight/highlight.js"); } catch(e) {}
+}
+
+
 function htmlEscape(str) {
 	return str
 		.replace(/&/g, '&amp;')
@@ -106,6 +113,9 @@ function highlight(code) {
 	var lines = code.split('\n');
 	var result = [];
 	var inCodeBlock = false;
+	var codeBlockFence = '';
+	var codeBlockLang = '';
+	var codeBlockBuffer = [];
 	var inKatexBlock = false;
 
 	for (var i = 0; i < lines.length; i++) {
@@ -125,15 +135,48 @@ function highlight(code) {
 		}
 
 		// Code fences
-		if (/^`{3}/.test(line)) {
-			inCodeBlock = !inCodeBlock;
-			result.push('<span class="md-code-fence">' + escaped + '</span>');
-			continue;
-		}
-
-		if (inCodeBlock) {
-			result.push('<span class="md-code-block">' + escaped + '</span>');
-			continue;
+		if (!inCodeBlock) {
+			var fenceMatch = line.match(/^(`{3,})(\w*)/);
+			if (fenceMatch) {
+				inCodeBlock = true;
+				codeBlockFence = fenceMatch[1];
+				codeBlockLang = fenceMatch[2];
+				result.push('<span class="md-code-fence">' + escaped + '</span>');
+				codeBlockBuffer = [];
+				continue;
+			}
+		} else {
+			if (line.startsWith(codeBlockFence)) {
+				// Flush buffer
+				var rawBlock = codeBlockBuffer.join('\n');
+				var highlightedHTML;
+				if (codeBlockLang && hljsLib && hljsLib.getLanguage(codeBlockLang)) {
+					try {
+						// Try highlight.js v11+ API
+						highlightedHTML = hljsLib.highlight(rawBlock, {language: codeBlockLang, ignoreIllegals: true}).value;
+					} catch (err) {
+						try {
+							// Fallback to highlight.js v10 API
+							highlightedHTML = hljsLib.highlight(codeBlockLang, rawBlock, true).value;
+						} catch(e) {
+							highlightedHTML = htmlEscape(rawBlock);
+						}
+					}
+				} else {
+					highlightedHTML = htmlEscape(rawBlock);
+				}
+				
+				if (codeBlockBuffer.length > 0) {
+					result.push('<span class="md-code-block hljs">' + highlightedHTML + '</span>');
+				}
+				
+				inCodeBlock = false;
+				result.push('<span class="md-code-fence">' + escaped + '</span>');
+				continue;
+			} else {
+				codeBlockBuffer.push(line);
+				continue;
+			}
 		}
 
 		// TiddlyWiki pragma lines (\define, \procedure, etc.)
@@ -195,6 +238,28 @@ function highlight(code) {
 
 		// Regular line
 		result.push(parseInline(escaped));
+	}
+
+	// Flush unclosed code block if necessary
+	if (inCodeBlock) {
+		var rawBlock = codeBlockBuffer.join('\n');
+		var highlightedHTML;
+		if (codeBlockLang && hljsLib && hljsLib.getLanguage(codeBlockLang)) {
+			try {
+				highlightedHTML = hljsLib.highlight(rawBlock, {language: codeBlockLang, ignoreIllegals: true}).value;
+			} catch (err) {
+				try {
+					highlightedHTML = hljsLib.highlight(codeBlockLang, rawBlock, true).value;
+				} catch(e) {
+					highlightedHTML = htmlEscape(rawBlock);
+				}
+			}
+		} else {
+			highlightedHTML = htmlEscape(rawBlock);
+		}
+		if (codeBlockBuffer.length > 0) {
+			result.push('<span class="md-code-block hljs">' + highlightedHTML + '</span>');
+		}
 	}
 
 	return result.join('\n');
