@@ -1,0 +1,26 @@
+tags: $:/tags/Stylesheet
+title: $:/plugins/TWaddle/pluginsize/stylesheet
+type: text/vnd.tiddlywiki
+
+\define pluginsize() a.tc-plugin-info[href="<<href>>"]:after {content:"$(size)$ kb = $(relToCore)$%"}
+
+<pre>a.tc-plugin-info:after {
+	font-family: "Roboto", sans-serif;
+	font-size:.8rem;
+	white-space:nowrap;
+}
+a[href="#%24%3A%2Fcore"].tc-plugin-info:after {
+	outline:1px solid <<colour muted-foreground>>;
+	padding: 0 5px;
+}
+<$let coresize={{{ [[$:/core]get[text]length[]] }}}>
+<$list filter="plugin theme language" >
+<$list filter="[plugin-type<currentTiddler>!is[draft]]" variable=plugin>
+<$let
+	href={{{ [<plugin>encodeuricomponent[]addprefix[#]] }}}
+	size={{{ [<plugin>get[text]length[]divide[1000]round[]] }}}
+	relToCore={{{ [<plugin>get[text]length[]] 
+		+[divide<coresize>multiply[100]fixed[0]] }}}
+><<pluginsize>>
+</$let></$list></$list></$let>
+</pre>
