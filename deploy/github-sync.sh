@@ -13,9 +13,11 @@ DEFAULT_CLIENT_ID="Iv23lippjEJMp4KLlLKI"
 
 # Diagnostic logging to stderr (visible in Railway/Docker logs)
 echo "[CGI] Request: $REQUEST_METHOD $REQUEST_URI" >&2
+echo "[CGI] Query: $QUERY_STRING" >&2
 
 CLIENT_ID="${GITHUB_CLIENT_ID:-$DEFAULT_CLIENT_ID}"
 REQUEST_URI="${REQUEST_URI:-}"
+QUERY_STRING="${QUERY_STRING:-}"
 METHOD="${REQUEST_METHOD:-GET}"
 
 # Helper: Extract value from JSON-like strings
