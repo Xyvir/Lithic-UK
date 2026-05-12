@@ -30,6 +30,12 @@ for cmd in curl tar jq; do
   fi
 done
 
+# --- Install lighttpd dependencies ---
+if ! command -v lighttpd &> /dev/null; then
+  echo "Installing lighttpd..."
+  apt-get update -qq && apt-get install -y -qq lighttpd lighttpd-mod-webdav 2>/dev/null || apt-get install -y -qq lighttpd
+fi
+
 # --- Fetch latest release URL ---
 echo "Fetching latest release from GitHub..."
 RELEASE_URL=$(curl -fsSL "https://api.github.com/repos/${REPO}/releases/latest" \
@@ -74,7 +80,7 @@ fi
 echo "Creating systemd service..."
 cat > "/etc/systemd/system/${SERVICE_NAME}.service" <<EOF
 [Unit]
-Description=Lithic Server (Caddy + WebDAV)
+Description=Lithic Server
 After=network.target
 
 [Service]
@@ -85,6 +91,7 @@ WorkingDirectory=${INSTALL_DIR}
 
 # Override paths for the non-Docker layout
 Environment="APP_DIR=${INSTALL_DIR}"
+Environment="DATA_DIR=${DATA_DIR}"
 
 ExecStart=${INSTALL_DIR}/entrypoint.sh
 Restart=always
@@ -99,85 +106,7 @@ ReadWritePaths=${DATA_DIR} ${INSTALL_DIR}
 WantedBy=multi-user.target
 EOF
 
-# --- Patch entrypoint for LXC layout ---
-# The entrypoint expects /app and /data. For LXC we override via env in the service.
-# Create a wrapper that sets the right paths.
-cat > "${INSTALL_DIR}/start.sh" <<'WRAPPER'
-#!/bin/bash
-# LXC wrapper — remaps /app and /data to /opt/lithic paths
-export APP_DIR="${APP_DIR:-/opt/lithic}"
-export DATA_DIR="${DATA_DIR:-/opt/lithic/data}"
-export PUBLIC_DIR="${APP_DIR}/public"
-export CADDYFILE="${APP_DIR}/Caddyfile"
-
-# Source the environment file if present
-[ -f /etc/default/lithic ] && . /etc/default/lithic
-
-# Execute the main entrypoint logic inline
-set -euo pipefail
-
-LITHIC_USER="${LITHIC_USER:-admin}"
-LITHIC_PASSWORD="${LITHIC_PASSWORD:-changeme}"
-LITHIC_PORT="${LITHIC_PORT:-8080}"
-
-echo "============================================"
-echo "  Lithic Server (LXC)"
-echo "============================================"
-echo "  User:  ${LITHIC_USER}"
-echo "  Port:  ${LITHIC_PORT}"
-echo "  Data:  ${DATA_DIR}"
-echo "============================================"
-
-if [ "${LITHIC_PASSWORD}" = "changeme" ]; then
-  echo ""
-  echo "  ⚠  WARNING: Using default password!"
-  echo "  Edit ${ENV_FILE:-/etc/default/lithic} and restart."
-  echo ""
-fi
-
-mkdir -p "${DATA_DIR}"
-
-if [ ! -f "${DATA_DIR}/.agents" ] && [ -f "${APP_DIR}/.agents" ]; then
-  cp "${APP_DIR}/.agents" "${DATA_DIR}/.agents"
-fi
-
-echo "Generating password hash..."
-HASHED_PASSWORD=$("${APP_DIR}/caddy" hash-password --plaintext "${LITHIC_PASSWORD}")
-
-echo "Writing Caddyfile..."
-cat > "${CADDYFILE}" <<CADDY
-{
-	auto_https off
-}
-
-:${LITHIC_PORT} {
-	basicauth * {
-		${LITHIC_USER} ${HASHED_PASSWORD}
-	}
-
-	route /sync/* {
-		uri strip_prefix /sync
-		webdav {
-			root ${DATA_DIR}
-		}
-	}
-
-	route * {
-		file_server {
-			root ${PUBLIC_DIR}
-		}
-	}
-}
-CADDY
-
-echo "Starting Caddy..."
-exec "${APP_DIR}/caddy" run --config "${CADDYFILE}"
-WRAPPER
-
-chmod +x "${INSTALL_DIR}/start.sh"
-
-# Update service to use the wrapper
-sed -i "s|ExecStart=.*|ExecStart=${INSTALL_DIR}/start.sh|" "/etc/systemd/system/${SERVICE_NAME}.service"
+# Removed start.sh wrapper; entrypoint.sh handles variable paths natively now.
 
 # --- Enable and start ---
 systemctl daemon-reload

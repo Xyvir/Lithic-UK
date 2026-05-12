@@ -6,9 +6,9 @@ set -euo pipefail
 # Generates a Caddyfile from environment variables and boots Caddy.
 # ==============================================================================
 
-APP_DIR="/app"
-PUBLIC_DIR="${APP_DIR}/public"
-DATA_DIR="/data"
+APP_DIR="${APP_DIR:-/app}"
+PUBLIC_DIR="${PUBLIC_DIR:-${APP_DIR}/public}"
+DATA_DIR="${DATA_DIR:-/data}"
 CADDYFILE="${APP_DIR}/Caddyfile"
 
 # --- Environment Variables ---
@@ -112,16 +112,19 @@ echo "  Purge complete: ${orphaned} orphaned, ${stale} stale lock(s) removed."
 echo "Starting sync watcher..."
 /app/watcher.sh &
 
-# --- Hash the password ---
-echo "Generating password hash..."
-# Jane's Note: Passing plaintext passwords in CLI args can leak to process lists (`ps`).
-# In a transient Docker container, we'll tolerate it, but keep it in mind.
-HASHED_PASSWORD=$("${APP_DIR}/caddy" hash-password --plaintext "${LITHIC_PASSWORD}")
-echo "Password hash generated."
+# --- Hash the password & Start Server ---
+SERVER_BACKEND="${SERVER_BACKEND:-lighttpd}"
 
-# --- Write Caddyfile ---
-echo "Writing Caddyfile..."
-cat > "${CADDYFILE}" <<EOF
+if [ "$SERVER_BACKEND" = "caddy" ]; then
+    echo "Generating password hash..."
+    # Jane's Note: Passing plaintext passwords in CLI args can leak to process lists (`ps`).
+    # In a transient Docker container, we'll tolerate it, but keep it in mind.
+    HASHED_PASSWORD=$("${APP_DIR}/caddy" hash-password --plaintext "${LITHIC_PASSWORD}")
+    echo "Password hash generated."
+
+    # --- Write Caddyfile ---
+    echo "Writing Caddyfile..."
+    cat > "${CADDYFILE}" <<EOF
 {
     auto_https off
     order webdav last
@@ -167,7 +170,80 @@ cat > "${CADDYFILE}" <<EOF
 }
 EOF
 
-echo "Caddyfile written to ${CADDYFILE}"
-echo ""
-echo "Starting Caddy..."
-exec "${APP_DIR}/caddy" run --config "${CADDYFILE}"
+    echo "Caddyfile written to ${CADDYFILE}"
+    echo ""
+    echo "Starting Caddy..."
+    exec "${APP_DIR}/caddy" run --config "${CADDYFILE}"
+
+else
+    # --- Write Lighttpd Config ---
+    LIGHTTPD_CONF="${APP_DIR}/lighttpd.conf"
+    LIGHTTPD_USER_FILE="${DATA_DIR}/lighttpd.user"
+    
+    echo "Writing Lighttpd config..."
+    echo "${LITHIC_USER}:${LITHIC_PASSWORD}" > "${LIGHTTPD_USER_FILE}"
+    chmod 600 "${LIGHTTPD_USER_FILE}"
+    
+    cat > "${LIGHTTPD_CONF}" <<EOF
+server.modules = (
+    "mod_access",
+    "mod_auth",
+    "mod_authn_file",
+    "mod_alias",
+    "mod_webdav",
+    "mod_cgi",
+    "mod_setenv",
+    "mod_rewrite"
+)
+
+server.document-root = "${PUBLIC_DIR}"
+server.port = ${LITHIC_PORT}
+server.bind = "0.0.0.0"
+
+# Fix for Lithic UI and paths
+index-file.names = ( "index.html" )
+mimetype.assign = (
+    ".html" => "text/html",
+    ".css"  => "text/css",
+    ".js"   => "application/javascript",
+    ".json" => "application/json",
+    ".png"  => "image/png",
+    ".ico"  => "image/x-icon",
+    ".webmanifest" => "application/manifest+json",
+    ".lith" => "text/plain; charset=utf-8"
+)
+
+# Authentication
+auth.backend = "plain"
+auth.backend.plain.userfile = "${LIGHTTPD_USER_FILE}"
+auth.require = ( "" => (
+    "method" => "basic",
+    "realm" => "Lithic Server",
+    "require" => "valid-user"
+))
+
+# Exclude public assets from auth
+\$HTTP["url"] =~ "^/(manifest\.json|site\.webmanifest|offline-service-worker\.js|android-chrome-.*|apple-touch-icon\.png|favicon.*|health)$" {
+    auth.require = ()
+}
+
+# CGI for GitHub Sync
+alias.url += ( "/api/github/" => "/app/scripts/github-sync.sh" )
+\$HTTP["url"] =~ "^/api/github/" {
+    cgi.assign = ( "" => "" )
+}
+
+# WebDAV Sync
+alias.url += ( "/sync/" => "${DATA_DIR}/" )
+\$HTTP["url"] =~ "^/sync/" {
+    webdav.activate = "enable"
+    webdav.is-readonly = "disable"
+    setenv.add-response-header = ( "Content-Type" => "text/plain; charset=utf-8" )
+}
+EOF
+    
+    echo "Lighttpd config written to ${LIGHTTPD_CONF}"
+    echo ""
+    echo "Starting Lighttpd..."
+    exec lighttpd -D -f "${LIGHTTPD_CONF}"
+fi

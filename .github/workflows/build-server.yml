@@ -7,11 +7,24 @@ on:
         description: 'Tag name for Docker image (e.g. v1.0.0)'
         required: false
         type: string
+      server_backend:
+        description: 'Server backend to build (lighttpd or caddy)'
+        required: false
+        type: choice
+        default: 'lighttpd'
+        options:
+          - lighttpd
+          - caddy
   workflow_call:
     inputs:
       tag_name:
         required: true
         type: string
+      server_backend:
+        description: 'Server backend to build (lighttpd or caddy)'
+        required: false
+        type: string
+        default: 'lighttpd'
 
 permissions:
   contents: write
@@ -31,15 +44,18 @@ jobs:
 
       # --- Build custom Caddy with WebDAV plugin ---
       - name: Install xcaddy
+        if: ${{ inputs.server_backend == 'caddy' }}
         run: go install github.com/caddyserver/xcaddy/cmd/xcaddy@latest
 
       - name: Build Caddy with WebDAV
+        if: ${{ inputs.server_backend == 'caddy' }}
         run: |
           xcaddy build \
             --with github.com/mholt/caddy-webdav \
             --output build/caddy
 
       - name: Verify Caddy binary
+        if: ${{ inputs.server_backend == 'caddy' }}
         run: |
           ./build/caddy version
           ./build/caddy list-modules | grep webdav || echo "WARNING: webdav module not found"
@@ -108,10 +124,12 @@ jobs:
       # --- Assemble app directory ---
       - name: Assemble app contents
         run: |
-          mv build/caddy build/app/caddy
+          if [ "${{ inputs.server_backend }}" = "caddy" ]; then
+            mv build/caddy build/app/caddy
+          fi
           cp deploy/entrypoint.sh build/app/entrypoint.sh 2>/dev/null || echo "Warning: entrypoint.sh missing"
           cp deploy/.agents build/app/.agents 2>/dev/null || echo "Warning: .agents missing"
-          chmod +x build/app/entrypoint.sh build/app/caddy
+          chmod +x build/app/entrypoint.sh build/app/caddy 2>/dev/null || true
 
       # --- Create tarball ---
       - name: Create God Artifact tarball
@@ -173,3 +191,5 @@ jobs:
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
+          build-args: |
+            SERVER_BACKEND=${{ inputs.server_backend }}

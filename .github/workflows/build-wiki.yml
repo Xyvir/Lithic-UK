@@ -19,6 +19,14 @@ on:
         - pre
         - dev
         - all
+      server_backend:
+        description: 'Server backend to build (lighttpd or caddy)'
+        required: true
+        type: choice
+        default: 'lighttpd'
+        options:
+          - lighttpd
+          - caddy
 
 permissions:
   contents: write
@@ -156,4 +164,5 @@ jobs:
     uses: ./.github/workflows/build-server.yml
     with:
       tag_name: build-${{ needs.build.outputs.tag_name }}
+      server_backend: ${{ inputs.server_backend }}
     secrets: inherit

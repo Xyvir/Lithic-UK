@@ -26,7 +26,11 @@ RUN xcaddy build \
 FROM alpine:latest
 
 # Basic dependencies
-RUN apk add --no-cache bash sed curl ca-certificates git inotify-tools imagemagick
+RUN apk add --no-cache bash sed curl ca-certificates git inotify-tools imagemagick lighttpd lighttpd-mod_webdav lighttpd-mod_auth lighttpd-mod_cgi
+
+# ARG for backend (caddy or lighttpd)
+ARG SERVER_BACKEND=lighttpd
+ENV SERVER_BACKEND=${SERVER_BACKEND}
 
 # App structure
 RUN mkdir -p /app/public/src /app/scripts /data /app/public/_icon-defaults
@@ -36,16 +40,18 @@ COPY --from=caddy-builder /usr/bin/caddy /app/caddy-fallback
 
 # Acquire Caddy: try the fast API download first (45s timeout).
 # If it fails or is rate-limited, fall back to the pre-built xcaddy binary.
-RUN if curl --max-time 45 --retry 1 -fsSL \
+RUN if [ "$SERVER_BACKEND" = "caddy" ]; then \
+      if curl --max-time 45 --retry 1 -fsSL \
          -o /app/caddy \
          "https://caddyserver.com/api/download?os=linux&arch=amd64&p=github.com/mholt/caddy-webdav&p=github.com/aksdb/caddy-cgi/v2"; then \
-       echo "✓ Caddy acquired via API download"; \
-    else \
-       echo "⚠ Caddy API unavailable or rate-limited — using pre-built xcaddy binary"; \
-       cp /app/caddy-fallback /app/caddy; \
+        echo "✓ Caddy acquired via API download"; \
+      else \
+        echo "⚠ Caddy API unavailable or rate-limited — using pre-built xcaddy binary"; \
+        cp /app/caddy-fallback /app/caddy; \
+      fi \
+      && chmod +x /app/caddy; \
     fi \
-    && rm -f /app/caddy-fallback \
-    && chmod +x /app/caddy
+    && rm -f /app/caddy-fallback
 
 # Copy entrypoint
 COPY deploy/entrypoint.sh /app/entrypoint.sh
