@@ -26,7 +26,7 @@ RUN xcaddy build \
 FROM alpine:latest
 
 # Basic dependencies
-RUN apk add --no-cache bash sed curl ca-certificates git inotify-tools imagemagick lighttpd lighttpd-mod_webdav lighttpd-mod_auth lighttpd-mod_cgi
+RUN apk add --no-cache bash sed curl ca-certificates git inotify-tools imagemagick lighttpd lighttpd-mod_webdav lighttpd-mod_auth
 
 # ARG for backend (caddy or lighttpd)
 ARG SERVER_BACKEND=lighttpd
