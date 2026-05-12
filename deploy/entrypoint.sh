@@ -35,7 +35,9 @@ fi
 # --- Ensure data directory and .gitignore exist ---
 mkdir -p "${DATA_DIR}"
 if [ ! -f "${DATA_DIR}/.gitignore" ]; then
-  echo "*.lock" > "${DATA_DIR}/.gitignore"
+  printf "*.lock\nlighttpd.user\n" > "${DATA_DIR}/.gitignore"
+else
+  grep -q "lighttpd.user" "${DATA_DIR}/.gitignore" || echo "lighttpd.user" >> "${DATA_DIR}/.gitignore"
 fi
 
 # --- Backup default icons (once, at first boot) ---
@@ -65,7 +67,7 @@ if [ ! -d "${DATA_DIR}/.git" ]; then
 
   # Ensure .gitignore is the VERY first thing committed to set the rules
   if [ ! -f "${DATA_DIR}/.gitignore" ]; then
-    echo "*.lock" > "${DATA_DIR}/.gitignore"
+    printf "*.lock\nlighttpd.user\n" > "${DATA_DIR}/.gitignore"
   fi
   git -C "${DATA_DIR}" add .gitignore >/dev/null 2>&1
   git -C "${DATA_DIR}" commit -m "System: Initialize .gitignore" >/dev/null 2>&1
