@@ -10,10 +10,12 @@ echo ""
 
 DATA_DIR="/data"
 DEFAULT_CLIENT_ID="Iv23lippjEJMp4KLlLKI"
+LOCK_FILE="/tmp/github-sync.lock"
 
 # Diagnostic logging to stderr (visible in Railway/Docker logs)
 echo "[CGI] Request: $REQUEST_METHOD $REQUEST_URI" >&2
 echo "[CGI] Query: $QUERY_STRING" >&2
+
 
 CLIENT_ID="${GITHUB_CLIENT_ID:-$DEFAULT_CLIENT_ID}"
 REQUEST_URI="${REQUEST_URI:-}"
@@ -75,12 +77,24 @@ elif [[ "$REQUEST_URI" == */create-repo* ]] && [[ "$METHOD" == "POST" ]]; then
     echo "$RESPONSE"
 
 elif [[ "$REQUEST_URI" == */setup* ]] && [[ "$METHOD" == "POST" ]]; then
+    # --- Acquire Lock ---
+    while [ -f "$LOCK_FILE" ]; do
+        # Check if lock is stale (older than 1 minute)
+        if [ "$(( $(date +%s) - $(stat -c %Y "$LOCK_FILE") ))" -gt 60 ]; then
+            rm -f "$LOCK_FILE"
+        else
+            sleep 1
+        fi
+    done
+    touch "$LOCK_FILE"
+
     read -r PAYLOAD
     TOKEN=$(extract_json_val "token" "$PAYLOAD")
     REPO_NAME=$(extract_json_val "repo" "$PAYLOAD")
 
     if [ -z "$TOKEN" ] || [ -z "$REPO_NAME" ]; then
         echo '{"error":"missing_params"}'
+        rm -f "$LOCK_FILE"
         exit 0
     fi
 
@@ -128,6 +142,9 @@ elif [[ "$REQUEST_URI" == */setup* ]] && [[ "$METHOD" == "POST" ]]; then
         LOG=$(cat /tmp/git_sync.log | tr '\n' ' ' | sed 's/"/\\"/g')
         echo "{\"status\":\"error\",\"message\":\"$LOG\"}"
     fi
+    
+    # --- Release Lock ---
+    rm -f "$LOCK_FILE"
 
 elif [[ "$REQUEST_URI" == */status* ]]; then
     if [ ! -f "${DATA_DIR}/.git/backup_token" ]; then
@@ -145,10 +162,14 @@ elif [[ "$REQUEST_URI" == */status* ]]; then
     fi
 
 elif [[ "$REQUEST_URI" == */disconnect* ]]; then
+    # --- Acquire Lock ---
+    touch "$LOCK_FILE"
     # Wipe credentials and status for a clean reconnect
     rm -f "${DATA_DIR}/.git/backup_token"
     rm -f "${DATA_DIR}/.git/backup_status"
     echo '{"status":"disconnected"}'
+    # --- Release Lock ---
+    rm -f "$LOCK_FILE"
 
 else
     echo "{\"error\":\"route_not_found\",\"uri\":\"$REQUEST_URI\"}"
