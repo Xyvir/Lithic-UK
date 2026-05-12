@@ -1,5 +1,5 @@
 {
-    "description": "Lithic PKMS",
+    "description": "Lithic UK",
     "plugins": [
         "tiddlywiki/markdown",
         "tiddlywiki/freelinks",
@@ -12,7 +12,6 @@
         "xyvir/lithic-patch-streams",
         "xyvir/lithic-patch-whiteboard",
         "xyvir/lithic-tweaks",
-        "xyvir/overtype",
         "linonetwo/tw-react",
         "linonetwo/tw-whiteboard",
         "snowgoon88/edit-comptext",
@@ -39,7 +38,6 @@
         "xyvir/lithic-patch-unieditor",
         "orange/mermaid-tw5"
     ],
-
     "themes": [
         "tiddlywiki/vanilla",
         "tiddlywiki/snowwhite",
