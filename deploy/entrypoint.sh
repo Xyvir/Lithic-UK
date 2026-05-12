@@ -228,10 +228,12 @@ auth.require = ( "" => (
 }
 
 # CGI for GitHub Sync
-alias.url += ( "/api/github/" => "/app/scripts/github-sync.sh" )
-\$HTTP["url"] =~ "^/api/github/" {
-    cgi.assign = ( "" => "" )
+alias.url += ( "/api/github-sync.sh" => "/app/scripts/github-sync.sh" )
+url.rewrite-once = ( "^/api/github(/.*)?$" => "/api/github-sync.sh" )
+\$HTTP["url"] == "/api/github-sync.sh" {
+    cgi.assign = ( ".sh" => "" )
 }
+
 
 # WebDAV Sync
 alias.url += ( "/sync/" => "${DATA_DIR}/" )
