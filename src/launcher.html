@@ -1257,7 +1257,6 @@
     }
 
     /* --- CORE ENGINE FETCHER --- */
-    const REMOTE_CORE_URL = 'https://lithic.uk/src/lithic.html';
     const WEBDAV_UTILS_JS = `/*
 title: $:/lithic/startup/webdav-utils.js
 type: application/javascript
@@ -1280,28 +1279,22 @@ exports.startup = function() {
 };
 })();`;
 
-    async function fetchCoreEngine(url = 'lithic.html') {
-      const isLocalFile = window.location.protocol === 'file:';
-
-      // Adjust path if we rewrote the URL from /src/launcher.html to /
-      if (url === 'lithic.html' && window.__ORIGINAL_PATH__ && window.__ORIGINAL_PATH__.endsWith('/src/launcher.html')) {
-        url = 'src/lithic.html';
-      }
-
-      if (!isLocalFile) {
+    async function fetchCoreEngine() {
+      const pathsToTry = ['src/lithic.html', '/src/lithic.html', 'lithic.html', '/lithic.html'];
+      
+      for (const path of pathsToTry) {
         try {
-          const res = await fetch(url);
-          if (res.ok) return await res.text();
+          const res = await fetch(path);
+          if (res.ok) {
+            console.log(`[Lithic] Found core engine at: ${path}`);
+            return await res.text();
+          }
         } catch (e) {
-          console.warn("Relative fetch failed, falling back to remote URL...");
+          // Continue to next path
         }
-      } else {
-        console.log("Local file:/// detected. Fetching core engine from remote server...");
       }
 
-      const remoteRes = await fetch(REMOTE_CORE_URL);
-      if (!remoteRes.ok) throw new Error("Could not fetch core engine from " + REMOTE_CORE_URL);
-      return await remoteRes.text();
+      throw new Error("Could not find lithic.html locally. Ensure it is uploaded to the /src/ directory.");
     }
 
     /* --- WEBDAV LOCKING (Presence) --- */
