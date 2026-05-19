@@ -127,9 +127,12 @@ jobs:
           if [ "${{ inputs.server_backend }}" = "caddy" ]; then
             mv build/caddy build/app/caddy
           fi
+          mkdir -p build/app/scripts
           cp deploy/entrypoint.sh build/app/entrypoint.sh 2>/dev/null || echo "Warning: entrypoint.sh missing"
           cp deploy/.agents build/app/.agents 2>/dev/null || echo "Warning: .agents missing"
-          chmod +x build/app/entrypoint.sh build/app/caddy 2>/dev/null || true
+          cp deploy/watcher.sh build/app/watcher.sh 2>/dev/null || echo "Warning: watcher.sh missing"
+          cp deploy/github-sync.sh build/app/scripts/github-sync.sh 2>/dev/null || echo "Warning: github-sync.sh missing"
+          chmod +x build/app/entrypoint.sh build/app/watcher.sh build/app/scripts/github-sync.sh build/app/caddy 2>/dev/null || true
 
       # --- Create tarball ---
       - name: Create God Artifact tarball
