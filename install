@@ -1,0 +1,3 @@
+#!/bin/bash
+# Proxy script to fetch and execute the main Lithic LXC installer
+eval "$(curl -fsSL https://raw.githubusercontent.com/Xyvir/Lithic/main/deploy/install-lxc.sh)"
