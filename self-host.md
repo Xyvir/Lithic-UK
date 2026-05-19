@@ -39,17 +39,18 @@ docker run -d --name lithic \
 
 ### Method C: Proxmox LXC (One-Liner)
 
-Run this inside a Debian/Ubuntu LXC container:
+Run this inside a Debian/Ubuntu LXC container. You have two options:
 
+**Option 1: Interactive Setup**
+This will prompt you for your backend choice (Caddy/Lighttpd), FQDN, and credentials. If you leave the password blank, a secure one will be auto-generated for you.
 ```bash
-curl -fsSL https://raw.githubusercontent.com/Xyvir/Lithic/main/deploy/install-lxc.sh | bash
+sudo bash -c "$(curl -fsSL https://raw.githubusercontent.com/Xyvir/Lithic/main/deploy/install-lxc.sh)"
 ```
 
-Then edit your credentials:
-
+**Option 2: Fully Automated Setup**
+Bypass the prompts by providing the variables inline. This will automatically set up Caddy, request an SSL certificate for your domain, and auto-generate a secure password.
 ```bash
-sudo nano /etc/default/lithic
-sudo systemctl restart lithic
+curl -fsSL https://raw.githubusercontent.com/Xyvir/Lithic/main/deploy/install-lxc.sh | sudo SERVER_BACKEND=caddy LITHIC_FQDN=lithic.example.com LITHIC_USER=your_username bash
 ```
 
 ### Method D: Manual Install
