@@ -54,9 +54,10 @@ echo "Downloading and installing to ${INSTALL_DIR}..."
 mkdir -p "${INSTALL_DIR}"
 curl -fsSL "${RELEASE_URL}" | tar -xz -C "${INSTALL_DIR}" --strip-components=1
 
-# The tarball contains app/{caddy, entrypoint.sh, public/}
-# After strip-components=1, we get caddy, entrypoint.sh, public/ in INSTALL_DIR
-chmod +x "${INSTALL_DIR}/caddy" "${INSTALL_DIR}/entrypoint.sh"
+# The tarball contains app/{entrypoint.sh, public/} and maybe caddy
+# After strip-components=1, we get entrypoint.sh, public/ in INSTALL_DIR
+chmod +x "${INSTALL_DIR}/entrypoint.sh"
+[ -f "${INSTALL_DIR}/caddy" ] && chmod +x "${INSTALL_DIR}/caddy"
 
 # --- Create data directory ---
 mkdir -p "${DATA_DIR}"
@@ -98,8 +99,18 @@ LITHIC_FQDN=${CONF_FQDN}
 EOF
   echo "Created ${ENV_FILE} with specified credentials."
 else
-  echo "Environment file ${ENV_FILE} already exists, skipping."
+  echo "Environment file ${ENV_FILE} already exists, loading values."
+  source "${ENV_FILE}"
+  CONF_BACKEND="${SERVER_BACKEND:-lighttpd}"
 fi
+
+# --- Ensure Caddy Binary Exists if Selected ---
+if [ "${CONF_BACKEND}" = "caddy" ] && [ ! -f "${INSTALL_DIR}/caddy" ]; then
+  echo "Downloading Caddy with required plugins (webdav, cgi)..."
+  curl -fsSL -o "${INSTALL_DIR}/caddy" "https://caddyserver.com/api/download?os=linux&arch=amd64&p=github.com/mholt/caddy-webdav&p=github.com/aksdb/caddy-cgi/v2"
+  chmod +x "${INSTALL_DIR}/caddy"
+fi
+
 
 # --- Create systemd service ---
 echo "Creating systemd service..."
