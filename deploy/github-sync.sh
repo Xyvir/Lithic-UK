@@ -8,7 +8,7 @@
 echo "Content-Type: application/json"
 echo ""
 
-DATA_DIR="/data"
+DATA_DIR="${DATA_DIR:-/data}"
 DEFAULT_CLIENT_ID="Iv23lippjEJMp4KLlLKI"
 LOCK_FILE="/tmp/github-sync.lock"
 

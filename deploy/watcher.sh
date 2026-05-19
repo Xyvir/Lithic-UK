@@ -5,8 +5,9 @@
 # Also handles custom.ico propagation to /app/public/ icon slots.
 # ==============================================================================
 
-DATA_DIR="/data"
-PUBLIC_DIR="/app/public"
+APP_DIR="${APP_DIR:-/app}"
+DATA_DIR="${DATA_DIR:-/data}"
+PUBLIC_DIR="${PUBLIC_DIR:-${APP_DIR}/public}"
 ICON_DEFAULTS_DIR="${PUBLIC_DIR}/_icon-defaults"
 LOCK_FILE="/tmp/github-sync.lock"
 
