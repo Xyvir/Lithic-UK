@@ -1043,7 +1043,7 @@
       || document.querySelector('meta[name="lithic-webdav"]') !== null
       || (window.location.protocol.startsWith('http') && 
           !['localhost', '127.0.0.1'].includes(window.location.hostname) && 
-          !window.location.hostname.endsWith('lithic.uk') && 
+          !['lithic.uk', 'www.lithic.uk'].includes(window.location.hostname) && 
           !window.location.hostname.endsWith('github.io') && 
           !window.__TAURI__);
 
