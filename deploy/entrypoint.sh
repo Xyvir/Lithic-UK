@@ -57,6 +57,18 @@ if [ -f "${DATA_DIR}/custom.ico" ]; then
 fi
 
 
+# --- Ensure Git is installed ---
+if ! command -v git &> /dev/null; then
+  echo "Git is not installed. Attempting to install git..."
+  if command -v apk &> /dev/null; then
+    apk add --no-cache git
+  elif command -v apt-get &> /dev/null; then
+    apt-get update -qq && apt-get install -y -qq git
+  else
+    echo "WARNING: Could not find apk or apt-get to install git. Git sync may fail."
+  fi
+fi
+
 # --- Initialize Git if not present ---
 if [ ! -d "${DATA_DIR}/.git" ]; then
   echo "Initializing Git repository in ${DATA_DIR}..."

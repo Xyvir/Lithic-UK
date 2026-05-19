@@ -23,7 +23,7 @@ echo "============================================"
 echo ""
 
 # --- Check dependencies ---
-for cmd in curl tar jq; do
+for cmd in curl tar jq git; do
   if ! command -v "$cmd" &> /dev/null; then
     echo "Installing missing dependency: ${cmd}..."
     apt-get update -qq && apt-get install -y -qq "$cmd"
