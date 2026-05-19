@@ -72,7 +72,7 @@ if [ ! -f "${ENV_FILE}" ]; then
     CONF_PASS="${LITHIC_PASSWORD}"
   else
     # Generate a 32-char disambiguous base32 password (excludes 0, 1, I, O)
-    CONF_PASS=$(tr -dc '23456789ABCDEFGHJKLMNPQRSTUVWXYZ' < /dev/urandom | head -c 32)
+    CONF_PASS=$(tr -dc '23456789ABCDEFGHJKLMNPQRSTUVWXYZ' < /dev/urandom | head -c 32 || true)
   fi
   CONF_PORT="${LITHIC_PORT:-8080}"
   CONF_FQDN="${LITHIC_FQDN:-}"
