@@ -7,6 +7,7 @@ set -euo pipefail
 # ==============================================================================
 
 APP_DIR="${APP_DIR:-/app}"
+SCRIPT_DIR="${APP_DIR}/scripts"
 PUBLIC_DIR="${PUBLIC_DIR:-${APP_DIR}/public}"
 DATA_DIR="${DATA_DIR:-/data}"
 CADDYFILE="${APP_DIR}/Caddyfile"
@@ -53,7 +54,7 @@ done
 # --- Apply custom icon if one was persisted from a previous session ---
 if [ -f "${DATA_DIR}/custom.ico" ]; then
   echo "Applying persisted custom.ico..."
-  /app/watcher.sh --apply-custom-icon "${DATA_DIR}/custom.ico" "${PUBLIC_DIR}" || true
+  "${APP_DIR}/watcher.sh" --apply-custom-icon "${DATA_DIR}/custom.ico" "${PUBLIC_DIR}" || true
 fi
 
 
@@ -124,7 +125,7 @@ echo "  Purge complete: ${orphaned} orphaned, ${stale} stale lock(s) removed."
 
 # --- Start Watcher ---
 echo "Starting sync watcher..."
-/app/watcher.sh &
+"${APP_DIR}/watcher.sh" &
 
 # --- Hash the password & Start Server ---
 SERVER_BACKEND="${SERVER_BACKEND:-lighttpd}"
@@ -168,7 +169,7 @@ ${CADDY_SITE_ADDRESS} {
 
     # 2. GitHub Sync API (CGI)
     handle /api/github/* {
-        cgi * /app/scripts/github-sync.sh
+        cgi * ${SCRIPT_DIR}/github-sync.sh
     }
 
     # 3. WebDAV Sync
@@ -252,7 +253,7 @@ auth.require = ( "" => (
 }
 
 # CGI for GitHub Sync
-alias.url += ( "/api/github" => "/app/scripts/github-sync.sh" )
+alias.url += ( "/api/github" => "${SCRIPT_DIR}/github-sync.sh" )
 \$HTTP["url"] =~ "^/api/github" {
     cgi.assign = ( ".sh" => "" )
 }
