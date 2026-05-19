@@ -123,6 +123,10 @@ done < <(find "${DATA_DIR}" -maxdepth 1 -name "*.lock" -type f 2>/dev/null)
 
 echo "  Purge complete: ${orphaned} orphaned, ${stale} stale lock(s) removed."
 
+# --- Ensure Scripts are Executable ---
+chmod +x "${APP_DIR}/watcher.sh" 2>/dev/null || true
+chmod +x "${SCRIPT_DIR}/github-sync.sh" 2>/dev/null || true
+
 # --- Start Watcher ---
 echo "Starting sync watcher..."
 "${APP_DIR}/watcher.sh" &

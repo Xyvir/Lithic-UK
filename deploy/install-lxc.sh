@@ -57,6 +57,8 @@ curl -fsSL "${RELEASE_URL}" | tar -xz -C "${INSTALL_DIR}" --strip-components=1
 # The tarball contains app/{entrypoint.sh, public/} and maybe caddy
 # After strip-components=1, we get entrypoint.sh, public/ in INSTALL_DIR
 chmod +x "${INSTALL_DIR}/entrypoint.sh"
+[ -f "${INSTALL_DIR}/watcher.sh" ] && chmod +x "${INSTALL_DIR}/watcher.sh"
+[ -f "${INSTALL_DIR}/scripts/github-sync.sh" ] && chmod +x "${INSTALL_DIR}/scripts/github-sync.sh"
 [ -f "${INSTALL_DIR}/caddy" ] && chmod +x "${INSTALL_DIR}/caddy"
 
 # --- Create data directory ---
