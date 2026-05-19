@@ -126,14 +126,24 @@ if [ "$SERVER_BACKEND" = "caddy" ]; then
 
     # --- Write Caddyfile ---
     echo "Writing Caddyfile..."
+    
+    CADDY_SITE_ADDRESS=":${LITHIC_PORT}"
+    CADDY_GLOBAL_BLOCK="auto_https off"
+    
+    if [ -n "${LITHIC_FQDN:-}" ]; then
+        echo "Using FQDN: ${LITHIC_FQDN}. Auto-HTTPS is enabled."
+        CADDY_SITE_ADDRESS="${LITHIC_FQDN}"
+        CADDY_GLOBAL_BLOCK="# auto_https enabled by FQDN"
+    fi
+
     cat > "${CADDYFILE}" <<EOF
 {
-    auto_https off
+    ${CADDY_GLOBAL_BLOCK}
     order webdav last
     order cgi last
 }
 
-:${LITHIC_PORT} {
+${CADDY_SITE_ADDRESS} {
     # 1. Protection Rules
     # Authenticate everything EXCEPT the PWA installation assets and healthcheck
     @protected {

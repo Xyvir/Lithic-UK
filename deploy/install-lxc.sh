@@ -64,14 +64,39 @@ mkdir -p "${DATA_DIR}"
 # --- Create environment file ---
 if [ ! -f "${ENV_FILE}" ]; then
   echo "Creating environment file at ${ENV_FILE}..."
+
+  CONF_BACKEND="${SERVER_BACKEND:-lighttpd}"
+  CONF_USER="${LITHIC_USER:-admin}"
+  CONF_PASS="${LITHIC_PASSWORD:-changeme}"
+  CONF_PORT="${LITHIC_PORT:-8080}"
+  CONF_FQDN="${LITHIC_FQDN:-}"
+
+  # Interactive setup if running on a TTY
+  if [ -t 0 ]; then
+    echo ""
+    echo "--- Interactive Setup ---"
+    read -p "Backend (caddy/lighttpd) [${CONF_BACKEND}]: " input; CONF_BACKEND="${input:-${CONF_BACKEND}}"
+    read -p "Admin Username [${CONF_USER}]: " input; CONF_USER="${input:-${CONF_USER}}"
+    read -p "Admin Password [${CONF_PASS}]: " input; CONF_PASS="${input:-${CONF_PASS}}"
+    read -p "HTTP Port [${CONF_PORT}]: " input; CONF_PORT="${input:-${CONF_PORT}}"
+    
+    if [ "${CONF_BACKEND}" = "caddy" ]; then
+      read -p "Public FQDN for Auto-HTTPS (e.g. example.com) [none]: " input; CONF_FQDN="${input:-${CONF_FQDN}}"
+    fi
+    echo "-------------------------"
+    echo ""
+  fi
+
   cat > "${ENV_FILE}" <<EOF
 # Lithic Server Configuration
 # Edit these values and restart the service: systemctl restart ${SERVICE_NAME}
-LITHIC_USER=admin
-LITHIC_PASSWORD=changeme
-LITHIC_PORT=8080
+LITHIC_USER=${CONF_USER}
+LITHIC_PASSWORD=${CONF_PASS}
+LITHIC_PORT=${CONF_PORT}
+SERVER_BACKEND=${CONF_BACKEND}
+LITHIC_FQDN=${CONF_FQDN}
 EOF
-  echo "Created ${ENV_FILE} with default credentials."
+  echo "Created ${ENV_FILE} with specified credentials."
 else
   echo "Environment file ${ENV_FILE} already exists, skipping."
 fi
@@ -113,6 +138,9 @@ systemctl daemon-reload
 systemctl enable "${SERVICE_NAME}"
 systemctl start "${SERVICE_NAME}"
 
+# Source the env file to get the final values for the summary
+source "${ENV_FILE}"
+
 echo ""
 echo "============================================"
 echo "  ✅  Lithic Server installed!"
@@ -123,9 +151,17 @@ echo "  Logs:     journalctl -u ${SERVICE_NAME} -f"
 echo "  Config:   ${ENV_FILE}"
 echo "  Data:     ${DATA_DIR}"
 echo ""
+
+if [ "${LITHIC_PASSWORD}" = "changeme" ]; then
 echo "  ⚠  IMPORTANT: Edit your credentials!"
 echo "     sudo nano ${ENV_FILE}"
 echo "     sudo systemctl restart ${SERVICE_NAME}"
 echo ""
-echo "  Access:   http://$(hostname -I | awk '{print $1}'):8080"
+fi
+
+if [ -n "${LITHIC_FQDN:-}" ] && [ "${SERVER_BACKEND}" = "caddy" ]; then
+echo "  Access:   https://${LITHIC_FQDN}"
+else
+echo "  Access:   http://$(hostname -I | awk '{print $1}'):${LITHIC_PORT}"
+fi
 echo "============================================"
