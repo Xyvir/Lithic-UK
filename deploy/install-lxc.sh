@@ -68,7 +68,12 @@ if [ ! -f "${ENV_FILE}" ]; then
 
   CONF_BACKEND="${SERVER_BACKEND:-lighttpd}"
   CONF_USER="${LITHIC_USER:-admin}"
-  CONF_PASS="${LITHIC_PASSWORD:-changeme}"
+  if [ -n "${LITHIC_PASSWORD:-}" ] && [ "${LITHIC_PASSWORD}" != "changeme" ]; then
+    CONF_PASS="${LITHIC_PASSWORD}"
+  else
+    # Generate a 32-char disambiguous base32 password (excludes 0, 1, I, O)
+    CONF_PASS=$(tr -dc '23456789ABCDEFGHJKLMNPQRSTUVWXYZ' < /dev/urandom | head -c 32)
+  fi
   CONF_PORT="${LITHIC_PORT:-8080}"
   CONF_FQDN="${LITHIC_FQDN:-}"
 
@@ -162,13 +167,10 @@ echo "  Logs:     journalctl -u ${SERVICE_NAME} -f"
 echo "  Config:   ${ENV_FILE}"
 echo "  Data:     ${DATA_DIR}"
 echo ""
-
-if [ "${LITHIC_PASSWORD}" = "changeme" ]; then
-echo "  ⚠  IMPORTANT: Edit your credentials!"
-echo "     sudo nano ${ENV_FILE}"
-echo "     sudo systemctl restart ${SERVICE_NAME}"
+echo "  🔑  Credentials:"
+echo "     User:     ${LITHIC_USER}"
+echo "     Password: ${LITHIC_PASSWORD}"
 echo ""
-fi
 
 if [ -n "${LITHIC_FQDN:-}" ] && [ "${SERVER_BACKEND}" = "caddy" ]; then
 echo "  Access:   https://${LITHIC_FQDN}"
