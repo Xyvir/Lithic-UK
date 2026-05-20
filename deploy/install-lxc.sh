@@ -12,8 +12,8 @@ set -euo pipefail
 # ==============================================================================
 
 REPO="${LITHIC_REPO:-Xyvir/Lithic}"
-INSTALL_DIR="/opt/lithic"
-DATA_DIR="/opt/lithic/data"
+INSTALL_DIR="/app"
+DATA_DIR="/data"
 ENV_FILE="/etc/default/lithic"
 SERVICE_NAME="lithic"
 
@@ -131,10 +131,6 @@ Type=simple
 EnvironmentFile=${ENV_FILE}
 Environment="HOME=${INSTALL_DIR}"
 WorkingDirectory=${INSTALL_DIR}
-
-# Override paths for the non-Docker layout
-Environment="APP_DIR=${INSTALL_DIR}"
-Environment="DATA_DIR=${DATA_DIR}"
 
 ExecStart=${INSTALL_DIR}/entrypoint.sh
 Restart=always

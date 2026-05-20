@@ -5,15 +5,9 @@
 # Also handles custom.ico propagation to /app/public/ icon slots.
 # ==============================================================================
 
-# Load environment from entrypoint
-SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
-if [ -f "${SCRIPT_DIR}/.env" ]; then
-    source "${SCRIPT_DIR}/.env"
-fi
-
-APP_DIR="${APP_DIR:-/app}"
-DATA_DIR="${DATA_DIR:-/data}"
-PUBLIC_DIR="${PUBLIC_DIR:-${APP_DIR}/public}"
+APP_DIR="/app"
+DATA_DIR="/data"
+PUBLIC_DIR="${APP_DIR}/public"
 ICON_DEFAULTS_DIR="${PUBLIC_DIR}/_icon-defaults"
 LOCK_FILE="${DATA_DIR}/.git/github-sync.lock"
 

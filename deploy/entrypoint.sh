@@ -6,10 +6,10 @@ set -euo pipefail
 # Generates a Caddyfile from environment variables and boots Caddy.
 # ==============================================================================
 
-APP_DIR="${APP_DIR:-/app}"
+APP_DIR="/app"
 SCRIPT_DIR="${APP_DIR}/scripts"
-PUBLIC_DIR="${PUBLIC_DIR:-${APP_DIR}/public}"
-DATA_DIR="${DATA_DIR:-/data}"
+PUBLIC_DIR="${APP_DIR}/public"
+DATA_DIR="/data"
 CADDYFILE="${APP_DIR}/Caddyfile"
 
 # --- Environment Variables ---
@@ -133,9 +133,6 @@ echo "Starting sync watcher..."
 
 # --- Hash the password & Start Server ---
 SERVER_BACKEND="${SERVER_BACKEND:-lighttpd}"
-# --- Export Environment for CGI Scripts ---
-echo "export DATA_DIR=\"${DATA_DIR}\"" > "${SCRIPT_DIR}/.env"
-
 # --- Determine Backend ---
 if [ "${SERVER_BACKEND}" = "caddy" ]; then
     echo "Generating password hash..."
