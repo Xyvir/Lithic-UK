@@ -138,7 +138,7 @@ RestartSec=5
 
 # Security hardening
 NoNewPrivileges=true
-ProtectSystem=strict
+ProtectSystem=full
 ReadWritePaths=${DATA_DIR} ${INSTALL_DIR}
 
 [Install]
