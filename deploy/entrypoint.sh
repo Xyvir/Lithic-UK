@@ -173,7 +173,9 @@ ${CADDY_SITE_ADDRESS} {
 
     # 2. GitHub Sync API (CGI)
     handle /api/github/* {
-        cgi * ${SCRIPT_DIR}/github-sync.sh
+        cgi * ${SCRIPT_DIR}/github-sync.sh {
+            env DATA_DIR=${DATA_DIR}
+        }
     }
 
     # 3. WebDAV Sync
@@ -260,6 +262,9 @@ auth.require = ( "" => (
 alias.url += ( "/api/github" => "${SCRIPT_DIR}/github-sync.sh" )
 \$HTTP["url"] =~ "^/api/github" {
     cgi.assign = ( ".sh" => "" )
+    setenv.add-environment = (
+        "DATA_DIR" => "${DATA_DIR}"
+    )
 }
 
 
