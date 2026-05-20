@@ -169,7 +169,7 @@ sync_now() {
 ) &
 
 # --- Main Inotify Loop ---
-inotifywait -m -e close_write,create,delete "${DATA_DIR}" | while read path action file; do
+inotifywait -m -e close_write,create,delete,moved_to "${DATA_DIR}" | while read path action file; do
     # Handle custom icon file
     if [[ "$file" == "custom.ico" ]]; then
         if [[ "$action" == "DELETE" ]]; then
