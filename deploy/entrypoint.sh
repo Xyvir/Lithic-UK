@@ -173,9 +173,7 @@ ${CADDY_SITE_ADDRESS} {
 
     # 2. GitHub Sync API (CGI)
     handle /api/github/* {
-        cgi * ${SCRIPT_DIR}/github-sync.sh {
-            env DATA_DIR=${DATA_DIR}
-        }
+        cgi * ${SCRIPT_DIR}/github-sync.sh
     }
 
     # 3. WebDAV Sync
