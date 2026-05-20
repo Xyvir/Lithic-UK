@@ -9,7 +9,7 @@ APP_DIR="${APP_DIR:-/app}"
 DATA_DIR="${DATA_DIR:-/data}"
 PUBLIC_DIR="${PUBLIC_DIR:-${APP_DIR}/public}"
 ICON_DEFAULTS_DIR="${PUBLIC_DIR}/_icon-defaults"
-LOCK_FILE="/tmp/github-sync.lock"
+LOCK_FILE="${DATA_DIR}/.git/github-sync.lock"
 
 # --- Custom Icon Functions ---
 apply_custom_icon() {

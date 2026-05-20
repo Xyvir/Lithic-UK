@@ -10,7 +10,7 @@ echo ""
 
 DATA_DIR="${DATA_DIR:-/data}"
 DEFAULT_CLIENT_ID="Iv23lippjEJMp4KLlLKI"
-LOCK_FILE="/tmp/github-sync.lock"
+LOCK_FILE="${DATA_DIR}/.git/github-sync.lock"
 
 # Diagnostic logging to stderr (visible in Railway/Docker logs)
 echo "[CGI] Request: $REQUEST_METHOD $REQUEST_URI" >&2
@@ -77,6 +77,9 @@ elif [[ "$REQUEST_URI" == */create-repo* ]] && [[ "$METHOD" == "POST" ]]; then
     echo "$RESPONSE"
 
 elif [[ "$REQUEST_URI" == */setup* ]] && [[ "$METHOD" == "POST" ]]; then
+    # Ensure .git exists before lock check
+    mkdir -p "${DATA_DIR}/.git"
+
     # --- Acquire Lock ---
     while [ -f "$LOCK_FILE" ]; do
         # Check if lock is stale (older than 1 minute)
@@ -99,7 +102,6 @@ elif [[ "$REQUEST_URI" == */setup* ]] && [[ "$METHOD" == "POST" ]]; then
     fi
 
     # Setup remote (Delay token write to prevent watcher race condition)
-    mkdir -p "${DATA_DIR}/.git"
     git -C "${DATA_DIR}" remote remove origin >/dev/null 2>&1
     git -C "${DATA_DIR}" remote add origin "https://oauth2:${TOKEN}@github.com/${REPO_NAME}.git"
 
@@ -113,13 +115,13 @@ elif [[ "$REQUEST_URI" == */setup* ]] && [[ "$METHOD" == "POST" ]]; then
     fi
 
     # 1. Fetch from remote (safe, no merges yet)
-    git -C "${DATA_DIR}" fetch origin main > /tmp/git_sync.log 2>&1 || true
+    git -C "${DATA_DIR}" fetch origin main > "${DATA_DIR}/.git/git_sync.log" 2>&1 || true
     
     # 2. Graceful Rescue: Download any liths we don't have locally
     if git -C "${DATA_DIR}" rev-parse origin/main >/dev/null 2>&1; then
         git -C "${DATA_DIR}" ls-tree -r --name-only origin/main | grep -E '\.(lith|json)$' | while IFS= read -r file; do
             if [ ! -f "${DATA_DIR}/$file" ]; then
-                git -C "${DATA_DIR}" checkout origin/main -- "$file" >> /tmp/git_sync.log 2>&1
+                git -C "${DATA_DIR}" checkout origin/main -- "$file" >> "${DATA_DIR}/.git/git_sync.log" 2>&1
             fi
         done
     fi
@@ -131,7 +133,7 @@ elif [[ "$REQUEST_URI" == */setup* ]] && [[ "$METHOD" == "POST" ]]; then
     git -C "${DATA_DIR}" commit -m "System: Finalizing sync and .gitignore enforcement" >/dev/null 2>&1
 
     # 4. Force Push to establish tracking and update remote with unified clean state
-    git -C "${DATA_DIR}" push -f -u origin main >> /tmp/git_sync.log 2>&1
+    git -C "${DATA_DIR}" push -f -u origin main >> "${DATA_DIR}/.git/git_sync.log" 2>&1
     
     if [ $? -eq 0 ]; then
         # Setup successful: Enable Watcher
@@ -139,7 +141,7 @@ elif [[ "$REQUEST_URI" == */setup* ]] && [[ "$METHOD" == "POST" ]]; then
         echo "last_sync=$(date +%s)" > "${DATA_DIR}/.git/backup_status"
         echo "{\"status\":\"success\",\"repo\":\"$REPO_NAME\"}"
     else
-        LOG=$(cat /tmp/git_sync.log | tr '\n' ' ' | sed 's/"/\\"/g')
+        LOG=$(cat "${DATA_DIR}/.git/git_sync.log" | tr '\n' ' ' | sed 's/"/\\"/g')
         echo "{\"status\":\"error\",\"message\":\"$LOG\"}"
     fi
     
