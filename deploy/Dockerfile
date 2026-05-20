@@ -1,57 +1,17 @@
 # ==============================================================================
-# Lithic Server — Dockerfile (Resilient Build)
-#
-# Two-path Caddy acquisition strategy:
-#   Fast Path:  Downloads a pre-compiled Caddy binary via the Caddy API (~10s).
-#   Fallback:   If the API is rate-limited or times out, uses a binary compiled
-#               by xcaddy in Stage 0. Docker caches Stage 0, so after the first
-#               build the fallback is also instant.
-#
+# Lithic Server — Dockerfile
 # ==============================================================================
 
-# =============================================================================
-# Stage 0: Pre-build Caddy with xcaddy (cached fallback)
-# Docker layer-caches this stage. It only re-runs if the plugin list changes.
-# =============================================================================
-FROM caddy:2-builder AS caddy-builder
-
-RUN xcaddy build \
-    --with github.com/mholt/caddy-webdav \
-    --with github.com/aksdb/caddy-cgi/v2 \
-    --output /usr/bin/caddy
-
-# =============================================================================
-# Stage 1: Final Image
-# =============================================================================
 FROM alpine:latest
 
 # Basic dependencies
 RUN apk add --no-cache bash sed curl ca-certificates git inotify-tools imagemagick lighttpd lighttpd-mod_webdav lighttpd-mod_auth
 
-# ARG for backend (caddy or lighttpd)
-ARG SERVER_BACKEND=lighttpd
-ENV SERVER_BACKEND=${SERVER_BACKEND}
+# Force Lighttpd as the backend
+ENV SERVER_BACKEND=lighttpd
 
 # App structure
 RUN mkdir -p /app/public/src /app/scripts /data /app/public/_icon-defaults
-
-# Stage the xcaddy-built fallback binary (always available, cached after first build)
-COPY --from=caddy-builder /usr/bin/caddy /app/caddy-fallback
-
-# Acquire Caddy: try the fast API download first (45s timeout).
-# If it fails or is rate-limited, fall back to the pre-built xcaddy binary.
-RUN if [ "$SERVER_BACKEND" = "caddy" ]; then \
-      if curl --max-time 45 --retry 1 -fsSL \
-         -o /app/caddy \
-         "https://caddyserver.com/api/download?os=linux&arch=amd64&p=github.com/mholt/caddy-webdav&p=github.com/aksdb/caddy-cgi/v2"; then \
-        echo "✓ Caddy acquired via API download"; \
-      else \
-        echo "⚠ Caddy API unavailable or rate-limited — using pre-built xcaddy binary"; \
-        cp /app/caddy-fallback /app/caddy; \
-      fi \
-      && chmod +x /app/caddy; \
-    fi \
-    && rm -f /app/caddy-fallback
 
 # Copy entrypoint
 COPY deploy/entrypoint.sh /app/entrypoint.sh
