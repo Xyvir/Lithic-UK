@@ -13,17 +13,16 @@ LOCK_FILE="${DATA_DIR}/.git/github-sync.lock"
 
 # --- Custom Icon Functions ---
 apply_custom_icon() {
-  local src="$1"
   local pub="${2:-${PUBLIC_DIR}}"
-  echo "[Watcher] Applying custom icon from ${src}..."
-  # Resize to each required slot using ImageMagick
-  convert "${src}" -resize 16x16   "${pub}/favicon-16x16.png"        2>/dev/null
-  convert "${src}" -resize 32x32   "${pub}/favicon-32x32.png"        2>/dev/null
-  convert "${src}" -resize 32x32   "${pub}/favicon.ico"              2>/dev/null
-  convert "${src}" -resize 150x150 "${pub}/mstile-150x150.png"       2>/dev/null
-  convert "${src}" -resize 192x192 "${pub}/android-chrome-192x192.png" 2>/dev/null
-  convert "${src}" -resize 512x512 "${pub}/android-chrome-512x512.png" 2>/dev/null
-  convert "${src}" -resize 180x180 "${pub}/apple-touch-icon.png"     2>/dev/null
+  echo "[Watcher] Copying pre-sized icons from ${DATA_DIR} to public..."
+  # Icons are pre-sized by the browser and PUT directly to /sync/ (= /data/).
+  # No imagemagick needed — just copy each file into its public slot.
+  for icon in favicon.ico favicon-16x16.png favicon-32x32.png mstile-150x150.png \
+               android-chrome-192x192.png android-chrome-512x512.png apple-touch-icon.png; do
+    if [ -f "${DATA_DIR}/${icon}" ]; then
+      cp "${DATA_DIR}/${icon}" "${pub}/${icon}"
+    fi
+  done
   echo "[Watcher] Custom icon applied to all slots."
 }
 

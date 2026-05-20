@@ -2607,24 +2607,32 @@ exports.startup = function() {
       await idbKeyval.set('lithic-icon-emoji', em);
       statusEl.textContent = 'Saving…'; statusEl.className = 'emoji-save-status';
       try {
-        // PUT a 512px PNG to /sync/custom.ico — the inotify watcher propagates it
-        // to all icon slots in /app/public/. Caddy serves /sync/ as writable WebDAV.
-        const blob = await _emojiToBlob(em, 512);
-        const res = await fetch('/sync/custom.ico', { method:'PUT', body:blob, headers:{'Content-Type':'image/png'} });
-        if (res.ok || res.status === 201 || res.status === 204) {
-          statusEl.textContent = '\u2713 Saved. Refreshing icon cache\u2026';
-          statusEl.className = 'emoji-save-status ok';
-          // Wait ~2.5s for the inotify watcher to finish writing resized icons,
-          // then tell the SW to evict + re-fetch all icon paths (no manual cache clear needed).
-          setTimeout(async () => {
-            try {
-              const sw = navigator.serviceWorker && navigator.serviceWorker.controller;
-              if (sw) { sw.postMessage({ type: 'BUST_ICON_CACHE' }); }
-            } catch(e) {}
-          }, 2500);
-        } else {
-          throw new Error('PUT ' + res.status);
+        // Resize all icon sizes client-side via canvas and PUT each directly to /sync/.
+        // The inotify watcher detects custom.ico (PUT last) and cp's all pre-sized files
+        // into /app/public/ — no server-side imagemagick needed.
+        const ICON_SIZES = [
+          { path: '/sync/favicon-16x16.png',          size: 16  },
+          { path: '/sync/favicon-32x32.png',          size: 32  },
+          { path: '/sync/favicon.ico',                size: 32  },
+          { path: '/sync/mstile-150x150.png',         size: 150 },
+          { path: '/sync/android-chrome-192x192.png', size: 192 },
+          { path: '/sync/apple-touch-icon.png',       size: 180 },
+          { path: '/sync/android-chrome-512x512.png', size: 512 },
+          { path: '/sync/custom.ico',                 size: 512 }, // PUT last — signals watcher to copy
+        ];
+        for (let i = 0; i < ICON_SIZES.length; i++) {
+          const { path, size } = ICON_SIZES[i];
+          statusEl.textContent = `Saving\u2026 (${i + 1} of ${ICON_SIZES.length})`;
+          const blob = await _emojiToBlob(em, size);
+          const res = await fetch(path, { method: 'PUT', body: blob, headers: { 'Content-Type': 'image/png' } });
+          if (!res.ok && res.status !== 201 && res.status !== 204) throw new Error('PUT ' + path + ' \u2192 ' + res.status);
         }
+        statusEl.textContent = '\u2713 Saved!';
+        statusEl.className = 'emoji-save-status ok';
+        try {
+          const sw = navigator.serviceWorker && navigator.serviceWorker.controller;
+          if (sw) { sw.postMessage({ type: 'BUST_ICON_CACHE' }); }
+        } catch(e) {}
       } catch(e) {
         statusEl.textContent = '\u2139\ufe0f Saved locally only (server write failed).';
         statusEl.className = 'emoji-save-status';

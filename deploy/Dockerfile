@@ -5,7 +5,7 @@
 FROM alpine:latest
 
 # Basic dependencies
-RUN apk add --no-cache bash sed curl ca-certificates git inotify-tools imagemagick lighttpd lighttpd-mod_webdav lighttpd-mod_auth
+RUN apk add --no-cache bash sed curl ca-certificates git inotify-tools lighttpd lighttpd-mod_webdav lighttpd-mod_auth
 
 # Force Lighttpd as the backend
 ENV SERVER_BACKEND=lighttpd

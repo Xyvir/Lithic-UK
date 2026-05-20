@@ -25,7 +25,7 @@ echo ""
 # --- Install core dependencies ---
 echo "Installing core dependencies..."
 apt-get update -qq
-apt-get install -y -qq curl tar jq git inotify-tools imagemagick
+apt-get install -y -qq curl tar jq git inotify-tools
 
 # --- Install lighttpd dependencies ---
 if ! command -v lighttpd &> /dev/null; then
