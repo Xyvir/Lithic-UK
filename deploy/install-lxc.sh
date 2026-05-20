@@ -22,13 +22,10 @@ echo "  Lithic Server — LXC Installer"
 echo "============================================"
 echo ""
 
-# --- Check dependencies ---
-for cmd in curl tar jq git; do
-  if ! command -v "$cmd" &> /dev/null; then
-    echo "Installing missing dependency: ${cmd}..."
-    apt-get update -qq && apt-get install -y -qq "$cmd"
-  fi
-done
+# --- Install core dependencies ---
+echo "Installing core dependencies..."
+apt-get update -qq
+apt-get install -y -qq curl tar jq git inotify-tools imagemagick
 
 # --- Install lighttpd dependencies ---
 if ! command -v lighttpd &> /dev/null; then
