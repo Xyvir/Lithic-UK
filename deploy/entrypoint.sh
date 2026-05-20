@@ -133,8 +133,11 @@ echo "Starting sync watcher..."
 
 # --- Hash the password & Start Server ---
 SERVER_BACKEND="${SERVER_BACKEND:-lighttpd}"
+# --- Export Environment for CGI Scripts ---
+echo "export DATA_DIR=\"${DATA_DIR}\"" > "${SCRIPT_DIR}/.env"
 
-if [ "$SERVER_BACKEND" = "caddy" ]; then
+# --- Determine Backend ---
+if [ "${SERVER_BACKEND}" = "caddy" ]; then
     echo "Generating password hash..."
     # Jane's Note: Passing plaintext passwords in CLI args can leak to process lists (`ps`).
     # In a transient Docker container, we'll tolerate it, but keep it in mind.

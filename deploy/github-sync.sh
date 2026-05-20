@@ -8,6 +8,12 @@
 echo "Content-Type: application/json"
 echo ""
 
+# Load environment from entrypoint (bypasses CGI env stripping)
+SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
+if [ -f "${SCRIPT_DIR}/.env" ]; then
+    source "${SCRIPT_DIR}/.env"
+fi
+
 DATA_DIR="${DATA_DIR:-/data}"
 DEFAULT_CLIENT_ID="Iv23lippjEJMp4KLlLKI"
 LOCK_FILE="${DATA_DIR}/.git/github-sync.lock"
