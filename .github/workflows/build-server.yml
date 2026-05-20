@@ -7,24 +7,11 @@ on:
         description: 'Tag name for Docker image (e.g. v1.0.0)'
         required: false
         type: string
-      server_backend:
-        description: 'Server backend to build (lighttpd or caddy)'
-        required: false
-        type: choice
-        default: 'lighttpd'
-        options:
-          - lighttpd
-          - caddy
   workflow_call:
     inputs:
       tag_name:
         required: true
         type: string
-      server_backend:
-        description: 'Server backend to build (lighttpd or caddy)'
-        required: false
-        type: string
-        default: 'lighttpd'
 
 permissions:
   contents: write
@@ -36,29 +23,6 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
-
-      - name: Setup Go
-        uses: actions/setup-go@v5
-        with:
-          go-version: '1.25'
-
-      # --- Build custom Caddy with WebDAV plugin ---
-      - name: Install xcaddy
-        if: ${{ inputs.server_backend == 'caddy' }}
-        run: go install github.com/caddyserver/xcaddy/cmd/xcaddy@latest
-
-      - name: Build Caddy with WebDAV
-        if: ${{ inputs.server_backend == 'caddy' }}
-        run: |
-          xcaddy build \
-            --with github.com/mholt/caddy-webdav \
-            --output build/caddy
-
-      - name: Verify Caddy binary
-        if: ${{ inputs.server_backend == 'caddy' }}
-        run: |
-          ./build/caddy version
-          ./build/caddy list-modules | grep webdav || echo "WARNING: webdav module not found"
 
       # --- Download built wiki if chained from build-wiki ---
       - name: Download Built Wiki Artifact
@@ -124,15 +88,12 @@ jobs:
       # --- Assemble app directory ---
       - name: Assemble app contents
         run: |
-          if [ "${{ inputs.server_backend }}" = "caddy" ]; then
-            mv build/caddy build/app/caddy
-          fi
           mkdir -p build/app/scripts
           cp deploy/entrypoint.sh build/app/entrypoint.sh 2>/dev/null || echo "Warning: entrypoint.sh missing"
           cp deploy/.agents build/app/.agents 2>/dev/null || echo "Warning: .agents missing"
           cp deploy/watcher.sh build/app/watcher.sh 2>/dev/null || echo "Warning: watcher.sh missing"
           cp deploy/github-sync.sh build/app/scripts/github-sync.sh 2>/dev/null || echo "Warning: github-sync.sh missing"
-          chmod +x build/app/entrypoint.sh build/app/watcher.sh build/app/scripts/github-sync.sh build/app/caddy 2>/dev/null || true
+          chmod +x build/app/entrypoint.sh build/app/watcher.sh build/app/scripts/github-sync.sh 2>/dev/null || true
 
       # --- Create tarball ---
       - name: Create God Artifact tarball
