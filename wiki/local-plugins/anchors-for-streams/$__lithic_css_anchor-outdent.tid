@@ -1,0 +1,10 @@
+created: 20260526121000000
+modified: 20260526121000000
+tags: $:/tags/Stylesheet
+title: $:/lithic/css/anchor-outdent
+type: text/vnd.tiddlywiki
+
+/* Hide the stream control (bullet and line) for anchored nodes to visually outdent them */
+.stream-row:has(.lithic-anchor-ui) > .stream-node-control {
+    display: none;
+}

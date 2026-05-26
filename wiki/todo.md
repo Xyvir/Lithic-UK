@@ -1,6 +1,6 @@
 
-- [ ] Add "apply anchor template" filtered UI widget dropdownsearch to stub view / placeholder tiddlers.
-- [ ] Improve anchors behavior and workflow.
+- [X] Add "apply anchor template" filtered UI widget dropdownsearch to stub view / placeholder tiddlers.
+- [X] Improve anchors behavior and workflow.
 - [ ] Extend hover-over 'appear' plugin behavior to be more intuitive
     - [ ] modify behavior to show todo when highlighting calendar datelinks
     - [X] Modify behavior to use <<embed-stream>> macro on parent stream-nodes that do not have their own body.

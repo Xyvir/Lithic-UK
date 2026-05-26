@@ -1,0 +1,24 @@
+created: 20251210061518151
+modified: 20251211183553318
+title: $:/language/MissingTiddler/Hint
+
+//This is a placeholder due to a hanging link. Press //"+"// below to add content.//
+
+<div style="margin-top: 1.5em; padding: 0.75em; border: 1px dashed #666; border-radius: 6px; display: inline-block; background: rgba(0,0,0,0.1);">
+    <div style="font-size: 0.8em; color: #aaa; margin-bottom: 0.5em;">Or Initialize from Anchor Template:</div>
+    <$vars selectState=<<qualify "$:/state/clone-template">>>
+        <$select tiddler=<<selectState>> default="" style="min-width: 250px; background: transparent; color: inherit; border: 1px solid #666; padding: 4px;">
+            <option value="">-- Select a template --</option>
+            <$list filter="[!is[system]!is[shadow]has[stream-list]!has[cloned-from]] :filter[get[stream-list]enlist-input[]search:text[{{||$:/anchor}}]first[]]">
+                <option value=<<currentTiddler>>><$text text=<<currentTiddler>>/></option>
+            </$list>
+        </$select>
+        <$list filter="[<selectState>get[text]!is[blank]]" variable="selectedTemplate">
+            <$button style="margin-left: 6px; padding: 2px 10px; cursor: pointer;">
+                ✓ Clone
+                <$action-setfield $tiddler=<<currentTiddler>> text={{{ [<selectedTemplate>get[text]] }}} stream-list={{{ [<selectedTemplate>get[stream-list]] }}} stream-type={{{ [<selectedTemplate>get[stream-type]] }}} cloned-from=<<selectedTemplate>> />
+                <$action-deletetiddler $tiddler=<<selectState>> />
+            </$button>
+        </$list>
+    </$vars>
+</div>

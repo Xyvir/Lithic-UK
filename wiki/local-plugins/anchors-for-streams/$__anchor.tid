@@ -10,12 +10,14 @@ title: $:/anchor
 }}}>
     <$list filter="[<p-tiddler>!is[blank]]" variable="ignore">
         
-        <$vars lb={{{ [charcode[10]] }}} reg-pattern="[^a-zA-Z0-9]" payload={{{ [<currentTiddler>get[text]split[---]rest[]join[---]trim[]search-replace[{{||$:/anchor}}],[]] }}}>
+        <$vars lb={{{ [charcode[10]] }}} reg-pattern="[^a-zA-Z0-9]">
             
             <$vars tag-name={{{ 
-                [<currentTiddler>get[text]search-replace[{{||$:/anchor}}],[]trim[]split<lb>first[]splitregexp<reg-pattern>join[]trim[]first[30]] 
+                [<currentTiddler>get[text]search-replace:g[{{||$:/anchor}}],[]trim[]split<lb>first[]splitregexp<reg-pattern>join[]trim[]first[30]] 
             }}}>
-            
+                
+                <$list filter="[<currentTiddler>get[text]split[---]rest[]trim[]!is[blank]reverse[]] ~[[__EMPTY__]]" variable="payload">
+                <$vars node-text={{{ [<payload>match[__EMPTY__]then[]else<payload>] }}}>
                 <$wikify name="title-fmt" text={{$:/config/sq/streams/new-node-title}}>
                 <$wikify name="new-title" text={{{ [[<<unusedtitle "]] [<title-fmt>] [[">>]] +[join[]] }}}>
                     <$action-createtiddler 
@@ -25,12 +27,14 @@ title: $:/anchor
                         stream-type="default"
                         tags=<<tag-name>>
                         anchored=<<p-tiddler>>
-                        text=<<payload>>
+                        text=<<node-text>>
                     />
                     <$action-listops $tiddler=<<p-tiddler>> $field="stream-list" $subfilter="+[insertafter:currentTiddler<new-title>]" />
                     <$action-setfield $tiddler=<<row-edit-state>> text=<<new-title>>/>
                 </$wikify>
                 </$wikify>
+                </$vars>
+                </$list>
             </$vars>
         </$vars>
 

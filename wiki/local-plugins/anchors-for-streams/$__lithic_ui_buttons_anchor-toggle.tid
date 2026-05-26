@@ -8,17 +8,25 @@ title: $:/lithic/ui/buttons/anchor-toggle
 type: 
 
 \whitespace trim
-<$list filter="[<currentTiddler>enlist{!!stream-list}has[text]first[]]" variable="representativeNode">
+<$list filter="[<currentTiddler>!tag[Journal]get[stream-list]enlist-input[]has[text]first[]]" variable="representativeNode">
     <$vars anchor-string="{{||$:/anchor}}" lb={{{ [charcode[10]] }}}>
-    <$vars anchor-prefix={{{ [<anchor-string>addsuffix<lb>] }}}>    
-        <$list filter="[<representativeNode>search:text<anchor-string>]" variable="isAnchored" emptyMessage="""<$button tooltip="Drop Anchors" aria-label="Drop Anchors" class=<<tv-config-toolbar-class>> style="border: none; padding: 0; background: none;"><$list filter="[enlist{!!stream-list}has[text]!search:text<anchor-string>]"><$action-setfield text={{{ [<currentTiddler>get[text]addprefix<anchor-prefix>] }}} /></$list>{{$:/lithic/images/anchor}}</$button>""">     
+    <$vars anchor-prefix={{{ [<anchor-string>addsuffix<lb>] }}}>
+    <$vars rep-first={{{ [<representativeNode>get[text]split[---]first[]] }}}>
+    <$vars rep-replaced={{{ [<rep-first>search-replace:g<anchor-string>,[]] }}}>
+        <$list filter="[<rep-first>!match<rep-replaced>]" variable="isAnchored" emptyMessage="""<$button tooltip="Drop Anchors" aria-label="Drop Anchors" class=<<tv-config-toolbar-class>> style="border: none; padding: 0; background: none;"><$list filter="[enlist{!!stream-list}has[text]]" variable="node"><$vars node-first={{{ [<node>get[text]split[---]first[]] }}} node-replaced={{{ [<node>get[text]split[---]first[]search-replace:g<anchor-string>,[]] }}}><$list filter="[<node-first>match<node-replaced>]" variable="ignore"><$action-setfield $tiddler=<<node>> text={{{ [<node>get[text]addprefix<anchor-prefix>] }}} /></$list></$vars></$list>{{$:/lithic/images/anchor}}</$button>""">     
             <$button tooltip="Hoist Anchors" aria-label="Hoist Anchors" class=<<tv-config-toolbar-class>>>                
-                <$list filter="[enlist{!!stream-list}search:text<anchor-string>]">
-                    <$action-setfield text={{{ [<currentTiddler>get[text]search-replace:g<anchor-prefix>,[]] }}} />
+                <$list filter="[enlist{!!stream-list}has[text]]" variable="node">
+                    <$vars node-first={{{ [<node>get[text]split[---]first[]] }}} node-replaced={{{ [<node>get[text]split[---]first[]search-replace:g<anchor-string>,[]] }}}>
+                        <$list filter="[<node-first>!match<node-replaced>]" variable="ignore">
+                            <$action-setfield $tiddler=<<node>> text={{{ [<node>get[text]split[---]first[]search-replace:g<anchor-prefix>,[]search-replace:g<anchor-string>,[]] ~[[__EMPTY__]] [<node>get[text]split[---]rest[]] +[join[---]] +[search-replace:g[__EMPTY__],[]] }}} />
+                        </$list>
+                    </$vars>
                 </$list>               
                 {{$:/lithic/images/anchor}}               
             </$button>          
         </$list>
+    </$vars>
+    </$vars>
     </$vars>
     </$vars>
 </$list>
