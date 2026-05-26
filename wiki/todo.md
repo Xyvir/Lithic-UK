@@ -30,10 +30,12 @@
 - [ ] Move "install app" button on mobile UI only to be next to the 'clear cache' button.
 - [ ] Add git history rollback UI/widget to online sync modal. (this should theoretically work for the local git instance even if not synced to github)
 - [ ] Create simpleUI TW plugin for Lithic
-- [ ] Create "Offifcial" Lithic plugin store for Lithic specific plugins/extensions.
+- [ ] Create "Offifcial" Lithic plugin store for Lithic-specific plugins/extensions.
     - [ ] circuitJS
     - [ ] Treevis / Chesstree
     - [ ] text-based adventure game plugin
+    - [ ] Audio Editor/podcast plugin from talk.tiddlywiki.
+    - [ ] Dogreader?
 - [ ] Add local 2fa topt for backend wiki access.
 - [X] Create some way to disambiguate if someone wants to self-host multiple backends for different groups of wikis.
 - [ ] Add agents.md to back-end server if anyone wants to clone the github sync in their own LLM-IDE.
