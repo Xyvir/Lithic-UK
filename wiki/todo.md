@@ -37,6 +37,7 @@
     - [ ] Audio Editor/podcast plugin from talk.tiddlywiki.
     - [ ] Dogreader?
 - [ ] Add local 2fa topt for backend wiki access.
+- [ ] Automate lithic-light build process (including TW Uglifier) and merge in esp32-launcher repo into this one.
 - [X] Create some way to disambiguate if someone wants to self-host multiple backends for different groups of wikis.
 - [ ] Add agents.md to back-end server if anyone wants to clone the github sync in their own LLM-IDE.
 - [ ] Switch or create an option to use double markdown pagebreak for printing newpage isntead of one (Incase user wants to include visual page-spanning pagebreaks)
