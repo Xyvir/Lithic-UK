@@ -1,7 +1,7 @@
 
 - [X] Add "apply anchor template" filtered UI widget dropdownsearch to stub view / placeholder tiddlers.
 - [X] Improve anchors behavior and workflow.
-- [ ] add copy button to Pyrmaid sidebar that copies the rendered mermaid code for further embedding / editing / extending.
+- [X] add copy button to Pyrmaid sidebar that copies the rendered mermaid code for further embedding / editing / extending.
 - [ ] Add addlt paraemter to AutoTable widget that allows for prefilled content per column? 
     - <<AutoTable "One Two Three" "- - {formula}">>
     - dash here is a placeholder for no prefilled content.
@@ -12,6 +12,8 @@
     - [ ] Limit hover-over so it doesn't appear on search query result links, etc.
 - [ ] Make sure all custom lithic-macros accept "[[Tiddler Title]]" syntax parameters and tweak to make sure they work appropriate with comp-text plugin. 
 - [ ] Replace the regular searchbox in notebook UI with byper "Advanced Search" also extend it a bit to allow searching shadow tiddlers etc?
+- [ ] include textcolumns or similair plugin:
+    https://br-text-columns.tiddlyhost.com/
 - [ ] Add a viewfilter or somethign so transcluded nodestream parents show their children?
 - [ ] Add "Alpha Sort" option to nodestream right-click menu.
 - [ ] Add "Toggle Todo" option to tiddler? (or nodstream?) right-click emnu.
