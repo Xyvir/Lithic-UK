@@ -42,6 +42,11 @@ graph TD
     <$list filter="[<targetNode>has[stream-list]]" emptyMessage="*No child streams to display for this node.*">
         <$wikify name="evaluatedChart" text="<$macrocall $name='build-pyramid-chart' rootNode=<<targetNode>> />">
             <$mermaid text=<<evaluatedChart>> />
+            <div style="display:flex; justify-content:flex-end; margin-top:4px;">
+               <$button message="tm-copy-to-clipboard" param=<<evaluatedChart>> tooltip="Copy mermaid code" class="tc-btn-invisible tc-btn-mini tc-tiddlylink">
+                  copy
+               </$button>
+            </div>
         </$wikify>
     </$list>
 </$set>

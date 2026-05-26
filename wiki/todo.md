@@ -1,6 +1,7 @@
 
 - [X] Add "apply anchor template" filtered UI widget dropdownsearch to stub view / placeholder tiddlers.
 - [X] Improve anchors behavior and workflow.
+- [ ] add copy button to Pyrmaid sidebar that copies the rendered mermaid code for further embedding / editing / extending.
 - [ ] Add addlt paraemter to AutoTable widget that allows for prefilled content per column? 
     - <<AutoTable "One Two Three" "- - {formula}">>
     - dash here is a placeholder for no prefilled content.
