@@ -1,10 +1,14 @@
 
 - [X] Add "apply anchor template" filtered UI widget dropdownsearch to stub view / placeholder tiddlers.
 - [X] Improve anchors behavior and workflow.
+- [ ] Add addlt paraemter to AutoTable widget that allows for prefilled content per column? 
+    - <<AutoTable "One Two Three" "- - {formula}">>
+    - dash here is a placeholder for no prefilled content.
 - [ ] Extend hover-over 'appear' plugin behavior to be more intuitive
     - [ ] modify behavior to show todo when highlighting calendar datelinks
     - [X] Modify behavior to use <<embed-stream>> macro on parent stream-nodes that do not have their own body.
     - [ ] add guardrails so only a bit of context is shown on hoverover.
+    - [ ] Limit hover-over so it doesn't appear on search query result links, etc.
 - [ ] Make sure all custom lithic-macros accept "[[Tiddler Title]]" syntax parameters and tweak to make sure they work appropriate with comp-text plugin. 
 - [ ] Replace the regular searchbox in notebook UI with byper "Advanced Search" also extend it a bit to allow searching shadow tiddlers etc?
 - [ ] Add a viewfilter or somethign so transcluded nodestream parents show their children?
@@ -13,13 +17,15 @@
     (Do twice to toggle ascending/descending)
 - [ ] Create simple "Presentation" view / layout based on existing backlink nav pills.
    - [ ] possibly apply "prinstyles.css" to this view.
-- [ ] Create/Integrate EPUB Serialization based on current to_lithic logic (but have user provide shortcode instead of AI-generated one)
+- [ ] Create/Integrate EPUB Serialization based on current to_lithic logic (but have user provide shortcode instead of AI-generated one); add it to exeisting pdf-to-whiteboard and name the plugin 'lithic-import' or something.
 - [ ] Freeze external plugin integrations once I'm happy with the base featureset.
 - [ ] Create unit tests for all lithic.html and launcher.html UI elements, logic and functions
 - [ ] Modularize launcher.html into seperate javascript / html / css files
     - [ ] being modularizing launcher.html and test packaging into prelauncher.html
     - [ ] once all unit tests pass, update the build-wiki to package launcher.html into the build
     - [ ] archive original launcher.html and being using new modularized build process moving forward.
+- [ ] Move "install app" button on mobile UI only to be next to the 'clear cache' button.
+- [ ] Add git history rollback UI/widget to online sync modal. (this should theoretically work for the local git instance even if not synced to github)
 - [ ] Create simpleUI TW plugin for Lithic
 - [ ] Create "Offifcial" Lithic plugin store for Lithic specific plugins/extensions.
     - [ ] circuitJS
