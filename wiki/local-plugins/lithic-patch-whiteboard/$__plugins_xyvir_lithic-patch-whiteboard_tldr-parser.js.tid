@@ -1,0 +1,42 @@
+title: $:/plugins/xyvir/lithic-patch-whiteboard/tldr-parser.js
+type: application/javascript
+module-type: parser
+
+/*\
+title: $:/plugins/xyvir/lithic-patch-whiteboard/tldr-parser.js
+type: application/javascript
+module-type: parser
+
+Parses application/tldr to automatically render the whiteboard widget
+\*/
+(function(){
+"use strict";
+
+var TldrParser = function(type, text, options) {
+    var tiddlerTitle = "";
+    try {
+        var data = JSON.parse(text);
+        var docName = data.document ? data.document.name : "";
+        if (docName && options.wiki && options.wiki.tiddlerExists(docName)) {
+            tiddlerTitle = docName;
+        }
+    } catch(e) {}
+
+    // Fallback search if the tiddler was not found under docName
+    if (!tiddlerTitle && options.wiki) {
+        options.wiki.eachTiddlerPlusShadows(function(tiddler, title) {
+            if (tiddler && tiddler.fields.type === "application/tldr" && tiddler.fields.text === text) {
+                tiddlerTitle = title;
+            }
+        });
+    }
+
+    var tiddler = options.wiki ? options.wiki.getTiddler(tiddlerTitle) : null;
+    var height = (tiddler && tiddler.fields["whiteboard-height"]) || "540px";
+    var wikitext = '<<draw "' + tiddlerTitle + '" "' + height + '">>';
+    var parser = options.wiki ? options.wiki.parseText("text/vnd.tiddlywiki", wikitext, {parseAsInline: false}) : null;
+    this.tree = parser ? parser.tree : [];
+};
+
+exports["application/tldr"] = TldrParser;
+})();

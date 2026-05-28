@@ -3,4 +3,4 @@ modified: 20251203153422949
 tags: 
 title: $:/lithic/slashcommands/draw
 
-<$whiteboard tiddler={{{ [<currentTiddler>addsuffix[-draw]] }}} />
+<<draw "">>

@@ -49,3 +49,35 @@ A `.lith` file is an extension of the vanilla TiddlyWiki `*.tid` file format, wh
 1. It supports multiple tiddlers appended together within a single file.
 2. The **triple-asterism** (`⁂⁂⁂`) is used as a strict delimiter to separate each individual tiddler inside the file. Do NOT use standard asterisks.
 3. The `title` field is explicitly required for each tiddler entry within the file.
+
+# TiddlyWiki JS Plugin File Format (`*.js.tid`)
+
+**CONTEXT:**
+When creating or editing JavaScript plugins, macros, or startup modules in TiddlyWiki via `.js.tid` files, the boot parser requires a specific dual-header format to function correctly. 
+
+**PROBLEM:**
+If a `.js.tid` file is missing the leading plain-text frontmatter, or missing the `/*\` comment block, the TiddlyWiki boot sequence will crash with a `Syntax error in boot module` or `Unexpected identifier` error. The core `$tw.boot` system reads the `/*\` block to extract module metadata *before* the main parser is loaded.
+
+**STANDARD OPERATING PROCEDURE:**
+Every `.js.tid` file MUST contain the module metadata **twice**:
+1. Once as plain-text tiddler fields at the very top of the file (e.g. `title: ...`, `type: ...`, `module-type: ...`).
+2. A second time inside a `/*\` ... `\*/` block comment immediately preceding the JavaScript code.
+
+**Example Format:**
+```javascript
+title: $:/Lithic/Widgets/example.js
+type: application/javascript
+module-type: widget
+
+/*\
+title: $:/Lithic/Widgets/example.js
+type: application/javascript
+module-type: widget
+
+Description of the module goes here.
+\*/
+(function(){
+"use strict";
+// Your JS code here
+})();
+```

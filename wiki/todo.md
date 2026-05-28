@@ -3,8 +3,7 @@
 - [X] Improve anchors behavior and workflow.
 - [X] add copy button to Pyrmaid sidebar that copies the rendered mermaid code for further embedding / editing / extending.
 - [ ] add ## 'toggle button' to unieditor line numbers on line 00; that toggles the numbers on and off.
-- [ ] Further Extensions to tw-whiteboard; import all images as whiteboard embeds moving forward.
-
+- [X] Further Extensions to tw-whiteboard; import all images as whiteboard embeds moving forward.
 - [ ] Add addlt paraemter to AutoTable widget that allows for prefilled content per column? 
     - <<AutoTable "One Two Three" "- - {formula}">>
     - dash here is a placeholder for no prefilled content.

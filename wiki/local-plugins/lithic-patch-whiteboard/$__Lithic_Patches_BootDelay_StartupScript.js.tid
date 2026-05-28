@@ -1,0 +1,31 @@
+title: $:/Lithic/Patches/BootDelay/StartupScript.js
+type: application/javascript
+module-type: startup
+
+/*\
+title: $:/Lithic/Patches/BootDelay/StartupScript.js
+type: application/javascript
+module-type: startup
+
+Sets a state flag after the TiddlyWiki boot sequence is completely finished.
+This flag is used to delay the rendering of React widgets (like the whiteboard)
+to prevent them from interfering with TiddlyWiki's initial core DOM setup.
+\*/
+(function(){
+"use strict";
+
+exports.name = "lithic-boot-delay-flag";
+exports.platforms = ["browser"];
+exports.after = ["startup"];
+exports.synchronous = true;
+
+exports.startup = function() {
+    // Wait a brief moment after the synchronous startup completes
+    // to ensure the DOM is fully settled.
+    setTimeout(function() {
+        $tw.wiki.setText("$:/state/Lithic/BootComplete", "text", null, "yes");
+        console.log("[Lithic] Boot sequence completely settled. BootComplete flag set to 'yes'.");
+    }, 250);
+};
+
+})();

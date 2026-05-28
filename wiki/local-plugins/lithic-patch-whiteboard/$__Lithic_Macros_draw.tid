@@ -4,16 +4,17 @@ tags: $:/tags/Global
 title: $:/Lithic/Macros/draw
 
 \procedure draw(id, height:"540px")
+<$vars boardTitle={{{ [<id>!is[blank]] ~[<currentTiddler>addsuffix[-draw]] }}}>
 <div 
-  class="tc-tiddler-frame" 
-  data-tiddler-title=<<id>> 
+  class="tc-tiddler-frame lithic-inline-board" 
+  data-tiddler-title=<<boardTitle>> 
   style="border:none; box-shadow:none; background:none; padding:0; margin:0; position:relative;"
-  onclick="event.stopPropagation();" 
-  onmousedown="event.stopPropagation();" 
-  onpointerdown="event.stopPropagation();"
 >
   <div class="tc-tiddler-body" style="padding:0; margin:0; border:none;">
-    <$whiteboard tiddler=<<id>> height=<<height>> />
+    <$reveal state="$:/state/Lithic/BootComplete" type="match" text="yes" default="no">
+      <$whiteboard tiddler=<<boardTitle>> height=<<height>> />
+    </$reveal>
   </div>
 </div>
+</$vars>
 \end
