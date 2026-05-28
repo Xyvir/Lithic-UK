@@ -98,7 +98,11 @@ WbImageWidget.prototype.extractImageSrc = function() {
 Compute the internal state of the widget
 */
 WbImageWidget.prototype.execute = function() {
-	this.boardTitle = this.getAttribute("board", this.getVariable("currentTiddler"));
+	var boardTitle = this.getAttribute("board", this.getVariable("currentTiddler"));
+	if (boardTitle && boardTitle.startsWith("[[") && boardTitle.endsWith("]]")) {
+		boardTitle = boardTitle.substring(2, boardTitle.length - 2);
+	}
+	this.boardTitle = boardTitle;
 	this.imageName = this.getAttribute("name");
     this.assetId = this.getAttribute("assetId");
 	this.width = this.getAttribute("width");

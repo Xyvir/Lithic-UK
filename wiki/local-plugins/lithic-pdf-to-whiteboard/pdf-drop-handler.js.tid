@@ -248,10 +248,37 @@ exports.startup = function() {
         $tw.wiki.deleteTiddler(alertTitle);
     }
 
+    function loadImage(file) {
+        return new Promise((resolve, reject) => {
+            const reader = new FileReader();
+            reader.onload = function(e) {
+                const dataUri = e.target.result;
+                const img = new Image();
+                img.onload = function() {
+                    resolve({
+                        filename: file.name,
+                        dataUri: dataUri,
+                        width: img.width,
+                        height: img.height
+                    });
+                };
+                img.onerror = function(err) {
+                    reject(new Error("Failed to load image structure"));
+                };
+                img.src = dataUri;
+            };
+            reader.onerror = function(err) {
+                reject(new Error("Failed to read file"));
+            };
+            reader.readAsDataURL(file);
+        });
+    }
+
     async function handleFiles(files, event) {
         const pdfFiles = Array.from(files).filter(f => f.type === "application/pdf" || f.name.toLowerCase().endsWith(".pdf"));
-        if (pdfFiles.length > 0) {
-            // We found PDFs, so intercept this event completely
+        const imageFiles = Array.from(files).filter(f => f.type.startsWith("image/") && f.type !== "image/svg+xml");
+        if (pdfFiles.length > 0 || imageFiles.length > 0) {
+            // We found PDFs or images, so intercept this event completely
             event.preventDefault();
             event.stopPropagation();
             event.stopImmediatePropagation();
@@ -274,6 +301,37 @@ exports.startup = function() {
                             createdTitles.push(fields.title);
                         }
                     }
+                }
+
+                for (const file of imageFiles) {
+                    setProgress("Converting " + file.name + " to whiteboard...");
+                    const img = await loadImage(file);
+                    
+                    // Apply unique title logic if name is "image.png"
+                    let title = file.name;
+                    if (title === "image.png") {
+                        title = $tw.utils.formatDateString(new Date(), "image_YYYY-0MM-0DD_0hh:0mm:0XXX.png");
+                    }
+                    title = $tw.wiki.generateNewTitle(title);
+
+                    const payload = generateWhiteboardData([img]);
+                    const isPortrait = img.height > img.width;
+                    const wbHeight = isPortrait ? "1056px" : "540px";
+
+                    const wbTiddlerFields = {
+                        title: title,
+                        text: JSON.stringify(payload),
+                        type: "application/tldr",
+                        "stream-type": "default",
+                        "whiteboard-height": wbHeight
+                    };
+
+                    $tw.wiki.addTiddler(new $tw.Tiddler(
+                        $tw.wiki.getCreationFields(),
+                        $tw.wiki.getModificationFields(),
+                        wbTiddlerFields
+                    ));
+                    createdTitles.push(title);
                 }
 
                 clearProgress();
@@ -299,8 +357,8 @@ exports.startup = function() {
                     list: $tw.utils.stringifyList(storyList)
                 }));
 
-                // Handle other (non-PDF) files that were part of the same selection
-                const otherFiles = Array.from(files).filter(f => !pdfFiles.includes(f));
+                // Handle other (non-PDF/image) files that were part of the same selection
+                const otherFiles = Array.from(files).filter(f => !pdfFiles.includes(f) && !imageFiles.includes(f));
                 if (otherFiles.length > 0) {
                     $tw.utils.each(otherFiles, function(file) {
                         $tw.utils.deserializeTiddlers(file.type, file, {}, function(tiddlers) {
@@ -311,8 +369,8 @@ exports.startup = function() {
 
             } catch (err) {
                 clearProgress();
-                console.error("PDF Processing error:", err);
-                setProgress("Failed to convert PDF: " + err.message);
+                console.error("Import processing error:", err);
+                setProgress("Failed to convert file: " + err.message);
             }
         }
     }
@@ -328,6 +386,13 @@ exports.startup = function() {
     document.addEventListener("change", function(event) {
         if (event.target.tagName === "INPUT" && event.target.type === "file" && event.target.files && event.target.files.length > 0) {
             handleFiles(event.target.files, event);
+        }
+    }, true);
+
+    // Intercept paste
+    document.addEventListener("paste", function(event) {
+        if (event.clipboardData && event.clipboardData.files && event.clipboardData.files.length > 0) {
+            handleFiles(event.clipboardData.files, event);
         }
     }, true);
 };

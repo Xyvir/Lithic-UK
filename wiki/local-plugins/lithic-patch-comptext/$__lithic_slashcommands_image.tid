@@ -1,5 +1,5 @@
 title: $:/lithic/slashcommands/image
 tags: 
-caret-pos: 19
+caret-pos: 13
 
-[img width="100%" []]
+<<wb-image [[]]>>
