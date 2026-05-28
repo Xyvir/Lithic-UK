@@ -39,20 +39,11 @@ tc-page-container tc-page-view-$(storyviewTitle)$ tc-language-$(languageTitle)$ 
 <nav class="tw-whiteboard-layout-top-bar">
 	Select board: 
 	<!-- default to recently used whiteboard tiddler -->
-	<$select tiddler="$:/state/Whiteboard/PageLayout/tiddler" default={{{[all[shadows+tiddlers]field:type[application/tldr]sort[modified]first[]]}}}>
-		<$list filter='[all[shadows+tiddlers]field:type[application/tldr]sort[modified]]'>
+	<$select tiddler="$:/state/Whiteboard/PageLayout/tiddler" default={{{[all[shadows+tiddlers]field:type[application/tldr]!prefix[$:/temp]sort[modified]first[]]}}}>
+		<$list filter='[all[shadows+tiddlers]field:type[application/tldr]!prefix[$:/temp]sort[modified]]'>
 			<option value=<<currentTiddler>>><$view field='title'/></option>
 		</$list>
 	</$select>
-
-	<$button tooltip="New Whiteboard" popup="$:/state/Whiteboard/PageLayout/CreateNewTiddlerPopup">
-		{{$:/core/images/new-button}}
-	</$button>
-	<$reveal type="popup" state="$:/state/Whiteboard/PageLayout/CreateNewTiddlerPopup">
-		{{$:/plugins/linonetwo/tw-whiteboard/tiddlywiki-ui/PageLayout/CreateNewTiddlerPopup}}
-	</$reveal>
-
-	<span class="lithic-wb-save-btn">{{$:/core/ui/Buttons/save-wiki}}</span>
 
 	<$reveal state="$:/state/Whiteboard/PageLayout/tiddler" type="nomatch" text="">
 		<$reveal state="$:/state/lithic/whiteboard-pending" type="match" text="yes">
@@ -69,7 +60,7 @@ tc-page-container tc-page-view-$(storyviewTitle)$ tc-language-$(languageTitle)$ 
 	</$reveal>
 	<!-- default value, when first opened, select widget's state tiddler is empty, but default value filter gives a value, we show that tiddler -->
 	<$reveal state="$:/state/Whiteboard/PageLayout/tiddler" type="match" text="">
-		<$list filter='[all[shadows+tiddlers]field:type[application/tldr]sort[modified]first[]]'>
+		<$list filter='[all[shadows+tiddlers]field:type[application/tldr]!prefix[$:/temp]sort[modified]first[]]'>
 			<$reveal state="$:/state/lithic/whiteboard-pending" type="match" text="yes">
 				<$button tooltip="Saving…" disabled="yes" class="tc-btn-invisible" style="opacity: 0.4; cursor: not-allowed;">
 					{{$:/core/images/home-button}} <small>saving…</small>
@@ -79,11 +70,32 @@ tc-page-container tc-page-view-$(storyviewTitle)$ tc-language-$(languageTitle)$ 
 				<$button tooltip="Open In StoryView">
 					{{$:/core/images/home-button}}
 					<$action-setfield $tiddler="$:/layout" text="$:/core/ui/PageTemplate"/>
-					<$action-navigate $to={{{[all[shadows+tiddlers]field:type[application/tldr]sort[modified]first[]]}}} />
+					<$action-navigate $to={{{[all[shadows+tiddlers]field:type[application/tldr]!prefix[$:/temp]sort[modified]first[]]}}} />
 				</$button>
 			</$reveal>
 		</$list>
 	</$reveal>
+
+	<$button tooltip="New Whiteboard" popup="$:/state/Whiteboard/PageLayout/CreateNewTiddlerPopup">
+		{{$:/core/images/new-button}}
+	</$button>
+	<$reveal type="popup" state="$:/state/Whiteboard/PageLayout/CreateNewTiddlerPopup">
+		{{$:/plugins/linonetwo/tw-whiteboard/tiddlywiki-ui/PageLayout/CreateNewTiddlerPopup}}
+	</$reveal>
+
+	<span class="lithic-wb-save-btn">
+		<$button tooltip="Print Sequential Whiteboard" class="tc-btn-invisible">
+			{{$:/core/images/print-button}}
+			<$vars currentBoard={{{ [[$:/state/Whiteboard/PageLayout/tiddler]get[text]] ~[all[shadows+tiddlers]field:type[application/tldr]!prefix[$:/temp]sort[modified]first[]] }}}>
+				<$action-setfield $tiddler="$:/layout" text="" />
+				<$action-setfield $tiddler="$:/StoryList" list="" />
+				<$action-setfield $tiddler="Print Sequential Whiteboard" text={{{ [[<<draw-sequential "]] [<currentBoard>] [[">><$trigger-print delay="1000" />]] +[join[]] }}} />
+				<$action-navigate $to="Print Sequential Whiteboard" />
+			</$vars>
+		</$button>
+	</span>
+
+	<span class="lithic-wb-save-btn">{{$:/core/ui/Buttons/save-wiki}}</span>
 </nav>
 
 </$navigator>

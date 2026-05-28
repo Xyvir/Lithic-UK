@@ -1,0 +1,46 @@
+title: $:/Lithic/Widgets/trigger-print.js
+type: application/javascript
+module-type: widget
+
+/*\
+title: $:/Lithic/Widgets/trigger-print.js
+type: application/javascript
+module-type: widget
+
+A hidden widget that triggers window.print() after a delay, and then cleans up.
+\*/
+(function(){
+
+/*jslint node: true, browser: true */
+/*global $tw: false */
+"use strict";
+
+var Widget = require("$:/core/modules/widgets/widget.js").widget;
+
+var PrintWidget = function(parseTreeNode,options) {
+	this.initialise(parseTreeNode,options);
+};
+
+PrintWidget.prototype = new Widget();
+
+PrintWidget.prototype.render = function(parent,nextSibling) {
+	this.parentDomNode = parent;
+	this.execute();
+	
+	if (typeof window !== "undefined" && !this.printed) {
+		this.printed = true; // prevent infinite loops on re-render
+		var self = this;
+		var delay = parseInt(this.getAttribute("delay", "1000"), 10);
+		
+		setTimeout(function() {
+			window.print();
+		}, delay);
+	}
+};
+
+PrintWidget.prototype.execute = function() {};
+PrintWidget.prototype.refresh = function() { return false; };
+
+exports["trigger-print"] = PrintWidget;
+
+})();
