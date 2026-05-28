@@ -283,9 +283,12 @@ exports.startup = function() {
             event.stopPropagation();
             event.stopImmediatePropagation();
 
-            // If it was a drop, dismiss the TW dropzone UI
+            // If it was a drop, dismiss the TW dropzone UI by manually clearing the dragover classes
             if (event.type === "drop") {
-                document.dispatchEvent(new DragEvent("dragleave", { bubbles: true }));
+                var dropzones = document.querySelectorAll(".tc-dragover");
+                for (var i = 0; i < dropzones.length; i++) {
+                    dropzones[i].classList.remove("tc-dragover");
+                }
             }
 
             try {
