@@ -165,13 +165,13 @@ docker stop lithic && docker rm lithic
 ```
 
 ### LXC
-Re-run the installer — it will download the latest release and restart the service:
+Server-internal updates (e.g., updating Caddy/Lighttpd binaries, systemd configs, and backend wrappers) are intentionally manual. To pull the latest server version onto an existing deployment, simply re-run the installer (it will safely preserve your `/etc/default/lithic` configuration):
 ```bash
 curl -fsSL https://raw.githubusercontent.com/Xyvir/Lithic/main/deploy/install-lxc.sh | bash
 ```
 
 ### Automatic Updates (LXC)
-Lithic includes a built-in autoupdate utility that pulls the latest `lithic.html` and `launcher.html` UI files from the GitHub repository to keep the front-end up to date. It is designed to operate offline, checking connectivity before making request attempts and failing gracefully if the server has no internet access.
+For updating the "app" portion of the server (the UI files `lithic.html` and `launcher.html` where PKMS features and patches are frequently added), using the built-in `lithic-autoupdate` utility is the recommended method. It pulls the latest UI files from the GitHub repository to keep the front-end up to date without requiring a server reboot. It is designed to operate offline, checking connectivity before making request attempts and failing gracefully if the server has no internet access.
 
 By default, the daily autoupdate checker is **disabled**. You can manage it using the `lithic-autoupdate` helper command from your server's SSH environment:
 
