@@ -2,6 +2,11 @@
 - [X] Add "apply anchor template" filtered UI widget dropdownsearch to stub view / placeholder tiddlers.
 - [X] Improve anchors behavior and workflow.
 - [X] add copy button to Pyrmaid sidebar that copies the rendered mermaid code for further embedding / editing / extending.
+- [ ] add ## 'toggle button' to unieditor line numbers on line 00; that toggles the numbers on and off.
+- [ ] Further Extensions to tw-whiteboard
+    - [x] support transcluding image tiddlers instead of only b64 embeds.
+    - [x] update the pdf importer to use transcluded images instead of embedded.
+    - [ ] enable text font-switcher tool to switch between generic sans/serif/mono fonts. (right now it doesn't seem to do anything)
 - [ ] Add addlt paraemter to AutoTable widget that allows for prefilled content per column? 
     - <<AutoTable "One Two Three" "- - {formula}">>
     - dash here is a placeholder for no prefilled content.
@@ -10,7 +15,7 @@
     - [X] Modify behavior to use <<embed-stream>> macro on parent stream-nodes that do not have their own body.
     - [ ] add guardrails so only a bit of context is shown on hoverover.
     - [ ] Limit hover-over so it doesn't appear on search query result links, etc.
-- [ ] Make sure all custom lithic-macros accept "[[Tiddler Title]]" syntax parameters and tweak to make sure they work appropriate with comp-text plugin. 
+- [ ] Make sure all custom lithic-macros accept "[[Tiddler Title]]" syntax parameters and tweak to make sure they work appropriatly with comp-text plugin/ slashcommands.
 - [ ] Replace the regular searchbox in notebook UI with byper "Advanced Search" also extend it a bit to allow searching shadow tiddlers etc?
 - [ ] include textcolumns or similair plugin:
     https://br-text-columns.tiddlyhost.com/
@@ -21,7 +26,8 @@
 - [ ] Create simple "Presentation" view / layout based on existing backlink nav pills.
    - [ ] possibly apply "prinstyles.css" to this view.
 - [ ] Create/Integrate EPUB Serialization based on current to_lithic logic (but have user provide shortcode instead of AI-generated one); add it to exeisting pdf-to-whiteboard and name the plugin 'lithic-import' or something.
-- [ ] Freeze external plugin integrations once I'm happy with the base featureset.
+- [ ] Freeze external plugin integrations once I'm happy with the base featureset. (currently only byperserach and columns are candidates)
+- [ ] Allow specifying 'modes' via http parameters so the launcher monolith html can be forced into specific modes to make unit tests easier; (all unit tests can be performed in 1 test enviroment this way, but with multiple test profiles/users)
 - [ ] Create unit tests for all lithic.html and launcher.html UI elements, logic and functions
 - [ ] Modularize launcher.html into seperate javascript / html / css files
     - [ ] being modularizing launcher.html and test packaging into prelauncher.html
@@ -43,3 +49,6 @@
 - [ ] Switch or create an option to use double markdown pagebreak for printing newpage isntead of one (Incase user wants to include visual page-spanning pagebreaks)
 - [ ] Add some kind of filter/builder UI or filter slashcommand autocompletes that integrates with BuklOps.
 - [ ] Create "Lithic for Teams" backend version based on Mult-Wiki Server.
+- Tauri App Ideas:
+    - [ ] Add 'run code' button next to copy code that hooks into ephemeral.exe
+    - [ ] Allow file associations for *.txt; *.py, *.md etc so it can act as a lightweigth text editor for local files.
