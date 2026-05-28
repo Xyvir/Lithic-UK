@@ -1,7 +1,5 @@
 caption: {{$:/core/images/down-arrow}} {{$:/language/Buttons/More/Caption}}
-created: 20251209163016931
 description: {{$:/language/Buttons/More/Hint}}
-modified: 20251209163021355
 tags: 
 title: $:/core/ui/Buttons/more-page-actions
 

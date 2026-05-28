@@ -1,7 +1,5 @@
 caption: Template wikified for node title
-created: 20251129161657659
 description: Wikitext that is wikified to generate the title for new nodes
-modified: 20260111161346501
 settings-template: $:/plugins/sq/streams/ui/templates/settings/input
 tags: 
 title: $:/config/sq/streams/new-node-title

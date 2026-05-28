@@ -1,5 +1,3 @@
-created: 20251210062014570
-modified: 20251210062023774
 title: $:/core/ui/ViewTemplate/body/code
 
 <%if [{!!title}is[missing]!is[shadow]]%>

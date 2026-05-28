@@ -1,5 +1,3 @@
-created: 20251129190814522
-modified: 20260109171959769
 title: $:/config/BrowserStorage/SaveFilter
 
 [all[]] -[prefix[$:/state/]] -[prefix[$:/temp/]] -[prefix[$:/info/]] -[[$:/StoryList]]

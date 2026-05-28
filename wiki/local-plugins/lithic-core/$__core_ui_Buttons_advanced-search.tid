@@ -1,7 +1,5 @@
 caption: {{$:/core/images/advanced-search-button}} {{$:/language/Buttons/AdvancedSearch/Caption}}
-created: 20260121165759684
 description: {{$:/language/Buttons/AdvancedSearch/Hint}}
-modified: 20260121165806679
 tags: 
 title: $:/core/ui/Buttons/advanced-search
 

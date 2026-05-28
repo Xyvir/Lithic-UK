@@ -1,7 +1,5 @@
 caption: {{$:/core/images/close-button}} {{$:/language/Buttons/Close/Caption}}
-created: 20260123194214590
 description: {{$:/language/Buttons/Close/Hint}}
-modified: 20260123194215856
 tags: $:/tags/ViewToolbar
 title: $:/core/ui/Buttons/close
 

@@ -1,7 +1,5 @@
 caption: {{$:/core/images/save-button}} {{$:/language/Buttons/SaveWiki/Caption}}
-created: 20251129235017420
 description: {{$:/language/Buttons/SaveWiki/Hint}}
-modified: 20251129235100592
 tags: $:/tags/PageControls
 title: $:/core/ui/Buttons/save-wiki
 

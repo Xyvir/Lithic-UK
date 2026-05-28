@@ -1,6 +1,4 @@
-created: 20260126150115367
 description: All Notes
 filter: [all[]] -[is[system]]
-modified: 20260126150115368
 tags: $:/tags/Filter
 title: $:/config/TiddlyTools/Filters/All Notes

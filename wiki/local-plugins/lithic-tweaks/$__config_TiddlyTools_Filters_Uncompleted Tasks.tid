@@ -1,7 +1,5 @@
-created: 20260425002316143
 description: Uncompleted Tasks
 filter: [all[]search:text:regexp[\x5B \x5D]] -[is[system]] -[tag[done]]
-modified: 20260425002316143
 tags: $:/tags/Filter
 title: $:/config/TiddlyTools/Filters/Uncompleted Tasks
 

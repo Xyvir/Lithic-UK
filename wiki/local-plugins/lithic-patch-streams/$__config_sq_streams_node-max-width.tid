@@ -1,6 +1,4 @@
 caption: Maximum node width
-created: 20211005174105234
 description: Maximum displayed width of a Stream node
-modified: 20211005174105234
 settings-template: $:/plugins/sq/streams/ui/templates/settings/input
 title: $:/config/sq/streams/node-max-width

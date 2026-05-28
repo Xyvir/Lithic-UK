@@ -1,7 +1,5 @@
 caption: {{$:/plugins/phiv/streams-fusion/language##settings-outputformat-caption}}
-created: 20210728010110712
 description: {{$:/plugins/phiv/streams-fusion/language##settings-outputformat-description}}
-modified: 20251209163411147
 option-names: html wikitext
 option-values: html wikitext
 settings-group: z-streams-fusion

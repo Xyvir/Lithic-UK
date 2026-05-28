@@ -1,5 +1,3 @@
-created: 20260109173004204
-modified: 20260109173039735
 title: $:/config/SaverFilter
 
 [all[]] -[prefix[$:/state/]!prefix[$:/state/sq/streams/visibility/]] -[prefix[$:/temp/]] -[prefix[$:/info/]] -[prefix[$:/HistoryList]] -[prefix[$:/StoryList]] -[status[pending]plugin-type[import]] -[[$:/isEncrypted]] -[[$:/UploadName]] -[[$:/config/BrowserStorage/SaveFilter]] -[[$:/lithic/config/SaveFilterPatch]]

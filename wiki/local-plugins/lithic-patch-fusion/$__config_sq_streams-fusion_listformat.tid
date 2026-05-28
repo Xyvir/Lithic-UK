@@ -1,7 +1,5 @@
 caption: {{$:/plugins/phiv/streams-fusion/language##settings-listformat-caption}}
-created: 20210726104706258
 description: {{$:/plugins/phiv/streams-fusion/language##settings-listformat-description}}
-modified: 20251209163345778
 option-names: bullets numbers paragraphs
 option-values: * # p
 settings-group: z-streams-fusion

@@ -1,4 +1,4 @@
-﻿title: $:/lithic/filters/stream-indent.js
+title: $:/lithic/filters/stream-indent.js
 type: application/javascript
 module-type: filteroperator
 description: Returns an indented string for each level of depth of a stream node from a given root node, applying indentation to every line within the node

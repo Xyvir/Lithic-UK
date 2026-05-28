@@ -49,6 +49,7 @@ A `.lith` file is an extension of the vanilla TiddlyWiki `*.tid` file format, wh
 1. It supports multiple tiddlers appended together within a single file.
 2. The **triple-asterism** (`⁂⁂⁂`) is used as a strict delimiter to separate each individual tiddler inside the file. Do NOT use standard asterisks.
 3. The `title` field is explicitly required for each tiddler entry within the file.
+4. The `created:` and `modified:` front matter items are not necessary and should be omitted to save space.
 
 # TiddlyWiki JS Plugin File Format (`*.js.tid`)
 
@@ -62,6 +63,8 @@ If a `.js.tid` file is missing the leading plain-text frontmatter, or missing th
 Every `.js.tid` file MUST contain the module metadata **twice**:
 1. Once as plain-text tiddler fields at the very top of the file (e.g. `title: ...`, `type: ...`, `module-type: ...`).
 2. A second time inside a `/*\` ... `\*/` block comment immediately preceding the JavaScript code.
+
+*(Note: The `created:` and `modified:` fields are not necessary and should be omitted from both the plain-text headers and the comment block metadata).*
 
 **Example Format:**
 ```javascript

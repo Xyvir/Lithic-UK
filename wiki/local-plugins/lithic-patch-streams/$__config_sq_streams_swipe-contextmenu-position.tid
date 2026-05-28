@@ -1,8 +1,6 @@
 caption: Position of context menu shown on swiping.
 condition: [[$:/config/sq/streams/swipe-enabled]get[text]match[yes]]
-created: 20210503202943810
 description: Position of context menu shown on swiping.
-modified: 20210503202943810
 option-names: [[Right]] [[Left]]
 option-values: right left
 settings-group: swipe

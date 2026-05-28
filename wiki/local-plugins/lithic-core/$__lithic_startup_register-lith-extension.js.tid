@@ -1,5 +1,3 @@
-created: 20260305213812490
-modified: 20260305214038327
 module-type: startup
 tags: 
 title: $:/lithic/startup/register-lith-extension.js

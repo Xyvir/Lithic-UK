@@ -1,8 +1,6 @@
 caption: Anchor Toggle
-created: 20260123192609632
 description: Toggle anchors on top-level nodes
 icon: $:/lithic/images/anchor
-modified: 20260123193723250
 tags: $:/tags/ViewToolbar
 title: $:/lithic/ui/buttons/anchor-toggle
 type: 

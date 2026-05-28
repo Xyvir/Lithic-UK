@@ -1,6 +1,4 @@
-created: 20260126150446586
 description: Saved Filters
 filter: [prefix[$:/config/TiddlyTools/Filters/]] -[is[shadow]]
-modified: 20260126150648160
 tags: $:/tags/Filter
 title: $:/config/TiddlyTools/Filters/Saved Filters

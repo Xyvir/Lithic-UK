@@ -1,7 +1,5 @@
 caption: {{$:/plugins/tiddlywiki/markdown/images/new-markdown-button}} {{$:/language/Buttons/NewMarkdown/Caption}}
-created: 20260121165648644
 description: {{$:/language/Buttons/NewMarkdown/Hint}}
-modified: 20260121165650411
 tags: $:/tags/PageControls
 title: $:/plugins/tiddlywiki/markdown/new-markdown-button
 

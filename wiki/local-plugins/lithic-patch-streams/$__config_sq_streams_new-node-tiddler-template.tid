@@ -1,7 +1,5 @@
 caption: Tiddler to use as new node template
-created: 20251127143058041
 description: T iddler to use as a template for new nodes
-modified: 20251127143058041
 settings-template: $:/plugins/sq/streams/ui/templates/settings/input
 title: $:/config/sq/streams/new-node-tiddler-template
 
