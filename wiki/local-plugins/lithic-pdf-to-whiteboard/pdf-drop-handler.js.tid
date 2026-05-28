@@ -84,15 +84,24 @@ function generateWhiteboardData(images) {
         const sidebarMargin = 0; 
         const topMargin = 50;
 
-        // Use actual stream row height (540px) so the image fits within the viewer
+        // Use adaptive stream row height so portrait PDFs get a full page and slides fit two-per-page (540px)
         const viewerWidth = 1200;
-        const viewerHeight = 540;
+        const isPortrait = img.height > img.width;
 
-        const zoom = Math.min(
-            (viewerWidth - sidebarMargin) / img.width,
-            (viewerHeight - topMargin) / img.height,
-            1
-        );
+        let zoom, viewerHeight;
+        if (isPortrait) {
+            // Per user request, scale to exactly 75% for portrait PDFs
+            zoom = 0.75;
+            // Hardcoded to exactly 1056px to strictly avoid the 'blank first page' print phenomenon
+            viewerHeight = 1056; 
+        } else {
+            viewerHeight = 540;
+            zoom = Math.min(
+                (viewerWidth - sidebarMargin) / img.width,
+                (viewerHeight - topMargin) / img.height,
+                1
+            );
+        }
 
         pageStates[uuidPage] = {
             id: uuidPage,
@@ -205,12 +214,20 @@ async function convertPdfDataToTiddlers(arrayBuffer, fileName, setProgress) {
 
     // Whiteboard tiddler
     const payload = generateWhiteboardData(images);
+    const isPortrait = images[0] && (images[0].height > images[0].width);
+    let wbHeight = "540px";
+    if (isPortrait) {
+        // Force the macro to exactly 1056px to strictly avoid the blank first page phenomenon
+        wbHeight = "1056px"; 
+    }
+
     tiddlers.push({
         title: wbTitle,
         parent: containerTitle,
         text: JSON.stringify(payload),
         type: "application/tldr",
-        "stream-type": "default"
+        "stream-type": "default",
+        "whiteboard-height": wbHeight
     });
 
     return tiddlers;

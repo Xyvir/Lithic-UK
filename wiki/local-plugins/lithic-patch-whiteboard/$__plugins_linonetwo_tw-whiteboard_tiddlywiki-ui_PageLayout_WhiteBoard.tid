@@ -46,33 +46,19 @@ tc-page-container tc-page-view-$(storyviewTitle)$ tc-language-$(languageTitle)$ 
 	</$select>
 
 	<$reveal state="$:/state/Whiteboard/PageLayout/tiddler" type="nomatch" text="">
-		<$reveal state="$:/state/lithic/whiteboard-pending" type="match" text="yes">
-			<$button tooltip="Saving…" disabled="yes" class="tc-btn-invisible" style="opacity: 0.4; cursor: not-allowed;">
-				{{$:/core/images/home-button}} <small>saving…</small>
-			</$button>
-		</$reveal>
-		<$reveal state="$:/state/lithic/whiteboard-pending" type="nomatch" text="yes">
-			<$button tooltip="Open In StoryView">
-				{{$:/core/images/home-button}}
-				<$action-setfield $tiddler="$:/layout" text="$:/core/ui/PageTemplate"/>
-			</$button>
-		</$reveal>
+		<$button tooltip="Open In StoryView">
+			{{$:/core/images/home-button}}
+			<$action-setfield $tiddler="$:/layout" text="$:/core/ui/PageTemplate"/>
+		</$button>
 	</$reveal>
 	<!-- default value, when first opened, select widget's state tiddler is empty, but default value filter gives a value, we show that tiddler -->
 	<$reveal state="$:/state/Whiteboard/PageLayout/tiddler" type="match" text="">
 		<$list filter='[all[shadows+tiddlers]field:type[application/tldr]!prefix[$:/temp]sort[modified]first[]]'>
-			<$reveal state="$:/state/lithic/whiteboard-pending" type="match" text="yes">
-				<$button tooltip="Saving…" disabled="yes" class="tc-btn-invisible" style="opacity: 0.4; cursor: not-allowed;">
-					{{$:/core/images/home-button}} <small>saving…</small>
-				</$button>
-			</$reveal>
-			<$reveal state="$:/state/lithic/whiteboard-pending" type="nomatch" text="yes">
-				<$button tooltip="Open In StoryView">
-					{{$:/core/images/home-button}}
-					<$action-setfield $tiddler="$:/layout" text="$:/core/ui/PageTemplate"/>
-					<$action-navigate $to={{{[all[shadows+tiddlers]field:type[application/tldr]!prefix[$:/temp]sort[modified]first[]]}}} />
-				</$button>
-			</$reveal>
+			<$button tooltip="Open In StoryView">
+				{{$:/core/images/home-button}}
+				<$action-setfield $tiddler="$:/layout" text="$:/core/ui/PageTemplate"/>
+				<$action-navigate $to={{{[all[shadows+tiddlers]field:type[application/tldr]!prefix[$:/temp]sort[modified]first[]]}}} />
+			</$button>
 		</$list>
 	</$reveal>
 
@@ -87,10 +73,12 @@ tc-page-container tc-page-view-$(storyviewTitle)$ tc-language-$(languageTitle)$ 
 		<$button tooltip="Print Sequential Whiteboard" class="tc-btn-invisible">
 			{{$:/core/images/print-button}}
 			<$vars currentBoard={{{ [[$:/state/Whiteboard/PageLayout/tiddler]get[text]] ~[all[shadows+tiddlers]field:type[application/tldr]!prefix[$:/temp]sort[modified]first[]] }}}>
-				<$action-setfield $tiddler="$:/layout" text="" />
-				<$action-setfield $tiddler="$:/StoryList" list="" />
-				<$action-setfield $tiddler="Print Sequential Whiteboard" text={{{ [[<<draw-sequential "]] [<currentBoard>] [[">><$trigger-print delay="1000" />]] +[join[]] }}} />
-				<$action-navigate $to="Print Sequential Whiteboard" />
+				<$vars wbHeight={{{ [<currentBoard>get[whiteboard-height]] ~[[540px]] }}}>
+					<$action-setfield $tiddler="$:/layout" text="" />
+					<$action-setfield $tiddler="$:/StoryList" list="" />
+					<$action-setfield $tiddler="Print Sequential Whiteboard" text={{{ [[<<draw-sequential "]] [<currentBoard>] [[" "]] [<wbHeight>] [[">><$trigger-print delay="1000" />]] +[join[]] }}} />
+					<$action-navigate $to="Print Sequential Whiteboard" />
+				</$vars>
 			</$vars>
 		</$button>
 	</span>

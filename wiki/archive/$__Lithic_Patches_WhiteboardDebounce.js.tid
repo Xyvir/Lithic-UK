@@ -1,0 +1,24 @@
+created: 20260422192800000
+modified: 20260422192800000
+module-type: startup
+tags: 
+title: $:/Lithic/Patches/WhiteboardDebounce
+type: application/javascript
+
+/*\
+title: $:/Lithic/Patches/WhiteboardDebounce
+type: application/javascript
+module-type: startup
+
+Debounces writes to application/tldr tiddlers (TLDraw whiteboards) by 3 seconds
+to prevent real-time re-indexing lag during pen strokes and handwriting.
+\*/
+(function () {
+    "use strict";
+
+    exports.name = "lithic-whiteboard-debounce";
+    exports.platforms = ["browser"];
+        // Debounce logic has been removed per user request.
+        // This file remains as a no-op to overwrite the active patch in the wiki.
+    };
+})();
