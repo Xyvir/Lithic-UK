@@ -13,13 +13,13 @@ ENV SERVER_BACKEND=lighttpd
 # App structure
 RUN mkdir -p /app/public/src /app/scripts /data /app/public/_icon-defaults
 
-# Copy entrypoint
+# Copy entrypoint and helper scripts
 COPY deploy/entrypoint.sh /app/entrypoint.sh
 COPY deploy/watcher.sh /app/watcher.sh
+COPY deploy/autoupdate.sh /app/autoupdate.sh
 COPY deploy/github-sync.sh /app/scripts/github-sync.sh
-RUN chmod +x /app/entrypoint.sh /app/watcher.sh /app/scripts/github-sync.sh
+RUN chmod +x /app/entrypoint.sh /app/watcher.sh /app/autoupdate.sh /app/scripts/github-sync.sh
 
-# Copy Lithic UI files
 COPY index.html              /app/public/index.html
 COPY src/launcher.html       /app/public/src/launcher.html
 COPY src/lithic.html         /app/public/src/lithic.html

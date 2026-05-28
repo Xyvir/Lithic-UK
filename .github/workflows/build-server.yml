@@ -92,8 +92,9 @@ jobs:
           cp deploy/entrypoint.sh build/app/entrypoint.sh 2>/dev/null || echo "Warning: entrypoint.sh missing"
           cp deploy/.agents build/app/.agents 2>/dev/null || echo "Warning: .agents missing"
           cp deploy/watcher.sh build/app/watcher.sh 2>/dev/null || echo "Warning: watcher.sh missing"
+          cp deploy/autoupdate.sh build/app/autoupdate.sh 2>/dev/null || echo "Warning: autoupdate.sh missing"
           cp deploy/github-sync.sh build/app/scripts/github-sync.sh 2>/dev/null || echo "Warning: github-sync.sh missing"
-          chmod +x build/app/entrypoint.sh build/app/watcher.sh build/app/scripts/github-sync.sh 2>/dev/null || true
+          chmod +x build/app/entrypoint.sh build/app/watcher.sh build/app/autoupdate.sh build/app/scripts/github-sync.sh 2>/dev/null || true
 
       # --- Create tarball ---
       - name: Create God Artifact tarball

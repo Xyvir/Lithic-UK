@@ -55,6 +55,7 @@ curl -fsSL "${RELEASE_URL}" | tar -xz -C "${INSTALL_DIR}" --strip-components=1
 # After strip-components=1, we get entrypoint.sh, public/ in INSTALL_DIR
 chmod +x "${INSTALL_DIR}/entrypoint.sh"
 [ -f "${INSTALL_DIR}/watcher.sh" ] && chmod +x "${INSTALL_DIR}/watcher.sh"
+[ -f "${INSTALL_DIR}/autoupdate.sh" ] && chmod +x "${INSTALL_DIR}/autoupdate.sh"
 [ -f "${INSTALL_DIR}/scripts/github-sync.sh" ] && chmod +x "${INSTALL_DIR}/scripts/github-sync.sh"
 [ -f "${INSTALL_DIR}/caddy" ] && chmod +x "${INSTALL_DIR}/caddy"
 
@@ -141,6 +142,35 @@ ReadWritePaths=${DATA_DIR} ${INSTALL_DIR}
 [Install]
 WantedBy=multi-user.target
 EOF
+
+# --- Create autoupdate systemd service and timer ---
+echo "Creating autoupdate systemd service and timer..."
+cat > "/etc/systemd/system/${SERVICE_NAME}-autoupdate.service" <<EOF
+[Unit]
+Description=Lithic Autoupdate Service
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=${INSTALL_DIR}/autoupdate.sh
+WorkingDirectory=${INSTALL_DIR}
+EOF
+
+cat > "/etc/systemd/system/${SERVICE_NAME}-autoupdate.timer" <<EOF
+[Unit]
+Description=Lithic Daily Autoupdate Timer
+
+[Timer]
+OnCalendar=daily
+Persistent=true
+
+[Install]
+WantedBy=timers.target
+EOF
+
+# Create a system symlink for a terse command
+ln -sf "${INSTALL_DIR}/autoupdate.sh" /usr/local/bin/lithic-autoupdate
 
 # Removed start.sh wrapper; entrypoint.sh handles variable paths natively now.
 

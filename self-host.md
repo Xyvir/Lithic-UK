@@ -170,6 +170,16 @@ Re-run the installer — it will download the latest release and restart the ser
 curl -fsSL https://raw.githubusercontent.com/Xyvir/Lithic/main/deploy/install-lxc.sh | bash
 ```
 
+### Automatic Updates (LXC)
+Lithic includes a built-in autoupdate utility that pulls the latest `lithic.html` and `launcher.html` UI files from the GitHub repository to keep the front-end up to date. It is designed to operate offline, checking connectivity before making request attempts and failing gracefully if the server has no internet access.
+
+By default, the daily autoupdate checker is **disabled**. You can manage it using the `lithic-autoupdate` helper command from your server's SSH environment:
+
+*   **Enable daily updates:** `lithic-autoupdate enable` (creates and starts a systemd timer to check once a day)
+*   **Disable daily updates:** `lithic-autoupdate disable`
+*   **Check status:** `lithic-autoupdate status` (shows if the timer is active and compares local files with GitHub)
+*   **Run manually:** `lithic-autoupdate run` (or simply `lithic-autoupdate`) to update immediately
+
 ---
 
 ## Service Management (LXC)
