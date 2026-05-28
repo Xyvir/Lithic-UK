@@ -179,6 +179,12 @@ systemctl daemon-reload
 systemctl enable "${SERVICE_NAME}"
 systemctl start "${SERVICE_NAME}"
 
+# Enable daily updates if requested via environment variable
+if [ "${LITHIC_AUTOUPDATE:-false}" = "true" ]; then
+  echo "Enabling and starting daily autoupdate timer..."
+  systemctl enable --now "${SERVICE_NAME}-autoupdate.timer"
+fi
+
 # Source the env file to get the final values for the summary
 source "${ENV_FILE}"
 

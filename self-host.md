@@ -48,9 +48,9 @@ sudo bash -c "$(curl -fsSL https://raw.githubusercontent.com/Xyvir/Lithic/main/d
 ```
 
 **Option 2: Fully Automated Setup**
-Bypass the prompts by providing the variables inline. This will automatically set up Caddy, request an SSL certificate for your domain, and auto-generate a secure password.
+Bypass the prompts by providing the variables inline. This will automatically set up Caddy, request an SSL certificate for your domain, auto-generate a secure password, and optionally enable daily automatic updates out of the box by setting `LITHIC_AUTOUPDATE=true`.
 ```bash
-curl -fsSL https://raw.githubusercontent.com/Xyvir/Lithic/main/deploy/install-lxc.sh | sudo SERVER_BACKEND=caddy LITHIC_FQDN=lithic.example.com LITHIC_USER=your_username bash
+curl -fsSL https://raw.githubusercontent.com/Xyvir/Lithic/main/deploy/install-lxc.sh | sudo SERVER_BACKEND=caddy LITHIC_FQDN=lithic.example.com LITHIC_USER=your_username LITHIC_AUTOUPDATE=true bash
 ```
 
 ### Method D: Manual Install
@@ -173,12 +173,12 @@ curl -fsSL https://raw.githubusercontent.com/Xyvir/Lithic/main/deploy/install-lx
 ### Automatic Updates (LXC)
 For updating the "app" portion of the server (the UI files `lithic.html` and `launcher.html` where PKMS features and patches are frequently added), using the built-in `lithic-autoupdate` utility is the recommended method. It pulls the latest UI files from the GitHub repository to keep the front-end up to date without requiring a server reboot. It is designed to operate offline, checking connectivity before making request attempts and failing gracefully if the server has no internet access.
 
-By default, the daily autoupdate checker is **disabled**. You can manage it using the `lithic-autoupdate` helper command from your server's SSH environment:
+By default, the daily autoupdate checker is **disabled** (unless enabled at install time). You can manage it using the `lithic-autoupdate` helper command from your server's SSH environment:
 
 *   **Enable daily updates:** `lithic-autoupdate enable` (creates and starts a systemd timer to check once a day)
 *   **Disable daily updates:** `lithic-autoupdate disable`
 *   **Check status:** `lithic-autoupdate status` (shows if the timer is active and compares local files with GitHub)
-*   **Run manually:** `lithic-autoupdate run` (or simply `lithic-autoupdate`) to update immediately
+*   **Run manually:** `lithic-autoupdate run` (or `lithic-autoupdate update`) to update immediately
 
 ---
 

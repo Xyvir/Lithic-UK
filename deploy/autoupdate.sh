@@ -161,10 +161,10 @@ show_status() {
 }
 
 # Parse commands
-CMD="${1:-run}"
+CMD="${1:-update}"
 
 case "$CMD" in
-    run)
+    run|update)
         run_update
         ;;
     enable)
@@ -177,7 +177,7 @@ case "$CMD" in
         show_status
         ;;
     *)
-        echo "Usage: $0 {run|enable|disable|status}"
+        echo "Usage: $0 {run|update|enable|disable|status}"
         exit 1
         ;;
 esac
