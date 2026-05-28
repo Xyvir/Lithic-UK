@@ -1,0 +1,123 @@
+title: $:/Lithic/Widgets/wb-image.js
+type: application/javascript
+module-type: widget
+
+/*\
+title: $:/Lithic/Widgets/wb-image.js
+type: application/javascript
+module-type: widget
+
+A widget to extract and display an image from a whiteboard's internal JSON assets.
+\*/
+(function(){
+
+/*jslint node: true, browser: true */
+/*global $tw: false */
+"use strict";
+
+var Widget = require("$:/core/modules/widgets/widget.js").widget;
+
+var WbImageWidget = function(parseTreeNode,options) {
+	this.initialise(parseTreeNode,options);
+};
+
+/*
+Inherit from the base widget class
+*/
+WbImageWidget.prototype = new Widget();
+
+/*
+Render this widget into the DOM
+*/
+WbImageWidget.prototype.render = function(parent,nextSibling) {
+	this.parentDomNode = parent;
+	this.computeAttributes();
+	this.execute();
+    
+    var imgNode = this.document.createElement("img");
+    if(this.width) {
+        imgNode.setAttribute("width", this.width);
+    }
+    if(this.height) {
+        imgNode.setAttribute("height", this.height);
+    }
+    if(this.className) {
+        imgNode.className = this.className;
+    }
+    
+    var src = this.extractImageSrc();
+    if(src) {
+        imgNode.setAttribute("src", src);
+    } else {
+        // Fallback or error
+        imgNode.setAttribute("alt", "Whiteboard image not found");
+        imgNode.style.border = "1px dashed red";
+        imgNode.style.display = "inline-block";
+        if (!this.width) imgNode.style.width = "100px";
+        if (!this.height) imgNode.style.height = "100px";
+    }
+
+	parent.insertBefore(imgNode,nextSibling);
+	this.domNodes.push(imgNode);
+};
+
+WbImageWidget.prototype.extractImageSrc = function() {
+    var tiddler = this.wiki.getTiddler(this.boardTitle);
+    if (!tiddler || !tiddler.fields.text) return null;
+    try {
+        var doc = JSON.parse(tiddler.fields.text);
+        if (doc && doc.document && doc.document.assets) {
+            var assets = doc.document.assets;
+            for (var id in assets) {
+                var asset = assets[id];
+                if (asset.type === "image") {
+                    if (this.imageName && asset.fileName === this.imageName) {
+                        return asset.src;
+                    }
+                    if (this.assetId && asset.id === this.assetId) {
+                        return asset.src;
+                    }
+                }
+            }
+            // If neither name nor assetId provided, fallback to the FIRST image found
+            if (!this.imageName && !this.assetId) {
+                for (var firstId in assets) {
+                    if (assets[firstId].type === "image") {
+                        return assets[firstId].src;
+                    }
+                }
+            }
+        }
+    } catch(e) {
+        console.error("WbImageWidget parse error", e);
+    }
+    return null;
+};
+
+/*
+Compute the internal state of the widget
+*/
+WbImageWidget.prototype.execute = function() {
+	this.boardTitle = this.getAttribute("board", this.getVariable("currentTiddler"));
+	this.imageName = this.getAttribute("name");
+    this.assetId = this.getAttribute("assetId");
+	this.width = this.getAttribute("width");
+	this.height = this.getAttribute("height");
+    this.className = this.getAttribute("class");
+};
+
+/*
+Selectively refreshes the widget if needed. Returns true if the widget or any of its children needed re-rendering
+*/
+WbImageWidget.prototype.refresh = function(changedTiddlers) {
+	var changedAttributes = this.computeAttributes();
+	if(changedAttributes.board || changedAttributes.name || changedAttributes.assetId || changedAttributes.width || changedAttributes.height || changedAttributes["class"] || changedTiddlers[this.boardTitle]) {
+		this.refreshSelf();
+		return true;
+	}
+	return false;
+};
+
+exports["wb-image"] = WbImageWidget;
+
+})();
