@@ -568,8 +568,7 @@ TODO : CHECK if needed
 					// We append a search + limit to the filter. 
 					var searchPart = " +[search:" + fieldMode + "[" + cleanPat + "]limit[" + (this._maxMatch + 5) + "]]";
 
-					var excludePart = " +[!is[image]!type[application/tldr]]";
-					allOptions = this._widget.wiki.filterTiddlers(baseFilter + excludePart + searchPart);
+					allOptions = this._widget.wiki.filterTiddlers(baseFilter + searchPart);
 					// ============================================
 					// JANE OPTIMIZATION END
 					// ============================================
