@@ -24,8 +24,6 @@
 - [ ] Add "Alpha Sort" option to nodestream right-click menu.
 - [ ] Add "Toggle Todo" option to tiddler? (or nodstream?) right-click emnu.
     (Do twice to toggle ascending/descending)
-- [ ] Create simple "Presentation" view / layout based on existing backlink nav pills.
-   - [ ] possibly apply "prinstyles.css" to this view.
 - [ ] Create/Integrate EPUB Serialization based on current to_lithic logic (but have user provide shortcode instead of AI-generated one); add it to exeisting pdf-to-whiteboard and name the plugin 'lithic-import' or something.
 - [ ] Freeze external plugin integrations once I'm happy with the base featureset. (currently only byperserach and columns are candidates)
 - [ ] Allow specifying 'modes' via http parameters so the launcher monolith html can be forced into specific modes to make unit tests easier; (all unit tests can be performed in 1 test enviroment this way, but with multiple test profiles/users)
@@ -48,6 +46,8 @@
 - [ ] Automate lithic-light build process (including TW Uglifier) and merge in esp32-launcher repo into this one.
 - [X] Create some way to disambiguate if someone wants to self-host multiple backends for different groups of wikis.
 - [ ] Add agents.md to back-end server if anyone wants to clone the github sync in their own LLM-IDE.
+- [ ] Create simple "Presentation" view / layout based on existing backlink nav pills.
+   - [ ] possibly apply "prinstyles.css" to this view.
 - [ ] Switch or create an option to use double markdown pagebreak for printing newpage isntead of one (Incase user wants to include visual page-spanning pagebreaks)
 - [ ] Create "Lithic for Teams" backend version based on Mult-Wiki Server.
 - Tauri App Ideas:
