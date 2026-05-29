@@ -4,6 +4,9 @@
 - [X] add copy button to Pyrmaid sidebar that copies the rendered mermaid code for further embedding / editing / extending.
 - [ ] add ## 'toggle button' to unieditor line numbers on line 00; that toggles the numbers on and off.
 - [X] Further Extensions to tw-whiteboard; import all images as whiteboard embeds moving forward.
+- [ ] Add some kind of filter/builder UI or filter slashcommand autocompletes that integrates with BulkOps.
+- [ ] rearrange icon order on bulkops to be more intuitive.
+- [ ] have some kind of logical 'prefill' on bulkops. (all notes?)
 - [ ] Add addlt paraemter to AutoTable widget that allows for prefilled content per column? 
     - <<AutoTable "One Two Three" "- - {formula}">>
     - dash here is a placeholder for no prefilled content.
@@ -16,7 +19,8 @@
 - [ ] Replace the regular searchbox in notebook UI with byper "Advanced Search" also extend it a bit to allow searching shadow tiddlers etc?
 - [ ] include textcolumns or similair plugin:
     https://br-text-columns.tiddlyhost.com/
-- [ ] Add a viewfilter or somethign so transcluded nodestream parents show their children?
+- [X] Add a viewfilter or somethign so transcluded nodestream parents show their children?
+    - Just handle by embed-stream macro for now.
 - [ ] Add "Alpha Sort" option to nodestream right-click menu.
 - [ ] Add "Toggle Todo" option to tiddler? (or nodstream?) right-click emnu.
     (Do twice to toggle ascending/descending)
@@ -39,12 +43,12 @@
     - [ ] text-based adventure game plugin
     - [ ] Audio Editor/podcast plugin from talk.tiddlywiki.
     - [ ] Dogreader?
-- [ ] Add local 2fa topt for backend wiki access.
+- [ ] Add local 2fa topt for backend wiki access?
+    - Maybe just suggest cloudflare tunnels for this instead.
 - [ ] Automate lithic-light build process (including TW Uglifier) and merge in esp32-launcher repo into this one.
 - [X] Create some way to disambiguate if someone wants to self-host multiple backends for different groups of wikis.
 - [ ] Add agents.md to back-end server if anyone wants to clone the github sync in their own LLM-IDE.
 - [ ] Switch or create an option to use double markdown pagebreak for printing newpage isntead of one (Incase user wants to include visual page-spanning pagebreaks)
-- [ ] Add some kind of filter/builder UI or filter slashcommand autocompletes that integrates with BuklOps.
 - [ ] Create "Lithic for Teams" backend version based on Mult-Wiki Server.
 - Tauri App Ideas:
     - [ ] Add 'run code' button next to copy code that hooks into ephemeral.exe
