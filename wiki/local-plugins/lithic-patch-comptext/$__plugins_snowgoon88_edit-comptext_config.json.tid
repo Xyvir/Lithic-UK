@@ -16,6 +16,12 @@ type: application/json
             "end": "]]"
         },
         {
+            "pattern": "{{",
+            "filter": "[all[tiddlers]!is[system]]",
+            "start": "{{",
+            "end": "}}"
+        },
+        {
             "pattern": "||",
             "filter": "[all[tiddlers]!is[system]]",
             "start": "[[|",

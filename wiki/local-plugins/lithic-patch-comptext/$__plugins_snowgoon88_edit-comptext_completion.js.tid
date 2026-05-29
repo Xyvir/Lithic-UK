@@ -745,7 +745,15 @@ TODO : CHECK if needed
 		var val = node.value;
 		var sStart = template.start !== undefined ? template.start : '[[';
 		var sEnd = template.end !== undefined ? template.end : ']]';
-		var newVal = val.slice(0, posBefore) + sStart + text + sEnd + val.slice(posAfter);
+		
+		var newVal;
+		// Check if the closing characters already exist immediately after the cursor
+		if (sEnd && val.substring(posAfter, posAfter + sEnd.length) === sEnd) {
+			newVal = val.slice(0, posBefore) + sStart + text + val.slice(posAfter);
+		} else {
+			newVal = val.slice(0, posBefore) + sStart + text + sEnd + val.slice(posAfter);
+		}
+		
 		//console.log("__INSERT s="+sStart+" e="+sEnd);
 		//console.log ("__INSERT pb="+posBefore+" pa="+posAfter+" txt="+text);
 		//console.log( "NEW VAL = "+newVal );
@@ -760,9 +768,9 @@ TODO : CHECK if needed
 		if (tiddlerTitle) {
 			var tiddler = $tw.wiki.getTiddler(tiddlerTitle);
 			if (tiddler && tiddler.fields["caret-pos"]) {
-				var val = parseInt(tiddler.fields["caret-pos"], 10);
-				if (!isNaN(val)) {
-					offset = val;
+				var valField = parseInt(tiddler.fields["caret-pos"], 10);
+				if (!isNaN(valField)) {
+					offset = valField;
 				}
 			}
 		}
