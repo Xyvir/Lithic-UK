@@ -12,7 +12,7 @@
     - [X] Modify behavior to use <<embed-stream>> macro on parent stream-nodes that do not have their own body.
     - [ ] add guardrails so only a bit of context is shown on hoverover.
     - [ ] Limit hover-over so it doesn't appear on search query result links, etc.
-- [ ] Make sure all custom lithic-macros accept "[[Tiddler Title]]" syntax parameters and tweak to make sure they work appropriatly with comp-text plugin/ slashcommands.
+- [X] Make sure all custom lithic-macros accept "[[Tiddler Title]]" syntax parameters and tweak to make sure they work appropriatly with comp-text plugin/ slashcommands.
 - [ ] Replace the regular searchbox in notebook UI with byper "Advanced Search" also extend it a bit to allow searching shadow tiddlers etc?
 - [ ] include textcolumns or similair plugin:
     https://br-text-columns.tiddlyhost.com/

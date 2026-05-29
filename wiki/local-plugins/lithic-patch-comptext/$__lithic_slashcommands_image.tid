@@ -1,5 +1,5 @@
-title: $:/lithic/slashcommands/image
+caret-pos: 14
 tags: 
-caret-pos: 13
+title: $:/lithic/slashcommands/image
 
-<<wb-image [[]]>>
+<<wb-image "[[]]" "80%">>

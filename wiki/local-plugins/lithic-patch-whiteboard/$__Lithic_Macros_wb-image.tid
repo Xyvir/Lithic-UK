@@ -2,5 +2,11 @@ title: $:/Lithic/Macros/wb-image
 tags: $:/tags/Macro
 
 \define wb-image(board, width:"800px")
-<$wb-image board=<<__board__>> width=<<__width__>> />
+<$let
+  left="[["
+  right="]]"
+  clean={{{ [<__board__>removeprefix<left>removesuffix<right>] ~[<__board__>] }}}
+>
+<$wb-image board=<<clean>> width=<<__width__>> />
+</$let>
 \end

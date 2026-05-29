@@ -2,7 +2,12 @@ tags: $:/tags/Global
 title: $:/Lithic/Macros/draw
 
 \procedure draw(id, height:"540px")
-<$vars boardTitle={{{ [<id>!is[blank]] ~[<currentTiddler>addsuffix[-draw]] }}}>
+<$let
+  left="[["
+  right="]]"
+  clean={{{ [<id>removeprefix<left>removesuffix<right>] ~[<id>] }}}
+>
+<$vars boardTitle={{{ [<clean>!is[blank]] ~[<currentTiddler>addsuffix[-draw]] }}}>
 <div 
   class="tc-tiddler-frame lithic-inline-board" 
   data-tiddler-title=<<boardTitle>> 
@@ -15,4 +20,5 @@ title: $:/Lithic/Macros/draw
   </div>
 </div>
 </$vars>
+</$let>
 \end

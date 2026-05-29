@@ -2,15 +2,21 @@ title: $:/Lithic/Macros/draw-sequential
 tags: $:/tags/Global
 
 \procedure draw-sequential(source, height:"540px")
+<$let
+  left="[["
+  right="]]"
+  clean={{{ [<source>removeprefix<left>removesuffix<right>] ~[<source>] }}}
+>
 <div class="sequential-whiteboard-container">
-<$let pageCount={{{ [<source>get[text]jsonindexes[document],[pages]count[]] }}}>
+<$let pageCount={{{ [<clean>get[text]jsonindexes[document],[pages]count[]] }}}>
 <$list filter="[range[0],<pageCount>!match<pageCount>]" variable="targetIndex">
 <div class="lithic-seq-step" style="margin-bottom: 5px; padding: 0; border: none; page-break-inside: avoid; break-inside: avoid;">
-<$let pageTiddler={{{ [<source>whiteboard-page<targetIndex>] }}}>
+<$let pageTiddler={{{ [<clean>whiteboard-page<targetIndex>] }}}>
 <$whiteboard tiddler=<<pageTiddler>> height=<<height>> readonly="yes" />
 </$let>
 </div>
 </$list>
 </$let>
 </div>
+</$let>
 \end
