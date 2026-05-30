@@ -1,7 +1,7 @@
 title: $:/Lithic/Macros/wb-image
 tags: $:/tags/Macro
 
-\define wb-image(board, width:"800px")
+\define wb-image(board, width:"80%")
 <$let
   left="[["
   right="]]"

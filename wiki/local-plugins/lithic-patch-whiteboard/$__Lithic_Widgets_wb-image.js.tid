@@ -105,7 +105,7 @@ WbImageWidget.prototype.execute = function() {
 	this.boardTitle = boardTitle;
 	this.imageName = this.getAttribute("name");
     this.assetId = this.getAttribute("assetId");
-	this.width = this.getAttribute("width");
+	this.width = this.getAttribute("width", "80%");
 	this.height = this.getAttribute("height");
     this.className = this.getAttribute("class");
 };
