@@ -1,0 +1,76 @@
+title: $:/Lithic/Patches/AutoCloseKeepOpen.js
+type: application/javascript
+module-type: startup
+
+/*\
+title: $:/Lithic/Patches/AutoCloseKeepOpen.js
+type: application/javascript
+module-type: startup
+
+Watches for the Text tool's specific style options (Align/Font) and automatically 
+turns off "Keep Style Menu Open" to prevent the shape.id crash bug.
+\*/
+(function () {
+    "use strict";
+
+    exports.name = "lithic-auto-close-keep-open";
+    exports.platforms = ["browser"];
+    exports.after = ["startup"];
+    exports.synchronous = true;
+
+    exports.startup = function () {
+        
+        function disableKeepOpen() {
+            var clicked = false;
+            
+            // 1. Check Preferences Menu Button by ID
+            var keepOpenBtn = document.getElementById('TD-Styles-Keep-Open');
+            if (keepOpenBtn && (keepOpenBtn.getAttribute('data-state') === 'checked' || keepOpenBtn.getAttribute('aria-checked') === 'true')) {
+                keepOpenBtn.click();
+                clicked = true;
+            }
+            
+            // 2. Check Palette Menu option by text
+            var spans = document.querySelectorAll('.tw-whiteboard-tldraw-container span');
+            for (var i = 0; i < spans.length; i++) {
+                if (spans[i].textContent === "Keep Style Menu Open" || spans[i].textContent === "Keep Open") {
+                    var wrapper = spans[i].closest('button, .c-kuOiws');
+                    if (wrapper && wrapper.id !== 'TD-Styles-Keep-Open') {
+                        // Look for the checked state
+                        if (wrapper.querySelector('[data-state="checked"]') || wrapper.getAttribute('data-state') === 'checked') {
+                            wrapper.click();
+                            clicked = true;
+                        }
+                    }
+                }
+            }
+            
+            if (clicked) {
+                setTimeout(function() {
+                    var escEvent = new KeyboardEvent('keydown', {
+                        key: 'Escape',
+                        code: 'Escape',
+                        keyCode: 27,
+                        which: 27,
+                        bubbles: true,
+                        cancelable: true
+                    });
+                    document.dispatchEvent(escEvent);
+                }, 10);
+            }
+        }
+
+        if (typeof document !== "undefined") {
+            var observer = new MutationObserver(function(mutations) {
+                // If the specific Text tool UI is present in the DOM
+                if (document.getElementById('TD-Styles-Align-Container')) {
+                    disableKeepOpen();
+                }
+            });
+            
+            // Observe the document body for any DOM additions/removals
+            observer.observe(document.body, { childList: true, subtree: true });
+        }
+    };
+
+})();

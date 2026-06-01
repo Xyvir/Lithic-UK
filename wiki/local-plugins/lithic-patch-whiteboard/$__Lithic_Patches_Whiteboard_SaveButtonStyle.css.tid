@@ -35,3 +35,15 @@ type: text/css
     width: 1.2em;
     height: 1.2em;
 }
+
+/* Hide the broken Font selector in the Tldraw style menu */
+#TD-Styles-Font-Container {
+    display: none !important;
+}
+
+/* Per-whiteboard transparent stickies toggle */
+.lithic-transparent-stickies [data-shape="sticky"] .c-gLGcPs {
+    background-color: transparent !important;
+    text-shadow: none !important;
+    box-shadow: none !important;
+}

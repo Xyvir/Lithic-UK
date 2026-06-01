@@ -15,20 +15,22 @@ tc-page-container tc-page-view-$(storyviewTitle)$ tc-language-$(languageTitle)$ 
 	tv-config-toolbar-class={{$:/config/Toolbar/ButtonClass}}
 	tv-show-missing-links={{$:/config/MissingLinks}}
 	storyviewTitle={{$:/view}}
-	languageTitle={{{ [{$:/language}get[name]] }}}>
+	languageTitle={{{ [{$:/language}get[name]] }}}
+	currentBoard={{{ [[$:/state/Whiteboard/PageLayout/tiddler]get[text]] ~[all[shadows+tiddlers]field:type[application/tldr]!prefix[$:/temp]sort[modified]first[]] }}}>
 
 <div class=<<containerClasses>>>
 
 <$navigator story="$:/StoryList" history="$:/HistoryList" openLinkFromInsideRiver={{$:/config/Navigation/openLinkFromInsideRiver}} openLinkFromOutsideRiver={{$:/config/Navigation/openLinkFromOutsideRiver}} relinkOnRename={{$:/config/RelinkOnRename}}>
 
-<main class="tw-whiteboard-layout-main-area">
+<$vars transparentClass={{{ [<currentBoard>get[transparent-stickies]match[yes]then[lithic-transparent-stickies]] }}}>
+<main class={{{ [[tw-whiteboard-layout-main-area ]addsuffix<transparentClass>] }}}>
 	<$reveal state="$:/state/Whiteboard/PageLayout/tiddler" type="nomatch" text="">
-		<$whiteboard tiddler={{$:/state/Whiteboard/PageLayout/tiddler}} height="calc(100vh - 35px)" />
+		<$whiteboard tiddler={{$:/state/Whiteboard/PageLayout/tiddler}} height="100vh" />
 	</$reveal>
 	<!-- default value, when first opened, select widget's state tiddler is empty, but default value filter gives a value, we show that tiddler -->
 	<$reveal state="$:/state/Whiteboard/PageLayout/tiddler" type="match" text="">
 		<$list filter='[all[shadows+tiddlers]field:type[application/tldr]sort[modified]first[]]'>
-			<$whiteboard tiddler={{{[all[shadows+tiddlers]field:type[application/tldr]sort[modified]first[]]}}} height="calc(100vh - 35px)" />
+			<$whiteboard tiddler={{{[all[shadows+tiddlers]field:type[application/tldr]sort[modified]first[]]}}} height="100vh" />
 		</$list>
 	</$reveal>
 </main>
@@ -37,6 +39,14 @@ tc-page-container tc-page-view-$(storyviewTitle)$ tc-language-$(languageTitle)$ 
 <nav class="tw-whiteboard-layout-top-bar">
 	<!-- Searchable combobox replacing standard select -->
 	<span style="position:relative; display:inline-flex; align-items:center;" onmousedown="event.stopPropagation();" onpointerdown="event.stopPropagation();" onclick="event.stopPropagation();">
+		
+		<!-- See-thru stickies per-whiteboard toggle -->
+		<span style="position:absolute; top: 4px; right: 100%; margin-right: 15px; white-space: nowrap; color: <<colour foreground>>; font-size: 0.85em; font-family: sans-serif; display: flex; align-items: center;">
+			<$checkbox tiddler=<<currentBoard>> field="transparent-stickies" checked="yes" unchecked="no" default="no">
+				<span style="margin-left: 5px; cursor: pointer; user-select: none;">see thru stickies</span>
+			</$checkbox>
+		</span>
+
 		<$let
 			searchState="$:/state/Whiteboard/PageLayout/search"
 			dropdownState="$:/state/Whiteboard/PageLayout/dropdown"

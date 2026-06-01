@@ -1,0 +1,71 @@
+title: $:/Lithic/Patches/Whiteboard/DeleteKeySimulator.js
+type: application/javascript
+module-type: startup
+
+/*\
+title: $:/Lithic/Patches/Whiteboard/DeleteKeySimulator.js
+type: application/javascript
+module-type: startup
+
+Simulates a click on the tldraw trash can icon when the Delete or Backspace key is pressed,
+as TiddlyWiki or Streams sometimes swallows keyboard shortcuts.
+\*/
+(function () {
+    "use strict";
+
+    exports.name = "lithic-whiteboard-delete-simulator";
+    exports.platforms = ["browser"];
+    exports.after = ["startup"];
+    exports.synchronous = true;
+
+    exports.startup = function () {
+        if (typeof document !== "undefined") {
+            document.addEventListener('keydown', function(e) {
+                // Only respond to Delete or Backspace
+                if (e.key !== 'Delete' && e.key !== 'Backspace') return;
+                
+                console.log("[DeleteSimulator] Caught key:", e.key, "Target:", e.target);
+                
+                if (!e.target) return;
+                
+                // Ignore if typing in an input
+                if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA' || e.target.isContentEditable) {
+                    console.log("[DeleteSimulator] Ignored because target is input/textarea/contenteditable.");
+                    return;
+                }
+                
+                // Also ignore if inside the tldraw text editor container
+                if (typeof e.target.closest === 'function') {
+                    if (e.target.closest('.tl-text-editor') || e.target.closest('.c-fOQRlS') || e.target.closest('.tl-absolute')) {
+                        console.log("[DeleteSimulator] Ignored because target is inside tldraw text editor.");
+                        return;
+                    }
+                }
+                
+                var deleteBtnWrapper = document.getElementById('TD-Delete');
+                if (deleteBtnWrapper) {
+                    console.log("[DeleteSimulator] Found #TD-Delete wrapper in DOM.");
+                    var deleteBtn = deleteBtnWrapper.querySelector('button');
+                    if (deleteBtn) {
+                        console.log("[DeleteSimulator] Found button inside wrapper! Dispatching pointerdown and click...");
+                        
+                        var eventInit = { bubbles: true, cancelable: true, button: 0 };
+                        deleteBtn.dispatchEvent(new PointerEvent('pointerdown', eventInit));
+                        deleteBtn.dispatchEvent(new MouseEvent('mousedown', eventInit));
+                        deleteBtn.dispatchEvent(new PointerEvent('pointerup', eventInit));
+                        deleteBtn.dispatchEvent(new MouseEvent('mouseup', eventInit));
+                        deleteBtn.click();
+                        
+                        e.preventDefault();
+                        e.stopPropagation();
+                    } else {
+                        console.log("[DeleteSimulator] ERROR: Could not find <button> inside #TD-Delete");
+                    }
+                } else {
+                    console.log("[DeleteSimulator] #TD-Delete not found in DOM.");
+                }
+            }, true); // Use capture phase to act before other handlers
+        }
+    };
+
+})();
