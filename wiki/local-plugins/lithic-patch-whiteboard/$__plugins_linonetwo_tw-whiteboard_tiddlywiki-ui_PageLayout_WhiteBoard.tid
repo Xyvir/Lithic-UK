@@ -35,13 +35,64 @@ tc-page-container tc-page-view-$(storyviewTitle)$ tc-language-$(languageTitle)$ 
 
 <!-- put this below main, so nav bar is layered on top of the main. In UI, this nav in on the top of the page. -->
 <nav class="tw-whiteboard-layout-top-bar">
-	Select board: 
-	<!-- default to recently used whiteboard tiddler -->
-	<$select tiddler="$:/state/Whiteboard/PageLayout/tiddler" default={{{[all[shadows+tiddlers]field:type[application/tldr]!prefix[$:/temp]sort[modified]first[]]}}}>
-		<$list filter='[all[shadows+tiddlers]field:type[application/tldr]!prefix[$:/temp]sort[modified]]'>
-			<option value=<<currentTiddler>>><$view field='title'/></option>
-		</$list>
-	</$select>
+	<!-- Searchable combobox replacing standard select -->
+	<span style="position:relative; display:inline-flex; align-items:center;" onmousedown="event.stopPropagation();" onpointerdown="event.stopPropagation();" onclick="event.stopPropagation();">
+		<$let
+			searchState="$:/state/Whiteboard/PageLayout/search"
+			dropdownState="$:/state/Whiteboard/PageLayout/dropdown"
+			currentBoard={{{ [[$:/state/Whiteboard/PageLayout/tiddler]get[text]] ~[all[shadows+tiddlers]field:type[application/tldr]!prefix[$:/temp]sort[modified]first[]] }}}
+		>
+			<$keyboard key="Escape" actions="<$action-deletetiddler $tiddler=<<dropdownState>>/><$action-setfield $tiddler=<<searchState>> text=''/>">
+				<style>
+				.lithic-wb-search-input { color: <<colour muted-foreground>> !important; }
+				.lithic-wb-search-input::placeholder { color: <<colour foreground>> !important; opacity: 1; }
+				</style>
+				<div style="display:flex; border: 1px solid #ccc; background: var(--tw-page-bg, white); align-items: stretch; border-radius: 3px;">
+					<$keyboard key="Enter" actions="""
+						<$let searchTerm={{{ [<searchState>get[text]] }}}>
+							<$list filter="[all[shadows+tiddlers]field:type[application/tldr]!prefix[$:/temp]search:title<searchTerm>!sort[modified]limit[1]]">
+								<$action-setfield $tiddler="$:/state/Whiteboard/PageLayout/tiddler" text=<<currentTiddler>>/>
+								<$action-deletetiddler $tiddler=<<dropdownState>>/>
+								<$action-setfield $tiddler=<<searchState>> text=""/>
+							</$list>
+						</$let>
+					""">
+						<$edit-text 
+							tiddler=<<searchState>> 
+							tag="input" 
+							placeholder={{{ [<currentBoard>!is[blank]then<currentBoard>] ~[[Search boards...]] }}}
+							default="" 
+							class="tc-edit-texteditor lithic-wb-search-input" 
+							style="width: 230px; padding: 4px 6px; border: none; outline: none; background: transparent; box-shadow: none;"
+						/>
+					</$keyboard>
+					<$button class="tc-btn-invisible" style="padding: 2px 8px; border-left: 1px solid #ccc; cursor: pointer; display: flex; align-items: center; justify-content: center; fill: currentColor;">
+						<$list filter="[<dropdownState>get[text]match[open]]" emptyMessage="<$action-setfield $tiddler=<<dropdownState>> text='open'/><span style='width:1em; height:1em;'>{{$:/core/images/down-arrow}}</span>">
+							<$action-deletetiddler $tiddler=<<dropdownState>>/>
+							<span style="width:1em; height:1em;">{{$:/core/images/up-arrow}}</span>
+						</$list>
+					</$button>
+				</div>
+
+				<$list filter="[<dropdownState>get[text]match[open]] [<searchState>get[text]!is[blank]] +[limit[1]then[show]]" variable="ignore">
+					<div style="position:absolute; top:100%; left:0; z-index:9999; margin-top: 2px;">
+						<div class="tc-drop-down" style="min-width: 250px; max-height: 400px; overflow-y: auto;">
+							<$let searchTerm={{{ [<searchState>get[text]] }}}>
+								<$list filter="[all[shadows+tiddlers]field:type[application/tldr]!prefix[$:/temp]search:title<searchTerm>!sort[modified]limit[10]]">
+									<$button class="tc-btn-invisible" style="display:block; width:100%; text-align:left; padding: 4px 8px;">
+										<$action-setfield $tiddler="$:/state/Whiteboard/PageLayout/tiddler" text=<<currentTiddler>>/>
+										<$action-deletetiddler $tiddler=<<dropdownState>>/>
+										<$action-setfield $tiddler=<<searchState>> text=""/>
+										<$view field="title"/>
+									</$button>
+								</$list>
+							</$let>
+						</div>
+					</div>
+				</$list>
+			</$keyboard>
+		</$let>
+	</span>
 
 	<$reveal state="$:/state/Whiteboard/PageLayout/tiddler" type="nomatch" text="">
 		<$button tooltip="Open In StoryView">
