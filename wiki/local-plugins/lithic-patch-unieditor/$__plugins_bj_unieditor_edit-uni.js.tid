@@ -306,7 +306,10 @@ uniEditorWidget.prototype.render = function(parent,nextSibling) {
 						bubbles: true,
 						cancelable: true,
 						composed: true,
-						shiftKey: e.shiftKey
+						shiftKey: e.shiftKey,
+						altKey: e.altKey,
+						ctrlKey: e.ctrlKey,
+						metaKey: e.metaKey
 					});
 					newEvent.__isStreamsCloned = true;
 					newEvent.preventDefault = function() {};
