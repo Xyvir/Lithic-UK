@@ -56,9 +56,9 @@ div[id$="c001"][data-shape="sticky"] .c-gLGcPs {
 }
 
 #TD-PrimaryTools-Image .c-lkmCgW::after {
-    content: ":>/";
+    content: "$:>/";
     font-family: monospace;
-    font-size: 14px;
+    font-size: 10px;
     font-weight: bold;
     color: currentColor;
     display: inline-block;
