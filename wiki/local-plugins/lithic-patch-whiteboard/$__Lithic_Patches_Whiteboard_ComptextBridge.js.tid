@@ -66,6 +66,28 @@ Listens for hotkeys (/, [, {) to trigger the floating Comptext UI in the whitebo
                 }, 100);
             }
         }, true); // Use capture phase so Tldraw doesn't swallow it first!
+
+        window.addEventListener('click', function(event) {
+            // Intercept clicks on the "Insert Media" button in Tldraw
+            var mediaBtn = event.target.closest('#TD-PrimaryTools-Image');
+            if (mediaBtn) {
+                event.preventDefault();
+                event.stopPropagation();
+
+                // Clear the input and open the popup
+                $tw.wiki.setText("$:/temp/whiteboard-comptext-input", "text", null, "");
+                $tw.wiki.setText("$:/state/Whiteboard/ComptextPopup", "text", null, "open");
+
+                // Focus the input
+                setTimeout(function() {
+                    var input = document.querySelector('.lithic-floating-comptext-input');
+                    if (input) {
+                        input.focus();
+                    }
+                }, 100);
+            }
+        }, true);
+
     };
 
 })();

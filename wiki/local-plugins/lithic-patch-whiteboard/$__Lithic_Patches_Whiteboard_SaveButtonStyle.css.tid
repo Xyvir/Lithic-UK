@@ -49,3 +49,19 @@ div[id$="c001"][data-shape="sticky"] .c-gLGcPs {
     text-shadow: none !important;
     box-shadow: none !important;
 }
+
+/* Replace the 'Insert Media' button icon with a Command Palette icon */
+#TD-PrimaryTools-Image svg {
+    display: none !important;
+}
+
+#TD-PrimaryTools-Image .c-lkmCgW::after {
+    content: ":>/";
+    font-family: monospace;
+    font-size: 14px;
+    font-weight: bold;
+    color: currentColor;
+    display: inline-block;
+    line-height: 1;
+}
+
