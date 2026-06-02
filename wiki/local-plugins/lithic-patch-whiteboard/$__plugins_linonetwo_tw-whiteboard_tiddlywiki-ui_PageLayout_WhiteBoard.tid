@@ -20,6 +20,11 @@ tc-page-container tc-page-view-$(storyviewTitle)$ tc-language-$(languageTitle)$ 
 
 <div class=<<containerClasses>>>
 
+<style>
+/* Prevent horizontal scrolling from wide tooltips overflowing the screen edges */
+body { overflow-x: hidden; }
+</style>
+
 <$navigator story="$:/StoryList" history="$:/HistoryList" openLinkFromInsideRiver={{$:/config/Navigation/openLinkFromInsideRiver}} openLinkFromOutsideRiver={{$:/config/Navigation/openLinkFromOutsideRiver}} relinkOnRename={{$:/config/RelinkOnRename}}>
 
 <main class="tw-whiteboard-layout-main-area">
@@ -160,6 +165,7 @@ tc-page-container tc-page-view-$(storyviewTitle)$ tc-language-$(languageTitle)$ 
 	<span class="lithic-wb-save-btn">{{$:/core/ui/Buttons/save-wiki}}</span>
 </nav>
 
+{{$:/plugins/tobibeer/preview/popups}}
 </$navigator>
 
 </div>

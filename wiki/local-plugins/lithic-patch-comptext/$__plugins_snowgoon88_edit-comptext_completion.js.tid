@@ -211,7 +211,8 @@ TODO : CHECK if needed
 			{ name: "input", handlerObject: this, handlerMethod: "handleInput" },
 			{ name: "keydown", handlerObject: this, handlerMethod: "handleKeydown" },
 			{ name: "keypress", handlerObject: this, handlerMethod: "handleKeypress" },
-			{ name: "keyup", handlerObject: this, handlerMethod: "handleKeyup" }
+			{ name: "keyup", handlerObject: this, handlerMethod: "handleKeyup" },
+			{ name: "blur", handlerObject: this, handlerMethod: "handleBlur" }
 		]);
 
 		/** * Find the bestMatches among listChoice with given pattern
@@ -288,6 +289,7 @@ TODO : CHECK if needed
 		};
 		// Should not be used, highlights specific item without any checks!
 		this._goto = function (node, idx) {
+			var self = this;
 			var lis = node.children;
 			var selected = this._idxChoice > -1;
 			if (selected) {
@@ -296,8 +298,66 @@ TODO : CHECK if needed
 
 			this._idxChoice = idx;
 
+			if (this.previewTimeout) {
+				clearTimeout(this.previewTimeout);
+				this.previewTimeout = null;
+			}
+
+			var popupInfo = $tw.popup.popupInfo(node);
+			var targetLevel = (popupInfo ? popupInfo.popupLevel : 0) + 1;
+
+			if (idx === -1) {
+				$tw.popup.cancel(targetLevel);
+			}
+
 			if (idx > -1 && lis.length > 0) {
-				lis[idx].setAttribute("patt-selected", "true");
+				var targetNode = lis[idx];
+				targetNode.setAttribute("patt-selected", "true");
+
+				var item = this._bestMatches[idx];
+				if (item && item.title) {
+					var titleToPreview = item.title;
+					var wiki = this._widget.wiki;
+					var delayStr = wiki.getTextReference("$:/plugins/tobibeer/preview/defaults/delay");
+					var delay = parseInt(delayStr);
+					if (isNaN(delay)) delay = 500;
+
+					this.previewTimeout = setTimeout(function() {
+						$tw.utils.addClass(targetNode, "tc-popup-handle");
+						$tw.utils.addClass(targetNode, "tc-popup-absolute");
+						
+						var u = "$:/temp/tobibeer/preview-";
+						var popupTitle = u + targetLevel;
+						wiki.setText(popupTitle + "-tiddler", "text", null, titleToPreview);
+						
+						if ($tw.popup.findPopup(popupTitle) === -1) {
+							$tw.popup.triggerPopup({
+								domNode: targetNode,
+								title: popupTitle,
+								wiki: wiki
+							});
+						}
+
+						// Custom positioning for autocomplete dropdowns: to the right of the dropdown box
+						var getAbsoluteCoords = function(el) {
+							var left = 0, top = 0, e = el;
+							do {
+								left += e.offsetLeft || 0;
+								top += e.offsetTop || 0;
+								e = e.offsetParent;
+							} while (e);
+							return { left: left, top: top };
+						};
+						var dropdownCoords = getAbsoluteCoords(self._popNode);
+						var itemCoords = getAbsoluteCoords(targetNode);
+						
+						// Always position to the right of the dropdown + 5px gap
+						var desiredLeft = dropdownCoords.left + self._popNode.offsetWidth + 5;
+						var desiredTop = itemCoords.top;
+						
+						wiki.setTextReference(popupTitle, "(" + desiredLeft + "," + desiredTop + ",0,0)");
+					}, delay);
+				}
 			}
 		};
 		/**
@@ -309,6 +369,16 @@ TODO : CHECK if needed
 			this._idxChoice = -1;
 			this._undisplay(displayNode);
 			this._template = undefined;
+
+			if (this.previewTimeout) {
+				clearTimeout(this.previewTimeout);
+				this.previewTimeout = null;
+			}
+			var popupInfo = $tw.popup.popupInfo(displayNode);
+			if (popupInfo) {
+				var targetLevel = popupInfo.popupLevel + 1;
+				$tw.popup.cancel(targetLevel);
+			}
 		};
 		/**
 		 * Display popupNode at the cursor position in areaNode.
@@ -850,6 +920,19 @@ TODO : CHECK if needed
 		return element;
 	};
 
+
+	/**
+	 * Handle blur events to clean up popups when clicking away or when widget is unmounted
+	 */
+	Completion.prototype.handleBlur = function (event) {
+		var self = this;
+		// Delay slightly to allow actual item clicks to be processed before the popup is aborted
+		setTimeout(function() {
+			if (self._state !== "VOID") {
+				self._abortPattern(self._popNode);
+			}
+		}, 150);
+	};
 
 	exports.Completion = Completion;
 

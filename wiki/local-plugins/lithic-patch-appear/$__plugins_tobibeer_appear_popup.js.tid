@@ -57,4 +57,14 @@ t.prototype.show = function(options) {
 t.prototype.popupInfo=function(t){var e,s=false,p=t;while(p&&e===undefined){if($tw.utils.hasClass(p,"tc-popup-handle")||$tw.utils.hasClass(p,"tc-popup-keep")){s=true}if($tw.utils.hasClass(p,"tc-reveal")&&($tw.utils.hasClass(p,"tc-popup")||$tw.utils.hasClass(p,"tc-popup-handle"))){e=parseInt(p.style.zIndex)-1e3}p=p.parentNode}var o={popupLevel:e||0,isHandle:s};return o};
 t.prototype.handleEvent=function(t){if(t.type==="click"){var e=this.popupInfo(t.target),s=e.popupLevel-1;if(e.isHandle){if(s<0){s=1}else{s++}}this.cancel(s)}};
 e.prototype.refresh=function(){var t,e,p=this.isOpen;e=s.apply(this,arguments);t=this.domNodes[0];if(this.isOpen&&(p!==this.isOpen||!t.style.zIndex)&&t&&(this.type==="popup"||$tw.utils.hasClass(t,"tc-block-dropdown")&&$tw.utils.hasClass(t,"tc-reveal"))){t.style.zIndex=1e3+$tw.popup.popups.length}return e}
+
+if (typeof document !== "undefined" && !document.hasAppearEscListener) {
+    document.hasAppearEscListener = true;
+    document.addEventListener("keydown", function(e) {
+        if (e.key === "Escape" || e.keyCode === 27) {
+            $tw.popup.cancel(0);
+        }
+    }, true); // useCapture=true ensures it runs before child elements can stopPropagation
+}
+
 })();

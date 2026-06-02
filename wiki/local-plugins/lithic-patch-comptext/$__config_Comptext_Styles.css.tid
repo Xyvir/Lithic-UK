@@ -1,0 +1,12 @@
+title: $:/config/Comptext/Styles.css
+tags: $:/tags/Stylesheet
+/* Fix for preview tooltips hiding behind high z-index elements like the whiteboard canvas */
+.tc-popup.tc-preview-tiddler {
+    z-index: 9999999 !important;
+}
+
+/* Force comptext dropdown to use a monospace font to match the unieditor */
+.tc-block-dropdown.ect-block-dropdown,
+.tc-block-dropdown.ect-block-dropdown * {
+    font-family: SFMono-Regular, Consolas, "Liberation Mono", Menlo, Courier, monospace !important;
+}

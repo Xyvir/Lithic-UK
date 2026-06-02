@@ -1,0 +1,8 @@
+title: $:/plugins/snowgoon88/edit-comptext/preview-fix.css
+tags: $:/tags/Stylesheet
+type: text/css
+
+/* Fix for preview tooltips hiding behind high z-index elements like the whiteboard canvas */
+.tc-popup.tc-preview-tiddler {
+    z-index: 9999999 !important;
+}
