@@ -1,0 +1,122 @@
+title: $:/Lithic/Patches/Whiteboard/ActionDispatchPaste.js
+type: application/javascript
+module-type: widget
+
+/*\
+title: $:/Lithic/Patches/Whiteboard/ActionDispatchPaste.js
+type: application/javascript
+module-type: widget
+
+Action widget to dispatch a synthetic paste event containing the comptext input to Tldraw.
+\*/
+(function(){
+"use strict";
+
+var Widget = require("$:/core/modules/widgets/widget.js").widget;
+
+var ActionDispatchPaste = function(parseTreeNode,options) {
+    this.initialise(parseTreeNode,options);
+};
+
+ActionDispatchPaste.prototype = new Widget();
+
+ActionDispatchPaste.prototype.render = function(parent,nextSibling) {
+    this.computeAttributes();
+    this.execute();
+};
+
+ActionDispatchPaste.prototype.execute = function() {
+    this.tiddlerName = this.getAttribute("tiddler", "$:/temp/whiteboard-comptext-input");
+    this.boardStateTiddler = "$:/state/Whiteboard/PageLayout/tiddler";
+};
+
+ActionDispatchPaste.prototype.refresh = function(changedTiddlers) {
+    var changedAttributes = this.computeAttributes();
+    if(changedAttributes.tiddler) {
+        this.refreshSelf();
+        return true;
+    }
+    return this.refreshChildren(changedTiddlers);
+};
+
+// Generates a random UUID v4
+function generateUUID() {
+    return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {
+        var r = Math.random() * 16 | 0, v = c === 'x' ? r : (r & 0x3 | 0x8);
+        return v.toString(16);
+    });
+}
+
+ActionDispatchPaste.prototype.invokeAction = function(triggeringWidget,event) {
+    var text = $tw.wiki.getTiddlerText(this.tiddlerName);
+    if (!text) return true; // nothing to paste
+
+    // Determine which whiteboard is currently active
+    var currentBoard = $tw.wiki.getTiddlerText(this.boardStateTiddler);
+    if (!currentBoard) {
+        // Fallback to the first whiteboard modified
+        var tiddlers = $tw.wiki.filterTiddlers("[all[shadows+tiddlers]field:type[application/tldr]!prefix[$:/temp]sort[modified]first[]]");
+        if (tiddlers.length > 0) currentBoard = tiddlers[0];
+    }
+    
+    if (!currentBoard) return true;
+
+    var boardText = $tw.wiki.getTiddlerText(currentBoard);
+    if (!boardText) return true;
+
+    try {
+        var data = JSON.parse(boardText);
+        var page = data.document.pages.page;
+        
+        // Find the highest childIndex
+        var maxIndex = 0;
+        for (var shapeId in page.shapes) {
+            var shape = page.shapes[shapeId];
+            if (shape.childIndex > maxIndex) maxIndex = shape.childIndex;
+        }
+
+        var newShapeId = generateUUID();
+        
+        // Create the new sticky note
+        var newShape = {
+            id: newShapeId,
+            type: "sticky",
+            name: "Sticky",
+            parentId: "page",
+            childIndex: maxIndex + 1,
+            point: [200, 200], // We can spawn it top-left or try to center it
+            size: [300, 300],
+            text: text,
+            rotation: 0,
+            style: {
+                color: "black",
+                size: "small",
+                isFilled: false,
+                dash: "draw",
+                scale: 1,
+                font: "sans",
+                textAlign: "middle"
+            }
+        };
+
+        // Center it around the camera if possible
+        if (data.pageStates && data.pageStates.page && data.pageStates.page.camera) {
+            var cam = data.pageStates.page.camera.point;
+            newShape.point = [-(cam[0]) + 300, -(cam[1]) + 300];
+        }
+
+        page.shapes[newShapeId] = newShape;
+
+        // Write it back to the tiddler
+        $tw.wiki.setText(currentBoard, "text", null, JSON.stringify(data));
+
+    } catch(e) {
+        console.error("Failed to inject shape into whiteboard JSON", e);
+    }
+
+    return true; // Action was invoked
+};
+
+exports["action-dispatch-paste"] = ActionDispatchPaste;
+
+})();

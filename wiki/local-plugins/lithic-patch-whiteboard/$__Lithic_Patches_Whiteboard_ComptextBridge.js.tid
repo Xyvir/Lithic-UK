@@ -1,0 +1,71 @@
+title: $:/Lithic/Patches/Whiteboard/ComptextBridge.js
+type: application/javascript
+module-type: startup
+
+/*\
+title: $:/Lithic/Patches/Whiteboard/ComptextBridge.js
+type: application/javascript
+module-type: startup
+
+Listens for hotkeys (/, [, {) to trigger the floating Comptext UI in the whiteboard.
+\*/
+(function () {
+    "use strict";
+
+    exports.name = "lithic-whiteboard-comptext-bridge";
+    exports.platforms = ["browser"];
+    exports.after = ["startup"];
+    exports.synchronous = true;
+
+    exports.startup = function () {
+        if (typeof window === "undefined" || typeof $tw === "undefined") return;
+
+        window.addEventListener('keydown', function(event) {
+            // Check if we are in the whiteboard
+            var whiteboardContainer = document.querySelector('.tw-whiteboard-layout-container');
+            if (!whiteboardContainer) return;
+
+            // Do not trigger if a modal or popup is already open
+            var isPopupOpen = $tw.wiki.getTiddlerText("$:/state/Whiteboard/ComptextPopup") === "open";
+            if (isPopupOpen) return;
+
+            // Check if the user is typing in an input field or contenteditable (e.g. existing sticky note)
+            var active = document.activeElement;
+            if (active) {
+                var tag = active.tagName.toUpperCase();
+                if (tag === 'INPUT' || tag === 'TEXTAREA' || active.isContentEditable) {
+                    return;
+                }
+            }
+
+            // Detect hotkeys
+            var key = event.key;
+            if (key === '/' || key === '[' || key === '{') {
+                // Prevent default Tldraw behaviors or scrolling
+                event.preventDefault();
+                event.stopPropagation();
+
+                var prefill = key;
+                if (key === '[') prefill = '[[';
+                if (key === '{') prefill = '{{';
+
+                // Set the temporary text
+                $tw.wiki.setText("$:/temp/whiteboard-comptext-input", "text", null, prefill);
+                
+                // Open the popup
+                $tw.wiki.setText("$:/state/Whiteboard/ComptextPopup", "text", null, "open");
+
+                // We need to focus the edit-text widget. We can do it by waiting for the DOM to update.
+                setTimeout(function() {
+                    var input = document.querySelector('.lithic-floating-comptext-input');
+                    if (input) {
+                        input.focus();
+                        // Move cursor to the end
+                        input.setSelectionRange(prefill.length, prefill.length);
+                    }
+                }, 100);
+            }
+        }, true); // Use capture phase so Tldraw doesn't swallow it first!
+    };
+
+})();

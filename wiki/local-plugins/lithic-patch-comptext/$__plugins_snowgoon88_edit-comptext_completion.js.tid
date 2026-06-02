@@ -526,7 +526,32 @@ TODO : CHECK if needed
 					// save this new content
 					this._widget.saveChanges(this._areaNode.value);
 				}
+				// otherwise take the first choice (if exists)
+				else if (this._bestMatches.length > 0) {
+					//DEBUG console.log( "   > take first one" );
+					var temp = this._bestMatches[0];
+					var str = temp.str;
+					// if str is "<hr>" or "...", abort
+					if (str === "<hr>" || str === "...") {
+						this._abortPattern(this._popNode);
+						this._areaNode.focus();
+						return;
+					}
+					if (this._template.field === "body") {
+						str = $tw.wiki.getTiddlerText(temp.title);
+					}
+					insertInto(this._areaNode,
+						str,
+						pattern.start, curPos, this._template, temp.title);
+					// save this new content
+					this._widget.saveChanges(this._areaNode.value);
+				}
 				this._abortPattern(this._popNode);
+				
+				// JANE FIX: Immediately trigger the outer keyboard widget to spawn the sticky!
+				if (this._areaNode.classList.contains("lithic-floating-comptext-input")) {
+					this._areaNode.dispatchEvent(new KeyboardEvent('keydown', {key: 'Enter', keyCode: 13, bubbles: true}));
+				}
 				//DEBUG this._logStatus( "" );
 			}
 			else if (key === 38 && this._hasInput === false) { // up
@@ -652,6 +677,11 @@ TODO : CHECK if needed
 		this._widget.saveChanges(this._areaNode.value);
 		this._abortPattern(this._popNode);
 		this._areaNode.focus();
+
+		// JANE FIX: Immediately trigger the outer keyboard widget to spawn the sticky!
+		if (this._areaNode.classList.contains("lithic-floating-comptext-input")) {
+			this._areaNode.dispatchEvent(new KeyboardEvent('keydown', {key: 'Enter', keyCode: 13, bubbles: true}));
+		}
 		//DEBUG this._logStatus( "" );
 	}
 	// **************************************************************************
