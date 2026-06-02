@@ -41,8 +41,10 @@ type: text/css
     display: none !important;
 }
 
-/* Per-whiteboard transparent stickies toggle */
-.lithic-transparent-stickies [data-shape="sticky"] .c-gLGcPs {
+
+
+/* Comptext injected stickies are ALWAYS transparent (targeted via 'c001' UUID suffix) */
+div[id$="c001"][data-shape="sticky"] .c-gLGcPs {
     background-color: transparent !important;
     text-shadow: none !important;
     box-shadow: none !important;

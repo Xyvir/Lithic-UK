@@ -39,12 +39,13 @@ ActionDispatchPaste.prototype.refresh = function(changedTiddlers) {
     return this.refreshChildren(changedTiddlers);
 };
 
-// Generates a random UUID v4
+// Generates a random UUID v4 ending with 'c001' so we can target it via CSS
 function generateUUID() {
-    return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {
+    var base = 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxc001'.replace(/[xy]/g, function(c) {
         var r = Math.random() * 16 | 0, v = c === 'x' ? r : (r & 0x3 | 0x8);
         return v.toString(16);
     });
+    return base;
 }
 
 ActionDispatchPaste.prototype.invokeAction = function(triggeringWidget,event) {

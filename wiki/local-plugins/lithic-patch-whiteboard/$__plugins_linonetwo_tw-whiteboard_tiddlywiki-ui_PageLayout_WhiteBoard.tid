@@ -22,8 +22,7 @@ tc-page-container tc-page-view-$(storyviewTitle)$ tc-language-$(languageTitle)$ 
 
 <$navigator story="$:/StoryList" history="$:/HistoryList" openLinkFromInsideRiver={{$:/config/Navigation/openLinkFromInsideRiver}} openLinkFromOutsideRiver={{$:/config/Navigation/openLinkFromOutsideRiver}} relinkOnRename={{$:/config/RelinkOnRename}}>
 
-<$vars transparentClass={{{ [<currentBoard>get[transparent-stickies]match[yes]then[lithic-transparent-stickies]] }}}>
-<main class={{{ [[tw-whiteboard-layout-main-area ]addsuffix<transparentClass>] }}}>
+<main class="tw-whiteboard-layout-main-area">
 	<$reveal state="$:/state/Whiteboard/PageLayout/tiddler" type="nomatch" text="">
 		<$whiteboard tiddler={{$:/state/Whiteboard/PageLayout/tiddler}} height="100vh" />
 	</$reveal>
@@ -61,12 +60,7 @@ tc-page-container tc-page-view-$(storyviewTitle)$ tc-language-$(languageTitle)$ 
 	<!-- Searchable combobox replacing standard select -->
 	<span style="position:relative; display:inline-flex; align-items:center;" onmousedown="event.stopPropagation();" onpointerdown="event.stopPropagation();" onclick="event.stopPropagation();">
 		
-		<!-- See-thru stickies per-whiteboard toggle -->
-		<span style="position:absolute; top: 4px; right: 100%; margin-right: 15px; white-space: nowrap; color: <<colour foreground>>; font-size: 0.85em; font-family: sans-serif; display: flex; align-items: center;">
-			<$checkbox tiddler=<<currentBoard>> field="transparent-stickies" checked="yes" unchecked="no" default="no">
-				<span style="margin-left: 5px; cursor: pointer; user-select: none;">see thru stickies</span>
-			</$checkbox>
-		</span>
+
 
 		<$let
 			searchState="$:/state/Whiteboard/PageLayout/search"
