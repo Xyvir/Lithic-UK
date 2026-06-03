@@ -44,13 +44,13 @@ Run this inside a Debian/Ubuntu LXC container. You have two options:
 **Option 1: Interactive Setup**
 This will prompt you for your backend choice (Caddy/Lighttpd), FQDN, and credentials. If you leave the password blank, a secure one will be auto-generated for you.
 ```bash
-sudo bash -c "$(curl -fsSL https://raw.githubusercontent.com/Xyvir/Lithic/main/deploy/install-lxc.sh)"
+sudo bash -c "$(curl -fsSL sh.lithic.uk)"
 ```
 
 **Option 2: Fully Automated Setup**
 Bypass the prompts by providing the variables inline. This will automatically set up Caddy, request an SSL certificate for your domain, auto-generate a secure password, and optionally enable daily automatic updates out of the box by setting `LITHIC_AUTOUPDATE=true`.
 ```bash
-curl -fsSL https://raw.githubusercontent.com/Xyvir/Lithic/main/deploy/install-lxc.sh | sudo SERVER_BACKEND=caddy LITHIC_FQDN=lithic.example.com LITHIC_USER=your_username LITHIC_AUTOUPDATE=true bash
+curl -fsSL sh.lithic.uk | sudo SERVER_BACKEND=caddy LITHIC_FQDN=lithic.example.com LITHIC_USER=your_username LITHIC_AUTOUPDATE=true bash
 ```
 
 ### Method D: Manual Install
@@ -167,7 +167,7 @@ docker stop lithic && docker rm lithic
 ### LXC
 Server-internal updates (e.g., updating Caddy/Lighttpd binaries, systemd configs, and backend wrappers) are intentionally manual. To pull the latest server version onto an existing deployment, simply re-run the installer (it will safely preserve your `/etc/default/lithic` configuration):
 ```bash
-curl -fsSL https://raw.githubusercontent.com/Xyvir/Lithic/main/deploy/install-lxc.sh | bash
+curl -fsSL sh.lithic.uk | bash
 ```
 
 ### Automatic Updates (LXC)
