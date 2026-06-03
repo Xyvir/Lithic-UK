@@ -167,7 +167,7 @@ docker stop lithic && docker rm lithic
 ### LXC
 Server-internal updates (e.g., updating Caddy/Lighttpd binaries, systemd configs, and backend wrappers) are intentionally manual. To pull the latest server version onto an existing deployment, simply re-run the installer (it will safely preserve your `/etc/default/lithic` configuration):
 ```bash
-curl -fsSL sh.lithic.uk | bash
+curl -fsSL sh.lithic.uk | sudo bash
 ```
 
 ### Automatic Updates (LXC)
