@@ -1,0 +1,89 @@
+title: $:/Lithic/startup/mobile-pwa-back-handler.js
+type: application/javascript
+module-type: startup
+
+/*\
+title: $:/Lithic/startup/mobile-pwa-back-handler.js
+type: application/javascript
+module-type: startup
+
+Intercepts the Android PWA back swipe when the wiki is dirty, showing a confirm dialog instead of bypassing the beforeunload event.
+\*/
+(function(){
+"use strict";
+
+exports.name = "mobile-pwa-back-handler";
+exports.platforms = ["browser"];
+exports.after = ["startup"];
+exports.synchronous = true;
+
+exports.startup = function() {
+    if(typeof window !== "undefined" && window.history && window.history.pushState) {
+        
+        // Ensure this only activates if we match PWA conditions or mobile conditions. 
+        // We'll activate it generally for standalone/fullscreen, as mobile browsers will handle beforeunload anyway.
+        var isPwa = window.matchMedia('(display-mode: standalone)').matches || 
+                    window.matchMedia('(display-mode: fullscreen)').matches || 
+                    window.navigator.standalone;
+
+        var isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
+
+        if (isPwa && isMobile) {
+            var hasPushedState = false;
+
+            // Check if wiki is dirty based on TW's own SaverFilter
+            var checkDirty = function() {
+                var filter = $tw.wiki.getTiddlerText("$:/config/SaverFilter", "[is[tiddler]] -[prefix[$:/info/]] -[prefix[$:/temp/]] -[prefix[$:/state/]] -[prefix[$:/status/]] -[prefix[$:/HistoryList]] -[prefix[$:/StoryList]] -[[favicon.ico]]");
+                var dirtyTiddlers = $tw.wiki.filterTiddlers(filter);
+                return dirtyTiddlers.length > 0;
+            };
+
+            var updateHistoryState = function() {
+                var currentlyDirty = checkDirty();
+                
+                if (currentlyDirty && !hasPushedState) {
+                    // Push a dummy state so the first back press triggers popstate instead of exit
+                    history.pushState({lithic_dirty_lock: true}, "", location.href);
+                    hasPushedState = true;
+                } else if (!currentlyDirty && hasPushedState) {
+                    // If the wiki becomes clean, we could technically pop the state, 
+                    // but it's tricky if they've navigated. For now, leave the state and handle in popstate.
+                    // Or we could try history.back() but that might disrupt normal navigation.
+                }
+            };
+
+            // Listen to wiki changes to update our dummy history state
+            $tw.wiki.addEventListener("change", function(changes) {
+                updateHistoryState();
+            });
+
+            // Handle the back button (which pops the state)
+            window.addEventListener("popstate", function(event) {
+                // If popstate fires, it means the state was popped.
+                // We assume our pushed state is gone. We reset the flag.
+                // Note: event.state is the state we are navigating TO.
+                hasPushedState = false;
+
+                if (checkDirty()) {
+                    var confirmMsg = $tw.language.getString("Notifications/Save/UnsavedChanges", {fallback: "You have unsaved changes. Are you sure you want to leave?"});
+                    if (confirm(confirmMsg)) {
+                        // User wants to leave, let them exit by going back again
+                        window.history.back();
+                    } else {
+                        // User wants to stay, push the state again
+                        history.pushState({lithic_dirty_lock: true}, "", location.href);
+                        hasPushedState = true;
+                    }
+                } else {
+                    // Not dirty, allow exit
+                    window.history.back();
+                }
+            });
+            
+            // Initial check just in case it loads dirty
+            updateHistoryState();
+        }
+    }
+};
+
+})();
