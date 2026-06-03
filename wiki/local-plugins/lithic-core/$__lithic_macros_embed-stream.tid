@@ -2,25 +2,25 @@ tags: $:/tags/Global
 title: $:/lithic/macros/embed-stream
 type: text/vnd.tiddlywiki
 
-\procedure .stream-recurse()
-<ul>
+\procedure .stream-recurse(line-spacing:"1", hide-bullets:"no")
+<ul style={{{ [<hide-bullets>match[yes]then[list-style-type: none;]] }}}>
   <$list filter="[enlist{!!stream-list}]">
-    <li>
+    <li style={{{ [[margin-bottom:]] [<line-spacing>] [[em;]] +[join[]] }}}>
       {{||$:/plugins/sq/streams/templates/stream-row-body}}
-      <<.stream-recurse>>
+      <$macrocall $name=".stream-recurse" line-spacing=<<line-spacing>> hide-bullets=<<hide-bullets>> />
     </li>
   </$list>
 </ul>
 \end
 
-\procedure embed-stream(parent)
+\procedure embed-stream(parent, line-spacing:"1", hide-bullets:"no")
 <$let
   left="[["
   right="]]"
   clean={{{ [<parent>removeprefix<left>removesuffix<right>] ~[<parent>] }}}
 >
 <$tiddler tiddler=<<clean>>>
-  <<.stream-recurse>>
+  <$macrocall $name=".stream-recurse" line-spacing=<<line-spacing>> hide-bullets=<<hide-bullets>> />
 </$tiddler>
 </$let>
 \end

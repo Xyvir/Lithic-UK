@@ -84,7 +84,18 @@ run_update() {
     done
 
     if [ "$updated" -eq 1 ]; then
-        echo "[Autoupdate] Updates applied successfully."
+        echo "[Autoupdate] Bumping local manifest version to invalidate client cache..."
+        NEW_VERSION="autoupdate-$(date +%s)"
+        
+        if [ -f "${PUBLIC_DIR}/manifest.json" ]; then
+            sed -i -E 's/"version": "[^"]+"/"version": "'"$NEW_VERSION"'"/' "${PUBLIC_DIR}/manifest.json"
+        fi
+        
+        if [ -f "${PUBLIC_DIR}/offline-service-worker.js" ]; then
+            sed -i -E "s/const VERSION = '[^']+';/const VERSION = '$NEW_VERSION';/" "${PUBLIC_DIR}/offline-service-worker.js"
+        fi
+
+        echo "[Autoupdate] Updates applied successfully. Manifest version bumped to $NEW_VERSION."
     else
         echo "[Autoupdate] All files are up to date."
     fi

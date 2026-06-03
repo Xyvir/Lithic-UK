@@ -2,4 +2,4 @@ caret-pos: 17
 tags: 
 title: $:/lithic/slashcommands/embed-stream
 
-<<embed-stream [[]]>>
+<<embed-stream [[]] line-spacing:"1" hide-bullets:"no">>
