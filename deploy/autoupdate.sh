@@ -52,11 +52,11 @@ run_update() {
     trap 'rm -rf "$TEMP_DIR"' EXIT
 
     # Fetch latest launcher.html and lithic.html
-    if ! curl -fsSL "https://raw.githubusercontent.com/${REPO}/${BRANCH}/src/launcher.html" -o "$TEMP_DIR/launcher.html"; then
+    if ! curl -fsSL "https://raw.githubusercontent.com/${REPO}/${BRANCH}/src/launcher.html?t=$(date +%s)" -o "$TEMP_DIR/launcher.html"; then
         echo "[Autoupdate] ERROR: Failed to download launcher.html"
         exit 1
     fi
-    if ! curl -fsSL "https://raw.githubusercontent.com/${REPO}/${BRANCH}/src/lithic.html" -o "$TEMP_DIR/lithic.html"; then
+    if ! curl -fsSL "https://raw.githubusercontent.com/${REPO}/${BRANCH}/src/lithic.html?t=$(date +%s)" -o "$TEMP_DIR/lithic.html"; then
         echo "[Autoupdate] ERROR: Failed to download lithic.html"
         exit 1
     fi
@@ -146,8 +146,8 @@ show_status() {
         TEMP_DIR=$(mktemp -d)
         trap 'rm -rf "$TEMP_DIR"' EXIT
         
-        if curl -fsSL "https://raw.githubusercontent.com/${REPO}/${BRANCH}/src/launcher.html" -o "$TEMP_DIR/launcher.html" 2>/dev/null && \
-           curl -fsSL "https://raw.githubusercontent.com/${REPO}/${BRANCH}/src/lithic.html" -o "$TEMP_DIR/lithic.html" 2>/dev/null; then
+        if curl -fsSL "https://raw.githubusercontent.com/${REPO}/${BRANCH}/src/launcher.html?t=$(date +%s)" -o "$TEMP_DIR/launcher.html" 2>/dev/null && \
+           curl -fsSL "https://raw.githubusercontent.com/${REPO}/${BRANCH}/src/lithic.html?t=$(date +%s)" -o "$TEMP_DIR/lithic.html" 2>/dev/null; then
             for file_name in "launcher.html" "lithic.html"; do
                 local_file="${PUBLIC_DIR}/src/${file_name}"
                 remote_file="${TEMP_DIR}/${file_name}"
