@@ -65,7 +65,10 @@ exports.startup = function() {
                 hasPushedState = false;
 
                 if (checkDirty()) {
-                    var confirmMsg = $tw.language.getString("Notifications/Save/UnsavedChanges", {fallback: "You have unsaved changes. Are you sure you want to leave?"});
+                    var confirmMsg = $tw.language.getString("Notifications/Save/UnsavedChanges");
+                    if (!confirmMsg) {
+                        confirmMsg = "You have unsaved changes. Are you sure you want to leave?";
+                    }
                     if (confirm(confirmMsg)) {
                         // User wants to leave, let them exit by going back again
                         window.history.back();
