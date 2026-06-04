@@ -26,9 +26,9 @@ exports.startup = function() {
                     window.matchMedia('(display-mode: fullscreen)').matches || 
                     window.navigator.standalone;
 
-        var isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
+        var isAndroid = /Android/i.test(navigator.userAgent);
 
-        if (isPwa && isMobile) {
+        if (isPwa && isAndroid) {
             var hasPushedState = false;
 
             // Check if wiki is dirty based on TW's own SaverFilter
