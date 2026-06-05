@@ -194,7 +194,7 @@ Starts up the wikitext highlighter
                 contains: [ { begin: '\'\'' } ]
               },
               {
-                begin: /\\]|\\}|\\)/,
+                begin: /\]|\}|\)/,
                 relevance: 0,
                 starts: TRANSPOSE
               },
