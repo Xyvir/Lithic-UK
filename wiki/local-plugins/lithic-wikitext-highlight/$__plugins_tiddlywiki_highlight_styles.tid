@@ -18,6 +18,8 @@ type: text/vnd.tiddlywiki
     font-weight: bold;
 }/* STRINGS & LITERALS: External Link Color (Usually distinct from body text) */.hljs-string,.hljs-meta .hljs-string,.hljs-literal,.hljs-doctag,.hljs-regexp {
     color: <<colour external-link-foreground-visited>>;
+}/* NUMBERS */.hljs-number {
+    color: <<colour primary>>;
 }/* TITLES & SECTIONS: Tiddler Title Color */.hljs-title,.hljs-section,.hljs-name,.hljs-selector-id,.hljs-selector-class {
     color: <<colour code-foreground>>;
     font-weight: bold;
