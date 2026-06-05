@@ -182,8 +182,30 @@ Starts up the wikitext highlighter
                 relevance: 0
               },
               {
-                className: 'type',
-                begin: /[\[\]]/,
+                className: 'symbol',
+                begin: /\[/,
+                end: /\]/,
+                contains: [
+                  'self',
+                  {
+                    className: 'number',
+                    begin: /(-?)(\b0[xX][a-fA-F0-9]+|(\b\d+(\.\d*)?|\.\d+)([eE][-+]?\d+)?)/,
+                    relevance: 0,
+                    starts: TRANSPOSE
+                  },
+                  {
+                    className: 'string',
+                    begin: '\'',
+                    end: '\'',
+                    contains: [ { begin: '\'\'' } ]
+                  },
+                  {
+                    className: 'string',
+                    begin: '"',
+                    end: '"',
+                    contains: [ { begin: '""' } ]
+                  }
+                ],
                 relevance: 0
               },
               {
