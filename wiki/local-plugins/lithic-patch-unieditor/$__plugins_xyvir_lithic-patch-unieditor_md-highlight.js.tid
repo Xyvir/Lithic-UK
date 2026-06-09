@@ -196,12 +196,7 @@ function highlight(code) {
 			continue;
 		}
 
-		// Blockquote
-		if (/^>\s/.test(line)) {
-			var content = parseInline(escaped.substring(2));
-			result.push('<span class="md-blockquote">' + m(escaped.substring(0, 2)) + content + '</span>');
-			continue;
-		}
+
 
 		// Horizontal rule
 		if (/^(-{3,}|\*{3,}|_{3,})\s*$/.test(line)) {

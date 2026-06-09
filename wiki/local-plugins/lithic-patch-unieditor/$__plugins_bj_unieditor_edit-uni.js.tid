@@ -171,6 +171,9 @@ uniEditorWidget.prototype.render = function(parent,nextSibling) {
 	// After the uniEditor instance is created, find the textarea and attach CompText
 	var textarea = this.domNode.querySelector('textarea');
 	if (textarea) {
+		// Enable native spellcheck
+		textarea.setAttribute("spellcheck", "true");
+
 		// Streams Caret Positioning
 		var shouldFocus = self.getAttribute("focus") === "yes";
 		var caretState = self.wiki.getTiddlerText("$:/state/sq/streams/caret-position");
