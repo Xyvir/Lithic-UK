@@ -3,7 +3,8 @@
 
 <head>
   <title>Lithic - Launcher</title>
-  <meta name="description" content="A portability-first outliner knowledgebase tailored for modern academic and engineering workflows.">
+  <meta name="description"
+    content="A portability-first outliner knowledgebase tailored for modern academic and engineering workflows.">
   <meta name="robots" content="index, follow">
 
   <script>
@@ -454,7 +455,8 @@
         font-size: 1.4rem;
       }
 
-      h1 img, .fallback-icon {
+      h1 img,
+      .fallback-icon {
         margin-right: 8px;
       }
 
@@ -565,26 +567,40 @@
       cursor: pointer !important;
       transition: transform 0.2s, filter 0.2s;
     }
+
     .emoji-icon-trigger:hover {
       transform: scale(1.08);
       filter: brightness(1.3);
     }
+
     #emoji-picker-modal .modal-content {
       max-width: 520px;
       text-align: left;
     }
-    #emoji-picker-modal h2 { margin-bottom: 4px; color: var(--text-color); }
+
+    #emoji-picker-modal h2 {
+      margin-bottom: 4px;
+      color: var(--text-color);
+    }
+
     .emoji-picker-preview {
       display: flex;
       align-items: center;
       gap: 14px;
-      background: rgba(255,255,255,0.03);
+      background: rgba(255, 255, 255, 0.03);
       border: 1px solid var(--border-color);
       border-radius: 8px;
       padding: 10px 14px;
       margin-bottom: 14px;
     }
-    .emoji-preview-large { font-size: 2.8rem; line-height: 1; min-width: 48px; text-align: center; }
+
+    .emoji-preview-large {
+      font-size: 2.8rem;
+      line-height: 1;
+      min-width: 48px;
+      text-align: center;
+    }
+
     .emoji-category-label {
       font-size: 0.68rem;
       opacity: 0.45;
@@ -592,7 +608,13 @@
       letter-spacing: 0.08em;
       margin: 12px 0 5px;
     }
-    .emoji-grid { display: flex; flex-wrap: wrap; gap: 3px; }
+
+    .emoji-grid {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 3px;
+    }
+
     .emoji-btn {
       font-size: 1.35rem;
       width: 2.15em;
@@ -608,12 +630,40 @@
       justify-content: center;
       transition: background 0.12s, border-color 0.12s;
     }
-    .emoji-btn:hover { background: rgba(255,255,255,0.08); border-color: var(--border-color); }
-    .emoji-btn.selected { background: rgba(138,180,248,0.15); border-color: var(--accent-color); }
-    .emoji-picker-scroll { max-height: 280px; overflow-y: auto; scrollbar-width: thin; scrollbar-color: var(--button-hover) transparent; padding-right: 4px; }
-    .emoji-save-status { font-size: 0.78rem; min-height: 1.3em; margin-top: 8px; text-align: center; opacity: 0.75; }
-    .emoji-save-status.ok { color: #4caf50; }
-    .emoji-save-status.err { color: #ff5252; }
+
+    .emoji-btn:hover {
+      background: rgba(255, 255, 255, 0.08);
+      border-color: var(--border-color);
+    }
+
+    .emoji-btn.selected {
+      background: rgba(138, 180, 248, 0.15);
+      border-color: var(--accent-color);
+    }
+
+    .emoji-picker-scroll {
+      max-height: 280px;
+      overflow-y: auto;
+      scrollbar-width: thin;
+      scrollbar-color: var(--button-hover) transparent;
+      padding-right: 4px;
+    }
+
+    .emoji-save-status {
+      font-size: 0.78rem;
+      min-height: 1.3em;
+      margin-top: 8px;
+      text-align: center;
+      opacity: 0.75;
+    }
+
+    .emoji-save-status.ok {
+      color: #4caf50;
+    }
+
+    .emoji-save-status.err {
+      color: #ff5252;
+    }
 
     .mode-pill {
       font-size: 0.6rem;
@@ -751,7 +801,7 @@
       max-width: 450px;
       width: 90%;
       text-align: center;
-      box-shadow: 0 20px 50px rgba(0,0,0,0.5);
+      box-shadow: 0 20px 50px rgba(0, 0, 0, 0.5);
       position: relative;
     }
 
@@ -846,9 +896,20 @@
     }
 
     @keyframes pulse {
-      0% { transform: scale(1); opacity: 1; }
-      50% { transform: scale(1.1); opacity: 0.7; }
-      100% { transform: scale(1); opacity: 1; }
+      0% {
+        transform: scale(1);
+        opacity: 1;
+      }
+
+      50% {
+        transform: scale(1.1);
+        opacity: 0.7;
+      }
+
+      100% {
+        transform: scale(1);
+        opacity: 1;
+      }
     }
 
     .github-modal-content {
@@ -867,8 +928,11 @@
     /* Loading Spinner */
     .loading-overlay {
       position: fixed;
-      top: 0; left: 0; right: 0; bottom: 0;
-      background: rgba(0,0,0,0.8);
+      top: 0;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      background: rgba(0, 0, 0, 0.8);
       display: none;
       flex-direction: column;
       align-items: center;
@@ -877,8 +941,9 @@
     }
 
     .spinner {
-      width: 40px; height: 40px;
-      border: 4px solid rgba(255,255,255,0.1);
+      width: 40px;
+      height: 40px;
+      border: 4px solid rgba(255, 255, 255, 0.1);
       border-top-color: var(--accent-color);
       border-radius: 50%;
       animation: spin 1s linear infinite;
@@ -886,7 +951,9 @@
     }
 
     @keyframes spin {
-      to { transform: rotate(360deg); }
+      to {
+        transform: rotate(360deg);
+      }
     }
 
     /* Discovery Radio Cards */
@@ -898,7 +965,7 @@
     }
 
     .radio-card {
-      background: rgba(255,255,255,0.03);
+      background: rgba(255, 255, 255, 0.03);
       border: 1px solid var(--border-color);
       padding: 12px;
       border-radius: 8px;
@@ -972,7 +1039,7 @@
       overflow-y: auto;
       z-index: 1100;
       display: none;
-      box-shadow: 0 10px 30px rgba(0,0,0,0.5);
+      box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5);
     }
 
     .search-results.active {
@@ -983,14 +1050,15 @@
       padding: 10px 12px;
       cursor: pointer;
       font-size: 0.9rem;
-      border-bottom: 1px solid rgba(255,255,255,0.05);
+      border-bottom: 1px solid rgba(255, 255, 255, 0.05);
     }
 
     .search-item:last-child {
       border-bottom: none;
     }
 
-    .search-item:hover, .search-item.highlight {
+    .search-item:hover,
+    .search-item.highlight {
       background: rgba(138, 180, 248, 0.1);
       color: var(--accent-color);
     }
@@ -1043,11 +1111,11 @@
     // --- WEBDAV MODE DETECTION ---
     const IS_WEBDAV = ((window.__ORIGINAL_PATH__ || window.location.pathname).startsWith('/sync/'))
       || document.querySelector('meta[name="lithic-webdav"]') !== null
-      || (window.location.protocol.startsWith('http') && 
-          !['localhost', '127.0.0.1'].includes(window.location.hostname) && 
-          !['lithic.uk', 'www.lithic.uk'].includes(window.location.hostname) && 
-          !window.location.hostname.endsWith('github.io') && 
-          !window.__TAURI__);
+      || (window.location.protocol.startsWith('http') &&
+        !['localhost', '127.0.0.1'].includes(window.location.hostname) &&
+        !['lithic.uk', 'www.lithic.uk'].includes(window.location.hostname) &&
+        !window.location.hostname.endsWith('github.io') &&
+        !window.__TAURI__);
 
     /* IDB-KEYVAL & FILE MANAGER LOGIC */
     let idbKeyval = (function (exports) {
@@ -1283,7 +1351,7 @@ exports.startup = function() {
 
     async function fetchCoreEngine() {
       const pathsToTry = ['src/lithic.html', '/src/lithic.html', 'lithic.html', '/lithic.html'];
-      
+
       for (const path of pathsToTry) {
         try {
           const res = await fetch(path);
@@ -1296,7 +1364,27 @@ exports.startup = function() {
         }
       }
 
-      throw new Error("Could not find lithic.html locally. Ensure it is uploaded to the /src/ directory.");
+      // Fallback for local file:// execution where CORS blocks fetch
+      console.log("[Lithic] Local fetch failed (likely CORS). Attempting to fetch core engine from GitHub...");
+      try {
+        const res = await fetch('https://raw.githubusercontent.com/Xyvir/Lithic-UK/refs/heads/main/src/lithic.html');
+        if (res.ok) {
+          const text = await res.text();
+          await idbKeyval.set('cachedOnlineCoreEngine', text);
+          return text;
+        }
+      } catch (e) {
+        console.warn("[Lithic] Failed to fetch from GitHub (offline?).", e);
+      }
+
+      // Fallback to offline cache
+      const cachedEngine = await idbKeyval.get('cachedOnlineCoreEngine');
+      if (cachedEngine) {
+        console.log("[Lithic] Using cached online core engine.");
+        return cachedEngine;
+      }
+
+      throw new Error("Could not find lithic.html locally, could not reach GitHub, and no offline cache found.");
     }
 
     /* --- WEBDAV LOCKING (Presence) --- */
@@ -1331,7 +1419,7 @@ exports.startup = function() {
             method: 'PUT',
             body: JSON.stringify(lockData)
           });
-        } catch (e) {}
+        } catch (e) { }
       };
       await updateLock();
       heartbeatInterval = setInterval(updateLock, 30000);
@@ -1343,10 +1431,10 @@ exports.startup = function() {
         heartbeatInterval = null;
       }
       if (window.currentLockFileName) {
-        fetch(WEBDAV_BASE + encodeURIComponent(window.currentLockFileName) + '.lock', { 
+        fetch(WEBDAV_BASE + encodeURIComponent(window.currentLockFileName) + '.lock', {
           method: 'DELETE',
           keepalive: true
-        }).catch(() => {});
+        }).catch(() => { });
         window.currentLockFileName = null;
       }
     }
@@ -1949,7 +2037,7 @@ exports.startup = function() {
         if (elem) elem.innerHTML = "";
       });
     }
-    window.clearRemoteSearchCache = async function() {
+    window.clearRemoteSearchCache = async function () {
       if (!confirm('Are you sure? This will clear all local search caches and backups for your remote files. The remote files themselves will NOT be affected.')) return;
 
       try {
@@ -1999,6 +2087,78 @@ exports.startup = function() {
       });
     };
 
+    window.openIntro = async function(e) {
+      e.preventDefault();
+      
+      const el = e.currentTarget;
+      const originalHtml = el.innerHTML;
+      el.innerHTML = '...';
+      el.style.pointerEvents = 'none';
+
+      let targetUrl = (window.location.protocol === 'file:') 
+          ? 'https://raw.githubusercontent.com/Xyvir/Lithic-UK/refs/heads/main/intro.lith' 
+          : '/intro.lith';
+
+      try {
+        const res = await fetch(targetUrl);
+        if (res.ok) {
+          const text = await res.text();
+          let parsedData;
+          try {
+            parsedData = JSON.parse(text);
+          } catch(e) {
+            parsedData = parseLithToJSON(text);
+          }
+          
+          if (Array.isArray(parsedData) && parsedData.length > 0) {
+            let node = parsedData[0];
+            node.tags = node.tags ? [...new Set([...(Array.isArray(node.tags) ? node.tags : (typeof node.tags === 'string' ? node.tags.split(' ') : [])), '$:/tags/PayloadURL'])].join(' ') : '$:/tags/PayloadURL';
+            
+            window.pendingImports = window.pendingImports.concat(parsedData);
+            window.openNewBlankLith();
+            
+            el.innerHTML = originalHtml;
+            el.style.pointerEvents = 'auto';
+            return;
+          }
+        }
+      } catch (err) {
+        console.warn("Failed to load intro.lith:", err);
+      }
+
+      // Fallback
+      if (navigator.onLine) {
+        window.open('https://lithic.uk/intro.html', '_blank');
+      } else {
+        alert("Could not load introduction. You appear to be offline and the local intro file is missing.");
+      }
+      
+      el.innerHTML = originalHtml;
+      el.style.pointerEvents = 'auto';
+    };
+
+    window.handleSearchKeydown = function(e, inputElem) {
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        inputElem.value = '';
+        window.handleSearch('');
+        inputElem.focus();
+      } else if (e.key === 'Enter') {
+        e.preventDefault();
+        const listItems = document.querySelectorAll('#recent-files ul li');
+        for (const li of listItems) {
+          if (li.style.display !== 'none') {
+            // Find the main actionable button, ignoring cache/remove utility buttons
+            const btn = li.querySelector('button:not(.cache-icon-btn):not(.remove-item-btn)');
+            if (btn) {
+              btn.click();
+              break;
+            }
+          }
+        }
+      }
+    };
+
     window.handleSearch = function (query) {
       window.currentSearchTick = query;
       const q = query.toLowerCase();
@@ -2009,21 +2169,41 @@ exports.startup = function() {
         const fileBtn = li.querySelector('button');
         if (!fileBtn) return;
 
-        let fileNameMatch = fileBtn.innerText;
+        const labelSpan = fileBtn.querySelector('.file-name-label');
+        let rawText = labelSpan ? labelSpan.textContent : fileBtn.innerText;
+        let fileNameMatch = rawText.trim();
         if (fileNameMatch.endsWith(' (Linked)')) fileNameMatch = fileNameMatch.slice(0, -9);
 
         const previewDiv = li.querySelector('.search-preview');
 
+        const escapeHtml = (str) => str.replace(/</g, '&lt;').replace(/>/g, '&gt;');
+
         if (!q) {
+          if (labelSpan) labelSpan.innerHTML = escapeHtml(rawText);
           li.style.display = 'flex';
           if (previewDiv) { previewDiv.style.display = 'none'; previewDiv.style.opacity = '0'; }
           return;
         }
 
+        let nameMatches = fileNameMatch.toLowerCase().includes(q);
+
+        if (labelSpan) {
+          let lowerText = rawText.toLowerCase();
+          let matchIdx = lowerText.indexOf(q);
+          if (matchIdx !== -1) {
+            let before = rawText.substring(0, matchIdx);
+            let match = rawText.substring(matchIdx, matchIdx + q.length);
+            let after = rawText.substring(matchIdx + q.length);
+            labelSpan.innerHTML = escapeHtml(before) + `<span style="color:var(--accent-color);">${escapeHtml(match)}</span>` + escapeHtml(after);
+          } else {
+            labelSpan.innerHTML = escapeHtml(rawText);
+          }
+        }
+
         idbKeyval.get('search_cache_' + fileNameMatch).then(cache => {
           if (window.currentSearchTick !== query) return;
           if (!cache || !cache.text) {
-            li.style.display = 'none';
+            li.style.display = nameMatches ? 'flex' : 'none';
             if (previewDiv) { previewDiv.style.display = 'none'; previewDiv.style.opacity = '0'; }
             return;
           }
@@ -2125,6 +2305,9 @@ exports.startup = function() {
               previewDiv.style.display = 'block';
               window.updatePreviewsPosition();
             }
+          } else if (nameMatches) {
+            li.style.display = 'flex';
+            if (previewDiv) { previewDiv.style.display = 'none'; previewDiv.style.opacity = '0'; }
           } else {
             li.style.display = 'none';
             if (previewDiv) { previewDiv.style.display = 'none'; previewDiv.style.opacity = '0'; }
@@ -2134,32 +2317,162 @@ exports.startup = function() {
       setTimeout(window.updatePreviewsPosition, 20);
     };
 
+    window.openBookmarkModal = function () {
+      const input = document.getElementById('bookmark-url-input');
+      input.value = '';
+      document.getElementById('bookmark-modal').style.display = 'flex';
+      setTimeout(() => {
+        input.focus();
+        input.onkeydown = (e) => { if (e.key === 'Enter') window.saveBookmark(); };
+      }, 100);
+    };
+
+    window.saveBookmark = async function () {
+      let urlStr = document.getElementById('bookmark-url-input').value.trim();
+      if (!urlStr) return;
+
+      if (!urlStr.startsWith('http://') && !urlStr.startsWith('https://')) {
+        urlStr = 'https://' + urlStr;
+      }
+
+      try {
+        const urlObj = new URL(urlStr);
+        const normalizedUrl = urlObj.origin;
+        
+        let requiresManualConfirm = false;
+        
+        if (document.getElementById('global-loading-overlay')) {
+          document.getElementById('global-loading-text').innerText = "Verifying Instance...";
+          document.getElementById('global-loading-overlay').style.display = 'flex';
+        }
+
+        try {
+          const controller = new AbortController();
+          const timeoutId = setTimeout(() => controller.abort(), 5000);
+          
+          const res = await fetch(normalizedUrl + '/manifest.json', { method: 'GET', signal: controller.signal });
+          clearTimeout(timeoutId);
+          
+          if (res.ok) {
+            const manifest = await res.json();
+            if (manifest && (manifest.name === "Lithic" || manifest.short_name === "Lithic")) {
+              // Validated perfectly via manifest!
+            } else {
+              if (document.getElementById('global-loading-overlay')) document.getElementById('global-loading-overlay').style.display = 'none';
+              alert("The provided URL has a manifest.json but it does not appear to be a Lithic instance.");
+              return; 
+            }
+          } else if (res.status === 401 || res.status === 403) {
+            // Basic auth or forbidden
+            requiresManualConfirm = true;
+          } else {
+            if (document.getElementById('global-loading-overlay')) document.getElementById('global-loading-overlay').style.display = 'none';
+            alert(`The server returned an error (${res.status}). Please check the URL.`);
+            return;
+          }
+        } catch (err) {
+          // CORS error, network error, invalid JSON, or timeout
+          if (document.getElementById('global-loading-overlay')) document.getElementById('global-loading-overlay').style.display = 'none';
+          alert("The provided URL could not be verified. It may not be a Lithic instance, or it may be blocking access via CORS.");
+          return;
+        }
+
+        if (document.getElementById('global-loading-overlay')) document.getElementById('global-loading-overlay').style.display = 'none';
+
+        if (requiresManualConfirm) {
+           if (!confirm(`We couldn't verify the manifest (it appears to be protected by Basic Authentication or Forbidden).\n\nAre you sure you want to bookmark ${normalizedUrl}?`)) {
+              return;
+           }
+        }
+
+        let bookmarks = (await idbKeyval.get('bookmarkedInstances')) || [];
+        if (!bookmarks.includes(normalizedUrl)) {
+          bookmarks.push(normalizedUrl);
+          await idbKeyval.set('bookmarkedInstances', bookmarks);
+        }
+        document.getElementById('bookmark-modal').style.display = 'none';
+        displayRecentFiles();
+      } catch (e) {
+        if (document.getElementById('global-loading-overlay')) document.getElementById('global-loading-overlay').style.display = 'none';
+        alert("Please enter a valid URL.");
+      }
+    };
+
+    window.removeBookmark = async function (urlToRemove) {
+      let bookmarks = (await idbKeyval.get('bookmarkedInstances')) || [];
+      bookmarks = bookmarks.filter(u => u !== urlToRemove);
+      await idbKeyval.set('bookmarkedInstances', bookmarks);
+      displayRecentFiles();
+    };
+
     function displayRecentFiles() {
       const elem = document.getElementById("recent-files");
       if (elem) {
-        twFileManager.getRecent().
-          then(recentFiles => {
-            if (recentFiles && recentFiles.length > 0) {
-              elem.innerHTML = "";
-              const sectionDiv = document.createElement('div');
-              sectionDiv.className = 'section';
+        Promise.all([
+          twFileManager.getRecent(),
+          idbKeyval.get('bookmarkedInstances')
+        ]).then(([recentFiles, bookmarks]) => {
+          if ((recentFiles && recentFiles.length > 0) || (bookmarks && bookmarks.length > 0)) {
+            elem.innerHTML = "";
+            const sectionDiv = document.createElement('div');
+            sectionDiv.className = 'section';
 
-              const searchContainer = document.createElement('div');
-              searchContainer.className = 'search-container';
-              searchContainer.innerHTML = `
-                <input type="text" class="search-input" placeholder="Search recent liths..." oninput="handleSearch(this.value)">
+            const searchContainer = document.createElement('div');
+            searchContainer.className = 'search-container';
+            searchContainer.innerHTML = `
+                <input type="text" class="search-input" placeholder="Search recent liths..." oninput="handleSearch(this.value)" onkeydown="handleSearchKeydown(event, this)">
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line></svg>
                 <button type="button" class="search-clear-btn" onclick="const i=this.previousElementSibling.previousElementSibling; i.value=''; handleSearch(''); i.focus();" title="Clear search">&times;</button>
               `;
-              sectionDiv.appendChild(searchContainer);
+            sectionDiv.appendChild(searchContainer);
 
-              const list = document.createElement('ul');
+            const list = document.createElement('ul');
+
+            if (bookmarks && bookmarks.length > 0) {
+              for (const url of bookmarks) {
+                const li = document.createElement('li');
+
+                const button = document.createElement('button');
+                button.type = 'button';
+                button.style.display = 'flex';
+                button.style.alignItems = 'center';
+                button.style.gap = '10px';
+                button.style.paddingLeft = '10px';
+
+                const iconUrl = url + (url.endsWith('/') ? '' : '/') + 'favicon.ico';
+                const displayUrl = url.replace(/^https?:\/\//, '');
+                button.innerHTML = `<img src="${iconUrl}" style="width:16px;height:16px;border-radius:3px;" onerror="this.outerHTML='<svg viewBox=\\'0 0 24 24\\' width=\\'16\\' height=\\'16\\' fill=\\'none\\' stroke=\\'currentColor\\' stroke-width=\\'2\\' stroke-linecap=\\'round\\' stroke-linejoin=\\'round\\'><path d=\\'M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71\\'></path><path d=\\'M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71\\'></path></svg>'"> <span class="file-name-label" style="flex-grow:1; text-align:left; overflow:hidden; text-overflow:ellipsis;">${displayUrl}</span>`;
+                button.onclick = () => {
+                  window.location.href = url;
+                };
+
+                const removeBtn = document.createElement('button');
+                removeBtn.type = 'button';
+                removeBtn.innerHTML = '&times;';
+                removeBtn.className = 'remove-item-btn';
+                removeBtn.title = "Remove bookmark";
+                removeBtn.onclick = async (e) => {
+                  e.stopPropagation();
+                  window.removeBookmark(url);
+                };
+
+                const previewDiv = document.createElement('div');
+                previewDiv.className = 'search-preview';
+
+                li.appendChild(button);
+                li.appendChild(removeBtn);
+                li.appendChild(previewDiv);
+                list.appendChild(li);
+              }
+            }
+
+            if (recentFiles && recentFiles.length > 0) {
               for (const recent of recentFiles) {
                 const li = document.createElement('li');
 
                 const button = document.createElement('button');
                 button.type = 'button';
-                button.innerText = recent.handle.name + (recent.tauriPath ? ' (Linked)' : '');
+                button.innerHTML = `<span class="file-name-label">${recent.handle.name + (recent.tauriPath ? ' (Linked)' : '')}</span>`;
                 button.onclick = () => window.openFile(recent.handle);
 
                 const cacheBtn = document.createElement('button');
@@ -2222,19 +2535,20 @@ exports.startup = function() {
                 li.appendChild(previewDiv);
                 list.appendChild(li);
               }
-              list.addEventListener('scroll', () => { if (window.updatePreviewsPosition) window.updatePreviewsPosition(); });
-              sectionDiv.appendChild(list);
-
-              const clearButton = document.createElement('button');
-              clearButton.type = 'button';
-              clearButton.onclick = clearRecent;
-              clearButton.innerText = 'Clear All Recent Files';
-              clearButton.className = 'clear-btn';
-
-              sectionDiv.appendChild(clearButton);
-              elem.appendChild(sectionDiv);
             }
-          })
+            list.addEventListener('scroll', () => { if (window.updatePreviewsPosition) window.updatePreviewsPosition(); });
+            sectionDiv.appendChild(list);
+
+            const clearButton = document.createElement('button');
+            clearButton.type = 'button';
+            clearButton.onclick = clearRecent;
+            clearButton.innerText = 'Clear All Recent Files';
+            clearButton.className = 'clear-btn';
+
+            sectionDiv.appendChild(clearButton);
+            elem.appendChild(sectionDiv);
+          }
+        })
       }
     }
 
@@ -2253,7 +2567,7 @@ exports.startup = function() {
         const searchContainer = document.createElement('div');
         searchContainer.className = 'search-container';
         searchContainer.innerHTML = `
-          <input type="text" class="search-input" placeholder="Search Remote Liths" oninput="handleSearch(this.value)">
+          <input type="text" class="search-input" placeholder="Search Remote Liths" oninput="handleSearch(this.value)" onkeydown="handleSearchKeydown(event, this)">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line></svg>
           <button type="button" class="search-clear-btn" onclick="const i=this.previousElementSibling.previousElementSibling; i.value=''; handleSearch(''); i.focus();" title="Clear search">&times;</button>
         `;
@@ -2428,7 +2742,7 @@ exports.startup = function() {
       const searchContainer = document.createElement('div');
       searchContainer.className = 'search-container';
       searchContainer.innerHTML = `
-        <input type="text" class="search-input" placeholder="Search cached liths..." oninput="handleSearch(this.value)">
+        <input type="text" class="search-input" placeholder="Search cached liths..." oninput="handleSearch(this.value)" onkeydown="handleSearchKeydown(event, this)">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line></svg>
         <button type="button" class="search-clear-btn" onclick="const i=this.previousElementSibling.previousElementSibling; i.value=''; handleSearch(''); i.focus();" title="Clear search">&times;</button>
       `;
@@ -2510,21 +2824,21 @@ exports.startup = function() {
     /* --- EMOJI ICON PICKER --- */
     const EMOJI_LIST = [
       // Study & Work
-      '📚','📖','📝','📋','🗒️','📁','🗂️','📦','🔖','📌','📍','🗃️','🗄️','📊','📈','📉',
+      '📚', '📖', '📝', '📋', '🗒️', '📁', '🗂️', '📦', '🔖', '📌', '📍', '🗃️', '🗄️', '📊', '📈', '📉',
       // Science & Tech
-      '🔬','🔭','⚗️','🧪','🧫','🧬','💡','🔋','🔌','💻','🖥️','⌨️','📱','📡','🛰️','🤖','🧲','⚙️','🔩','🧰',
+      '🔬', '🔭', '⚗️', '🧪', '🧫', '🧬', '💡', '🔋', '🔌', '💻', '🖥️', '⌨️', '📱', '📡', '🛰️', '🤖', '🧲', '⚙️', '🔩', '🧰',
       // World & Nature
-      '🌐','🗺️','🧭','🌍','🌎','🌏','⭐','🌙','☀️','🌊','⚡','🔥','❄️','🌿','🌱','🌸','🌺','🌻','🍃','🌴',
+      '🌐', '🗺️', '🧭', '🌍', '🌎', '🌏', '⭐', '🌙', '☀️', '🌊', '⚡', '🔥', '❄️', '🌿', '🌱', '🌸', '🌺', '🌻', '🍃', '🌴',
       // Places & Things
-      '🏛️','🏰','⛩️','🗼','⏰','⌚','🕰️','🔐','🔑','🗝️','🔮','🎯','🧩','🎲','♟️','🎺','🗿',
+      '🏛️', '🏰', '⛩️', '🗼', '⏰', '⌚', '🕰️', '🔐', '🔑', '🗝️', '🔮', '🎯', '🧩', '🎲', '♟️', '🎺', '🗿',
       // Art & Creative
-      '🎨','🖌️','🖍️','🗳️','🗯️','✏️','🖊️','🖋️','📷','📸','🎥','🎞️','🏗️','🎭','🎬','🎤','🎧','🎈','🎆','🎇','✨','🌈','🗣️','🐞',
+      '🎨', '🖌️', '🖍️', '🗳️', '🗯️', '✏️', '🖊️', '🖋️', '📷', '📸', '🎥', '🎞️', '🏗️', '🎭', '🎬', '🎤', '🎧', '🎈', '🎆', '🎇', '✨', '🌈', '🗣️', '🐞',
       // Faces (just a few)
-      '😊','😄','😂','😍','🤔','😎','🤓','😤','😠','😢','😴','🥳','🤯','😇','🥶'
+      '😊', '😄', '😂', '😍', '🤔', '😎', '🤓', '😤', '😠', '😢', '😴', '🥳', '🤯', '😇', '🥶'
     ];
     let _pickerEmoji = null;
 
-    window.openEmojiPicker = function() {
+    window.openEmojiPicker = function () {
       const gridWrap = document.getElementById('emoji-picker-scroll');
       if (gridWrap && !gridWrap.dataset.built) {
         gridWrap.dataset.built = '1';
@@ -2571,22 +2885,22 @@ exports.startup = function() {
       try {
         const c = document.createElement('canvas'); c.width = 32; c.height = 32;
         const ctx = c.getContext('2d');
-        ctx.fillStyle = '#333'; ctx.fillRect(0,0,32,32);
+        ctx.fillStyle = '#333'; ctx.fillRect(0, 0, 32, 32);
         ctx.font = '22px serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
         ctx.fillText(em, 16, 17);
         let lnk = document.querySelector("link[rel='shortcut icon']") || document.querySelector("link[rel='icon']");
         if (!lnk) { lnk = document.createElement('link'); lnk.rel = 'shortcut icon'; document.head.appendChild(lnk); }
         lnk.type = 'image/png'; lnk.href = c.toDataURL('image/png');
-      } catch(e) {}
+      } catch (e) { }
     }
 
     async function _emojiToBlob(em, size) {
       const c = document.createElement('canvas'); c.width = size; c.height = size;
       const ctx = c.getContext('2d');
-      ctx.fillStyle = '#333'; ctx.fillRect(0,0,size,size);
-      ctx.font = `${Math.floor(size*0.65)}px serif`;
+      ctx.fillStyle = '#333'; ctx.fillRect(0, 0, size, size);
+      ctx.font = `${Math.floor(size * 0.65)}px serif`;
       ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-      ctx.fillText(em, size/2, size/2 + 2);
+      ctx.fillText(em, size / 2, size / 2 + 2);
       return new Promise(r => c.toBlob(r, 'image/png'));
     }
 
@@ -2596,12 +2910,12 @@ exports.startup = function() {
         const res = await fetch('/mstile-150x150.png');
         if (!res.ok) return;
         const blob = await res.blob();
-        const dataUrl = await new Promise((ok,err) => { const r=new FileReader(); r.onload=()=>ok(r.result); r.onerror=err; r.readAsDataURL(blob); });
+        const dataUrl = await new Promise((ok, err) => { const r = new FileReader(); r.onload = () => ok(r.result); r.onerror = err; r.readAsDataURL(blob); });
         await idbKeyval.set('lithic-original-icon-backup', dataUrl);
-      } catch(e) { console.warn('[Lithic] Icon backup failed:', e); }
+      } catch (e) { console.warn('[Lithic] Icon backup failed:', e); }
     }
 
-    window.confirmEmojiIcon = async function() {
+    window.confirmEmojiIcon = async function () {
       if (!_pickerEmoji) return;
       const em = _pickerEmoji;
       const statusEl = document.getElementById('emoji-save-status');
@@ -2613,14 +2927,14 @@ exports.startup = function() {
         // The inotify watcher detects custom.ico (PUT last) and cp's all pre-sized files
         // into /app/public/ — no server-side imagemagick needed.
         const ICON_SIZES = [
-          { path: '/sync/favicon-16x16.png',          size: 16  },
-          { path: '/sync/favicon-32x32.png',          size: 32  },
-          { path: '/sync/favicon.ico',                size: 32  },
-          { path: '/sync/mstile-150x150.png',         size: 150 },
+          { path: '/sync/favicon-16x16.png', size: 16 },
+          { path: '/sync/favicon-32x32.png', size: 32 },
+          { path: '/sync/favicon.ico', size: 32 },
+          { path: '/sync/mstile-150x150.png', size: 150 },
           { path: '/sync/android-chrome-192x192.png', size: 192 },
-          { path: '/sync/apple-touch-icon.png',       size: 180 },
+          { path: '/sync/apple-touch-icon.png', size: 180 },
           { path: '/sync/android-chrome-512x512.png', size: 512 },
-          { path: '/sync/custom.ico',                 size: 512 }, // PUT last — signals watcher to copy
+          { path: '/sync/custom.ico', size: 512 }, // PUT last — signals watcher to copy
         ];
         for (let i = 0; i < ICON_SIZES.length; i++) {
           const { path, size } = ICON_SIZES[i];
@@ -2637,9 +2951,9 @@ exports.startup = function() {
           try {
             const sw = navigator.serviceWorker && navigator.serviceWorker.controller;
             if (sw) { sw.postMessage({ type: 'BUST_ICON_CACHE' }); }
-          } catch(e) {}
+          } catch (e) { }
         }, 2000);
-      } catch(e) {
+      } catch (e) {
         statusEl.textContent = '\u2139\ufe0f Saved locally only (server write failed).';
         statusEl.className = 'emoji-save-status';
       }
@@ -2647,7 +2961,7 @@ exports.startup = function() {
       setTimeout(() => { document.getElementById('emoji-picker-modal').style.display = 'none'; }, 900);
     };
 
-    window.restoreDefaultIcon = async function() {
+    window.restoreDefaultIcon = async function () {
       await idbKeyval.del('lithic-icon-emoji');
       // Reset header to original img
       let el = document.querySelector('h1 .emoji-icon-trigger');
@@ -2667,7 +2981,7 @@ exports.startup = function() {
       try {
         await fetch('/sync/custom.ico', { method: 'DELETE' });
         if (statusEl) { statusEl.textContent = '✓ Default icon restored server-wide.'; statusEl.className = 'emoji-save-status ok'; }
-      } catch(e) {
+      } catch (e) {
         if (statusEl) { statusEl.textContent = 'Restored locally.'; statusEl.className = 'emoji-save-status ok'; }
       }
     };
@@ -2686,9 +3000,9 @@ exports.startup = function() {
       if (overlay) overlay.style.display = 'none';
     }
 
-    window.clearAndReloadRemoteSearchCache = async function() {
+    window.clearAndReloadRemoteSearchCache = async function () {
       if (!confirm('This will crawl all remote files and index them for global search. Depending on your server speed, this may take a moment. Proceed?')) return;
-      
+
       showLoading('Crawling remote liths...');
       try {
         const files = await webdavPropfind();
@@ -2699,8 +3013,8 @@ exports.startup = function() {
 
         for (let i = 0; i < files.length; i++) {
           const file = files[i];
-          showLoading(`Indexing [${i+1}/${files.length}]: ${file.name}...`);
-          
+          showLoading(`Indexing [${i + 1}/${files.length}]: ${file.name}...`);
+
           try {
             const res = await fetch(WEBDAV_BASE + encodeURIComponent(file.name));
             if (res.ok) {
@@ -2723,7 +3037,7 @@ exports.startup = function() {
             console.warn(`Failed to index ${file.name}:`, e);
           }
         }
-        
+
         hideLoading();
         displayRemoteFiles();
       } catch (err) {
@@ -2772,6 +3086,11 @@ exports.startup = function() {
 
         const mountBtn = document.getElementById('btn-mount');
         const newLithBtn = document.getElementById('btn-new-lith');
+        const bookmarkBtn = document.getElementById('btn-bookmark-trigger');
+
+        if (bookmarkBtn) {
+          bookmarkBtn.style.display = 'none';
+        }
 
         if (mountBtn) {
           mountBtn.innerText = 'Upload a Lith';
@@ -2843,7 +3162,7 @@ exports.startup = function() {
               const twDate = getTwTime();
               const todayTitle = getTodayTitle();
               const minimalLith = `created: ${twDate}\nmodified: ${twDate}\ntags: Journal\ntitle: ${todayTitle}\ntype: \n\n`;
-              
+
               await webdavUpload(fileName, minimalLith);
               await displayRemoteFiles();
             } catch (err) {
@@ -2864,15 +3183,15 @@ exports.startup = function() {
         }
 
         await displayRemoteFiles();
-        
+
         // --- GITHUB SYNC INTEGRATION ---
         const githubBtn = document.getElementById('github-sync-btn');
         if (githubBtn) githubBtn.style.display = 'flex';
-        
+
         let tempToken = null;
         let isAuthFlowActive = false;
 
-        window.updateGithubStatus = async function() {
+        window.updateGithubStatus = async function () {
           try {
             const res = await fetch('/api/github/status');
             const data = await res.json();
@@ -2882,20 +3201,20 @@ exports.startup = function() {
             if (data.connected) {
               btn.classList.add('active');
               btn.classList.remove('error');
-              
+
               // Only auto-update the modal view if we aren't in the middle of setup
               if (!tempToken && !isAuthFlowActive) {
                 setGithubState('connected');
               }
 
               document.getElementById('github-active-repo').textContent = data.repo;
-              
+
               if (data.last_sync > 0) {
                 const date = new Date(data.last_sync * 1000);
                 const timeStr = date.toLocaleString();
                 document.getElementById('github-last-sync').textContent = timeStr;
                 btn.title = `GitHub Sync: Last synced at ${timeStr}`;
-                
+
                 // If synced in the last 5 seconds, show active state
                 const age = (Date.now() / 1000) - data.last_sync;
                 if (age < 5) {
@@ -2906,7 +3225,7 @@ exports.startup = function() {
               }
             } else {
               btn.classList.remove('active', 'syncing');
-              
+
               // Only reset to disconnected if we aren't busy with a new setup
               if (!tempToken && !isAuthFlowActive) {
                 setGithubState('disconnected');
@@ -2939,7 +3258,7 @@ exports.startup = function() {
 
           setGithubState('installing');
           resetInstallStep();
-          
+
           // Show disconnect button in the nested view if we are already connected
           const res = await fetch('/api/github/status');
           const data = await res.json();
@@ -2984,7 +3303,7 @@ exports.startup = function() {
           try {
             const res = await fetch('/api/github/device-code');
             const data = await res.json();
-            
+
             if (data.user_code) {
               document.getElementById('github-user-code').textContent = data.user_code;
               pollGithubToken(data.device_code, (data.interval || 5) * 1000);
@@ -2998,7 +3317,7 @@ exports.startup = function() {
           }
         };
 
-        window.resetAuthUI = function() {
+        window.resetAuthUI = function () {
           setGithubState('disconnected');
           document.getElementById('btn-github-connect').disabled = false;
           tempToken = null;
@@ -3066,7 +3385,7 @@ exports.startup = function() {
             const res = await fetch(`/api/github/list-repos?token=${tempToken}`);
             allRepos = await res.json();
             if (!Array.isArray(allRepos)) allRepos = [];
-            
+
             renderDiscovery();
           } catch (err) {
             discoveryList.innerHTML = '<p class="discovery-empty">Failed to load repositories</p>';
@@ -3076,9 +3395,9 @@ exports.startup = function() {
         function renderDiscovery() {
           const discoveryList = document.getElementById('github-discovery-list');
           const managed = allRepos.filter(r => r.name.startsWith('lithic-sync-') || r.name.startsWith('lithic-backup-'));
-          
+
           discoveryList.innerHTML = '';
-          
+
           if (managed.length === 0) {
             discoveryList.innerHTML = '<div class="discovery-empty">No existing sync repos found</div>';
           } else {
@@ -3109,7 +3428,7 @@ exports.startup = function() {
             updateDiscoveryUI();
           };
           discoveryList.appendChild(customCard);
-          
+
           updateDiscoveryUI();
           renderRepos(''); // In case they pick custom
         }
@@ -3118,7 +3437,7 @@ exports.startup = function() {
           const choice = document.querySelector('input[name="github-repo-choice"]:checked')?.value;
           const searchWrapper = document.getElementById('github-custom-search-wrapper');
           const finalizeBtn = document.getElementById('btn-github-finalize');
-          
+
           // Style cards
           document.querySelectorAll('.radio-card').forEach(card => {
             card.classList.toggle('selected', card.querySelector('input').checked);
@@ -3136,9 +3455,9 @@ exports.startup = function() {
         function renderRepos(filter) {
           const resultsDiv = document.getElementById('github-search-results');
           const matches = allRepos.filter(r => r.full_name.toLowerCase().includes(filter.toLowerCase()));
-          
+
           resultsDiv.innerHTML = '';
-          highlightIndex = -1; 
+          highlightIndex = -1;
 
           matches.forEach((repo, idx) => {
             const el = document.createElement('div');
@@ -3171,7 +3490,7 @@ exports.startup = function() {
 
           const resultsDiv = document.getElementById('github-search-results');
           const items = resultsDiv.querySelectorAll('.search-item');
-          
+
           if (e.key === 'ArrowDown') {
             e.preventDefault();
             highlightIndex = Math.min(highlightIndex + 1, items.length - 1);
@@ -3230,7 +3549,7 @@ exports.startup = function() {
             const choice = document.querySelector('input[name="github-repo-choice"]:checked')?.value;
             repo = (choice === 'custom') ? document.getElementById('github-repo-search').value : choice;
           }
-          
+
           if (!repo) {
             alert('Please select a repository.');
             return;
@@ -3306,7 +3625,7 @@ exports.startup = function() {
           try {
             parsedData = JSON.parse(text);
           } catch (e) {
-            throw new Error("Remote URL payload is not JSON.");
+            parsedData = parseLithToJSON(text);
           }
           if (Array.isArray(parsedData) && parsedData.length > 0) {
             // Replicate ?json behavior by tagging only the root parent with PayloadURL
@@ -3593,9 +3912,11 @@ exports.startup = function() {
         style="text-decoration: none; color: var(--text-color); font-size: 1.2rem; opacity: 0.7; transition: opacity 0.2s; display: flex; align-items: center; justify-content: center; width: 30px; height: 30px; border-radius: 50%; border: 2px solid var(--border-color); margin-left: 10px;"
         onmouseover="this.style.opacity='1'; this.style.borderColor='var(--accent-color)'; this.style.color='var(--accent-color)'"
         onmouseout="this.style.opacity='0.7'; this.style.borderColor='var(--border-color)'; this.style.color='var(--text-color)'"
+        onclick="openIntro(event)"
         title="View Introduction">?</a>
       <button id="github-sync-btn" onclick="openGithubSyncModal()" title="GitHub Sync Settings">
-        <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2"
+          stroke-linecap="round" stroke-linejoin="round">
           <path d="M18 10h-1.26A8 8 0 1 0 9 20h9a5 5 0 0 0 0-10z"></path>
         </svg>
       </button>
@@ -3605,8 +3926,16 @@ exports.startup = function() {
       <button id="btn-new-lith" type="button" onclick="openNewBlankLith()">New Blank Lith</button>
     </div>
 
-    <div class="section">
-      <button id="btn-mount" type="button" onclick="openFile()">Mount a Lith (or HTML) from Disk</button>
+    <div class="section" style="display: flex; gap: 10px;">
+      <button id="btn-mount" type="button" onclick="openFile()" style="flex-grow: 1;">Mount a Lith (or HTML) from
+        Disk</button>
+      <button id="btn-bookmark-trigger" type="button" onclick="openBookmarkModal()" title="Bookmark a Remote Instance"
+        style="flex-shrink: 0; width: 48px; padding: 0; display: flex; align-items: center; justify-content: center; margin-top: 0;">
+        <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2"
+          stroke-linecap="round" stroke-linejoin="round" style="color: var(--accent-color)">
+          <path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z"></path>
+        </svg>
+      </button>
     </div>
 
     <div id="recent-files"></div>
@@ -3623,7 +3952,7 @@ exports.startup = function() {
     window.addEventListener('beforeinstallprompt', (e) => {
       // Don't show install prompt in Tauri
       if (window.__TAURI__ || window.__TAURI_INTERNALS__) return;
-      
+
       e.preventDefault();
       deferredPrompt = e;
       installBtn.style.display = 'block';
@@ -3667,15 +3996,20 @@ exports.startup = function() {
   <!-- EMOJI ICON PICKER MODAL -->
   <div id="emoji-picker-modal" class="modal-overlay">
     <div class="modal-content" style="max-width:460px; text-align:left;">
-      <button class="close-modal-btn" onclick="document.getElementById('emoji-picker-modal').style.display='none';" title="Close">&times;</button>
+      <button class="close-modal-btn" onclick="document.getElementById('emoji-picker-modal').style.display='none';"
+        title="Close">&times;</button>
       <h2 style="margin-bottom:12px; color:var(--text-color); display:flex; align-items:center; gap:10px;">
         <span id="emoji-preview-display" style="font-size:1.3em; line-height:1;">&#127912;</span> Icon Picker
       </h2>
       <div class="emoji-picker-scroll" id="emoji-picker-scroll"></div>
       <div id="emoji-save-status" class="emoji-save-status"></div>
       <div class="modal-buttons" style="margin-top:14px; flex-direction:row; flex-wrap:wrap; gap:8px;">
-        <button onclick="confirmEmojiIcon()" style="flex:1; min-width:120px; background:rgba(138,180,248,0.12); border:1px solid rgba(138,180,248,0.3); color:var(--accent-color); font-weight:600;">Apply &amp; Save</button>
-        <button onclick="restoreDefaultIcon()" style="flex:1; min-width:120px; background:transparent; border:1px dashed var(--border-color); opacity:0.65;">&#8617; Restore</button>
+        <button onclick="confirmEmojiIcon()"
+          style="flex:1; min-width:120px; background:rgba(138,180,248,0.12); border:1px solid rgba(138,180,248,0.3); color:var(--accent-color); font-weight:600;">Apply
+          &amp; Save</button>
+        <button onclick="restoreDefaultIcon()"
+          style="flex:1; min-width:120px; background:transparent; border:1px dashed var(--border-color); opacity:0.65;">&#8617;
+          Restore</button>
       </div>
     </div>
   </div>
@@ -3685,10 +4019,15 @@ exports.startup = function() {
     <div class="modal-content">
       <h2 style="color:#ffb74d;">&#128218; Read-Only Mode</h2>
       <p>You are about to open <strong id="offline-readonly-filename"></strong> from your local cache.</p>
-      <p style="font-size:0.88rem; opacity:0.75; line-height:1.6;">Since the server is offline, <strong>any changes you make will only be saved as a local HTML download</strong> and will need to be manually merged back to the server the next time you are online.</p>
+      <p style="font-size:0.88rem; opacity:0.75; line-height:1.6;">Since the server is offline, <strong>any changes you
+          make will only be saved as a local HTML download</strong> and will need to be manually merged back to the
+        server the next time you are online.</p>
       <div class="modal-buttons">
-        <button id="offline-readonly-confirm-btn" style="background:rgba(255,183,77,0.15); border:1px solid rgba(255,183,77,0.4); color:#ffb74d;">Open Read-Only</button>
-        <button onclick="document.getElementById('offline-readonly-confirm-modal').style.display='none';" style="background:transparent; border:1px solid var(--border-color); opacity:0.7;">Cancel</button>
+        <button id="offline-readonly-confirm-btn"
+          style="background:rgba(255,183,77,0.15); border:1px solid rgba(255,183,77,0.4); color:#ffb74d;">Open
+          Read-Only</button>
+        <button onclick="document.getElementById('offline-readonly-confirm-modal').style.display='none';"
+          style="background:transparent; border:1px solid var(--border-color); opacity:0.7;">Cancel</button>
       </div>
     </div>
   </div>
@@ -3697,11 +4036,16 @@ exports.startup = function() {
   <div id="collision-modal" class="modal-overlay">
     <div class="modal-content">
       <h2 id="collision-title">Active Session Detected</h2>
-      <p id="collision-message">Another user is currently editing this file. Opening it may lead to data loss as Lithic does not support collaboration (last-write-wins).</p>
+      <p id="collision-message">Another user is currently editing this file. Opening it may lead to data loss as Lithic
+        does not support collaboration (last-write-wins).</p>
       <div class="modal-buttons">
-        <button id="collision-btn-readonly" style="background: var(--button-bg); border: 1px solid var(--border-color);">Open Read-Only</button>
-        <button id="collision-btn-ignore" style="background: #e53935; color: white; border: none;">Ignore and Open (Overwrite Risk)</button>
-        <button onclick="document.getElementById('collision-modal').style.display='none'; if(document.getElementById('loading-overlay'))document.getElementById('loading-overlay').style.display='none';" style="background: transparent; border: 1px solid var(--border-color); opacity: 0.7;">Cancel</button>
+        <button id="collision-btn-readonly"
+          style="background: var(--button-bg); border: 1px solid var(--border-color);">Open Read-Only</button>
+        <button id="collision-btn-ignore" style="background: #e53935; color: white; border: none;">Ignore and Open
+          (Overwrite Risk)</button>
+        <button
+          onclick="document.getElementById('collision-modal').style.display='none'; if(document.getElementById('loading-overlay'))document.getElementById('loading-overlay').style.display='none';"
+          style="background: transparent; border: 1px solid var(--border-color); opacity: 0.7;">Cancel</button>
       </div>
     </div>
   </div>
@@ -3712,7 +4056,33 @@ exports.startup = function() {
       <h2 style="color:var(--accent-color)">Lith name already in use</h2>
       <p>Please pick a unique name for your new lith.</p>
       <div class="modal-buttons">
-        <button onclick="document.getElementById('name-collision-modal').style.display='none';" style="background: var(--button-bg); border: 1px solid var(--border-color);">Close</button>
+        <button onclick="document.getElementById('name-collision-modal').style.display='none';"
+          style="background: var(--button-bg); border: 1px solid var(--border-color);">Close</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- BOOKMARK MODAL -->
+  <div id="bookmark-modal" class="modal-overlay">
+    <div class="modal-content">
+      <h2
+        style="color:var(--text-color); margin-bottom: 12px; display:flex; align-items:center; justify-content:center; gap:8px;">
+        <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="2"
+          stroke-linecap="round" stroke-linejoin="round" style="color: var(--accent-color)">
+          <path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z"></path>
+        </svg>
+        Bookmark Remote Instance
+      </h2>
+      <p style="font-size:0.9rem; opacity:0.8; margin-bottom: 15px;">Enter the URL or FQDN of your public self-hosted
+        Lithic instance (e.g., <code>personal.lithic.uk</code>).</p>
+      <input type="text" id="bookmark-url-input" placeholder="https://..."
+        style="width: 100%; background: var(--button-bg); color: var(--text-color); border: 1px solid var(--border-color); padding: 12px; border-radius: 6px; font-family: inherit; outline: none; margin-bottom: 20px;">
+      <div class="modal-buttons" style="flex-direction: row; gap: 10px;">
+        <button onclick="saveBookmark()"
+          style="flex: 1; background: rgba(138, 180, 248, 0.1); border: 1px solid var(--accent-color); color: var(--accent-color);">Save
+          Bookmark</button>
+        <button onclick="document.getElementById('bookmark-modal').style.display='none';"
+          style="flex: 1; background: transparent; border: 1px solid var(--border-color); opacity: 0.7;">Cancel</button>
       </div>
     </div>
   </div>
@@ -3720,18 +4090,23 @@ exports.startup = function() {
   <!-- GLOBAL LOADING OVERLAY -->
   <div id="global-loading-overlay" class="loading-overlay">
     <div class="spinner"></div>
-    <div id="global-loading-text" style="color:var(--accent-color); font-weight:600; font-size:0.9rem;">Processing...</div>
+    <div id="global-loading-text" style="color:var(--accent-color); font-weight:600; font-size:0.9rem;">Processing...
+    </div>
   </div>
 
   <!-- GITHUB SYNC MODAL -->
   <div id="github-sync-modal" class="modal-overlay">
     <div class="modal-content github-modal-content">
-      <button class="close-modal-btn" onclick="resetAuthUI(); document.getElementById('github-sync-modal').style.display='none';" title="Close">&times;</button>
+      <button class="close-modal-btn"
+        onclick="resetAuthUI(); document.getElementById('github-sync-modal').style.display='none';"
+        title="Close">&times;</button>
       <h2 style="color:var(--text-color); display:flex; align-items:center; gap:10px;">
-        <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 10h-1.26A8 8 0 1 0 9 20h9a5 5 0 0 0 0-10z"></path></svg>
+        <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="2">
+          <path d="M18 10h-1.26A8 8 0 1 0 9 20h9a5 5 0 0 0 0-10z"></path>
+        </svg>
         GitHub Sync
       </h2>
-      
+
       <div id="github-state-disconnected">
         <div class="modal-buttons">
           <button id="btn-github-connect" onclick="initiateGithubAuth()">Connect to GitHub</button>
@@ -3742,43 +4117,54 @@ exports.startup = function() {
         <p style="font-size:0.95rem; margin-bottom:15px; line-height:1.4;">
           Step 1: Install the Lithic Sync app on your GitHub account to enable access.
         </p>
-        <div style="background:rgba(255,255,255,0.03); border:1px solid var(--border-color); padding:15px; border-radius:8px; text-align:center;">
-          <a href="https://github.com/apps/lithic-backup" target="_blank" onclick="onGithubInstallClick()" 
-             style="display:inline-block; background:var(--accent-color); color:#000; padding:10px 20px; border-radius:6px; font-weight:600; text-decoration:none;">
-             Install Lithic Sync
+        <div
+          style="background:rgba(255,255,255,0.03); border:1px solid var(--border-color); padding:15px; border-radius:8px; text-align:center;">
+          <a href="https://github.com/apps/lithic-backup" target="_blank" onclick="onGithubInstallClick()"
+            style="display:inline-block; background:var(--accent-color); color:#000; padding:10px 20px; border-radius:6px; font-weight:600; text-decoration:none;">
+            Install Lithic Sync
           </a>
-          <div id="github-install-check" style="display:none; color:#4caf50; margin-left:10px; font-size:1.2rem;">✓</div>
+          <div id="github-install-check" style="display:none; color:#4caf50; margin-left:10px; font-size:1.2rem;">✓
+          </div>
         </div>
         <div class="modal-buttons" style="margin-top:20px; flex-direction:column; gap:10px;">
-          <button id="btn-github-proceed-to-auth" onclick="generateDeviceCode()" disabled style="width:100%;">Wait for Installation...</button>
-          <button onclick="generateDeviceCode()" style="background:transparent; border:none; font-size:0.75rem; opacity:0.5; cursor:pointer; text-decoration:underline;">I've already installed the app</button>
-          <button id="btn-github-disconnect-nested" onclick="disconnectGithub()" style="display:none; background:transparent; border:1px solid var(--border-color); color:#f44336; width:100%; margin-top:10px;">Disconnect</button>
+          <button id="btn-github-proceed-to-auth" onclick="generateDeviceCode()" disabled style="width:100%;">Wait for
+            Installation...</button>
+          <button onclick="generateDeviceCode()"
+            style="background:transparent; border:none; font-size:0.75rem; opacity:0.5; cursor:pointer; text-decoration:underline;">I've
+            already installed the app</button>
+          <button id="btn-github-disconnect-nested" onclick="disconnectGithub()"
+            style="display:none; background:transparent; border:1px solid var(--border-color); color:#f44336; width:100%; margin-top:10px;">Disconnect</button>
         </div>
       </div>
 
       <div id="github-state-connecting" style="display:none;">
-        <p style="font-size:0.9rem; opacity:0.8;">1. Open <a href="https://github.com/login/device" target="_blank" style="color:var(--accent-color)">github.com/login/device</a></p>
+        <p style="font-size:0.9rem; opacity:0.8;">1. Open <a href="https://github.com/login/device" target="_blank"
+            style="color:var(--accent-color)">github.com/login/device</a></p>
         <p style="font-size:0.9rem; opacity:0.8;">2. Enter the code below:</p>
         <div id="github-user-code" class="user-code-display">---- ----</div>
         <p style="font-size:0.8rem; opacity:0.6; text-align:center;">Waiting for authorization...</p>
       </div>
 
       <div id="github-state-selecting" style="display:none;">
-        <button id="btn-github-create-new" onclick="createGithubRepo()" style="width:100%; background:rgba(138, 180, 248, 0.1); border:1px dashed var(--accent-color); color:var(--accent-color); padding:12px; border-radius:6px; cursor:pointer; font-weight:600;">
+        <button id="btn-github-create-new" onclick="createGithubRepo()"
+          style="width:100%; background:rgba(138, 180, 248, 0.1); border:1px dashed var(--accent-color); color:var(--accent-color); padding:12px; border-radius:6px; cursor:pointer; font-weight:600;">
           + Create lithic-sync-xxxx and sync
         </button>
-        
+
         <div style="margin-top:20px;">
-          <label style="font-size:0.75rem; opacity:0.5; text-transform:uppercase; letter-spacing:0.05em;">Found Existing Sync Repos</label>
+          <label style="font-size:0.75rem; opacity:0.5; text-transform:uppercase; letter-spacing:0.05em;">Found Existing
+            Sync Repos</label>
           <div id="github-discovery-list" class="discovery-group">
             <!-- Populated via JS -->
           </div>
         </div>
 
-        <div id="github-custom-search-wrapper" style="display:none; margin-top:15px; border-top:1px solid rgba(255,255,255,0.05); padding-top:15px;">
+        <div id="github-custom-search-wrapper"
+          style="display:none; margin-top:15px; border-top:1px solid rgba(255,255,255,0.05); padding-top:15px;">
           <div class="field">
             <div class="search-wrapper">
-              <input type="text" id="github-repo-search" class="search-input-gh" placeholder="Type custom repository name..." autocomplete="off">
+              <input type="text" id="github-repo-search" class="search-input-gh"
+                placeholder="Type custom repository name..." autocomplete="off">
               <div id="github-search-results" class="search-results"></div>
             </div>
           </div>
@@ -3799,9 +4185,10 @@ exports.startup = function() {
           </div>
         </div>
         <p style="font-size:0.85rem; opacity:0.7;">Last successful sync: <span id="github-last-sync">Never</span></p>
-        
+
         <div class="modal-buttons" style="margin-top:30px; flex-direction:column; gap:10px;">
-          <button onclick="initiateGithubAuth()" style="background:var(--button-bg); border:1px solid var(--border-color); font-size:0.9rem; width:100%;">Change</button>
+          <button onclick="initiateGithubAuth()"
+            style="background:var(--button-bg); border:1px solid var(--border-color); font-size:0.9rem; width:100%;">Change</button>
         </div>
       </div>
     </div>
