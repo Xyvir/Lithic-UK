@@ -27,12 +27,6 @@ echo "Installing core dependencies..."
 apt-get update -qq
 apt-get install -y -qq curl tar jq git inotify-tools
 
-# --- Install lighttpd dependencies ---
-if ! command -v lighttpd &> /dev/null; then
-  echo "Installing lighttpd..."
-  apt-get update -qq && apt-get install -y -qq lighttpd lighttpd-mod-webdav 2>/dev/null || apt-get install -y -qq lighttpd
-fi
-
 # --- Fetch latest release URL ---
 echo "Fetching latest release from GitHub..."
 RELEASE_URL=$(curl -fsSL "https://api.github.com/repos/${REPO}/releases/latest" \
@@ -40,7 +34,7 @@ RELEASE_URL=$(curl -fsSL "https://api.github.com/repos/${REPO}/releases/latest" 
 
 if [ -z "${RELEASE_URL}" ] || [ "${RELEASE_URL}" = "null" ]; then
   echo "ERROR: Could not find lithic-server.tar.gz in the latest release."
-  echo "       Check https://github.com/${REPO}/releases"
+  echo "        Check https://github.com/${REPO}/releases"
   exit 1
 fi
 
@@ -51,8 +45,6 @@ echo "Downloading and installing to ${INSTALL_DIR}..."
 mkdir -p "${INSTALL_DIR}"
 curl -fsSL "${RELEASE_URL}" | tar -xz -C "${INSTALL_DIR}" --strip-components=1
 
-# The tarball contains app/{entrypoint.sh, public/} and maybe caddy
-# After strip-components=1, we get entrypoint.sh, public/ in INSTALL_DIR
 chmod +x "${INSTALL_DIR}/entrypoint.sh"
 [ -f "${INSTALL_DIR}/watcher.sh" ] && chmod +x "${INSTALL_DIR}/watcher.sh"
 [ -f "${INSTALL_DIR}/autoupdate.sh" ] && chmod +x "${INSTALL_DIR}/autoupdate.sh"
@@ -109,13 +101,19 @@ else
   CONF_BACKEND="${SERVER_BACKEND:-lighttpd}"
 fi
 
-# --- Ensure Caddy Binary Exists if Selected ---
-if [ "${CONF_BACKEND}" = "caddy" ] && [ ! -f "${INSTALL_DIR}/caddy" ]; then
-  echo "Downloading Caddy with required plugins (webdav, cgi)..."
-  curl -fsSL -o "${INSTALL_DIR}/caddy" "https://caddyserver.com/api/download?os=linux&arch=amd64&p=github.com/mholt/caddy-webdav&p=github.com/aksdb/caddy-cgi/v2"
-  chmod +x "${INSTALL_DIR}/caddy"
+# --- Setup Web Server Backend ---
+if [ "${CONF_BACKEND}" = "caddy" ]; then
+  if [ ! -f "${INSTALL_DIR}/caddy" ]; then
+    echo "Downloading Caddy with required plugins (webdav, cgi)..."
+    curl -fsSL -o "${INSTALL_DIR}/caddy" "https://caddyserver.com/api/download?os=linux&arch=amd64&p=github.com/mholt/caddy-webdav&p=github.com/aksdb/caddy-cgi/v2"
+    chmod +x "${INSTALL_DIR}/caddy"
+  fi
+elif [ "${CONF_BACKEND}" = "lighttpd" ]; then
+  if ! command -v lighttpd &> /dev/null; then
+    echo "Installing lighttpd..."
+    apt-get install -y -qq lighttpd lighttpd-mod-webdav 2>/dev/null || apt-get install -y -qq lighttpd
+  fi
 fi
-
 
 # --- Create systemd service ---
 echo "Creating systemd service..."
@@ -172,8 +170,6 @@ EOF
 # Create a system symlink for a terse command
 ln -sf "${INSTALL_DIR}/autoupdate.sh" /usr/local/bin/lithic-autoupdate
 
-# Removed start.sh wrapper; entrypoint.sh handles variable paths natively now.
-
 # --- Enable and start ---
 systemctl daemon-reload
 systemctl enable "${SERVICE_NAME}"
@@ -199,8 +195,8 @@ echo "  Config:   ${ENV_FILE}"
 echo "  Data:     ${DATA_DIR}"
 echo ""
 echo "  Credentials:"
-echo "     User:     ${LITHIC_USER}"
-echo "     Password: ${LITHIC_PASSWORD}"
+echo "      User:     ${LITHIC_USER}"
+echo "      Password: ${LITHIC_PASSWORD}"
 echo ""
 
 if [ -n "${LITHIC_FQDN:-}" ] && [ "${SERVER_BACKEND}" = "caddy" ]; then
