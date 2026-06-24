@@ -13,6 +13,11 @@ module-type: widget
 var import_widget = require("$:/core/modules/widgets/widget.js");
 
 var SpeechSynthesisWidget = class extends import_widget.widget {
+  constructor(parseTreeNode, options) {
+    super(parseTreeNode, options);
+    this.wakeLock = null;
+  }
+
   refresh(e) {
     return $tw.utils.count(this.computeAttributes()) > 0 ? (this.refreshSelf(), !0) : this.refreshChildren(e);
   }
@@ -24,8 +29,35 @@ var SpeechSynthesisWidget = class extends import_widget.widget {
     this.renderChildren(e, t);
   }
   
+  async requestWakeLock() {
+    if ('wakeLock' in navigator && !this.wakeLock) {
+      try {
+        this.wakeLock = await navigator.wakeLock.request('screen');
+        this.wakeLock.addEventListener('release', () => {
+          this.wakeLock = null;
+        });
+      } catch (err) {
+        console.warn("Wake Lock request denied by OS:", err);
+      }
+    }
+  }
+
+  releaseWakeLock() {
+    if (this.wakeLock !== null) {
+      this.wakeLock.release().catch(()=>{});
+      this.wakeLock = null;
+    }
+  }
+
   setState(state) {
     $tw.wiki.addTiddler(new $tw.Tiddler({ title: "$:/state/speech-synthesis", text: state }));
+    
+    // Manage screen awake status based on playback state
+    if (state === "playing") {
+      this.requestWakeLock();
+    } else if (state === "stopped" || state === "paused") {
+      this.releaseWakeLock();
+    }
   }
   
   invokeAction(e, t) {
@@ -69,14 +101,12 @@ var SpeechSynthesisWidget = class extends import_widget.widget {
       let clause = clauses[i].trim();
       if (!clause) continue;
       
-      // If adding the next clause exceeds the safe limit, push current to queue and start fresh
       if ((currentChunk + " " + clause).length > maxChunkLength) {
         if (currentChunk) {
           chunks.push(currentChunk.trim());
           currentChunk = "";
         }
         
-        // Fallback: If a single clause without punctuation is STILL too huge, split it by words
         if (clause.length > maxChunkLength) {
           const words = clause.split(' ');
           for (let j = 0; j < words.length; j++) {
