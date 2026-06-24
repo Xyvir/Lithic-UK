@@ -55,37 +55,76 @@ var SpeechSynthesisWidget = class extends import_widget.widget {
   }
   
   speak(e) {
+    window.speechSynthesis.cancel();
     
-    // Fallback: If utterance text is very long, some browsers break. We just pass 'e' for now.
-    const t = new SpeechSynthesisUtterance(e);
+    const maxChunkLength = 200;
+    const chunks = [];
     
-    // Only set voice if it's available, otherwise fallback to default
-    const voices = window.speechSynthesis.getVoices();
-    if (voices && voices.length > 0) {
-      // Find a reasonable default voice or just let it use the system default if we don't set it.
-      // Often setting it to voices[0] can pick a weird voice or a silent/offline one.
-      // Actually, it's safer to NOT set t.voice and let the browser pick its default, 
-      // unless we explicitly want to configure a specific voice.
-      // t.voice = voices[0];
+    // Split text by common punctuation/newlines, keeping the punctuation attached to the clause
+    const clauses = e.match(/[^,.\?!;\n]+[,.\?!;\n]*/g) || [e];
+    
+    let currentChunk = "";
+    
+    for (let i = 0; i < clauses.length; i++) {
+      let clause = clauses[i].trim();
+      if (!clause) continue;
+      
+      // If adding the next clause exceeds the safe limit, push current to queue and start fresh
+      if ((currentChunk + " " + clause).length > maxChunkLength) {
+        if (currentChunk) {
+          chunks.push(currentChunk.trim());
+          currentChunk = "";
+        }
+        
+        // Fallback: If a single clause without punctuation is STILL too huge, split it by words
+        if (clause.length > maxChunkLength) {
+          const words = clause.split(' ');
+          for (let j = 0; j < words.length; j++) {
+            if ((currentChunk + " " + words[j]).length > maxChunkLength && currentChunk) {
+              chunks.push(currentChunk.trim());
+              currentChunk = words[j];
+            } else {
+              currentChunk += (currentChunk ? " " : "") + words[j];
+            }
+          }
+        } else {
+          currentChunk = clause;
+        }
+      } else {
+        currentChunk += (currentChunk ? " " : "") + clause;
+      }
     }
     
-    t.onstart = () => {
-      this.setState("playing");
-    };
-    t.onpause = () => {
-      this.setState("paused");
-    };
-    t.onresume = () => {
-      this.setState("playing");
-    };
-    t.onend = () => {
-      this.setState("stopped");
-    };
-    t.onerror = (evt) => {
-      console.error("SpeechSynthesis error", evt);
-      this.setState("stopped");
-    };
-    window.speechSynthesis.speak(t);
+    if (currentChunk.trim().length > 0) {
+      chunks.push(currentChunk.trim());
+    }
+
+    let chunksPlayed = 0;
+
+    chunks.forEach((chunk, index) => {
+      const t = new SpeechSynthesisUtterance(chunk);
+      
+      if (index === 0) {
+        t.onstart = () => this.setState("playing");
+      }
+      
+      t.onpause = () => this.setState("paused");
+      t.onresume = () => this.setState("playing");
+      
+      t.onerror = (evt) => {
+        console.error("SpeechSynthesis error on chunk", evt);
+        this.setState("stopped");
+      };
+      
+      t.onend = () => {
+        chunksPlayed++;
+        if (chunksPlayed === chunks.length) {
+          this.setState("stopped");
+        }
+      };
+      
+      window.speechSynthesis.speak(t);
+    });
   }
 };
 exports["speech-synthesis"] = SpeechSynthesisWidget;
