@@ -41,13 +41,8 @@ var SpeechSynthesisWidget = class extends import_widget.widget {
       this.setState("stopped");
     } else if (action === "toggle") {
       if (window.speechSynthesis.speaking) {
-        if (window.speechSynthesis.paused) {
-          window.speechSynthesis.resume();
-          this.setState("playing");
-        } else {
-          window.speechSynthesis.pause();
-          this.setState("paused");
-        }
+        window.speechSynthesis.cancel();
+        this.setState("stopped");
       } else {
         const s = this.getAttribute("text");
         s && this.speak(s);
@@ -60,8 +55,6 @@ var SpeechSynthesisWidget = class extends import_widget.widget {
   }
   
   speak(e) {
-    // Media session hook
-    this.setupMediaSession();
     
     // Fallback: If utterance text is very long, some browsers break. We just pass 'e' for now.
     const t = new SpeechSynthesisUtterance(e);
@@ -78,66 +71,21 @@ var SpeechSynthesisWidget = class extends import_widget.widget {
     
     t.onstart = () => {
       this.setState("playing");
-      if (navigator.mediaSession) navigator.mediaSession.playbackState = "playing";
     };
     t.onpause = () => {
       this.setState("paused");
-      if (navigator.mediaSession) navigator.mediaSession.playbackState = "paused";
     };
     t.onresume = () => {
       this.setState("playing");
-      if (navigator.mediaSession) navigator.mediaSession.playbackState = "playing";
     };
     t.onend = () => {
       this.setState("stopped");
-      if (navigator.mediaSession) navigator.mediaSession.playbackState = "none";
-      this.cleanupMediaSession();
     };
     t.onerror = (evt) => {
       console.error("SpeechSynthesis error", evt);
       this.setState("stopped");
-      if (navigator.mediaSession) navigator.mediaSession.playbackState = "none";
-      this.cleanupMediaSession();
     };
     window.speechSynthesis.speak(t);
-  }
-
-  setupMediaSession() {
-    if ('mediaSession' in navigator) {
-      // We need a dummy audio file to trigger media session on mobile
-      if (!this.dummyAudio) {
-        // A short silent audio clip (base64)
-        this.dummyAudio = new Audio("data:audio/wav;base64,UklGRigAAABXQVZFZm10IBIAAAABAAEARKwAAIhYAQACABAAAABkYXRhAgAAAAEA");
-        this.dummyAudio.loop = true;
-      }
-      this.dummyAudio.play().catch(e => console.log("Dummy audio play failed", e));
-      
-      navigator.mediaSession.setActionHandler('play', () => {
-        window.speechSynthesis.resume();
-        this.setState("playing");
-        navigator.mediaSession.playbackState = "playing";
-      });
-      
-      navigator.mediaSession.setActionHandler('pause', () => {
-        window.speechSynthesis.pause();
-        this.setState("paused");
-        navigator.mediaSession.playbackState = "paused";
-      });
-      
-      navigator.mediaSession.setActionHandler('stop', () => {
-        window.speechSynthesis.cancel();
-        this.setState("stopped");
-        navigator.mediaSession.playbackState = "none";
-        this.cleanupMediaSession();
-      });
-    }
-  }
-  
-  cleanupMediaSession() {
-    if (this.dummyAudio) {
-      this.dummyAudio.pause();
-      this.dummyAudio.currentTime = 0;
-    }
   }
 };
 exports["speech-synthesis"] = SpeechSynthesisWidget;
