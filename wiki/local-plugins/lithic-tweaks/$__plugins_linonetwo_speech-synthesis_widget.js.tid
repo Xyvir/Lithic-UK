@@ -72,10 +72,12 @@ var SpeechSynthesisWidget = class extends import_widget.widget {
       window.speechSynthesis.cancel();
       this.setState("stopped");
     } else if (action === "toggle") {
-      if (window.speechSynthesis.speaking) {
+      const state = $tw.wiki.getTiddlerText("$:/state/speech-synthesis");
+      if (state === "playing") {
         window.speechSynthesis.cancel();
         this.setState("stopped");
       } else {
+        window.speechSynthesis.cancel();
         const s = this.getAttribute("text");
         s && this.speak(s);
       }
