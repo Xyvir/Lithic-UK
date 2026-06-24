@@ -60,7 +60,3 @@
 - name: mermaid-tw5
   url: https://efurlanm.github.io/mermaid-tw5/
   type: plugins
-
-- name: speech-synthesis
-  url: https://tiddly-gittly.github.io/speech-synthesis/
-  type: plugins

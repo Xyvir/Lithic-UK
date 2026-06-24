@@ -58,15 +58,23 @@ title: $:/plugins/kebi/tiddlystudy-references/filters
 </li>
 </$list>
 
-<li class="filtertag" style=<<pillStyle>> title="Play stream audio">
-<$wikify name="streamText" text="""<$macrocall $name="embed-stream" parent=<<currentTiddler>>/>""" output="text">
-<$button class="tc-btn-invisible tc-tiddlylink" tooltip="Play stream audio" style="color:inherit; cursor:pointer;">
-►
-<$speech-synthesis text=<<streamText>>/>
+<li class="filtertag" style=<<pillStyle>> title="Play/Pause stream audio">
+<$wikify name="streamText" text="""<$list filter="[<currentTiddler>get[stream-list]minlength[1]]" emptyMessage="{{!!text}}"><$macrocall $name="embed-stream" parent=<<currentTiddler>>/></$list>""" output="text">
+<$button class="tc-btn-invisible tc-tiddlylink" tooltip="Play/Pause stream audio" style="color:inherit; cursor:pointer;">
+⏯
+<$speech-synthesis text=<<streamText>> action="toggle"/>
 </$button>
 </$wikify>
 </li>
-
+<$list filter="[{$:/state/speech-synthesis}match[paused]] [{$:/state/speech-synthesis}match[playing]] +[limit[1]]" variable="ignore">
+<li class="filtertag" style=<<pillStyle>> title="Stop audio">
+<$button class="tc-btn-invisible tc-tiddlylink" tooltip="Stop stream audio" style="color:inherit; cursor:pointer;">
+⏹
+<$speech-synthesis action="stop"/>
+</$button>
+</li>
+</$list>
+<$list filter="[{$:/state/speech-synthesis}!match[paused]!match[playing]]" variable="ignore">
 <$list filter="[<currentTiddler>tag[Dogear]]" emptyMessage="<li class='filtertag' style='background-color:gray; opacity:0.5;' title='No active dogear'>X</li>" variable="ignore">
 <li class="filtertag" style=<<pillStyle>> title="Clear dogear">
 <$button class="tc-btn-invisible tc-tiddlylink" tooltip="Clear dogear" style="color:inherit; cursor:pointer;">
@@ -74,6 +82,7 @@ title: $:/plugins/kebi/tiddlystudy-references/filters
 X
 </$button>
 </li>
+</$list>
 </$list>
 
 <$list filter="[<nextTarget>minlength[1]]" emptyMessage="<li class='filtertag' style='background-color:gray; opacity:0.5;' title='No next'>Next &gt;&gt;</li>" variable="ignore">
