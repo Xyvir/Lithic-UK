@@ -62,5 +62,5 @@
   type: plugins
 
 - name: speech-synthesis
-  url: https://raw.githubusercontent.com/linonetwo/wiki/refs/heads/master/tiddlers/system/%24__plugins_linonetwo_speech-synthesis.json
-  type: json-plugin
+  url: https://tiddly-gittly.github.io/speech-synthesis/
+  type: plugins
