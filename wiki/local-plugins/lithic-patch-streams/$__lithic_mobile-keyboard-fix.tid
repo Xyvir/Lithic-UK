@@ -1,0 +1,10 @@
+title: $:/lithic/mobile-keyboard-fix
+tags: $:/tags/RawMarkup
+
+<script>
+window.addEventListener('keydown', function(event) {
+    if (event.keyCode === 13 && event.getModifierState && (event.getModifierState("Shift") || event.getModifierState("CapsLock"))) {
+        try { Object.defineProperty(event, 'shiftKey', {value: true, configurable: true}); } catch (e) {}
+    }
+}, true);
+</script>
