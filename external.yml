@@ -61,3 +61,6 @@
   url: https://efurlanm.github.io/mermaid-tw5/
   type: plugins
 
+- name: speech-synthesis
+  url: https://raw.githubusercontent.com/linonetwo/wiki/refs/heads/master/tiddlers/system/%24__plugins_linonetwo_speech-synthesis.json
+  type: json-plugin

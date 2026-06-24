@@ -58,6 +58,15 @@ title: $:/plugins/kebi/tiddlystudy-references/filters
 </li>
 </$list>
 
+<li class="filtertag" style=<<pillStyle>> title="Play stream audio">
+<$wikify name="streamText" text="""<$macrocall $name="embed-stream" parent=<<currentTiddler>>/>""" output="text">
+<$button class="tc-btn-invisible tc-tiddlylink" tooltip="Play stream audio" style="color:inherit; cursor:pointer;">
+►
+<$speech-synthesis text=<<streamText>>/>
+</$button>
+</$wikify>
+</li>
+
 <$list filter="[<currentTiddler>tag[Dogear]]" emptyMessage="<li class='filtertag' style='background-color:gray; opacity:0.5;' title='No active dogear'>X</li>" variable="ignore">
 <li class="filtertag" style=<<pillStyle>> title="Clear dogear">
 <$button class="tc-btn-invisible tc-tiddlylink" tooltip="Clear dogear" style="color:inherit; cursor:pointer;">
