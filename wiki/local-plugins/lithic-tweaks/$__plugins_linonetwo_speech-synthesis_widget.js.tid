@@ -140,12 +140,12 @@ var SpeechSynthesisWidget = class extends import_widget.widget {
         t.onstart = () => this.setState("playing");
       }
       
-      // Dummy closures to trick mobile Safari/Chrome Garbage Collector into keeping the utterance alive
-      t.onpause = () => { if (this) { /* GC anchor */ } };
-      t.onresume = () => { if (this) { /* GC anchor */ } };
+      t.onpause = () => this.setState("paused");
+      t.onresume = () => this.setState("playing");
       
       t.onerror = (evt) => {
         console.error("SpeechSynthesis error on chunk", evt);
+        this.setState("stopped");
       };
       
       t.onend = () => {
