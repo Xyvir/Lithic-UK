@@ -140,12 +140,8 @@ var SpeechSynthesisWidget = class extends import_widget.widget {
         t.onstart = () => this.setState("playing");
       }
       
-      t.onpause = () => this.setState("paused");
-      t.onresume = () => this.setState("playing");
-      
       t.onerror = (evt) => {
         console.error("SpeechSynthesis error on chunk", evt);
-        this.setState("stopped");
       };
       
       t.onend = () => {
