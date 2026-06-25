@@ -52,8 +52,17 @@ var SpeechSynthesisWidget = class extends import_widget.widget {
     }
   }
   
-  setState(state) {
+  setState(state, reason) {
     $tw.wiki.addTiddler(new $tw.Tiddler({ title: "$:/state/speech-synthesis", text: state }));
+    /*
+    if (reason) {
+      const debugTiddler = "$:/speech/debug";
+      const existingText = $tw.wiki.getTiddlerText(debugTiddler) || "";
+      const time = new Date().toISOString();
+      const newText = existingText + `\n* ${time} - State: **${state}** - Reason: ${reason}`;
+      $tw.wiki.addTiddler(new $tw.Tiddler({ title: debugTiddler, text: newText }));
+    }
+    */
   }
   
   getStreamText(title) {
@@ -79,17 +88,17 @@ var SpeechSynthesisWidget = class extends import_widget.widget {
     
     if (action === "pause") {
       window.speechSynthesis.pause();
-      this.setState("paused");
+      this.setState("paused", "explicit pause action triggered");
     } else if (action === "resume") {
       window.speechSynthesis.resume();
-      this.setState("playing");
+      this.setState("playing", "explicit resume action triggered");
     } else if (action === "stop") {
       window.speechSynthesis.cancel();
-      this.setState("stopped");
+      this.setState("stopped", "explicit stop action triggered");
     } else if (action === "toggle") {
       if (window.speechSynthesis.speaking) {
         window.speechSynthesis.cancel();
-        this.setState("stopped");
+        this.setState("stopped", "toggle action triggered while speaking");
       } else {
         const s = streamNode ? this.getStreamText(streamNode) : this.getAttribute("text");
         s && this.speak(s);
@@ -132,22 +141,31 @@ var SpeechSynthesisWidget = class extends import_widget.widget {
       const t = new SpeechSynthesisUtterance(chunk);
       
       if (index === 0) {
-        t.onstart = () => this.setState("playing");
+        t.onstart = () => this.setState("playing", "onstart event from SpeechSynthesisUtterance");
       }
       
-      t.onpause = () => this.setState("paused");
-      t.onresume = () => this.setState("playing");
+      t.onpause = () => this.setState("paused", "onpause event from SpeechSynthesisUtterance");
+      t.onresume = () => this.setState("playing", "onresume event from SpeechSynthesisUtterance");
       
       t.onerror = (evt) => {
         console.error("SpeechSynthesis error on chunk", evt);
-        this.setState("stopped");
+        // We log the error but do not change the state to 'stopped' because mobile devices 
+        // often throw 'interrupted' or 'synthesis-failed' when locking the screen, even though 
+        // playback continues or resumes seamlessly.
+        /*
+        const debugTiddler = "$:/speech/debug";
+        const existingText = $tw.wiki.getTiddlerText(debugTiddler) || "";
+        const time = new Date().toISOString();
+        const newText = existingText + `\n* ${time} - Event: **onerror** - Reason: ${evt.error} (Ignored to prevent state desync)`;
+        $tw.wiki.addTiddler(new $tw.Tiddler({ title: debugTiddler, text: newText }));
+        */
       };
       
       t.onend = () => {
         chunksPlayed++;
         // Only mark as fully stopped when the very last chunk is done
         if (chunksPlayed === chunks.length) {
-          this.setState("stopped");
+          this.setState("stopped", "onend event from SpeechSynthesisUtterance for the final chunk");
         }
       };
       
