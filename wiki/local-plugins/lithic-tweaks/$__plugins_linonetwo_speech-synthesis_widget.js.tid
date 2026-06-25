@@ -50,13 +50,15 @@ var SpeechSynthesisWidget = class extends import_widget.widget {
   }
 
   setState(state) {
-    $tw.wiki.addTiddler(new $tw.Tiddler({ title: "$:/state/speech-synthesis", text: state }));
-    
-    // Manage screen awake status based on playback state
-    if (state === "playing") {
-      this.requestWakeLock();
-    } else if (state === "stopped" || state === "paused") {
-      this.releaseWakeLock();
+    if ($tw.wiki.getTiddlerText("$:/state/speech-synthesis") !== state) {
+      $tw.wiki.addTiddler(new $tw.Tiddler({ title: "$:/state/speech-synthesis", text: state }));
+      
+      // Manage screen awake status based on playback state
+      if (state === "playing") {
+        this.requestWakeLock();
+      } else if (state === "stopped" || state === "paused") {
+        this.releaseWakeLock();
+      }
     }
   }
   
@@ -136,12 +138,10 @@ var SpeechSynthesisWidget = class extends import_widget.widget {
     window._speechUtterances = chunks.map((chunk, index) => {
       const t = new SpeechSynthesisUtterance(chunk);
       
-      if (index === 0) {
-        t.onstart = () => this.setState("playing");
-      }
-      
+      t.onstart = () => this.setState("playing");
       t.onpause = () => this.setState("paused");
       t.onresume = () => this.setState("playing");
+      t.onboundary = () => this.setState("playing");
       
       t.onerror = (evt) => {
         console.error("SpeechSynthesis error on chunk", evt);
