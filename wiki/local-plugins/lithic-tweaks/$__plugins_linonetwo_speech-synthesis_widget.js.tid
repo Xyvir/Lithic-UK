@@ -133,7 +133,7 @@ var SpeechSynthesisWidget = class extends import_widget.widget {
 
     let chunksPlayed = 0;
 
-    chunks.forEach((chunk, index) => {
+    window._speechUtterances = chunks.map((chunk, index) => {
       const t = new SpeechSynthesisUtterance(chunk);
       
       if (index === 0) {
@@ -151,11 +151,14 @@ var SpeechSynthesisWidget = class extends import_widget.widget {
         chunksPlayed++;
         if (chunksPlayed === chunks.length) {
           this.setState("stopped");
+          window._speechUtterances = null; // Clean up memory when fully done
         }
       };
       
-      window.speechSynthesis.speak(t);
+      return t;
     });
+    
+    window._speechUtterances.forEach(t => window.speechSynthesis.speak(t));
   }
 };
 exports["speech-synthesis"] = SpeechSynthesisWidget;
