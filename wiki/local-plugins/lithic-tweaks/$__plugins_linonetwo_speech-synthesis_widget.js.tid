@@ -13,152 +13,148 @@ module-type: widget
 var import_widget = require("$:/core/modules/widgets/widget.js");
 
 var SpeechSynthesisWidget = class extends import_widget.widget {
-  constructor(parseTreeNode, options) {
-    super(parseTreeNode, options);
-    this.wakeLock = null;
-  }
-
-  refresh(e) {
-    return $tw.utils.count(this.computeAttributes()) > 0 ? (this.refreshSelf(), !0) : this.refreshChildren(e);
+  refresh(changedTiddlers) {
+    let changedAttributes = this.computeAttributes();
+    if(changedAttributes.streamNode || changedAttributes.text || changedAttributes.action || changedTiddlers["$:/state/speech-synthesis"]) {
+      this.refreshSelf();
+      return true;
+    }
+    return this.refreshChildren(changedTiddlers);
   }
   
-  render(e, t) {
-    this.parentDomNode = e;
+  render(parent, nextSibling) {
+    this.parentDomNode = parent;
     this.computeAttributes();
     this.execute();
-    this.renderChildren(e, t);
+    
+    const streamNode = this.getAttribute("streamNode");
+    
+    // If streamNode is provided, render a UI button that acts as the action trigger
+    if (streamNode) {
+      const btn = this.document.createElement("button");
+      btn.className = "tc-btn-invisible tc-tiddlylink";
+      btn.title = "Play/Stop stream audio";
+      btn.style.color = "inherit";
+      btn.style.cursor = "pointer";
+      
+      const state = $tw.wiki.getTiddlerText("$:/state/speech-synthesis");
+      btn.innerHTML = state === "playing" ? "■" : "▶";
+      
+      btn.addEventListener("click", () => {
+        this.invokeAction();
+      });
+      
+      parent.insertBefore(btn, nextSibling);
+      this.domNodes.push(btn);
+    } else {
+      // Otherwise, just act like a standard action widget without UI
+      this.renderChildren(parent, nextSibling);
+    }
   }
   
-  async requestWakeLock() {
-    if ('wakeLock' in navigator && !this.wakeLock) {
-      try {
-        this.wakeLock = await navigator.wakeLock.request('screen');
-        this.wakeLock.addEventListener('release', () => {
-          this.wakeLock = null;
-        });
-      } catch (err) {
-        console.warn("Wake Lock request denied by OS:", err);
-      }
-    }
-  }
-
-  releaseWakeLock() {
-    if (this.wakeLock !== null) {
-      this.wakeLock.release().catch(()=>{});
-      this.wakeLock = null;
-    }
-  }
-
   setState(state) {
     if ($tw.wiki.getTiddlerText("$:/state/speech-synthesis") !== state) {
       $tw.wiki.addTiddler(new $tw.Tiddler({ title: "$:/state/speech-synthesis", text: state }));
-      
-      // Manage screen awake status based on playback state
-      if (state === "playing") {
-        this.requestWakeLock();
-      } else if (state === "stopped" || state === "paused") {
-        this.releaseWakeLock();
+    }
+  }
+  
+  getStreamText(title) {
+    let text = "";
+    const tiddler = $tw.wiki.getTiddler(title);
+    if (tiddler) {
+      if (tiddler.fields.text) {
+        text += tiddler.fields.text + " ";
+      }
+      if (tiddler.fields["stream-list"]) {
+        const list = $tw.utils.parseStringArray(tiddler.fields["stream-list"]);
+        for (const child of list) {
+          text += this.getStreamText(child);
+        }
       }
     }
+    return text;
   }
   
   invokeAction(e, t) {
-    const action = this.getAttribute("action", "speak");
-    if (action === "pause") {
-      window.speechSynthesis.pause();
-      this.setState("paused");
-    } else if (action === "resume") {
-      window.speechSynthesis.resume();
-      this.setState("playing");
-    } else if (action === "stop") {
-      window.speechSynthesis.cancel();
+    const synth = window.speechSynthesis;
+    const currentState = $tw.wiki.getTiddlerText("$:/state/speech-synthesis");
+    
+    // Strict UI-based toggle: if the UI says we are playing, the user's intent when clicking is to STOP.
+    if (currentState === "playing") {
+      synth.cancel();
       this.setState("stopped");
-    } else if (action === "toggle") {
-      const state = $tw.wiki.getTiddlerText("$:/state/speech-synthesis");
-      if (state === "playing") {
-        window.speechSynthesis.cancel();
-        this.setState("stopped");
-      } else {
-        window.speechSynthesis.cancel();
-        const s = this.getAttribute("text");
-        s && this.speak(s);
-      }
     } else {
-      window.speechSynthesis.cancel();
-      const s = this.getAttribute("text");
-      s && this.speak(s);
+      // Otherwise, the intent is to PLAY.
+      synth.cancel(); // Clear anything lingering just in case
+      const streamNode = this.getAttribute("streamNode");
+      const s = streamNode ? this.getStreamText(streamNode) : this.getAttribute("text");
+      if (s) this.speak(s);
     }
+    return true;
   }
   
   speak(e) {
+    // Clear any existing audio in the queue before starting
     window.speechSynthesis.cancel();
     
+    // Assign a unique session ID so old events don't overwrite new states
+    this.currentSessionId = Date.now();
+    const sessionId = this.currentSessionId;
+    
+    // The Web Speech API chokes on massive strings. 
+    // We split the text into safe ~200 character chunks at word boundaries.
     const maxChunkLength = 200;
     const chunks = [];
-    
-    // Split text by common punctuation/newlines, keeping the punctuation attached to the clause
-    const clauses = e.match(/[^,.\?!;\n]+[,.\?!;\n]*/g) || [e];
-    
     let currentChunk = "";
+    const words = e.split(' ');
     
-    for (let i = 0; i < clauses.length; i++) {
-      let clause = clauses[i].trim();
-      if (!clause) continue;
-      
-      if ((currentChunk + " " + clause).length > maxChunkLength) {
-        if (currentChunk) {
-          chunks.push(currentChunk.trim());
-          currentChunk = "";
-        }
-        
-        if (clause.length > maxChunkLength) {
-          const words = clause.split(' ');
-          for (let j = 0; j < words.length; j++) {
-            if ((currentChunk + " " + words[j]).length > maxChunkLength && currentChunk) {
-              chunks.push(currentChunk.trim());
-              currentChunk = words[j];
-            } else {
-              currentChunk += (currentChunk ? " " : "") + words[j];
-            }
-          }
-        } else {
-          currentChunk = clause;
-        }
+    for (let i = 0; i < words.length; i++) {
+      if ((currentChunk + words[i]).length > maxChunkLength) {
+        chunks.push(currentChunk.trim());
+        currentChunk = words[i] + " ";
       } else {
-        currentChunk += (currentChunk ? " " : "") + clause;
+        currentChunk += words[i] + " ";
       }
     }
-    
     if (currentChunk.trim().length > 0) {
       chunks.push(currentChunk.trim());
     }
 
     let chunksPlayed = 0;
 
-    window._speechUtterances = chunks.map((chunk, index) => {
+    const handleEndOrError = () => {
+      if (this.currentSessionId !== sessionId) return;
+      chunksPlayed++;
+      
+      // Only set to stopped once every single chunk has been processed (or errored)
+      if (chunksPlayed >= chunks.length) {
+        this.setState("stopped");
+      }
+    };
+
+    // Queue up all the chunks to be read sequentially
+    chunks.forEach((chunk, index) => {
       const t = new SpeechSynthesisUtterance(chunk);
       
-      t.onstart = () => this.setState("playing");
-      t.onpause = () => this.setState("paused");
-      t.onresume = () => this.setState("playing");
-      t.onboundary = () => this.setState("playing");
+      t.onstart = () => {
+        if (this.currentSessionId !== sessionId) return;
+        this.setState("playing");
+      };
+      
+      // We explicitly ignore onpause and onresume events.
+      // If the mobile OS suspends the tab or locks the screen, it might throw an onpause.
+      // We want to safely assume the user INTENDS for it to keep playing upon unlock,
+      // so we keep the UI tightly locked to the "playing" state until the queue officially ends or errors out.
       
       t.onerror = (evt) => {
         console.error("SpeechSynthesis error on chunk", evt);
+        handleEndOrError();
       };
       
-      t.onend = () => {
-        chunksPlayed++;
-        if (chunksPlayed === chunks.length) {
-          this.setState("stopped");
-          window._speechUtterances = null; // Clean up memory when fully done
-        }
-      };
+      t.onend = handleEndOrError;
       
-      return t;
+      window.speechSynthesis.speak(t);
     });
-    
-    window._speechUtterances.forEach(t => window.speechSynthesis.speak(t));
   }
 };
 exports["speech-synthesis"] = SpeechSynthesisWidget;
