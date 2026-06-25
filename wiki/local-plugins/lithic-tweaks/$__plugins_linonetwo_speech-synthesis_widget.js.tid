@@ -145,7 +145,6 @@ var SpeechSynthesisWidget = class extends import_widget.widget {
       
       t.onerror = (evt) => {
         console.error("SpeechSynthesis error on chunk", evt);
-        this.setState("stopped");
       };
       
       t.onend = () => {
