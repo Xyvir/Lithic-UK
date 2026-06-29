@@ -1,0 +1,4 @@
+title: $:/lithic/Filters/AllHighlights
+tags: $:/tags/Filter
+description: All Highlights
+filter: [tag[Highlight]]
