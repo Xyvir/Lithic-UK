@@ -1,0 +1,58 @@
+caption: FilterOps
+tags: $:/tags/SideBar
+title: $:/lithic/SidebarFilterOps
+
+\define make-fallback() [all[tiddlers]!is[system]search::literal[$(rawFilter)$]] -[prefix[$:/state/viewtemplate/visibility/]]
+
+\procedure handle-filterops-input()
+  <$let
+    rawFilter={{$:/temp/filterops/input}}
+    fallbackFilter=<<make-fallback>>
+    regexPattern="(?i)^[a-z0-9\s]+$"
+    isFallback={{{ [<rawFilter>regexp<regexPattern>then[yes]else[no]] }}}
+    actualFilter={{{ [<isFallback>match[yes]then<fallbackFilter>] ~[<rawFilter>] }}}
+  >
+    <$action-setfield $tiddler="$:/temp/advancedsearch" text=<<actualFilter>> />
+    <$action-setfield $tiddler="$:/temp/advancedsearch/input" text=<<actualFilter>> />
+  </$let>
+\end
+
+\procedure cancel-search-actions()
+  <$action-deletetiddler $filter="[[$:/temp/advancedsearch]] [[$:/temp/advancedsearch/input]] [[$:/temp/advancedsearch/selected-item]] [[$:/temp/filterops/input]]"/>
+\end
+
+\procedure lingo(title)
+  <%if [<title>match[Filter/Hint]] %>
+    <!-- hidden -->
+  <%elseif [<title>match[Filter/Matches]] %>
+    <$let 
+      rawFilter={{$:/temp/filterops/input}}
+      regexPattern="(?i)^[a-z0-9\s]+$"
+      isFallback={{{ [<rawFilter>regexp<regexPattern>then[yes]else[no]] }}}>
+      <%if [<isFallback>match[yes]] %>
+          <span class="tc-muted" style="font-style: italic; display: block; margin-bottom: 0.5em;">
+              String search fallback
+          </span>
+      <%endif%>
+    </$let>
+    <$transclude $tiddler={{{ [<lingo-base>addsuffix<title>] }}}>
+      <$transclude $tiddler={{{ [[$:/language/]addsuffix<title>] }}}/>
+    </$transclude>
+  <%else%>
+    <$transclude $tiddler={{{ [<lingo-base>addsuffix<title>] }}}>
+      <$transclude $tiddler={{{ [[$:/language/]addsuffix<title>] }}}/>
+    </$transclude>
+  <%endif%>
+\end
+
+\procedure keyboard-driven-input(tiddler, storeTitle, refreshTitle, selectionStateTitle, type, tag, focus, configTiddlerFilter, firstSearchFilterField, inputAcceptActions, inputAcceptVariantActions, inputCancelActions, filterMinLength)
+  <$edit-text tiddler="$:/temp/filterops/input" tag="input" type="search" focus=<<focus>> default="" inputActions=<<handle-filterops-input>> />
+\end
+
+<div class="lithic-sidebar-search">
+<$let lithic-sidebar-filters="$:/core/Filters/SystemTiddlers $:/core/Filters/ShadowTiddlers">
+
+  {{$:/core/ui/AdvancedSearch/Filter}}
+
+</$let>
+</div>

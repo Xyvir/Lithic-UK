@@ -10,22 +10,7 @@ description: Create a temporary tiddler that transcludes all results from the cu
       <$action-setfield 
          $tiddler="$:/TranscludedFilter"
          filter-string=<<search-input>>
-         text="""<$list filter='[subfilter{!!filter-string}]'>
-<$set name="trackState" filter="[<currentTiddler>addprefix[$:/state/dynaview/bulk/]]">
-<$reveal state=<<trackState>> type="nomatch" text="0" tag="div">
-<div class="tc-dynaview-track-tiddler-when-visible" data-dynaview-track-tiddler=<<trackState>>>
-<h2><$link to=<<currentTiddler>>><$text text=<<currentTiddler>>/></$link></h2>
-<$transclude tiddler=<<currentTiddler>> mode="block"/>
-<hr class="tc-separator"/>
-</div>
-</$reveal>
-<$reveal state=<<trackState>> type="match" text="0" tag="div">
-<div class="tc-dynaview-track-tiddler-when-visible" style="min-height: 200px; display:flex; align-items:center; justify-content:center; color: #999; border: 1px dashed #ccc; margin-bottom: 1em;" data-dynaview-track-tiddler=<<trackState>>>
-Loading <$text text=<<currentTiddler>>/>...
-</div>
-</$reveal>
-</$set>
-</$list>"""
+         text="""<<transclude-filter "[subfilter{!!filter-string}]">>"""
          type="text/vnd.tiddlywiki"
       />
       <$action-navigate $to="$:/TranscludedFilter"/>
