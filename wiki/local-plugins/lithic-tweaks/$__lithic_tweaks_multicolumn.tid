@@ -1,0 +1,46 @@
+title: $:/lithic/tweaks/multicolumn
+tags: $:/tags/Global $:/tags/Stylesheet
+type: text/vnd.tiddlywiki
+
+\widget $multicolumn()
+<$parameters
+     count=2
+     width=auto
+     gap=8ch
+     border="#E8E8E8"
+     break=yes
+>
+<$let
+     txt-margin={{{ [{$:/themes/tiddlywiki/vanilla/metrics/bodylineheight} ] :else[[1.5em]] }}}
+>
+<div
+     class=`br-txt-col ${ [<break>match[yes]then[all-break]] }$`
+     style=`
+         column-count: ${ [<count>match[auto]then[auto]] :else[<count>match[]then[auto]] :else[<count>] }$;
+         column-width: ${ [<width>match[auto]then[auto]] :else[<width>match[]then[auto]] :else[<width>] }$;
+         column-gap: $(gap)$;
+         column-rule: 1px solid ${ [<border>match[no]then[#0000]] :else[<border>match[]then[#0000]] :else[<border>] }$;
+`><$slot $name="ts-raw"/></div>
+</$let>
+</$parameters>
+\end $multicolumn
+
+/* Original Developer: Brian Radspinner */
+
+.br-txt-col > *:first-child { margin: 0; }
+
+.br-txt-col.all-break p { break-inside: auto; }
+
+.br-txt-col:not(.all-break) p { break-inside: avoid; }
+
+/* Double hr acts as forced column break */
+.br-txt-col hr:has(+ hr) {
+    display: none;
+}
+
+.br-txt-col hr + hr {
+    break-before: column;
+    border: none;
+    margin: 0;
+    height: 0;
+}

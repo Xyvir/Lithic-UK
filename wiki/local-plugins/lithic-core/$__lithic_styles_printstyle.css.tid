@@ -171,15 +171,20 @@ type: text/css
     }
 
     /* =======================================================
-       7. HR AS PAGE BREAK
-       (Turns <hr> into a hard page break; hides the visible bar)
+       7. DOUBLE HR AS PAGE BREAK
+       (Turns double <hr> into a hard page break; hides the visible bars)
        ======================================================= */
 
-    hr {
+    hr:has(+ hr) {
+        display: none !important;
+    }
+
+    hr + hr {
         border: none !important;
         margin: 0 !important;
         height: 0 !important;
         page-break-after: always !important;
+        break-after: page !important;
     }
 
     /* =======================================================
