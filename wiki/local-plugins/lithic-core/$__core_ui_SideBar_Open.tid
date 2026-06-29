@@ -23,8 +23,18 @@ $button$
 </$droppable>
 \end
 
+<$set name="visibleItems" filter="[list<tv-story-list>:filter[<currentTiddler>addprefix[$:/state/viewtemplate/visibility/]get[text]!match[0]]]">
+<$set name="firstStory" filter="[list<tv-story-list>first[]]">
+<$set name="lastStory" filter="[list<tv-story-list>last[]]">
+<$set name="firstVisible" filter="[enlist<visibleItems>first[]]">
+<$set name="lastVisible" filter="[enlist<visibleItems>last[]]">
+
 <div class="tc-sidebar-tab-open">
-<$list filter="[list<tv-story-list>]" history=<<tv-history-list>> storyview="pop">
+<$list filter="[<firstStory>!match<firstVisible>]" variable="ignore">
+  <div style="color:#aaa; text-align:center; padding:4px 0;">&#8942;</div>
+</$list>
+
+<$list filter="[enlist<visibleItems>]" history=<<tv-history-list>> storyview="pop">
 <div class="tc-sidebar-tab-open-item">
    
    <$macrocall $name="droppable-item" button="""<$button message="tm-close-tiddler" tooltip={{$:/language/Buttons/Close/Hint}} aria-label={{$:/language/Buttons/Close/Caption}} class="tc-btn-invisible tc-btn-mini tc-small-gap-right">{{$:/core/images/close-button}}</$button><$link to={{!!title}}><$view field="title"/></$link>"""/>
@@ -45,6 +55,9 @@ $button$
    </div>
 </$list>
 
+<$list filter="[<lastStory>!match<lastVisible>]" variable="ignore">
+  <div style="color:#aaa; text-align:center; padding:4px 0;">&#8942;</div>
+</$list>
 <$tiddler tiddler="">
 <div style="display:flex; justify-content:space-between; align-items:center; margin-top:4px;">
    <$macrocall $name="droppable-item" button="""<$button message="tm-close-all-tiddlers" class="tc-btn-invisible tc-btn-mini tc-tiddlylink"><<lingo Button>></$button>"""/>
@@ -55,3 +68,8 @@ $button$
 </div>
 </$tiddler>
 </div>
+</$set>
+</$set>
+</$set>
+</$set>
+</$set>

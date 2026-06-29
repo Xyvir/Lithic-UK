@@ -3,6 +3,7 @@
     "plugins": [
         "tiddlywiki/markdown",
         "tiddlywiki/freelinks",
+        "tiddlywiki/dynaview",
         "xyvir/anchors-for-streams",
         "xyvir/lithic-core",
         "xyvir/lithic-default-configs",
