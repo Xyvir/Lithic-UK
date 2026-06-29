@@ -16,23 +16,74 @@ exports.name = "dynaview-startup-tiddler";
 exports.params = [];
 
 exports.run = function() {
-    if(typeof window !== "undefined" && window.localStorage) {
+    if(typeof window !== "undefined") {
         try {
-            var key = "tw5-dynaview-scroll-position#" + window.location.pathname;
-            var data = window.localStorage.getItem(key);
-            console.log("dynaview-startup-tiddler JS macro running! Key:", key, "Data:", data);
+            var stateTiddler = "$:/config/dynaview/scroll";
+            
+            // ONE-TIME POLYFILL INJECTION
+            if(!window.lithicDynaviewPolyfilled) {
+                window.lithicDynaviewPolyfilled = true;
+                
+                var isWaitingForAnimationFrame = false;
+                window.addEventListener("scroll", function() {
+                    if(!isWaitingForAnimationFrame) {
+                        window.requestAnimationFrame(function() {
+                            if($tw.wiki.getTiddlerText("$:/config/DynaView/RestoreScrollPositionAtStartup", "").trim() === "yes") {
+                                var elements = document.querySelectorAll(".tc-tiddler-frame[data-tiddler-title]"),
+                                    topmostElement = null,
+                                    topmostElementTop = 1000000;
+                                
+                                $tw.utils.each(elements,function(element) {
+                                    var rect = element.getBoundingClientRect();
+                                    if((rect.top < topmostElementTop) && (rect.bottom > 0)) {
+                                        topmostElement = element;
+                                        topmostElementTop = rect.top;
+                                    }
+                                });
+
+                                if(topmostElement) {
+                                    var newJson = JSON.stringify({
+                                        title: topmostElement.getAttribute("data-tiddler-title"),
+                                        offset: -topmostElementTop
+                                    });
+                                    if($tw.wiki.getTiddlerText(stateTiddler) !== newJson) {
+                                        $tw.wiki.addTiddler(new $tw.Tiddler({title: stateTiddler, text: newJson}));
+                                    }
+                                }
+                            }
+                            isWaitingForAnimationFrame = false;
+                        });
+                        isWaitingForAnimationFrame = true;
+                    }
+                }, false);
+            }
+
+            var data = $tw.wiki.getTiddlerText(stateTiddler);
             if(data) {
                 var json = JSON.parse(data);
                 if(json && json.title) {
-                    console.log("dynaview-startup-tiddler returning:", json.title);
+                    // ONE-TIME RESTORE POLYFILL
+                    if(!window.lithicDynaviewRestored) {
+                        window.lithicDynaviewRestored = true;
+                        setTimeout(function() {
+                            var elements = document.querySelectorAll(".tc-tiddler-frame[data-tiddler-title]");
+                            $tw.utils.each(elements,function(element) {
+                                if(element.getAttribute("data-tiddler-title") === json.title) {
+                                    var rect = element.getBoundingClientRect(),
+                                        scrollY = Math.round(window.scrollY + rect.top + json.offset);
+                                    if(Math.abs(scrollY - window.scrollY) > 5) {
+                                        window.scrollTo(window.scrollX, scrollY);
+                                    }
+                                }
+                            });
+                        }, 500); // Wait for DOM to settle after Lithic store injection
+                    }
                     return json.title;
                 }
             }
         } catch(e) {
             console.error("dynaview-startup-tiddler error:", e);
         }
-    } else {
-        console.log("dynaview-startup-tiddler: window or localStorage not available");
     }
     return "";
 };
