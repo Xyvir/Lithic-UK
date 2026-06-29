@@ -1,7 +1,7 @@
-caret-pos: 32
+caret-pos: 42
 title: $:/lithic/slashcommands/multicolumn
 type: text/vnd.tiddlywiki
 
-<$multicolumn count=2 break=no>
+<$multicolumn count=2 border=no break=no>
 
 </$multicolumn>

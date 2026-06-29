@@ -7,7 +7,8 @@ type: text/vnd.tiddlywiki
      count=2
      width=auto
      gap=8ch
-     border="#E8E8E8"
+     border=no
+     borderhex="#E8E8E8"
      break=yes
 >
 <$let
@@ -19,7 +20,7 @@ type: text/vnd.tiddlywiki
          column-count: ${ [<count>match[auto]then[auto]] :else[<count>match[]then[auto]] :else[<count>] }$;
          column-width: ${ [<width>match[auto]then[auto]] :else[<width>match[]then[auto]] :else[<width>] }$;
          column-gap: $(gap)$;
-         column-rule: 1px solid ${ [<border>match[no]then[#0000]] :else[<border>match[]then[#0000]] :else[<border>] }$;
+         column-rule: 1px solid ${ [<border>match[yes]then<borderhex>] :else[[#0000]] }$;
 `><$slot $name="ts-raw"/></div>
 </$let>
 </$parameters>
