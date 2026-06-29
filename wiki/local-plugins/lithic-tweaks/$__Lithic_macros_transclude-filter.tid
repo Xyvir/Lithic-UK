@@ -3,7 +3,7 @@ tags: $:/tags/Global
 
 \procedure transclude-filter(filter)
 <$list filter=<<filter>>>
-<$set name="trackState" filter="[<currentTiddler>addprefix[$:/state/dynaview/bulk/]]">
+<$let trackState={{{ [<currentTiddler>addprefix[$:/state/dynaview/bulk/]] }}}>
 <$reveal state=<<trackState>> type="nomatch" text="0" tag="div">
 <div class="tc-dynaview-track-tiddler-when-visible" data-dynaview-track-tiddler=<<trackState>>>
 <h2><$link to=<<currentTiddler>>><$text text=<<currentTiddler>>/></$link></h2>
@@ -16,6 +16,6 @@ tags: $:/tags/Global
 Loading <$text text=<<currentTiddler>>/>...
 </div>
 </$reveal>
-</$set>
+</$let>
 </$list>
 \end

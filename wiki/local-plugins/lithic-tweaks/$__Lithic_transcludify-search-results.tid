@@ -3,16 +3,18 @@ tags: $:/tags/AdvancedSearch/FilterButton
 caption: Transcludify Results
 description: Create a temporary tiddler that transcludes all results from the current filter
 
+\define build-text() <<transclude-filter """$(search-input)$""">>
+
 <$reveal state="$:/temp/advancedsearch" type="nomatch" text="">
 <$set name="search-input" value={{$:/temp/advancedsearch}}>
 <$list filter="[subfilter{$:/temp/advancedsearch}limit[1]]" variable="ignore">
    <$button tooltip="Create a tiddler transcluding these results" class="tc-btn-invisible">
       <$action-setfield 
          $tiddler="$:/TranscludedFilter"
-         filter-string=<<search-input>>
-         text="""<<transclude-filter "[subfilter{!!filter-string}]">>"""
+         text=<<build-text>>
          type="text/vnd.tiddlywiki"
       />
+      <$action-deletefield $tiddler="$:/TranscludedFilter" filter-string/>
       <$action-navigate $to="$:/TranscludedFilter"/>
       {{$:/core/images/transcludify}}
    </$button>
