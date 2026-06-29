@@ -2112,7 +2112,7 @@ exports.startup = function() {
           
           if (Array.isArray(parsedData) && parsedData.length > 0) {
             let node = parsedData[0];
-            node.tags = node.tags ? [...new Set([...(Array.isArray(node.tags) ? node.tags : (typeof node.tags === 'string' ? node.tags.split(' ') : [])), '$:/tags/PayloadURL'])].join(' ') : '$:/tags/PayloadURL';
+            node.tags = node.tags ? [...new Set([...(Array.isArray(node.tags) ? node.tags : (typeof node.tags === 'string' ? node.tags.split(' ') : [])), 'Dogear'])].join(' ') : 'Dogear';
             
             window.pendingImports = window.pendingImports.concat(parsedData);
             window.openNewBlankLith();
@@ -3628,9 +3628,9 @@ exports.startup = function() {
             parsedData = parseLithToJSON(text);
           }
           if (Array.isArray(parsedData) && parsedData.length > 0) {
-            // Replicate ?json behavior by tagging only the root parent with PayloadURL
+            // Replicate ?json behavior by tagging only the root parent with Dogear
             let node = parsedData[0];
-            node.tags = node.tags ? [...new Set([...(Array.isArray(node.tags) ? node.tags : (typeof node.tags === 'string' ? node.tags.split(' ') : [])), '$:/tags/PayloadURL'])].join(' ') : '$:/tags/PayloadURL';
+            node.tags = node.tags ? [...new Set([...(Array.isArray(node.tags) ? node.tags : (typeof node.tags === 'string' ? node.tags.split(' ') : [])), 'Dogear'])].join(' ') : 'Dogear';
             window.pendingImports = window.pendingImports.concat(parsedData);
             log("Remote Payload loaded. Booting fresh lithic.html...");
             // Clear URL query params to prevent reload loop
