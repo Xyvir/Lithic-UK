@@ -1,0 +1,139 @@
+title: $:/lithic/modules/action-highlight.js
+type: application/javascript
+module-type: widget
+
+/*\
+title: $:/lithic/modules/action-highlight.js
+type: application/javascript
+module-type: widget
+
+Action widget to highlight text in the story river ephemerally.
+
+\*/
+(function(){
+
+/*jslint node: true, browser: true */
+/*global $tw: false */
+"use strict";
+
+var Widget = require("$:/core/modules/widgets/widget.js").widget;
+
+var HighlightWidget = function(parseTreeNode,options) {
+	this.initialise(parseTreeNode,options);
+};
+
+HighlightWidget.prototype = new Widget();
+
+HighlightWidget.prototype.render = function(parent,nextSibling) {
+	this.computeAttributes();
+	this.execute();
+};
+
+HighlightWidget.prototype.execute = function() {
+	this.text = this.getAttribute("text","");
+};
+
+HighlightWidget.prototype.refresh = function(changedTiddlers) {
+	var changedAttributes = this.computeAttributes();
+	if(changedAttributes.text) {
+		this.refreshSelf();
+		return true;
+	}
+	return this.refreshChildren(changedTiddlers);
+};
+
+HighlightWidget.prototype.invokeAction = function(triggeringWidget,event) {
+	if(!this.text) return true;
+
+	var searchText = this.text.trim();
+	if(!searchText || searchText.length < 2) return true; // ignore empty or 1-char
+
+    var regex;
+    try {
+        regex = new RegExp("(" + searchText.replace(/[-[\]{}()*+?.,\\^$|#\s]/g, '\\$&') + ")", "gi");
+    } catch(e) {
+        return true;
+    }
+
+    var storyRiver = document.querySelector(".tc-story-river");
+    if(!storyRiver) return true;
+
+    // Function to walk DOM and highlight text nodes
+    var highlightNode = function(element) {
+        var walker = document.createTreeWalker(element, NodeFilter.SHOW_TEXT, null, false);
+        var nodesToReplace = [];
+        var node;
+        while (node = walker.nextNode()) {
+            if (node.parentNode && node.parentNode.nodeName !== 'SCRIPT' && node.parentNode.nodeName !== 'STYLE' && node.parentNode.nodeName !== 'MARK') {
+                if (regex.test(node.nodeValue)) {
+                    nodesToReplace.push(node);
+                }
+            }
+        }
+        
+        nodesToReplace.forEach(function(n) {
+            var span = document.createElement("span");
+            span.className = "lithic-ephemeral-highlight-container";
+            span.innerHTML = n.nodeValue.replace(regex, "<mark class='lithic-ephemeral-highlight' style='background-color: yellow; color: black; border-radius: 2px; padding: 0 2px;'>$1</mark>");
+            if(n.parentNode) {
+                n.parentNode.replaceChild(span, n);
+            }
+        });
+    };
+
+    // 1. Highlight anything currently in the story river (after a brief delay for TW render)
+    setTimeout(function() {
+        highlightNode(storyRiver);
+    }, 100);
+
+    // 2. Setup MutationObserver for Dynaview dynamic rendering
+    var observer = new MutationObserver(function(mutations) {
+        mutations.forEach(function(mutation) {
+            mutation.addedNodes.forEach(function(node) {
+                if(node.nodeType === 1) { // ELEMENT_NODE
+                    highlightNode(node);
+                }
+            });
+        });
+    });
+
+    observer.observe(storyRiver, { childList: true, subtree: true });
+
+    // 3. Setup click listener to clear highlights
+    var clearHighlight = function() {
+        observer.disconnect();
+        
+        var containers = document.querySelectorAll("span.lithic-ephemeral-highlight-container");
+        for(var i=0; i<containers.length; i++) {
+            var container = containers[i];
+            var parent = container.parentNode;
+            if(!parent) continue;
+            var frag = document.createDocumentFragment();
+            while(container.firstChild) {
+                var c = container.firstChild;
+                if(c.nodeName === 'MARK') {
+                    while(c.firstChild) {
+                        frag.appendChild(c.firstChild);
+                    }
+                    container.removeChild(c);
+                } else {
+                    frag.appendChild(c);
+                }
+            }
+            parent.replaceChild(frag, container);
+            parent.normalize();
+        }
+        document.body.removeEventListener("click", clearHighlight, true);
+    };
+
+    // wait a tick before adding the listener so the current click doesn't instantly clear it
+    setTimeout(function() {
+        document.body.addEventListener("click", clearHighlight, true);
+    }, 200);
+
+	return true; // Action was invoked
+};
+
+exports["action-highlight"] = HighlightWidget;
+
+})();

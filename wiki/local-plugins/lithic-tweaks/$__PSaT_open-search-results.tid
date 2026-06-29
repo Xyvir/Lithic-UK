@@ -20,6 +20,8 @@ wiki-name: TW5Reference
     <$action-navigate $to=<<currenttiddler>> $scroll=no/>
    </$list>
    
+   <$action-highlight text={{$:/temp/filterops/input}}/>
+   
    {{$:/core/images/preview-open}}
    </$button>
 </$list>
