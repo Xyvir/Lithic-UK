@@ -9,9 +9,7 @@ $:/state/folded/$(currentTiddler)$
 <$vars storyTiddler=<<currentTiddler>> tiddlerInfoState=<<qualify "$:/state/popup/tiddler-info">> recentJournal={{{ [tag[Journal]!sort[created]first[]] }}}>
 <$set name="startupTiddler" value=<<dynaview-startup-tiddler>>>
 <div data-tiddler-title=<<currentTiddler>> data-tags={{!!tags}} class={{{ [all[shadows+tiddlers]tag[$:/tags/ClassFilters/TiddlerTemplate]!is[draft]] :map:flat[subfilter{!!text}] tc-tiddler-frame tc-tiddler-view-frame [<currentTiddler>is[tiddler]then[tc-tiddler-exists]] [<currentTiddler>is[missing]!is[shadow]then[tc-tiddler-missing]] [<currentTiddler>is[shadow]then[tc-tiddler-exists tc-tiddler-shadow]] [<currentTiddler>is[shadow]is[tiddler]then[tc-tiddler-overridden-shadow]] [<currentTiddler>is[system]then[tc-tiddler-system]] [{!!class}] [<currentTiddler>tags[]encodeuricomponent[]addprefix[tc-tagged-]] +[join[ ]] }}} role="article">
-<$list filter="[<currentTiddler>!prefix[$:/state/viewtemplate/visibility/]!match<startupTiddler>!match<recentJournal>!tag[Dogear]] -[list[$:/StoryList]first[]]" variable="ignore" emptyMessage="""
-<$action-log message="ViewTemplate LAZY EXEMPTION TRIGGERED for" tiddler=<<currentTiddler>> />
-<$list filter="[all[shadows+tiddlers]tag[$:/tags/ViewTemplate]!ihas[draft.of]]" variable="listItem"><$transclude tiddler=<<listItem>>/></$list>""">
+<$list filter="[<currentTiddler>!prefix[$:/state/viewtemplate/visibility/]!match<startupTiddler>!match<recentJournal>!tag[Dogear]] -[list[$:/StoryList]first[]]" variable="ignore" emptyMessage="""<$list filter="[all[shadows+tiddlers]tag[$:/tags/ViewTemplate]!ihas[draft.of]]" variable="listItem"><$transclude tiddler=<<listItem>>/></$list>""">
 <$set name="state" value={{{ [[$:/state/viewtemplate/visibility/]addsuffix<currentTiddler>] }}}>
 <$reveal stateTitle=<<state>> type="nomatch" text="" default="" tag="div">
 <div class="tc-dynaview-track-tiddler-when-visible" data-dynaview-track-tiddler=<<state>>>
@@ -21,7 +19,6 @@ $:/state/folded/$(currentTiddler)$
 </div>
 </$reveal>
 <$reveal stateTitle=<<state>> type="match" text="" default="" tag="div">
-<$action-log message="ViewTemplate LAZY LOAD TRIGGERED for" tiddler=<<currentTiddler>> />
 <div class="tc-dynaview-track-tiddler-when-visible" style="min-height: 5em;" data-dynaview-track-tiddler=<<state>>>
 </div>
 </$reveal>
