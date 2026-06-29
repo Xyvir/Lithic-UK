@@ -42,7 +42,7 @@ let idbKeyval = (function (exports) {
 }({}));
 
 /* Service Worker Logic */
-const VERSION = '0.0.99'; // Updated by build pipeline
+const VERSION = '0.0.100'; // Updated by build pipeline
 const CACHE_NAME = 'lithic-cache-v' + VERSION;
 const ASSETS_TO_CACHE = [
   '/',
