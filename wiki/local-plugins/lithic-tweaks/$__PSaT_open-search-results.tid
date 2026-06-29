@@ -16,7 +16,7 @@ wiki-name: TW5Reference
    
    <$action-sendmessage $message="tm-close-all-tiddlers"/>
    
-   <$list filter="[subfilter{$:/temp/advancedsearch}]">
+   <$list filter="[subfilter{$:/temp/advancedsearch}reverse[]]">
     <$action-navigate $to=<<currenttiddler>> $scroll=no/>
    </$list>
    
