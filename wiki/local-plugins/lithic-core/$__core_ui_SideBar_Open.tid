@@ -23,22 +23,9 @@ $button$
 </$droppable>
 \end
 
-<$set name="visibleItems" filter="[list<tv-story-list>:filter[<currentTiddler>addprefix[$:/state/viewtemplate/visibility/]get[text]!match[0]]]">
-<$set name="firstStory" filter="[list<tv-story-list>first[]]">
-<$set name="lastStory" filter="[list<tv-story-list>last[]]">
-<$set name="firstVisible" filter="[enlist<visibleItems>first[]]">
-<$set name="lastVisible" filter="[enlist<visibleItems>last[]]">
-
-<div class="tc-sidebar-tab-open">
-<$list filter="[<firstStory>!match<firstVisible>]" variable="ignore">
-  <div style="color:#aaa; text-align:center; padding:4px 0;">&#8942;</div>
-</$list>
-
-<$list filter="[enlist<visibleItems>]" history=<<tv-history-list>> storyview="pop">
+\define open-item-template()
 <div class="tc-sidebar-tab-open-item">
-   
    <$macrocall $name="droppable-item" button="""<$button message="tm-close-tiddler" tooltip={{$:/language/Buttons/Close/Hint}} aria-label={{$:/language/Buttons/Close/Caption}} class="tc-btn-invisible tc-btn-mini tc-small-gap-right">{{$:/core/images/close-button}}</$button><$link to={{!!title}}><$view field="title"/></$link>"""/>
-   
    <$list filter="[<currentTiddler>has[stream-list]]">
       <div style="margin-left: 22px; border-left: 1px solid #ddd; padding-left: 6px; font-size: 0.85em; opacity: 0.8;">
          <$list filter="[list[!!stream-list]]">
@@ -52,12 +39,48 @@ $button$
          </$list>
       </div>
    </$list>
-   </div>
+</div>
+\end
+
+<$set name="storyCount" filter="[list<tv-story-list>count[]]">
+<div class="tc-sidebar-tab-open">
+
+<!-- Classic View: <= 15 items -->
+<$list filter="[<storyCount>compare:number:lteq[15]]" variable="ignore">
+<$list filter="[list<tv-story-list>]" history=<<tv-history-list>> storyview="pop">
+<<open-item-template>>
+</$list>
+</$list>
+
+<!-- Sectional View: > 15 items -->
+<$list filter="[<storyCount>compare:number:gt[15]]" variable="ignore">
+<$set name="visibilityFilter" value="[<currentTiddler>addprefix[$:/state/viewtemplate/visibility/]get[text]!match[0]]">
+<$set name="visibleItems" filter="[list<tv-story-list>filter<visibilityFilter>]">
+<$set name="firstStory" filter="[list<tv-story-list>first[]]">
+<$set name="lastStory" filter="[list<tv-story-list>last[]]">
+<$set name="firstVisible" filter="[enlist<visibleItems>first[]]">
+<$set name="lastVisible" filter="[enlist<visibleItems>last[]]">
+
+<$list filter="[<firstStory>!match<firstVisible>]" variable="ignore">
+  <div style="color:#aaa; text-align:center; padding:4px 0;">&#8942;</div>
+</$list>
+
+<$list filter="[enlist<visibleItems>]" history=<<tv-history-list>> storyview="pop">
+<<open-item-template>>
 </$list>
 
 <$list filter="[<lastStory>!match<lastVisible>]" variable="ignore">
   <div style="color:#aaa; text-align:center; padding:4px 0;">&#8942;</div>
 </$list>
+
+</$set>
+</$set>
+</$set>
+</$set>
+</$set>
+</$set>
+</$list>
+
 <$tiddler tiddler="">
 <div style="display:flex; justify-content:space-between; align-items:center; margin-top:4px;">
    <$macrocall $name="droppable-item" button="""<$button message="tm-close-all-tiddlers" class="tc-btn-invisible tc-btn-mini tc-tiddlylink"><<lingo Button>></$button>"""/>
@@ -67,9 +90,6 @@ $button$
    </$button>
 </div>
 </$tiddler>
+
 </div>
-</$set>
-</$set>
-</$set>
-</$set>
 </$set>
