@@ -2,7 +2,7 @@ caption: FilterOps
 tags: $:/tags/SideBar
 title: $:/lithic/SidebarFilterOps
 
-\define make-fallback() [all[tiddlers]!is[system]search::literal[$(rawFilter)$]] -[prefix[$:/state/viewtemplate/visibility/]]
+\define make-fallback() [all[tiddlers]search::literal[$(rawFilter)$]] -[prefix[$:/state/]] -[prefix[$:/temp/]]
 
 \procedure handle-filterops-input()
   <$let
