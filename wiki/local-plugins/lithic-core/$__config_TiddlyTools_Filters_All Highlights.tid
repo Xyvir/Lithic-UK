@@ -1,4 +1,4 @@
-title: $:/lithic/Filters/AllHighlights
+title: $:/config/TiddlyTools/Filters/All Highlights
 tags: $:/tags/Filter
 description: All Highlights
 filter: [tag[Highlight]]
