@@ -1,0 +1,29 @@
+tags: $:/tags/Stylesheet
+title: $:/lithic/styles/mobile-tweaks.css
+
+/* Fix KaTeX math overflowing the mobile viewport and breaking the bottom bar layout */
+.katex-display {
+    max-width: 100%;
+    overflow-x: auto;
+    overflow-y: hidden;
+    /* Add a tiny padding so that scrollbars don't clip the bottom of equations */
+    padding-bottom: 2px;
+}
+
+/* Optional: Scale down math slightly on mobile to reduce the chance of needing the scrollbar */
+@media (max-width: 768px) {
+    .katex {
+        font-size: 0.9em;
+    }
+}
+
+/* === Hide Import Button on Desktop Page Controls === 
+   The import button is moved to the Actions sidebar on desktop.
+*/
+@media (min-width: {{$:/themes/tiddlywiki/vanilla/metrics/sidebarbreakpoint}}) {
+    .nc-topbar [class*="%24%3A%2Fcore%2Fui%2FButtons%2Fimport"],
+    .nc-bar [class*="%24%3A%2Fcore%2Fui%2FButtons%2Fimport"],
+    .tc-page-controls [class*="%24%3A%2Fcore%2Fui%2FButtons%2Fimport"] {
+        display: none !important;
+    }
+}

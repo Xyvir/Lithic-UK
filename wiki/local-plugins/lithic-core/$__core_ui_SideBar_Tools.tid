@@ -103,7 +103,7 @@ title: $:/core/ui/SideBar/Tools
 
 <$let tv-config-toolbar-icons=yes tv-config-toolbar-text=yes tv-config-toolbar-class="">
 <div class="lith-sidebar-tools-grid">
-<$list filter="[[$:/tags/PageControls]tagging[]!is[draft]] :filter[<currentTiddler>addprefix[$:/config/PageControlButtons/Visibility/]get[text]match[hide]]">
+<$list filter="[[$:/tags/PageControls]tagging[]!is[draft]] :filter[<currentTiddler>addprefix[$:/config/PageControlButtons/Visibility/]get[text]match[hide]] [<currentTiddler>match[$:/core/ui/Buttons/import]]">
 <$droppable actions=<<drop-actions>> tag="div" class="lith-sidebar-tools-item">
 <$draggable tiddler=<<currentTiddler>> tag="div" class="lith-sidebar-tools-item">
 <div class={{{[<currentTiddler>encodeuricomponent[]addprefix[tc-btn-]]}}} style="position:relative; width: 100%;" title={{{ [<currentTiddler>get[description]] }}}>
