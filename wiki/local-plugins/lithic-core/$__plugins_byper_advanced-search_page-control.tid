@@ -1,0 +1,4 @@
+title: $:/plugins/byper/advanced-search/page-control
+type: text/vnd.tiddlywiki
+
+<!-- Empty override to completely remove the plugin's page control button from the topnav and overflow menus -->
