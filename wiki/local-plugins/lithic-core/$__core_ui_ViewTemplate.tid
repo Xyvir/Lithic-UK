@@ -19,7 +19,7 @@ $:/state/folded/$(currentTiddler)$
 </div>
 </$reveal>
 <$reveal stateTitle=<<state>> type="match" text="" default="" tag="div">
-<div class="tc-dynaview-track-tiddler-when-visible tc-dynaview-unloaded" style="min-height: 5em;" data-dynaview-track-tiddler=<<state>>>
+<div class="tc-dynaview-track-tiddler-when-visible" style="min-height: 5em;" data-dynaview-track-tiddler=<<state>>>
 </div>
 </$reveal>
 </$set>
