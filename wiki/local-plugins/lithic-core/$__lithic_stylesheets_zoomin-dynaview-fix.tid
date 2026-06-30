@@ -1,0 +1,9 @@
+title: $:/Lithic/stylesheets/zoomin-dynaview-fix
+tags: $:/tags/Stylesheet
+type: text/vnd.tiddlywiki
+
+<$reveal state="$:/view" type="match" text="zoomin">
+.tc-dynaview-unloaded {
+    display: none !important;
+}
+</$reveal>
