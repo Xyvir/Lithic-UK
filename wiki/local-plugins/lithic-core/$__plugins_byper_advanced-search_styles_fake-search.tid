@@ -10,7 +10,7 @@ button.tc-btn-invisible.nc-fake-search-button {
     text-align: left;
     padding: 0.4em 1em !important;
     border: 1px solid <<colour tiddler-editor-border>> !important;
-    border-radius: 1.5em !important;
+    border-radius: 4px !important;
     background: <<colour tiddler-editor-background>> !important;
     color: <<colour muted-foreground>> !important;
     font-size: 0.9em;
@@ -33,4 +33,34 @@ button.tc-btn-invisible.nc-fake-search-button:hover {
 .nc-sidebar .nc-fake-search-wrapper {
     display: block;
     margin: 10px 0;
+}
+
+/* Modal Animations */
+@keyframes advancedSearchOverlayFadeIn {
+    from { opacity: 0; }
+    to { opacity: 1; }
+}
+
+@keyframes advancedSearchModalPopIn {
+    from { opacity: 0; transform: scale(0.97); }
+    to { opacity: 1; transform: scale(1); }
+}
+
+.advanced-search-overlay {
+    animation: advancedSearchOverlayFadeIn 0.15s ease-out;
+}
+
+.advanced-search-modal {
+    animation: advancedSearchModalPopIn 0.15s ease-out forwards;
+}
+
+/* Mobile adjustments for advanced search modal */
+@media (max-width: 768px) {
+    .advanced-search-overlay {
+        align-items: flex-start !important;
+        padding-top: 5vh !important;
+    }
+    .advanced-search-modal {
+        margin-top: 0 !important;
+    }
 }

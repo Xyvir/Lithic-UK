@@ -4,6 +4,6 @@ title: $:/themes/nico/notebook/ui/Search
 <span class="nc-fake-search-wrapper">
   <$button class="tc-btn-invisible nc-fake-search-button" tooltip="Advanced Search (Ctrl+K)">
     <$action-sendmessage $message="tm-open-advanced-search"/>
-    <span class="nc-fake-search-placeholder">Search...</span>
+    <span class="nc-fake-search-placeholder">&#x1F50D;&#xFE0E;&ensp;Search...</span>
   </$button>
 </span>
