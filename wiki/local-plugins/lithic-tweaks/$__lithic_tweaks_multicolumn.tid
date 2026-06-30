@@ -1,5 +1,5 @@
 title: $:/lithic/tweaks/multicolumn
-tags: $:/tags/Global $:/tags/Stylesheet
+tags: $:/tags/Global
 type: text/vnd.tiddlywiki
 
 \widget $multicolumn()
@@ -25,23 +25,3 @@ type: text/vnd.tiddlywiki
 </$let>
 </$parameters>
 \end $multicolumn
-
-/* Original Developer: Brian Radspinner */
-
-.br-txt-col > *:first-child { margin: 0; }
-
-.br-txt-col.all-break p { break-inside: auto; }
-
-.br-txt-col:not(.all-break) p { break-inside: avoid; }
-
-/* Double hr acts as forced column break */
-.br-txt-col hr:has(+ hr) {
-    display: none;
-}
-
-.br-txt-col hr + hr {
-    break-before: column;
-    border: none;
-    margin: 0;
-    height: 0;
-}
