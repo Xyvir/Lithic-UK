@@ -1,0 +1,36 @@
+title: $:/plugins/byper/advanced-search/styles/fake-search
+tags: $:/tags/Stylesheet
+type: text/vnd.tiddlywiki
+
+\rules only filteredtranscludeinline transcludeinline macrodef macrocallinline html
+
+/* Fake Search Input to bridge advanced-search workflow */
+button.tc-btn-invisible.nc-fake-search-button {
+    width: 100%;
+    text-align: left;
+    padding: 0.4em 1em !important;
+    border: 1px solid <<colour tiddler-editor-border>> !important;
+    border-radius: 1.5em !important;
+    background: <<colour tiddler-editor-background>> !important;
+    color: <<colour muted-foreground>> !important;
+    font-size: 0.9em;
+    transition: all 0.2s ease-in-out;
+    cursor: pointer;
+    display: inline-block;
+}
+
+button.tc-btn-invisible.nc-fake-search-button:hover {
+    border-color: <<colour primary>> !important;
+    color: <<colour primary>> !important;
+}
+
+.nc-topbar .nc-fake-search-wrapper {
+    display: inline-block;
+    width: 200px;
+    margin-left: 10px;
+}
+
+.nc-sidebar .nc-fake-search-wrapper {
+    display: block;
+    margin: 10px 0;
+}

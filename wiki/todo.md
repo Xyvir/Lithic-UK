@@ -4,7 +4,8 @@
 - [X] add copy button to Pyrmaid sidebar that copies the rendered mermaid code for further embedding / editing / extending.
 - [ ] add ## 'toggle button' to unieditor line numbers on line 00; that toggles the numbers on and off.
 - [X] Further Extensions to tw-whiteboard; import all images as whiteboard embeds moving forward.
-- [ ] Add some kind of filter/builder UI or filter slashcommand autocompletes that integrates with FilterOps.
+- [ ] Add some kind of filter/builder UI or filter slashcommand autocompletes that integrates with FilterOps. 
+    (Adding multi-column reference cheatsheet tiddler)
 - [ ] rearrange icon order on filterops to be more intuitive.
 - [X] have some kind of logical 'prefill' on filterops. (all notes?)
 - [ ] Add addlt paraemter to AutoTable widget that allows for prefilled content per column? 

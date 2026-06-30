@@ -60,3 +60,7 @@
 - name: mermaid-tw5
   url: https://efurlanm.github.io/mermaid-tw5/
   type: plugins
+
+- name: advanced-search
+  url: https://b-yp.github.io/tiddlywiki-plugins/
+  type: plugins
