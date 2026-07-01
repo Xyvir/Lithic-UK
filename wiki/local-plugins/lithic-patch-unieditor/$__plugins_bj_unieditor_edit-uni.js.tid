@@ -131,6 +131,15 @@ uniEditorWidget.prototype.render = function(parent,nextSibling) {
 
 	//gurumed the following causes an indirect save -- should be sorted out
 	this.instance.setCode(this.editInfo.value);consolelog("rend " + this.editInfo.value)
+
+	// STRICT LOAD: Maintain a reliable global state of which root tiddler is currently being edited.
+	// We use this in ViewTemplate to completely exclude it from Dynaview's `<$reveal>` wrapper.
+	// This forces TiddlyWiki to destroy the tracking element, inherently un-observing it from IntersectionObserver.
+	var rootTiddler = this.getVariable("storyTiddler") || this.getVariable("stream-root-title") || this.editTitle;
+	this._activeRootTiddler = rootTiddler;
+	if (rootTiddler) {
+		this.wiki.addTiddler(new $tw.Tiddler({title: "$:/state/unieditor/focused-root", text: rootTiddler}));
+	}
  
 		this.addEventListeners([
 			{type: "tm-edit-text-operation", handler: "handleEditTextOperationMessage"}
@@ -193,7 +202,7 @@ uniEditorWidget.prototype.render = function(parent,nextSibling) {
 				textarea.setSelectionRange(len, len);
 			});
 		}
-
+		
 		if (isStreams) {
 			var twoLineHeight = 46; // fallback
 			try {
@@ -235,6 +244,63 @@ uniEditorWidget.prototype.render = function(parent,nextSibling) {
 				fixHeight();
 				heightObserver.observe(self.domNode, { attributes: true, attributeFilter: ['style'], subtree: true });
 			});
+			
+			// FIX: Intercept paste to pre-expand the textarea height before text is inserted,
+			// preventing immediate deletion/crashing caused by layout thrashing on massive pastes.
+			textarea.addEventListener("paste", function(e) {
+				var pastedText = (e.clipboardData || window.clipboardData).getData('text');
+				if (!pastedText) return;
+				
+				e.preventDefault();
+				e.stopImmediatePropagation();
+				
+				var start = textarea.selectionStart;
+				var end = textarea.selectionEnd;
+				var currentVal = textarea.value;
+				var newVal = currentVal.substring(0, start) + pastedText + currentVal.substring(end);
+				
+				heightObserver.disconnect();
+				
+				// 1. Measure new height using a clone BEFORE setting value
+				var clone = document.createElement("textarea");
+				clone.style.width = textarea.clientWidth + "px";
+				clone.style.position = "absolute";
+				clone.style.visibility = "hidden";
+				clone.style.height = "1px";
+				clone.style.font = window.getComputedStyle(textarea).font;
+				clone.style.lineHeight = window.getComputedStyle(textarea).lineHeight;
+				clone.style.padding = window.getComputedStyle(textarea).padding;
+				clone.style.boxSizing = window.getComputedStyle(textarea).boxSizing;
+				clone.style.whiteSpace = window.getComputedStyle(textarea).whiteSpace;
+				clone.style.wordWrap = window.getComputedStyle(textarea).wordWrap;
+				clone.value = newVal;
+				document.body.appendChild(clone);
+				var sh = Math.max(clone.scrollHeight, twoLineHeight);
+				document.body.removeChild(clone);
+				
+				// 2. Expand wrappers FIRST
+				if (sh > 0) {
+					textarea.style.height = sh + 'px';
+					var wrappers = self.domNode.querySelectorAll('.unieditor, .unieditor > div, .unieditor canvas, .unieditor__textarea');
+					for (var i = 0; i < wrappers.length; i++) {
+						wrappers[i].style.height = sh + 'px';
+					}
+				}
+				
+				// 3. Set the text
+				textarea.value = newVal;
+				
+				// 4. Restore cursor
+				var newCursor = start + pastedText.length;
+				textarea.setSelectionRange(newCursor, newCursor);
+				
+				// 5. Reconnect observer
+				heightObserver.observe(self.domNode, { attributes: true, attributeFilter: ['style'], subtree: true });
+				
+				// 6. Trigger save pipeline
+				var inputEvent = new Event("input", { bubbles: true, cancelable: true });
+				textarea.dispatchEvent(inputEvent);
+			}, true);
 			
 			requestAnimationFrame(fixHeight);
 		}
@@ -640,6 +706,24 @@ uniEditorWidget.prototype.removeChildDomNodes = function () {
 		clearTimeout(this.saveTimeout);
 		this.saveTimeout = null;
 	}
+	
+	// FIX: Grab the latest value directly from textarea in case the 1ms timeout
+	// from unieditor.js hasn't fired yet before this widget is destroyed.
+	if (this.domNode) {
+		var textarea = this.domNode.querySelector('textarea');
+		if (textarea && textarea.value !== undefined) {
+			this.pendingSaveValue = textarea.value;
+		}
+	}
+	
+	// RESTORE DYNAVIEW
+	if (this._activeRootTiddler) {
+		var currentRoot = this.wiki.getTiddlerText("$:/state/unieditor/focused-root");
+		if (currentRoot === this._activeRootTiddler) {
+			this.wiki.addTiddler(new $tw.Tiddler({title: "$:/state/unieditor/focused-root", text: ""}));
+		}
+	}
+	
 	if (this.pendingSaveValue !== null && this.pendingSaveValue !== undefined) {
 		this.saveChanges(this.pendingSaveValue);
 		this.pendingSaveValue = null;

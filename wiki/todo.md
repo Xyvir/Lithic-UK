@@ -38,7 +38,8 @@
     - [ ] archive original launcher.html and being using new modularized build process moving forward.
 - [ ] Move "install app" button on mobile UI only to be next to the 'clear cache' button.
 - [ ] Add git history rollback UI/widget to online sync modal. (this should theoretically work for the local git instance even if not synced to github)
-- [ ] Create simpleUI TW plugin for Lithic
+- [ ] Create simpleUI TW plugin for Lithic (Lithic Patina)
+    - [ ] Also include backdoor "edit only" mode toggled by clicking on wikiname 5 times quickly as part of this plugin.
 - [ ] Create "Offifcial" Lithic plugin store for Lithic-specific plugins/extensions.
     - [ ] circuitJS
     - [ ] Treevis / Chesstree
