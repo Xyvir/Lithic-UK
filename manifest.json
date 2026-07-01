@@ -2,7 +2,7 @@
   "name": "Lithic",
   "short_name": "Lithic",
   "description": "Portability-first Outliner PKMS",
-  "version": "0.0.107",
+  "version": "0.0.108",
   "start_url": "src/launcher.html",
   "icons": [
     {
