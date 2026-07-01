@@ -23,7 +23,7 @@ title: $:/lithic/SidebarFilterOps
 
 \procedure lingo(title)
   <%if [<title>match[Filter/Hint]] %>
-    <!-- hidden -->
+    <$link to="$:/FilterReference">Search using filter syntax</$link>
   <%elseif [<title>match[Filter/Matches]] %>
     <$let 
       rawFilter={{$:/temp/filterops/input}}

@@ -1,0 +1,111 @@
+title: $:/FilterReference
+caption: Filter Syntax Basics
+type: text/markdown
+
+<$multi.column count=4 border=no break=no gap=2ch>
+
+#### Filter Syntax Basics
+
+**OR** (Outputs the union of both runs):
+```text
+[run1] [run2]
+```
+
+**AND** (run2 uses the output of run1):
+```text
+[run1] +[run2]
+```
+
+**NOT** (run2 strikes output from run1):
+```text
+[run1] -[run2]
+```
+
+**Negates the operator** 
+```text
+[!operator[parameter]]
+```
+
+**Exact string match**:
+```text
+[=operator[parameter]]
+```
+---
+---
+#### Common Operators
+
+**Has specific tag** (`tag`):
+```text
+[tag[Journal]]
+```
+
+**Matches field value** (`field:X`):
+```text
+[field:status[done]]
+```
+
+**Has the specified field** (`has`):
+```text
+[has[draft.of]]
+```
+
+**Search specific fields & flags**:
+```text
+[search:title,text[keyword]]
+```
+```text
+[search:text:regexp[keyword]]
+```
+
+---
+---
+
+**Sort alpha (`(A-Z) / (Z-A)`)**:
+```text
+[!sort:casesensitive[title]]
+```
+
+**Sort numeric (`(0-9) / (9-0)`)** :
+```text
+[!nsort[priority]]
+```
+
+**Return first N results** (`limit`):
+```text
+[limit[10]]
+```
+
+**Select standard domains** (`all`):
+```text
+[all[tiddlers]]
+```
+
+---
+---
+**Match tiddler categories** (`is`):
+```text
+[is[system]]
+```
+```text
+[is[shadow]]
+```
+
+**Extract field value** (`get`):
+```text
+[get[text]]
+```
+
+---
+
+#### Variables & Transclusions
+
+**Transclusion** (Filter on field's contents):
+```text
+[tag[{!!parent}]]
+```
+
+**Variables** (Filter on variable's contents):
+```text
+[tag<currentTiddler>]
+```
+</$multi.column>
