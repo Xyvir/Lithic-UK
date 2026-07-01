@@ -2,6 +2,6 @@ caret-pos: 42
 title: $:/lithic/slashcommands/multicolumn
 type: text/vnd.tiddlywiki
 
-<$multicolumn count=2 border=no break=no>
+<$multi.column count=2 border=no break=no>
 
-</$multicolumn>
+</$multi.column>

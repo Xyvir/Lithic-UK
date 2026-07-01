@@ -1,8 +1,8 @@
 title: $:/lithic/tweaks/multicolumn
-tags: $:/tags/Global
+tags: $:/tags/Macro
 type: text/vnd.tiddlywiki
 
-\widget $multicolumn()
+\widget $multi.column()
 <$parameters
      count=2
      width=auto
@@ -24,4 +24,4 @@ type: text/vnd.tiddlywiki
 `><$slot $name="ts-raw"/></div>
 </$let>
 </$parameters>
-\end $multicolumn
+\end $multi.column
