@@ -1,5 +1,5 @@
-caret-pos: 10
+caret-pos: 8
 tags: 
 title: $:/lithic/slashcommands/draw
 
-<<draw "[[]]">>
+<<draw "">>

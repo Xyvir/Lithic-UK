@@ -1,8 +1,9 @@
 
+- [ ] For both right-click menus, add gaurdrales so they 'invert' near screen edges so menu never goes out of view.
 - [X] Add "apply anchor template" filtered UI widget dropdownsearch to stub view / placeholder tiddlers.
 - [X] Improve anchors behavior and workflow.
 - [X] add copy button to Pyrmaid sidebar that copies the rendered mermaid code for further embedding / editing / extending.
-- [ ] add ## 'toggle button' to unieditor line numbers on line 00; that toggles the numbers on and off.
+- [ ] add ## 'toggle button' to unieditor line numbers on line 00; that globally toggles the numbers on and off. (via state tiddler?)
 - [X] Further Extensions to tw-whiteboard; import all images as whiteboard embeds moving forward.
 - [ ] Add some kind of filter/builder UI or filter slashcommand autocompletes that integrates with FilterOps. 
     (Adding multi-column reference cheatsheet tiddler)
@@ -18,16 +19,17 @@
     - [ ] add guardrails so only a bit of context is shown on hoverover.
     - [X] Limit hover-over so it doesn't appear on search query result links, etc.
 - [X] Make sure all custom lithic-macros accept "[[Tiddler Title]]" syntax parameters and tweak to make sure they work appropriatly with comp-text plugin/ slashcommands.
-- [ ] Replace the regular searchbox in notebook UI with byper "Advanced Search" also extend it a bit to allow searching shadow tiddlers etc?
-- [ ] include textcolumns or similair plugin:
+- [X] Replace the regular searchbox in notebook UI with byper "Advanced Search" also extend it a bit to allow searching shadow tiddlers etc?
+- [X] include textcolumns or similair plugin:
     https://br-text-columns.tiddlyhost.com/
 - [X] Add a viewfilter or somethign so transcluded nodestream parents show their children?
     - Just handle by embed-stream macro for now.
 - [ ] Add "Alpha Sort" option to nodestream right-click menu.
 - [ ] Add "Toggle Todo" option to tiddler? (or nodstream?) right-click emnu.
+    - [ ] Add toggle-todo hotkey like logseq?
     (Do twice to toggle ascending/descending)
 - [ ] Create/Integrate EPUB Serialization based on current to_lithic logic (but have user provide shortcode instead of AI-generated one); add it to exeisting pdf-to-whiteboard and name the plugin 'lithic-import' or something.
-- [ ] Freeze external plugin integrations once I'm happy with the base featureset. (currently only byperserach and columns are candidates)
+- [X] Freeze external plugin integrations once I'm happy with the base featureset. (currently only byperserach and columns are candidates)
 - [ ] Allow specifying 'modes' via http parameters so the launcher monolith html can be forced into specific modes to make unit tests easier; (all unit tests can be performed in 1 test enviroment this way, but with multiple test profiles/users)
 - [ ] Create unit tests for all lithic.html and launcher.html UI elements, logic and functions
 - [ ] Modularize launcher.html into seperate javascript / html / css files
