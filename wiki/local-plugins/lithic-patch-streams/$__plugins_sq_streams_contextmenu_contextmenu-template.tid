@@ -14,7 +14,8 @@ type: text/vnd.tiddlywiki
 
 <$reveal type="popup" state=<<contextmenu-state>> position={{{[<contextmenu-state>get[position]]}}} tag="div">
 	<div class={{{tc-drop-down sq-contextmenu [<contextmenu-state>get[position]match[right]then[sq-contextmenu-alignright]else[]] +[join[ ]]}}}>
-		<$macrocall $name="menu-item" title="Open" actions="""<$action-navigate/>"""/>
+		<$macrocall $name="menu-item" title="Insert Above" actions="""<$macrocall $name="add-node-actions" insertPosition="match"/>"""/>
+		<$macrocall $name="menu-item" title="Insert Below" actions="""<$macrocall $name="add-node-actions" insertPosition="after"/>"""/>
 		<$macrocall $name="menu-item" title="Rename" subtitle="((streams-rename))" actions=<<rename-node-actions>>/>
 		<$list filter="[all[shadows+tiddlers]tag[$:/tags/streams/contextmenu]]" variable="listItem">
 			<$macrocall $name="menu-item"
