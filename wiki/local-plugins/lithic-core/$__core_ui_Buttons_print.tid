@@ -1,0 +1,16 @@
+title: $:/core/ui/Buttons/print
+tags: $:/tags/PageControls
+description: {{$:/language/Buttons/Print/Hint}}
+
+\whitespace trim
+<$button tooltip={{$:/language/Buttons/Print/Hint}} aria-label={{$:/language/Buttons/Print/Caption}} class=<<tv-config-toolbar-class>>>
+<$action-print-river delay="800" />
+<$list filter="[<tv-config-toolbar-icons>match[yes]]">
+{{$:/core/images/print-button}}
+</$list>
+<$list filter="[<tv-config-toolbar-text>match[yes]]">
+<span class="tc-btn-text">
+<$text text={{$:/language/Buttons/Print/Caption}}/>
+</span>
+</$list>
+</$button>

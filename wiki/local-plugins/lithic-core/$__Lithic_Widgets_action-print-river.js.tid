@@ -1,0 +1,50 @@
+title: $:/Lithic/Widgets/action-print-river.js
+type: application/javascript
+module-type: widget
+
+/*\
+title: $:/Lithic/Widgets/action-print-river.js
+type: application/javascript
+module-type: widget
+
+A widget that sets a printing state, waits for the DOM to render, calls window.print(), and restores the state.
+\*/
+(function(){
+
+/*jslint node: true, browser: true */
+/*global $tw: false */
+"use strict";
+
+var Widget = require("$:/core/modules/widgets/widget.js").widget;
+
+var ActionPrintRiver = function(parseTreeNode,options) {
+	this.initialise(parseTreeNode,options);
+};
+
+ActionPrintRiver.prototype = new Widget();
+
+ActionPrintRiver.prototype.render = function(parent,nextSibling) {
+	this.computeAttributes();
+	this.execute();
+};
+
+ActionPrintRiver.prototype.execute = function() {};
+ActionPrintRiver.prototype.refresh = function() { return false; };
+
+ActionPrintRiver.prototype.invokeAction = function(triggeringWidget,event) {
+	if (typeof window !== "undefined") {
+		$tw.wiki.addTiddler(new $tw.Tiddler({title: "$:/state/printing", text: "yes"}));
+		
+		var delay = parseInt(this.getAttribute("delay", "800"), 10);
+		
+		setTimeout(function() {
+			window.print();
+			$tw.wiki.addTiddler(new $tw.Tiddler({title: "$:/state/printing", text: "no"}));
+		}, delay);
+	}
+	return true; // Action was invoked
+};
+
+exports["action-print-river"] = ActionPrintRiver;
+
+})();
