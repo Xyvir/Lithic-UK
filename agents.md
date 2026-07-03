@@ -98,3 +98,15 @@ The Lithic PKMS wiki is compiled and published automatically via a GitHub Action
 
 **IMPORTANT DIRECTORY RULES:**
 - The items within the `assets/` directory are merely for **local reference** and debugging. They should **NOT** be manually edited. The CI/CD pipeline dynamically handles fetching the definitive external dependencies based on `external.yml` during the build process.
+
+# `.lith` Importer / Exporter Type Quirk
+
+**CONTEXT:**
+The `.lith` deserializer/importer (`register-lith-extension.js`) automatically injects `type: text/markdown` into any non-system tiddler that lacks an explicit `type` field during import. 
+
+**QUIRK / EDGE CASE:**
+The `.lith` exporter does **not** have symmetric logic to strip this out or explicitly mark native `vnd.tiddlywiki` types. This was an intentional decision to keep the exporter lightweight (using the core `tid-tiddler` template).
+As a result, if a standard TiddlyWiki tiddler (which implicitly defaults to `vnd.tiddlywiki`) is exported to a `.lith` file, it will be exported without a type field. If that same file is subsequently re-imported, the importer will catch it as a "no-type non-system tiddler" and erroneously convert its type to `text/markdown`.
+
+**STANDARD OPERATING PROCEDURE:**
+If you encounter weird formatting issues where standard tiddlers suddenly behave like markdown after being passed through a `.lith` export/import cycle, be aware of this asymmetrical behavior. Do not try to "fix" the exporter with heavy JS macros unless explicitly requested again.
