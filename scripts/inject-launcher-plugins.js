@@ -26,6 +26,31 @@ function main() {
     const config = JSON.parse(fs.readFileSync(configPath, 'utf8'));
     const plugins = config.plugins || [];
     
+    // Scan wiki/tiddlers/ for any external JSON plugins
+    const tiddlersPath = path.join(ROOT_DIR, 'wiki', 'tiddlers');
+    if (fs.existsSync(tiddlersPath)) {
+        const files = fs.readdirSync(tiddlersPath);
+        for (const file of files) {
+            if (file.endsWith('.json')) {
+                try {
+                    const content = JSON.parse(fs.readFileSync(path.join(tiddlersPath, file), 'utf8'));
+                    const items = Array.isArray(content) ? content : [content];
+                    for (const item of items) {
+                        if (item['plugin-type'] === 'plugin' && item.title && item.title.startsWith('$:/plugins/')) {
+                            const pluginName = item.title.substring('$:/plugins/'.length);
+                            if (!plugins.includes(pluginName)) {
+                                plugins.push(pluginName);
+                                console.log(`Discovered external JSON plugin: ${pluginName}`);
+                            }
+                        }
+                    }
+                } catch (e) {
+                    console.warn(`Warning: Failed to parse ${file}`);
+                }
+            }
+        }
+    }
+
     // Sort for stable output
     plugins.sort();
 
