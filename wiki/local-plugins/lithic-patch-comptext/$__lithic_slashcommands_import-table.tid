@@ -1,0 +1,6 @@
+title: $:/lithic/slashcommands/import-table
+caret-pos: 42
+
+<$macrocall $name="import-autotable" data="""
+
+""" />

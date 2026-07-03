@@ -1,0 +1,153 @@
+title: $:/lithic/modules/widgets/action-import-autotable.js
+type: application/javascript
+module-type: widget
+
+/*\
+title: $:/lithic/modules/widgets/action-import-autotable.js
+type: application/javascript
+module-type: widget
+
+Action widget to import data to an AutoTable
+\*/
+(function(){
+
+/*jslint node: true, browser: true */
+/*global $tw: false */
+"use strict";
+
+var Widget = require("$:/core/modules/widgets/widget.js").widget;
+
+var ActionImportAutoTable = function(parseTreeNode,options) {
+	this.initialise(parseTreeNode,options);
+};
+
+/*
+Inherit from the base widget class
+*/
+ActionImportAutoTable.prototype = new Widget();
+
+/*
+Render this widget into the DOM
+*/
+ActionImportAutoTable.prototype.render = function(parent,nextSibling) {
+	this.computeAttributes();
+	this.execute();
+};
+
+/*
+Compute the internal state of the widget
+*/
+ActionImportAutoTable.prototype.execute = function() {
+	this.actionData = this.getAttribute("data","");
+    this.actionTarget = this.getAttribute("target", this.getVariable("currentTiddler"));
+};
+
+/*
+Refresh the widget by ensuring our attributes are up to date
+*/
+ActionImportAutoTable.prototype.refresh = function(changedTiddlers) {
+	var changedAttributes = this.computeAttributes();
+	if(changedAttributes.data || changedAttributes.target) {
+		this.refreshSelf();
+		return true;
+	}
+	return this.refreshChildren(changedTiddlers);
+};
+
+ActionImportAutoTable.prototype.invokeAction = function(triggeringWidget,event) {
+    if (!this.actionData || !this.actionTarget) return false;
+    
+    var text = this.actionData.trim();
+    if (!text) return true;
+
+    var lines = text.split(/\r?\n/);
+    var isMarkdown = false;
+    if (lines[0].trim().startsWith("|") && lines[0].trim().endsWith("|")) {
+        isMarkdown = true;
+    }
+
+    var rows = [];
+    for (var i=0; i<lines.length; i++) {
+        var line = lines[i].trim();
+        if (!line) continue;
+        
+        var cols = [];
+        if (isMarkdown) {
+            // Remove leading and trailing |
+            if (line.startsWith("|")) line = line.substring(1);
+            if (line.endsWith("|")) line = line.substring(0, line.length-1);
+            cols = line.split("|").map(function(c) { return c.trim(); });
+            
+            // Skip markdown divider line ---|---
+            if (i === 1 && cols[0].indexOf("---") !== -1) {
+                continue;
+            }
+        } else {
+            // Parse CSV taking quotes into account
+            var pos = 0;
+            while (pos < line.length) {
+                if (line.charAt(pos) === '"') {
+                    var endQuote = line.indexOf('"', pos + 1);
+                    while (endQuote !== -1 && line.charAt(endQuote + 1) === '"') {
+                        endQuote = line.indexOf('"', endQuote + 2);
+                    }
+                    if (endQuote === -1) endQuote = line.length;
+                    cols.push(line.substring(pos + 1, endQuote).replace(/""/g, '"').trim());
+                    pos = endQuote + 1;
+                    if (line.charAt(pos) === ',') pos++;
+                } else {
+                    var comma = line.indexOf(',', pos);
+                    var end = comma !== -1 ? comma : line.length;
+                    cols.push(line.substring(pos, end).trim());
+                    pos = end + 1;
+                }
+            }
+        }
+        rows.push(cols);
+    }
+    
+    if (rows.length === 0) return true;
+    
+    var headers = rows[0];
+    var dataRows = rows.slice(1);
+    
+    // Find next index for this tiddler to avoid overwriting existing rows
+    var targetTiddler = this.actionTarget;
+    var baseRows = $tw.wiki.filterTiddlers("[tag[" + targetTiddler + "]]");
+    var nextIndex = baseRows.length + 1;
+    
+    for (var r=0; r<dataRows.length; r++) {
+        var rowData = dataRows[r];
+        var title = targetTiddler + "-row" + (nextIndex + r);
+        var fields = {
+            title: title,
+            tags: [targetTiddler]
+        };
+        for (var c=0; c<rowData.length; c++) {
+            fields["col-" + (c+1)] = rowData[c];
+        }
+        $tw.wiki.addTiddler(new $tw.Tiddler($tw.wiki.getCreationFields(), fields, $tw.wiki.getModificationFields()));
+    }
+    
+    // Replace the macro block in the target tiddler
+    var parentText = $tw.wiki.getTiddlerText(targetTiddler) || "";
+    // Regex to match <<import-autotable """...""">> or <$macrocall $name="import-autotable" ... />
+    var replaceRegex = /(?:<<import-autotable\s+"""[\s\S]*?"""\s*>>|<\$macrocall\s+\$name="import-autotable"\s+data="""[\s\S]*?"""\s*\/>)/g;
+    
+    var colCount = headers.length;
+    var headerStr = headers.join(" ");
+    
+    var replacement = "<<AutoTable " + colCount + ' "' + headerStr + '">>';
+    var newText = parentText.replace(replaceRegex, replacement);
+    
+    var targetTiddlerObj = $tw.wiki.getTiddler(targetTiddler);
+    if (targetTiddlerObj) {
+        $tw.wiki.addTiddler(new $tw.Tiddler(targetTiddlerObj, {text: newText}, $tw.wiki.getModificationFields()));
+    }
+    
+	return true; // Action was invoked
+};
+
+exports["action-import-autotable"] = ActionImportAutoTable;
+
+})();

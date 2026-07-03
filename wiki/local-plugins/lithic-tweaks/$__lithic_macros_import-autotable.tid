@@ -1,0 +1,20 @@
+title: $:/lithic/macros/import-autotable
+tags: $:/tags/Macro
+
+\define import-autotable(data)
+<$set name="trimmedData" filter="[<__data__>trim[]]">
+<$list filter="[<trimmedData>is[blank]]" variable="null">
+  <div style="color: #e53e3e; font-style: italic; margin: 10px 0; text-align: left; padding: 10px 0;">
+    Error: No table data detected.
+  </div>
+</$list>
+<$list filter="[<trimmedData>!is[blank]]" variable="null">
+  <div style="margin: 10px 0; text-align: left; padding: 10px 0;">
+    <$button class="tc-btn-invisible" style="border: 1px solid #aaa; padding: 4px 10px; cursor: pointer; border-radius: 3px; background: transparent; font-weight: 500; display: inline-flex; align-items: center;">
+      <$action-import-autotable data=<<__data__>> />
+      Convert to ~AutoTable
+    </$button>
+  </div>
+</$list>
+</$set>
+\end

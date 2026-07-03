@@ -26,9 +26,9 @@
 - [X] Add a viewfilter or somethign so transcluded nodestream parents show their children?
     - Just handle by embed-stream macro for now.
 - [ ] Add "Alpha Sort" option to nodestream right-click menu.
-- [ ] Add "Toggle Todo" option to tiddler? (or nodstream?) right-click emnu.
-    - [ ] Add toggle-todo hotkey like logseq?
-    (Do twice to toggle ascending/descending)
+           (Do twice to toggle ascending/descending)
+- [ ] Add "Toggle Todo" or "Toggle Prefix" option to one of the right-click menus.
+    - [ ] Add toggle-prefix hotkey like logseq?
 - [ ] Create/Integrate EPUB Serialization based on current to_lithic logic (but have user provide shortcode instead of AI-generated one); add it to exeisting pdf-to-whiteboard and name the plugin 'lithic-import' or something.
 - [X] Freeze external plugin integrations once I'm happy with the base featureset. (currently only byperserach and columns are candidates)
 - [ ] Allow specifying 'modes' via http parameters so the launcher monolith html can be forced into specific modes to make unit tests easier; (all unit tests can be performed in 1 test enviroment this way, but with multiple test profiles/users)
