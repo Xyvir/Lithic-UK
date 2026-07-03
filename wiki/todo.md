@@ -7,8 +7,7 @@
 - [X] Further Extensions to tw-whiteboard; import all images as whiteboard embeds moving forward.
 - [X] Add some kind of filter/builder UI or filter slashcommand autocompletes that integrates with FilterOps. 
     (Adding multi-column reference cheatsheet tiddler)
-- [x
-] rearrange icon order on filterops to be more intuitive.
+- [x] rearrange icon order on filterops to be more intuitive.
 - [X] have some kind of logical 'prefill' on filterops. (all notes?)
 - [ ] Add addlt paraemter to AutoTable widget that allows for prefilled content per column? 
     - <<AutoTable "One Two Three" "- - {formula}">>
@@ -27,7 +26,7 @@
     - Just handle by embed-stream macro for now.
 - [ ] Add "Alpha Sort" option to nodestream right-click menu.
            (Do twice to toggle ascending/descending)
-- [ ] Add "Toggle Todo" or "Toggle Prefix" option to one of the right-click menus.
+- [ ] Add "Toggle Todo" or "Toggle Prefix" option to one of the right-click menus. (including <<num>> prefix?)
     - [ ] Add toggle-prefix hotkey like logseq?
 - [ ] Create/Integrate EPUB Serialization based on current to_lithic logic (but have user provide shortcode instead of AI-generated one); add it to exeisting pdf-to-whiteboard and name the plugin 'lithic-import' or something.
 - [X] Freeze external plugin integrations once I'm happy with the base featureset. (currently only byperserach and columns are candidates)
