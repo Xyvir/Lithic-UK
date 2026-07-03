@@ -7,7 +7,8 @@
 - [X] Further Extensions to tw-whiteboard; import all images as whiteboard embeds moving forward.
 - [X] Add some kind of filter/builder UI or filter slashcommand autocompletes that integrates with FilterOps. 
     (Adding multi-column reference cheatsheet tiddler)
-- [x] rearrange icon order on filterops to be more intuitive.
+- [x
+] rearrange icon order on filterops to be more intuitive.
 - [X] have some kind of logical 'prefill' on filterops. (all notes?)
 - [ ] Add addlt paraemter to AutoTable widget that allows for prefilled content per column? 
     - <<AutoTable "One Two Three" "- - {formula}">>

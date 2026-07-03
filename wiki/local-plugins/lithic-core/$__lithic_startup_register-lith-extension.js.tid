@@ -57,6 +57,11 @@ exports.startup = function() {
                             }
                         }
                     }
+                    
+                    if (tiddlerFields.title && !tiddlerFields.title.startsWith("$:/") && !tiddlerFields.type) {
+                        tiddlerFields.type = "text/markdown";
+                    }
+
                     results.push(tiddlerFields);
                 }
             }
