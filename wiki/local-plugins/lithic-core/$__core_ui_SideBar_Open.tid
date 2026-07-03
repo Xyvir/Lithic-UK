@@ -28,13 +28,18 @@ $button$
    <$macrocall $name="droppable-item" button="""<$button message="tm-close-tiddler" tooltip={{$:/language/Buttons/Close/Hint}} aria-label={{$:/language/Buttons/Close/Caption}} class="tc-btn-invisible tc-btn-mini tc-small-gap-right">{{$:/core/images/close-button}}</$button><$link to={{!!title}}><$view field="title"/></$link>"""/>
    <$list filter="[<currentTiddler>has[stream-list]]">
       <div style="margin-left: 22px; border-left: 1px solid #ddd; padding-left: 6px; font-size: 0.85em; opacity: 0.8;">
-         <$list filter="[list[!!stream-list]]">
+         <$list filter="[list[!!stream-list]first[4]]">
             <div class="tc-menu-item" style="white-space: nowrap; overflow: hidden; text-overflow: ellipsis; line-height: 1.4em;">
                <$link to={{!!title}}>
                   <$transclude field="caption">
                      <$view field="text" format="text" trim="30" />
                   </$transclude>
                </$link>
+            </div>
+         </$list>
+         <$list filter="[list[!!stream-list]nth[5]]" variable="ignore">
+            <div class="tc-menu-item" style="color: #999; line-height: 1.4em;">
+               ...
             </div>
          </$list>
       </div>

@@ -18,6 +18,13 @@ exports.params = [];
 exports.run = function() {
     if(typeof window !== "undefined") {
         try {
+            // CACHE: Return the initial startup tiddler title if already calculated.
+            // This prevents the macro's output from changing during scrolling,
+            // which would cause `<$set>` to destroy and recreate the entire ViewTemplate!
+            if (window.lithicDynaviewStartupTitle) {
+                return window.lithicDynaviewStartupTitle;
+            }
+            
             var stateTiddler = "$:/config/dynaview/scroll";
             
             // ONE-TIME POLYFILL INJECTION
@@ -65,6 +72,7 @@ exports.run = function() {
                     // ONE-TIME RESTORE POLYFILL
                     if(!window.lithicDynaviewRestored) {
                         window.lithicDynaviewRestored = true;
+                        window.lithicDynaviewStartupTitle = json.title;
                         setTimeout(function() {
                             var elements = document.querySelectorAll(".tc-tiddler-frame[data-tiddler-title]");
                             $tw.utils.each(elements,function(element) {
