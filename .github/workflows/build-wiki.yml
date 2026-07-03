@@ -54,6 +54,10 @@ jobs:
       - name: Generate Build Config
         run: node scripts/generate-config.js ${{ inputs.build_config }}
 
+      - name: Inject Plugins into Launcher
+        if: inputs.build_config == 'prod'
+        run: node scripts/inject-launcher-plugins.js
+
       - name: Build TiddlyWiki
         env:
           TIDDLYWIKI_PLUGIN_PATH: '${{ github.workspace }}/wiki:${{ github.workspace }}/wiki/plugins'
@@ -82,8 +86,8 @@ jobs:
 
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add src/lithic.html manifest.json offline-service-worker.js
-          git diff --cached --quiet || git commit -m "Update src/lithic.html and bump PWA to $NEW_VERSION (build-${{ steps.tag.outputs.date }})"
+          git add src/lithic.html src/launcher.html manifest.json offline-service-worker.js
+          git diff --cached --quiet || git commit -m "Update src/lithic.html, src/launcher.html, and bump PWA to $NEW_VERSION (build-${{ steps.tag.outputs.date }})"
           git push
 
       - name: Commit Built Wiki to repo root (non-prod)
