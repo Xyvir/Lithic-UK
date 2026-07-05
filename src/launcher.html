@@ -3712,7 +3712,9 @@ exports.startup = function() {
             log("Invalid JSON in url param.");
           }
 
-          if (Array.isArray(parsedData)) {
+          if (Array.isArray(parsedData) && parsedData.length > 0) {
+            let node = parsedData[0];
+            node.tags = node.tags ? [...new Set([...(Array.isArray(node.tags) ? node.tags : (typeof node.tags === 'string' ? node.tags.split(' ') : [])), 'Dogear'])].join(' ') : 'Dogear';
             window.pendingImports = window.pendingImports.concat(parsedData);
             // Automatically boot into a fresh lithic.html
             log("Payload from URL loaded. Booting fresh lithic.html...");
@@ -3875,7 +3877,9 @@ exports.startup = function() {
             const res = await fetch(remoteUrl);
             const text = await res.text();
             const parsedData = JSON.parse(text);
-            if (Array.isArray(parsedData)) {
+            if (Array.isArray(parsedData) && parsedData.length > 0) {
+              let node = parsedData[0];
+              node.tags = node.tags ? [...new Set([...(Array.isArray(node.tags) ? node.tags : (typeof node.tags === 'string' ? node.tags.split(' ') : [])), 'Dogear'])].join(' ') : 'Dogear';
               window.pendingImports = window.pendingImports.concat(parsedData);
               window.updatePendingImportsWindow();
               return; // Handled as deferred payload
@@ -3886,7 +3890,9 @@ exports.startup = function() {
               jsonString = decodeURIComponent(escape(atob(b64Json)));
             }
             const parsedData = JSON.parse(jsonString);
-            if (Array.isArray(parsedData)) {
+            if (Array.isArray(parsedData) && parsedData.length > 0) {
+              let node = parsedData[0];
+              node.tags = node.tags ? [...new Set([...(Array.isArray(node.tags) ? node.tags : (typeof node.tags === 'string' ? node.tags.split(' ') : [])), 'Dogear'])].join(' ') : 'Dogear';
               window.pendingImports = window.pendingImports.concat(parsedData);
               window.updatePendingImportsWindow();
               return; // Handled as deferred payload

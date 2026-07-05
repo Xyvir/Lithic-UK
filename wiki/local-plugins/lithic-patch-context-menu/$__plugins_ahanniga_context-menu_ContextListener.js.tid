@@ -268,10 +268,6 @@ This widgets implements context menus to tiddlers
                         var isParent = (t === 0);
                         var newTags = (tidObj.fields.tags || []).slice();
 
-                        if (isParent && newTags.indexOf("Dogear") < 0) {
-                            newTags.push("Dogear");
-                        }
-
                         // Parse and Wikify to handle transclusions (flattened to plain text)
                         var flattenedText = tidObj.fields.text || "";
                         if (flattenedText.indexOf("{{") !== -1) {
