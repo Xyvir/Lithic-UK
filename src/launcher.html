@@ -2050,13 +2050,22 @@ exports.startup = function() {
         setTwCustomSaveAsSaver(true);
         const todayTitle = getTodayTitle();
         const twDate = getTwTime();
-        window.pendingImports.push({
-          created: twDate,
-          modified: twDate,
-          tags: "Journal",
-          title: todayTitle,
-          type: ""
-        });
+        // Only push a blank journal tiddler if one with the same title
+        // isn't already queued (e.g. from a ?json= share URL payload).
+        // Otherwise the blank entry overwrites the payload's fields
+        // (stream-list, Dogear tag, etc.) during TiddlyWiki boot.
+        const alreadyQueued = window.pendingImports.some(
+          t => t.title === todayTitle
+        );
+        if (!alreadyQueued) {
+          window.pendingImports.push({
+            created: twDate,
+            modified: twDate,
+            tags: "Journal",
+            title: todayTitle,
+            type: ""
+          });
+        }
         replacePageContents(coreHtml, false);
       } catch (err) {
         if (document.getElementById('loading-overlay')) document.getElementById('loading-overlay').style.display = 'none';

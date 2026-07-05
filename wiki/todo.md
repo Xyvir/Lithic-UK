@@ -1,5 +1,6 @@
 
 - [ ] For both right-click menus, add gaurdrales so they 'invert' near screen edges so menu never goes out of view.
+- [ ] Merge Usage of Dogear, TiddlyTools PIN, and add a Permanent "Navigation" (bookmark) Tiddler area that appears at the top of the sidebar that tidders can be 'pinned' to.
 - [X] Add "apply anchor template" filtered UI widget dropdownsearch to stub view / placeholder tiddlers.
 - [X] Improve anchors behavior and workflow.
 - [X] add copy button to Pyrmaid sidebar that copies the rendered mermaid code for further embedding / editing / extending.
