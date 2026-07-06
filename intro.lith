@@ -1,188 +1,413 @@
-[
-  {
-    "title": "Introduction",
-    "stream-list": "Introduction/1 Introduction/2 Introduction/3 Introduction/4 Introduction/5 Introduction/6 Introduction/7 Introduction/8 Introduction/9 Introduction/10 Introduction/11 Introduction/12",
-    "type": "text/markdown",
-    "text": "Here is a quick introduction to some of the features Lithic has to offer:"
-  },
-  {
-    "title": "Introduction/1",
-    "parent": "Introduction",
-    "stream-list": "Introduction/1/demo",
-    "stream-type": "default",
-    "type": "text/markdown",
-    "text": "## 1. Zero Friction Entry\n\n    Put all new items into today's journal and simply describe what you are doing. Lithic will automatically track the time between bullets, but these can be manually edited. Use CamelCase or [[links]] to create stub pages and then click on them to fill them out."
-  },
-  {
-    "title": "Introduction/1/demo",
-    "parent": "Introduction/1",
-    "stream-type": "default",
-    "type": "text/markdown",
-    "text": "Demonstration:\n* Create a new item right here by pressing enter.\n* Link somewhere: [[Secret Project]]"
-  },
-  {
-    "title": "Introduction/2",
-    "parent": "Introduction",
-    "stream-list": "Introduction/2/demo",
-    "stream-type": "default",
-    "type": "text/markdown",
-    "text": "## 2. Slashcommands\n\n    Type `/` to access formatting and component insertion options quickly without leaving the keyboard."
-  },
-  {
-    "title": "Introduction/2/demo",
-    "parent": "Introduction/2",
-    "stream-type": "default",
-    "type": "text/markdown",
-    "text": "Demonstration (Try typing `/` below this line):\n\n"
-  },
-  {
-    "title": "Introduction/3",
-    "parent": "Introduction",
-    "stream-list": "Introduction/3/demo",
-    "stream-type": "default",
-    "type": "text/markdown",
-    "text": "## 3. Easy Todo with integrated calendar/date picker\n\n    Keep track of tasks with simple `[ ]` markdown. Use inline calendar pages to mark due dates. Try typing `/date` or clicking the calendar icon in the sidebar toolbar!"
-  },
-  {
-    "title": "Introduction/3/demo",
-    "parent": "Introduction/3",
-    "stream-type": "default",
-    "type": "text/markdown",
-    "text": "Demonstration:\n- [ ] Example Todo Item\n- [x] Completed Todo Item"
-  },
-  {
-    "title": "Introduction/4",
-    "parent": "Introduction",
-    "stream-list": "Introduction/4/demo",
-    "stream-type": "default",
-    "type": "text/markdown",
-    "text": "## 4. Markdown and KaTeX Formatting\n\n    Full support for `**markdown**` and math equations with `$$KaTeX$$`."
-  },
-  {
-    "title": "Introduction/4/demo",
-    "parent": "Introduction/4",
-    "stream-type": "default",
-    "type": "text/markdown",
-    "text": "Demonstration:\nLook at this **bold** and *italic* text, or this equation:\n\n$$ E = mc^2 $$"
-  },
-  {
-    "title": "Introduction/5",
-    "parent": "Introduction",
-    "stream-list": "Introduction/5/demo",
-    "stream-type": "default",
-    "type": "text/markdown",
-    "text": "## 5. Easy templating with anchors\n\n    Quickly apply structured templates to any stream item using the anchor feature."
-  },
-  {
-    "title": "Introduction/5/demo",
-    "parent": "Introduction/5",
-    "stream-type": "default",
-    "type": "text/markdown",
-    "text": "Demonstration:\nTyping `/anchor` will allow you to drop a template right into your workflow."
-  },
-  {
-    "title": "Introduction/6",
-    "parent": "Introduction",
-    "stream-list": "Introduction/6/demo",
-    "stream-type": "default",
-    "type": "text/markdown",
-    "text": "## 6. AutoTable\n\n    Create dynamic tables easily using the `<<AutoTable>>` macro for quick structured data entry."
-  },
-  {
-    "title": "Introduction/6/demo",
-    "parent": "Introduction/6",
-    "stream-type": "default",
-    "type": "text/markdown",
-    "text": "Demonstration:\n\n<<AutoTable>>"
-  },
-  {
-    "title": "Introduction/7",
-    "parent": "Introduction",
-    "stream-list": "Introduction/7/demo",
-    "stream-type": "default",
-    "type": "text/markdown",
-    "text": "## 7. Calc\n\n    Perform inline math evaluations directly in your notes."
-  },
-  {
-    "title": "Introduction/7/demo",
-    "parent": "Introduction/7",
-    "stream-type": "default",
-    "type": "text/markdown",
-    "text": "Demonstration:\n`calc(5 + 10 * 2)`"
-  },
-  {
-    "title": "Introduction/8",
-    "parent": "Introduction",
-    "stream-list": "Introduction/8/demo",
-    "stream-type": "default",
-    "type": "text/markdown",
-    "text": "## 8. Sane print defaults\n\n    Lithic is optimized to look great when printed or exported to PDF natively through your browser."
-  },
-  {
-    "title": "Introduction/8/demo",
-    "parent": "Introduction/8",
-    "stream-type": "default",
-    "type": "text/markdown",
-    "text": "Demonstration:\nTry hitting `Ctrl+P` (or `Cmd+P`) right now to see the print styling!"
-  },
-  {
-    "title": "Introduction/9",
-    "parent": "Introduction",
-    "stream-list": "Introduction/9/demo",
-    "stream-type": "default",
-    "type": "text/markdown",
-    "text": "## 9. PDF annotations\n\n    Read, highlight, and extract notes from PDFs directly within Lithic."
-  },
-  {
-    "title": "Introduction/9/demo",
-    "parent": "Introduction/9",
-    "stream-type": "default",
-    "type": "text/markdown",
-    "text": "Demonstration:\nDrag and drop a small PDF file right into Lithic!"
-  },
-  {
-    "title": "Introduction/10",
-    "parent": "Introduction",
-    "stream-list": "Introduction/10/demo",
-    "stream-type": "default",
-    "type": "text/markdown",
-    "text": "## 10. Syntax highlighting\n\n    Automatic code highlighting for popular languages perfectly styled out-of-the-box."
-  },
-  {
-    "title": "Introduction/10/demo",
-    "parent": "Introduction/10",
-    "stream-type": "default",
-    "type": "text/markdown",
-    "text": "Demonstration:\n```javascript\nfunction sayHello() {\n  console.log(\"Hello world!\");\n}\n```"
-  },
-  {
-    "title": "Introduction/11",
-    "parent": "Introduction",
-    "stream-list": "Introduction/11/demo",
-    "stream-type": "default",
-    "type": "text/markdown",
-    "text": "## 11. Backlink Pills\n\n    See all related notes and incoming connections in one convenient place using backlink pills."
-  },
-  {
-    "title": "Introduction/11/demo",
-    "parent": "Introduction/11",
-    "stream-type": "default",
-    "type": "text/markdown",
-    "text": "Demonstration:\nAny time a tiddler links to this one, you'll see a pill at the top!"
-  },
-  {
-    "title": "Introduction/12",
-    "parent": "Introduction",
-    "stream-list": "Introduction/12/demo",
-    "stream-type": "default",
-    "type": "text/markdown",
-    "text": "## 12. Infinite portability and customization\n\n    Being built on TiddlyWiki means Lithic is a self-contained HTML file you can take anywhere, hack, and customize to your heart's content."
-  },
-  {
-    "title": "Introduction/12/demo",
-    "parent": "Introduction/12",
-    "stream-type": "default",
-    "type": "text/markdown",
-    "text": "Demonstration:\nYou can save this entire site as a single file right now!"
-  }
-]
+title: Introduction
+stream-list: Introduction/1 Introduction/2 Introduction/3 Introduction/4 Introduction/5 Introduction/6 Introduction/7 Introduction/8 Introduction/9 Introduction/10 Introduction/11 Introduction/12
+type: text/markdown
+
+Here is a quick introduction to some of the features Lithic has to offer:
+⁂⁂⁂
+title: Introduction/1
+parent: Introduction
+stream-list: Introduction/1/explain Introduction/1/demo Introduction/1/code
+type: text/markdown
+
+## 1. Zero Friction Entry & Editing
+⁂⁂⁂
+title: Introduction/1/explain
+parent: Introduction/1
+type: text/markdown
+
+Put all new items into today's journal and simply describe what you are doing. Lithic will automatically track the time between bullets.
+
+**Double-click any node to edit it.** Press `Enter` while editing to create a new trailing node below it, or use `Shift+Enter` to add a new line within the current node. 
+
+Use CamelCase or `[[links]]` to create stub pages and then click on them to fill them out.
+⁂⁂⁂
+title: Introduction/1/demo
+parent: Introduction/1
+type: text/markdown
+
+#### Demonstration:
+* **Double-click this node to edit it**, then press `Enter` to create a new item right below it.
+* Link somewhere: [[Secret Project]]
+⁂⁂⁂
+title: Introduction/1/code
+parent: Introduction/1
+type: text/markdown
+
+```markdown
+#### Demonstration:
+* **Double-click this node to edit it**, then press `Enter` to create a new item right below it.
+* Link somewhere: [[Secret Project]]
+```
+⁂⁂⁂
+title: Introduction/2
+parent: Introduction
+stream-list: Introduction/2/explain Introduction/2/demo Introduction/2/code
+type: text/markdown
+
+## 2. Slashcommands
+⁂⁂⁂
+title: Introduction/2/explain
+parent: Introduction/2
+type: text/markdown
+
+Type `/` to access formatting and component insertion options quickly without leaving the keyboard. 
+
+<details>
+<summary><strong>Expand for common slashcommands:</strong></summary>
+
+- `/date` - Insert an interactive date picker link.
+- `/anchor` - Apply a structured template to the node.
+- `/todo` - Insert a markdown checkbox.
+- `/calc` - Insert an inline calculator macro.
+- `/table` - Insert an AutoTable macro.
+
+</details>
+⁂⁂⁂
+title: Introduction/2/demo
+parent: Introduction/2
+stream-list: Introduction/2/demo/1
+type: text/markdown
+
+#### Demonstration:
+**Double-click the child node below to edit it**, then type a character (like `n` or `d`) right after the slash to see the autocomplete menu!
+⁂⁂⁂
+title: Introduction/2/demo/1
+parent: Introduction/2/demo
+type: text/markdown
+
+/a
+⁂⁂⁂
+title: Introduction/2/code
+parent: Introduction/2
+type: text/markdown
+
+```markdown
+#### Demonstration:
+**Double-click the child node below to edit it**, then type a character (like `n` or `d`) right after the slash to see the autocomplete menu!
+```
+⁂⁂⁂
+title: Introduction/3
+parent: Introduction
+stream-list: Introduction/3/explain Introduction/3/demo Introduction/3/code
+type: text/markdown
+
+## 3. Easy Todo with integrated calendar
+⁂⁂⁂
+title: Introduction/3/explain
+parent: Introduction/3
+type: text/markdown
+
+Keep track of tasks with simple `[ ]` markdown. Use inline calendar pages to mark due dates. 
+
+**Double-click any node to edit it**, and try typing `/date` or clicking the calendar icon in the sidebar toolbar!
+⁂⁂⁂
+title: Introduction/3/demo
+parent: Introduction/3
+type: text/markdown
+
+#### Demonstration:
+* **Double-click this node to edit**, then change `[ ]` to `[x]`:
+* [ ] Example Todo Item
+* [x] Completed Todo Item
+⁂⁂⁂
+title: Introduction/3/code
+parent: Introduction/3
+type: text/markdown
+
+```markdown
+#### Demonstration:
+* **Double-click this node to edit**, then change `[ ]` to `[x]`:
+* [ ] Example Todo Item
+* [x] Completed Todo Item
+```
+⁂⁂⁂
+title: Introduction/4
+parent: Introduction
+stream-list: Introduction/4/explain Introduction/4/demo Introduction/4/code
+type: text/markdown
+
+## 4. Markdown and KaTeX Formatting
+⁂⁂⁂
+title: Introduction/4/explain
+parent: Introduction/4
+type: text/markdown
+
+Full support for standard `**markdown**` and math equations with `$$KaTeX$$`.
+⁂⁂⁂
+title: Introduction/4/demo
+parent: Introduction/4
+type: text/markdown
+
+#### Demonstration:
+**Double-click this node to edit it** and try changing the formatting! Look at this **bold** and *italic* text, or this equation:
+
+$$ E = mc^2 $$
+⁂⁂⁂
+title: Introduction/4/code
+parent: Introduction/4
+type: text/markdown
+
+```markdown
+#### Demonstration:
+**Double-click this node to edit it** and try changing the formatting! Look at this **bold** and *italic* text, or this equation:
+
+$$ E = mc^2 $$
+```
+⁂⁂⁂
+title: Introduction/5
+parent: Introduction
+stream-list: Introduction/5/explain Introduction/5/demo Introduction/5/code
+type: text/markdown
+
+## 5. Easy templating with anchors
+⁂⁂⁂
+title: Introduction/5/explain
+parent: Introduction/5
+type: text/markdown
+
+Quickly apply structured templates to any stream node using the anchor feature. 
+
+**Double-click a node to edit it**, then type `/anchor` to drop a template right into your workflow.
+⁂⁂⁂
+title: Introduction/5/demo
+parent: Introduction/5
+type: text/markdown
+
+#### Demonstration:
+**Double-click this node to edit it**, press `Shift+Enter` for a new line, and type `/anchor`!
+⁂⁂⁂
+title: Introduction/5/code
+parent: Introduction/5
+type: text/markdown
+
+```markdown
+#### Demonstration:
+**Double-click this node to edit it**, press `Shift+Enter` for a new line, and type `/anchor`!
+```
+⁂⁂⁂
+title: Introduction/6
+parent: Introduction
+stream-list: Introduction/6/explain Introduction/6/demo Introduction/6/code
+type: text/markdown
+
+## 6. AutoTable
+⁂⁂⁂
+title: Introduction/6/explain
+parent: Introduction/6
+type: text/markdown
+
+Create dynamic tables easily using the `<<AutoTable>>` macro (which takes a required number of columns and optional column headers) for quick structured data entry.
+⁂⁂⁂
+title: Introduction/6/demo
+parent: Introduction/6
+type: text/markdown
+
+#### Demonstration:
+**Double-click this node to edit it** and see how the macro looks under the hood:
+
+<<AutoTable 3 "One Two Three">>
+⁂⁂⁂
+title: Introduction/6/code
+parent: Introduction/6
+type: text/markdown
+
+```markdown
+#### Demonstration:
+**Double-click this node to edit it** and see how the macro looks under the hood:
+
+<<AutoTable 3 "One Two Three">>
+```
+⁂⁂⁂
+title: Introduction/7
+parent: Introduction
+stream-list: Introduction/7/explain Introduction/7/demo Introduction/7/code
+type: text/markdown
+
+## 7. Calc
+⁂⁂⁂
+title: Introduction/7/explain
+parent: Introduction/7
+type: text/markdown
+
+Perform inline math evaluations directly in your notes. Ending your formula with `=` displays the full equation and answer using KaTeX. Dropping the `=` displays only the plaintext result.
+⁂⁂⁂
+title: Introduction/7/demo
+parent: Introduction/7
+type: text/markdown
+
+#### Demonstration:
+**Double-click this node to edit it** and try adding or removing the `=` at the end of the macros to see the difference!
+
+Full KaTeX equation: <<calc "5 + 10 * 2=">>
+Plaintext answer only: <<calc "5 + 10 * 2">>
+⁂⁂⁂
+title: Introduction/7/code
+parent: Introduction/7
+type: text/markdown
+
+```markdown
+#### Demonstration:
+**Double-click this node to edit it** and try adding or removing the `=` at the end of the macros to see the difference!
+
+Full KaTeX equation: <<calc "5 + 10 * 2=">>
+Plaintext answer only: <<calc "5 + 10 * 2">>
+```
+⁂⁂⁂
+title: Introduction/8
+parent: Introduction
+stream-list: Introduction/8/explain Introduction/8/demo Introduction/8/code
+type: text/markdown
+
+## 8. Sane print defaults
+⁂⁂⁂
+title: Introduction/8/explain
+parent: Introduction/8
+type: text/markdown
+
+Lithic is optimized to look great when printed or exported to PDF natively through your browser. 
+
+You can **double-click** elements to ensure everything is perfect, then print!
+⁂⁂⁂
+title: Introduction/8/demo
+parent: Introduction/8
+type: text/markdown
+
+#### Demonstration:
+Try hitting `Ctrl+P` (or `Cmd+P`) right now to see the print styling!
+⁂⁂⁂
+title: Introduction/8/code
+parent: Introduction/8
+type: text/markdown
+
+```markdown
+#### Demonstration:
+Try hitting `Ctrl+P` (or `Cmd+P`) right now to see the print styling!
+```
+⁂⁂⁂
+title: Introduction/9
+parent: Introduction
+stream-list: Introduction/9/explain Introduction/9/demo Introduction/9/code
+type: text/markdown
+
+## 9. PDF annotations
+⁂⁂⁂
+title: Introduction/9/explain
+parent: Introduction/9
+type: text/markdown
+
+Read, highlight, and extract notes from PDFs directly within Lithic.
+⁂⁂⁂
+title: Introduction/9/demo
+parent: Introduction/9
+type: text/markdown
+
+#### Demonstration:
+Drag and drop a small PDF file right into your Lithic window!
+⁂⁂⁂
+title: Introduction/9/code
+parent: Introduction/9
+type: text/markdown
+
+```markdown
+#### Demonstration:
+Drag and drop a small PDF file right into your Lithic window!
+```
+⁂⁂⁂
+title: Introduction/10
+parent: Introduction
+stream-list: Introduction/10/explain Introduction/10/demo Introduction/10/code
+type: text/markdown
+
+## 10. Syntax highlighting
+⁂⁂⁂
+title: Introduction/10/explain
+parent: Introduction/10
+type: text/markdown
+
+Automatic code highlighting for popular languages perfectly styled out-of-the-box. 
+
+**Double-click the code snippet** below to edit the code.
+⁂⁂⁂
+title: Introduction/10/demo
+parent: Introduction/10
+type: text/markdown
+
+#### Demonstration:
+**Double-click here to edit this snippet!**
+```javascript
+function sayHello() {
+  console.log("Hello world!");
+}
+```
+⁂⁂⁂
+title: Introduction/10/code
+parent: Introduction/10
+type: text/markdown
+
+````markdown
+#### Demonstration:
+**Double-click here to edit this snippet!**
+```javascript
+function sayHello() {
+  console.log("Hello world!");
+}
+```
+````
+⁂⁂⁂
+title: Introduction/11
+parent: Introduction
+stream-list: Introduction/11/explain Introduction/11/demo Introduction/11/code
+type: text/markdown
+
+## 11. Backlink Pills
+⁂⁂⁂
+title: Introduction/11/explain
+parent: Introduction/11
+type: text/markdown
+
+See all related notes and incoming connections in one convenient place using backlink pills at the top of a page.
+⁂⁂⁂
+title: Introduction/11/demo
+parent: Introduction/11
+type: text/markdown
+
+#### Demonstration:
+**Double-click here** to create a link to another page, and watch the pill appear there!
+⁂⁂⁂
+title: Introduction/11/code
+parent: Introduction/11
+type: text/markdown
+
+```markdown
+#### Demonstration:
+**Double-click here** to create a link to another page, and watch the pill appear there!
+```
+⁂⁂⁂
+title: Introduction/12
+parent: Introduction
+stream-list: Introduction/12/explain Introduction/12/demo Introduction/12/code
+type: text/markdown
+
+## 12. Infinite portability and customization
+⁂⁂⁂
+title: Introduction/12/explain
+parent: Introduction/12
+type: text/markdown
+
+Being built on a self-contained architecture means Lithic is a single HTML file you can take anywhere, hack, and customize to your heart's content.
+⁂⁂⁂
+title: Introduction/12/demo
+parent: Introduction/12
+type: text/markdown
+
+#### Demonstration:
+You can save this entire site as a single file right now using the save icon in the sidebar!
+⁂⁂⁂
+title: Introduction/12/code
+parent: Introduction/12
+type: text/markdown
+
+```markdown
+#### Demonstration:
+You can save this entire site as a single file right now using the save icon in the sidebar!
+```
