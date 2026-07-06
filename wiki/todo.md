@@ -49,7 +49,15 @@
     - [ ] Create parallel layout for "Presentation Mode" that is non-editable and can navigate forward/back between whiteboard pages; with the above animations as toggleable options
 - [ ] When multiple images are drag-and-dropped simultaneously, serialize them into a single multi-page whiteboard (like PDF import) instead of individual whiteboard objects.
 - [ ] Revisit iframe-based web app embedding plugins (Treevis, Falstaad, etc.)
-- [ ] Add "depth" field ie depth:3 that modifies how far the "Pyramid" sidebar view shows children.
+- [ ] Pyramid expansion
+    - [ ] Rename to "Treeview"?
+    - [ ] Add "depth" field ie depth:3 that modifies how far the "Pyramid" sidebar view shows children.
+    - [ ] add Guardarles for 'too wide' views/ TIddler titles? (Capital Letters in nodes or something)
+    - [ ] Pull displayname from caption: field if avaiailable
+    - [ ] Add togglable full "story river" mode
+        - (currently limited to showing treeview for tiddler at top of story river.)
+        - This will act as a sort of 'ad-hoc' graph in place of the 'global graph' features of other PKMS; but it's more ideologically more focused.
+    - [ ] Add smart behavior for tiddlers that have prev / next fields (like showing the corresponding pyramids the sidebar)
 - [ ] "Deep copy" transclusions on single tiddler exporter, or automatic transclusion inclusion on multi tiddler exporter?
 - [ ] Add a whiteboard button that transcludes a parent's stream-list nodes as paginated stickynotes on a whiteboard. (Pre-presentation creation)
     - Highest level nodes are pages and their children are individual stickynotes on that page.
