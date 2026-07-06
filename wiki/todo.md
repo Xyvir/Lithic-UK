@@ -1,8 +1,8 @@
 
 ## Todo
-
+- [ ] Add proper print styling to Autotable Macros in printstyles.css
 - [ ] For both right-click menus, add guardrails so they 'invert' near screen edges so menu never goes out of view.
-- [ ] Add "reveal" / collapse element to backlink pill clouds.
+- [ ] Add "reveal" / collapse element to backlink pill clouds; always open by default(but configurable), tracked via state tiddlers that are not saved when the wiki is?
 - [ ] Remove extraneous whitespace on embed-streams macro.
 - [ ] Merge Usage of Dogear, TiddlyTools PIN, and add a Permanent "Navigation" (bookmark) Tiddler area that appears at the top of the sidebar that tiddlers can be 'pinned' to.
     (Add contextual "Navigation (with no header)" are in / above the sidebar populated by any of the following tagged Navigation: 1. Saved Filters. 2. Nodestream Parents. 3. Individual Tiddlers. These can be 'sorted' by tag order? (like elsehwere in tiddlywiki) and items can be added to it anytime via drag and drop; removed via right-click context menu. Also these cannot be edited if the wiki is in 'non-edit' mode.)
@@ -21,7 +21,6 @@
 - [ ] Allow double-bullet (`-` or `*` prefix) nodestream entries to create date/calendar highlights, not just `[ ]` / `[x]` todo items.
     (Currently only `- [ ] [[date]]` / `- [x] [[date]]` highlight the calendar sidebar. This would also recognize `- [[date]]` and `* [[date]]` for non-task journal entries.)
 - [ ] Create/Integrate EPUB Serialization based on current to_lithic logic (but have user provide shortcode instead of AI-generated one); add it to existing pdf-to-whiteboard and name the plugin 'lithic-import' or something.
-- [ ] Greatly improve existing intro.lith to capture ALL current features and workflows.
 - [ ] Integrate spaced repetition / flashcard review into Lithic.
     - Candidates: pdeck, twsr (unmaintained). TidMe is too heavyweight as a full edition.
     - Goal: lightweight integration that works within the streams experience (e.g., sidebar review tab, slashcommand to create cards from highlights).
@@ -69,6 +68,7 @@
 
 - [ ] Automate lithic-light build process (including TW Uglifier) and merge in esp32-launcher repo into this one.
 - [ ] Add agents.md to back-end server if anyone wants to clone the github sync in their own LLM-IDE.
+- [ ] Greatly improve existing intro.lith to capture ALL current features and workflows.
 - [ ] Create "Lithic for Teams" backend version based on Multi-Wiki Server.
 - Tauri App Ideas:
     - [ ] Add 'run code' button next to copy code that hooks into ephemeral.exe
