@@ -339,6 +339,18 @@ exports.startup = function() {
 
                 clearProgress();
 
+                // Copy imported linked references to the clipboard
+                if (createdTitles.length > 0) {
+                    var clipboardText = createdTitles.map(function(t) { return "[[" + t + "]]"; }).join("\n");
+                    if ($tw.utils && $tw.utils.copyToClipboard) {
+                        $tw.utils.copyToClipboard(clipboardText);
+                    } else if (navigator.clipboard) {
+                        navigator.clipboard.writeText(clipboardText).catch(function(err) {
+                            console.error("Clipboard failed:", err);
+                        });
+                    }
+                }
+
                 // Update $:/Import and $:/StoryList
                 var importList = createdTitles.map(function(t) { return "# [[" + t + "]]"; }).join("\n");
                 $tw.wiki.addTiddler(new $tw.Tiddler(

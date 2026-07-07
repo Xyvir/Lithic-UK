@@ -1,5 +1,7 @@
 
 ## Todo
+- [ ] Add custom feedback UI (especially for selfhost) for when save button is clicked but before the save confirmation modal appears.
+    (Currently, save actions are silent until the confirmation modal appears. The UI should give immediate feedback that the action has been registered and is being processed, particularly for large wikis where the save operation may take a few seconds.)
 - [ ] Add proper print styling to Autotable Macros in printstyles.css
 - [ ] For both right-click menus, add guardrails so they 'invert' near screen edges so menu never goes out of view.
 - [ ] Add "reveal" / collapse element to backlink pill clouds; always open by default(but configurable), tracked via state tiddlers that are not saved when the wiki is?
@@ -89,7 +91,7 @@
 
 ## Done
 - ~~Embed-wb-text macro? (Shelved — transclusions into whiteboards already cover this use case)~~
-
+- [x] With Lithic custom importer, on custom import finish automatically copy linked references i.ie [[tiddlername]] to the clipboard for the list of import items.
 - [X] Add "apply anchor template" filtered UI widget dropdownsearch to stub view / placeholder tiddlers.
 - [X] Improve anchors behavior and workflow.
 - [X] add copy button to Pyramid sidebar that copies the rendered mermaid code for further embedding / editing / extending.
