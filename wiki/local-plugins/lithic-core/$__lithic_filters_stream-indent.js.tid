@@ -38,7 +38,7 @@ description: Returns an indented string for each level of depth of a stream node
             }
             var indent = "";
             for (var i = 0; i < depth; i++) {
-                indent += "    "; // 4 spaces per depth
+                indent += "  "; // 2 spaces per depth
             }
 
             var text = (tiddler && tiddler.fields.text) ? tiddler.fields.text : "";

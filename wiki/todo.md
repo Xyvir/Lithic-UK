@@ -1,6 +1,6 @@
 
 ## Todo
-- [ ] Add "Copy All Plaintext" button to page control (or Open sidebar?) for Storyriver markdown export or to give AI context. (There is a smaller merge stream plugin that already does this???) (https://talk.tiddlywiki.org/t/buttons-to-merge-streams/14957/4)
+- Make sidebar Wiki Title and subtitle editable via double-clicking (similar to how stream nodes are already)
 - [ ] Add custom feedback UI (especially for selfhost) for when save button is clicked but before the save confirmation modal appears.
     (Currently, save actions are silent until the confirmation modal appears. The UI should give immediate feedback that the action has been registered and is being processed, particularly for large wikis where the save operation may take a few seconds.)
 - [ ] Add proper print styling to Autotable Macros in printstyles.css
@@ -92,6 +92,7 @@
 ---
 
 ## Done
+- [X] Add "Copy All Plaintext" button to page control (or Open sidebar?) for Storyriver markdown export or to give AI context. (There is a smaller merge stream plugin that already does this???) (https://talk.tiddlywiki.org/t/buttons-to-merge-streams/14957/4)
 - ~~Embed-wb-text macro? (Shelved — transclusions into whiteboards already cover this use case)~~
 - [x] With Lithic custom importer, on custom import finish automatically copy linked references i.ie [[tiddlername]] to the clipboard for the list of import items.
 - [X] Add "apply anchor template" filtered UI widget dropdownsearch to stub view / placeholder tiddlers.

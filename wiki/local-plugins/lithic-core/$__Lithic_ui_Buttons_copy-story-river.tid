@@ -1,0 +1,22 @@
+title: $:/Lithic/ui/Buttons/copy-story-river
+tags: $:/tags/PageControls
+list-before: $:/core/ui/Buttons/control-panel
+caption: {{$:/core/images/copy-clipboard}} copy story river
+description: Copy Story River as Markdown
+
+\whitespace trim
+\define inner-map()
+[<currentTiddler>] [<currentTiddler>get-stream-nodes[]] :filter[get[text]trim[]!is[blank]] :map[stream-indent<..currentTiddler>] +[join[%0A]]
+\end
+<$button tooltip="Copy Story River" aria-label="Copy Story River" class=<<tv-config-toolbar-class>>>
+<$action-sendmessage
+  $message="tm-copy-to-clipboard"
+  $param={{{ [list[$:/StoryList]] :map[subfilter<inner-map>] +[join[%0A]decodeuricomponent[]] }}}
+/>
+<$list filter="[<tv-config-toolbar-icons>match[yes]]">
+{{$:/core/images/copy-clipboard}}
+</$list>
+<$list filter="[<tv-config-toolbar-text>match[yes]]">
+<span class="tc-btn-text">copy story river</span>
+</$list>
+</$button>

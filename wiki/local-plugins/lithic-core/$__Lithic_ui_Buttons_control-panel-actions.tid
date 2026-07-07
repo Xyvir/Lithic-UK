@@ -1,0 +1,14 @@
+title: $:/Lithic/ui/Buttons/control-panel-actions
+tags: $:/tags/PageTools
+caption: {{$:/core/images/options}} control panel
+description: open the control panel
+
+<$button tooltip="Control Panel" aria-label="Control Panel" class=<<tv-config-toolbar-class>> selectedClass="tc-selected">
+<$action-navigate $to="$:/ControlPanel"/>
+<$list filter="[<tv-config-toolbar-icons>match[yes]]">
+{{$:/core/images/options}}
+</$list>
+<$list filter="[<tv-config-toolbar-text>match[yes]]">
+<span class="tc-btn-text">control panel</span>
+</$list>
+</$button>
