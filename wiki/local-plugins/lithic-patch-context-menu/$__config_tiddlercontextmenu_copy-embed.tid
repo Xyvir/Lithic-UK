@@ -1,8 +1,8 @@
-caption: Copy Embed
+caption: copy embed
 title: $:/config/tiddlercontextmenu/copy-embed
 text: show
 tm-message: tm-copy-to-clipboard
 param-filter: [addprefix{$:/config/lithic/constants!!open-double-brace}addsuffix{$:/config/lithic/constants!!close-double-brace}]
-icon: $:/core/images/picture
+icon: $:/core/images/transcludify
 tags: $:/tags/tiddlercontextmenu
 type: text/vnd.tiddlywiki

@@ -1,8 +1,8 @@
-caption: Copy Link
+caption: copy link
 title: $:/config/tiddlercontextmenu/copy-link
 text: show
 tm-message: tm-copy-to-clipboard
 param-filter: [addprefix{$:/config/lithic/constants!!open-double-bracket}addsuffix{$:/config/lithic/constants!!close-double-bracket}]
-icon: $:/core/images/link
+icon: $:/core/images/linkify
 tags: $:/tags/tiddlercontextmenu
 type: text/vnd.tiddlywiki

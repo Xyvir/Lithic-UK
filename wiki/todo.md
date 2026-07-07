@@ -1,5 +1,6 @@
 
 ## Todo
+- [ ] Add "Copy All Plaintext" button to page control (or Open sidebar?) for Storyriver markdown export or to give AI context. (There is a smaller merge stream plugin that already does this???) (https://talk.tiddlywiki.org/t/buttons-to-merge-streams/14957/4)
 - [ ] Add custom feedback UI (especially for selfhost) for when save button is clicked but before the save confirmation modal appears.
     (Currently, save actions are silent until the confirmation modal appears. The UI should give immediate feedback that the action has been registered and is being processed, particularly for large wikis where the save operation may take a few seconds.)
 - [ ] Add proper print styling to Autotable Macros in printstyles.css
@@ -50,6 +51,7 @@
     - [ ] Add "view frame" background item to DefaultCanvas
     - [ ] Create parallel layout for "Presentation Mode" that is non-editable and can navigate forward/back between whiteboard pages; with the above animations as toggleable options
 - [ ] When multiple images are drag-and-dropped simultaneously, serialize them into a single multi-page whiteboard (like PDF import) instead of individual whiteboard objects.
+- [ ] Test preserving existing 'rendered height' on unieditor when editing existing nodes/blocks. (IE images which are generally much taller than their sourcecode) Having the viewport jump around in response to editing text can be jarring. (which is the default behavior in logseq but is worth reviewing.)
 - [ ] Revisit iframe-based web app embedding plugins (Treevis, Falstaad, etc.)
 - [ ] Pyramid expansion
     - [ ] Rename to "Treeview"?

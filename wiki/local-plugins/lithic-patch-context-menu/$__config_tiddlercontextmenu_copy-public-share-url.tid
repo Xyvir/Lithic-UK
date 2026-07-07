@@ -1,5 +1,5 @@
-caption: Copy public share URL
-icon: $:/core/images/export-button
+caption: copy public share url
+icon: $:/core/images/globe
 tags: $:/tags/tiddlercontextmenu
 title: $:/config/tiddlercontextmenu/copy-public-share-url
 tm-message: lithic-copy-share-url

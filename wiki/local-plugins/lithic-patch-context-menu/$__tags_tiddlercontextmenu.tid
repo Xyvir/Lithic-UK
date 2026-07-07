@@ -1,0 +1,3 @@
+title: $:/tags/tiddlercontextmenu
+list: $:/config/tiddlercontextmenu/close-other-tiddlers $:/config/tiddlercontextmenu/edit-tiddler $:/config/tiddlercontextmenu/delete-tiddler $:/config/tiddlercontextmenu/clone-tiddler $:/config/tiddlercontextmenu/copy-body-text $:/config/tiddlercontextmenu/copy-embed $:/config/tiddlercontextmenu/copy-link $:/config/tiddlercontextmenu/copy-public-share-url
+type: text/vnd.tiddlywiki

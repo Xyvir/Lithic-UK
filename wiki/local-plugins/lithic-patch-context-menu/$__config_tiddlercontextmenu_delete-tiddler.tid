@@ -1,0 +1,8 @@
+title: $:/config/tiddlercontextmenu/delete-tiddler
+caption: {{$:/language/Buttons/Delete/Caption}}
+icon: $:/core/images/delete-button
+tags: $:/tags/tiddlercontextmenu
+tm-message: tm-delete-tiddler
+type: text/vnd.tiddlywiki
+
+show

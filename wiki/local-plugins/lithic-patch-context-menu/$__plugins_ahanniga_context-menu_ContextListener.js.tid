@@ -149,7 +149,14 @@ This widgets implements context menus to tiddlers
                 continue;
             }
 
-            label = sanitize(tid.getFieldString("caption", "Unlabelled Option"));
+            label = tid.getFieldString("caption", "Unlabelled Option");
+            if (label.indexOf("{{") !== -1 || label.indexOf("<<") !== -1) {
+                label = $tw.wiki.renderText("text/plain", "text/vnd.tiddlywiki", label, {
+                    parseAsInline: true,
+                    variables: { currentTiddler: targ }
+                });
+            }
+            label = sanitize(label);
             action = sanitize(tid.getFieldString("tm-message", "tm-dummy"));
             icon = $tw.wiki.getTiddlerText(tid.getFieldString("icon", "$:/core/images/blank"));
             if (icon) {

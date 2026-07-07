@@ -1,0 +1,8 @@
+title: $:/config/tiddlercontextmenu/close-other-tiddlers
+caption: {{$:/language/Buttons/CloseOthers/Caption}}
+icon: $:/core/images/close-others-button
+tags: $:/tags/tiddlercontextmenu
+tm-message: tm-close-other-tiddlers
+type: text/vnd.tiddlywiki
+
+show

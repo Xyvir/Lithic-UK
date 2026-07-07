@@ -1,0 +1,8 @@
+title: $:/config/tiddlercontextmenu/edit-tiddler
+caption: {{$:/language/Buttons/Edit/Caption}}
+icon: $:/core/images/edit-button
+tags: $:/tags/tiddlercontextmenu
+tm-message: tm-edit-tiddler
+type: text/vnd.tiddlywiki
+
+show

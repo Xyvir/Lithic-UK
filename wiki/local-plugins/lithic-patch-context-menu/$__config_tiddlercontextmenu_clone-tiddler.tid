@@ -1,4 +1,4 @@
-caption: Clone Tiddler
+caption: {{$:/language/Buttons/Clone/Caption}}
 title: $:/config/tiddlercontextmenu/clone-tiddler
 text: show
 tm-message: tm-new-tiddler
