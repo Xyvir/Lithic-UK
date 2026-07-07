@@ -65,6 +65,9 @@ if (typeof document !== "undefined" && !document.hasAppearEscListener) {
             $tw.popup.cancel(0);
         }
     }, true); // useCapture=true ensures it runs before child elements can stopPropagation
+    document.addEventListener("contextmenu", function() {
+        $tw.popup.cancel(0);
+    }, true);
 }
 
 })();
