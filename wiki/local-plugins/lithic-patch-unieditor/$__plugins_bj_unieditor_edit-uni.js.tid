@@ -236,6 +236,7 @@ uniEditorWidget.prototype.render = function(parent,nextSibling) {
 				fixHeight();
 				heightObserver.observe(self.domNode, { attributes: true, attributeFilter: ['style'], subtree: true });
 			});
+			self._heightObserver = heightObserver;
 			
 			heightObserver.observe(self.domNode, { attributes: true, attributeFilter: ['style'], subtree: true });
 			
@@ -400,6 +401,24 @@ uniEditorWidget.prototype.render = function(parent,nextSibling) {
 			}
 		});
 
+		// FIX: Monkey-patch uniEditor's doIndents so cloned Streams events
+		// (Tab/Enter forwarded to $keyboard-plus) are not also processed by
+		// uniEditor internally.  Without this, uniEditor inserts a tab/newline
+		// into the textarea AND Streams runs indent/save actions, causing
+		// conflicting state mutations that can freeze the browser.
+		// This must be applied regardless of whether CompText is loaded.
+		if (isStreams && this.instance && this.instance.textLayer) {
+			var originalDoIndents = this.instance.textLayer.doIndents.bind(this.instance.textLayer);
+			this.instance.textLayer.doIndents = function(e) {
+				if (e.__isStreamsCloned) return false;
+				if (self.completionInstance && 
+					(self.completionInstance._state === "PATTERN" || self.completionInstance._state === "SELECT")) {
+					return false; // Let CompText handle Enter
+				}
+				return originalDoIndents(e);
+			};
+		}
+
 		if (CompletionLib && CompletionLib.Completion) {
 			var configText = this.wiki.getTiddlerText("$:/plugins/snowgoon88/edit-comptext/config");
 			var config = {};
@@ -412,20 +431,6 @@ uniEditorWidget.prototype.render = function(parent,nextSibling) {
 			this.completionInstance = new CompletionLib.Completion(
 				this, textarea, config, document.body, 0, 0
 			);
-
-			// FIX 1: Monkey-patch uniEditor's doIndents so Enter key is
-			// yielded to CompText when the completion popup is active.
-			// Without this, handleIndents consumes Enter first and inserts
-			// a newline instead of confirming the selected completion.
-			var originalDoIndents = this.instance.textLayer.doIndents.bind(this.instance.textLayer);
-			var compRef = this.completionInstance;
-			this.instance.textLayer.doIndents = function(e) {
-				if (e.__isStreamsCloned) return false;
-				if (compRef._state === "PATTERN" || compRef._state === "SELECT") {
-					return false; // Let CompText handle Enter
-				}
-				return originalDoIndents(e);
-			};
 
 			// FIX 2: Intercept programmatic textarea.value changes (from
 			// CompText completions) so the canvas overlay and auto-resize
@@ -702,6 +707,12 @@ uniEditorWidget.prototype.saveChanges = function(text) {
 };
 
 uniEditorWidget.prototype.removeChildDomNodes = function () {
+	// Disconnect height MutationObserver to prevent it from firing during
+	// DOM teardown/restructuring (e.g. when a Streams indent moves the node).
+	if (this._heightObserver) {
+		this._heightObserver.disconnect();
+		this._heightObserver = null;
+	}
 	if (this.saveTimeout) {
 		clearTimeout(this.saveTimeout);
 		this.saveTimeout = null;
