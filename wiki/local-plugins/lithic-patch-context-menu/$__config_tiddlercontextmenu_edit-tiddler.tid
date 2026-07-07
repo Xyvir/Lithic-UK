@@ -4,5 +4,4 @@ icon: $:/core/images/edit-button
 tags: $:/tags/tiddlercontextmenu
 tm-message: tm-edit-tiddler
 type: text/vnd.tiddlywiki
-
-show
+text: show
