@@ -4,4 +4,5 @@ icon: $:/core/images/delete-button
 tags: $:/tags/tiddlercontextmenu
 tm-message: tm-delete-tiddler
 type: text/vnd.tiddlywiki
-text: show
+
+show

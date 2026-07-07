@@ -1,0 +1,81 @@
+title: $:/themes/nico/notebook/ui/Sidebar/Headings
+tags: $:/themes/nico/notebook/tags/Sidebar
+type: text/vnd.tiddlywiki
+
+\procedure save-title()
+<$action-setfield $tiddler="$:/SiteTitle" text={{$:/temp/edit-site-title}}/>
+<$action-setfield $tiddler="$:/state/edit-site-title" text="no"/>
+\end
+
+\procedure cancel-title()
+<$action-setfield $tiddler="$:/state/edit-site-title" text="no"/>
+\end
+
+\procedure edit-title()
+<$action-setfield $tiddler="$:/temp/edit-site-title" text={{$:/SiteTitle}}/>
+<$action-setfield $tiddler="$:/state/edit-site-title" text="yes"/>
+\end
+
+\procedure save-subtitle()
+<$action-setfield $tiddler="$:/SiteSubtitle" text={{$:/temp/edit-site-subtitle}}/>
+<$action-setfield $tiddler="$:/state/edit-site-subtitle" text="no"/>
+\end
+
+\procedure cancel-subtitle()
+<$action-setfield $tiddler="$:/state/edit-site-subtitle" text="no"/>
+\end
+
+\procedure edit-subtitle()
+<$action-setfield $tiddler="$:/temp/edit-site-subtitle" text={{$:/SiteSubtitle}}/>
+<$action-setfield $tiddler="$:/state/edit-site-subtitle" text="yes"/>
+\end
+
+<div class="segment">
+  <div class="content" style="position: relative;">
+    
+    <h1 class="tc-site-title" title="Double click to edit">
+      <$reveal type="nomatch" state="$:/state/edit-site-title" text="yes">
+        <$eventcatcher events="dblclick" actions-dblclick=<<edit-title>>>
+          <div style="cursor: text;">{{$:/SiteTitle}}</div>
+        </$eventcatcher>
+      </$reveal>
+      <$reveal type="match" state="$:/state/edit-site-title" text="yes">
+        <$keyboard key="escape" actions=<<save-title>>>
+          <$keyboard key="enter" actions=<<save-title>>>
+            <$edit-text tiddler="$:/temp/edit-site-title" tag="input" default="" class="lithic-inline-edit" focus="yes"/>
+          </$keyboard>
+        </$keyboard>
+      </$reveal>
+    </h1>
+    
+    <div class="tc-site-subtitle" title="Double click to edit">
+      <$reveal type="nomatch" state="$:/state/edit-site-subtitle" text="yes">
+        <$eventcatcher events="dblclick" actions-dblclick=<<edit-subtitle>>>
+          <div style="cursor: text;">{{$:/SiteSubtitle}}</div>
+        </$eventcatcher>
+      </$reveal>
+      <$reveal type="match" state="$:/state/edit-site-subtitle" text="yes">
+        <$keyboard key="escape" actions=<<save-subtitle>>>
+          <$keyboard key="enter" actions=<<save-subtitle>>>
+            <$edit-text tiddler="$:/temp/edit-site-subtitle" tag="input" default="" class="lithic-inline-edit" focus="yes"/>
+          </$keyboard>
+        </$keyboard>
+      </$reveal>
+    </div>
+
+    <$button class="tc-btn-invisible lithic-tools-toggle-btn" tooltip="Toggle Tools">
+      <$action-setfield $tiddler="$:/state/lithic/show-tools" text={{{ [[$:/state/lithic/show-tools]get[text]match[yes]then[no]else[yes]] }}}/>
+      <$reveal type="match" state="$:/state/lithic/show-tools" text="yes">
+        <div class="lithic-nut-slider active">
+           <div class="lithic-nut"><div class="lithic-nut-hole"></div></div>
+        </div>
+      </$reveal>
+      <$reveal type="nomatch" state="$:/state/lithic/show-tools" text="yes">
+        <div class="lithic-nut-slider">
+           <div class="lithic-nut"><div class="lithic-nut-hole"></div></div>
+        </div>
+      </$reveal>
+    </$button>
+
+  </div>
+</div>

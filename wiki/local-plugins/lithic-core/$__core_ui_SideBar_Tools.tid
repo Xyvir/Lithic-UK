@@ -1,4 +1,4 @@
-caption: {{$:/language/SideBar/Tools/Caption}}
+caption: <span class="lithic-tools-section-label">{{$:/language/SideBar/Tools/Caption}}</span>
 tags: $:/tags/SideBar
 title: $:/core/ui/SideBar/Tools
 

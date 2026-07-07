@@ -1,0 +1,83 @@
+title: $:/lithic/styles/sidebar-tools-toggle
+tags: $:/tags/Stylesheet
+type: text/vnd.tiddlywiki
+
+<$reveal type="nomatch" state="$:/state/lithic/show-tools" text="yes">
+.nc-sidebar .segment.section:has(.lithic-tools-section-label) {
+   display: none !important;
+}
+</$reveal>
+
+.lithic-tools-toggle-btn {
+    position: absolute;
+    right: 15px;
+    top: 25px; /* Adjust according to header size */
+    z-index: 100;
+    cursor: pointer;
+    background: none;
+    border: none;
+    padding: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.lithic-nut-slider {
+    width: 36px;
+    height: 18px;
+    background-color: #3a3a40; /* Dark track */
+    clip-path: polygon(6px 0%, calc(100% - 6px) 0%, 100% 50%, calc(100% - 6px) 100%, 6px 100%, 0% 50%);
+    position: relative;
+    display: flex;
+    align-items: center;
+    transition: background-color 0.2s;
+    box-sizing: border-box;
+}
+
+.lithic-nut-slider.active {
+    background-color: #c98a5d; /* Lithic orange/accent color */
+}
+
+.lithic-nut {
+    width: 16px;
+    height: 14px;
+    background-color: #ccc;
+    clip-path: polygon(25% 0%, 75% 0%, 100% 50%, 75% 100%, 25% 100%, 0% 50%);
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    position: absolute;
+    left: 4px;
+    transition: left 0.2s, transform 0.2s;
+}
+
+.lithic-nut-hole {
+    display: block;
+    width: 6px;
+    height: 6px;
+    flex-shrink: 0;
+    border-radius: 50%;
+    background-color: #3a3a40; /* Dark hole matching track */
+    transition: background-color 0.2s;
+}
+
+.lithic-nut-slider.active .lithic-nut {
+    left: 16px;
+}
+
+.lithic-nut-slider.active .lithic-nut-hole {
+    background-color: #c98a5d; /* Matches the active orange track */
+}
+
+.lithic-inline-edit {
+    background: rgba(0,0,0,0.1);
+    border: 1px solid #c98a5d;
+    color: inherit;
+    font-family: inherit;
+    font-size: inherit;
+    font-weight: inherit;
+    width: 100%;
+    border-radius: 4px;
+    padding: 2px 4px;
+    box-sizing: border-box;
+}
