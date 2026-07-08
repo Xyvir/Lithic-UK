@@ -25,7 +25,7 @@ type: text/vnd.tiddlywiki
 .lithic-nut-slider {
     width: 36px;
     height: 18px;
-    background-color: #3a3a40; /* Dark track */
+    background-color: <<colour foreground>>; /* Dark track */
     clip-path: polygon(6px 0%, calc(100% - 6px) 0%, 100% 50%, calc(100% - 6px) 100%, 6px 100%, 0% 50%);
     position: relative;
     display: flex;
@@ -35,13 +35,13 @@ type: text/vnd.tiddlywiki
 }
 
 .lithic-nut-slider.active {
-    background-color: #c98a5d; /* Lithic orange/accent color */
+    background-color: <<colour dropzone-background>>; /* Lithic orange/accent color */
 }
 
 .lithic-nut {
     width: 16px;
     height: 14px;
-    background-color: #ccc;
+    background-color: <<colour background>>;
     clip-path: polygon(25% 0%, 75% 0%, 100% 50%, 75% 100%, 25% 100%, 0% 50%);
     display: flex;
     justify-content: center;
@@ -57,7 +57,7 @@ type: text/vnd.tiddlywiki
     height: 6px;
     flex-shrink: 0;
     border-radius: 50%;
-    background-color: #3a3a40; /* Dark hole matching track */
+    background-color: <<colour foreground>>; /* Dark hole matching track */
     transition: background-color 0.2s;
 }
 
@@ -66,12 +66,12 @@ type: text/vnd.tiddlywiki
 }
 
 .lithic-nut-slider.active .lithic-nut-hole {
-    background-color: #c98a5d; /* Matches the active orange track */
+    background-color: <<colour dropzone-background>>; /* Matches the active orange track */
 }
 
 .lithic-inline-edit {
     background: rgba(0,0,0,0.1);
-    border: 1px solid #c98a5d;
+    border: 1px solid <<colour dropzone-background>>;
     color: inherit;
     font-family: inherit;
     font-size: inherit;
