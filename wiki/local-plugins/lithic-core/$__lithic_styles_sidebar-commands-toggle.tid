@@ -1,14 +1,14 @@
-title: $:/lithic/styles/sidebar-tools-toggle
+title: $:/lithic/styles/sidebar-commands-toggle
 tags: $:/tags/Stylesheet
 type: text/vnd.tiddlywiki
 
-<$reveal type="nomatch" state="$:/state/lithic/show-tools" text="yes">
-.nc-sidebar .segment.section:has(.lithic-tools-section-label) {
+<$reveal type="nomatch" state="$:/state/lithic/show-commands" text="yes">
+.nc-sidebar .segment.section:has(.lithic-commands-section-label) {
    display: none !important;
 }
 </$reveal>
 
-.lithic-tools-toggle-btn {
+.lithic-commands-toggle-btn {
     position: absolute;
     right: 15px;
     top: 25px; /* Adjust according to header size */

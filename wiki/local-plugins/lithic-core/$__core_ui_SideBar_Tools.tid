@@ -1,4 +1,4 @@
-caption: <span class="lithic-tools-section-label">{{$:/language/SideBar/Tools/Caption}}</span>
+caption: <span class="lithic-commands-section-label">Commands</span>
 tags: $:/tags/SideBar
 title: $:/core/ui/SideBar/Tools
 
@@ -10,7 +10,7 @@ title: $:/core/ui/SideBar/Tools
 \end
 
 <style>
-.lith-sidebar-tools-grid {
+.lith-sidebar-commands-grid {
 	display: grid;
 	grid-template-columns: repeat(auto-fit, minmax(105px, 1fr));
 	/* First number is row gap (vertical), second is column gap (horizontal) */
@@ -22,22 +22,22 @@ title: $:/core/ui/SideBar/Tools
 
 /* THE FLATTENER: Forces every hidden wrapper div to center its contents 
    Modified to only target the tool items and their immediate wrappers to avoid breaking dropdowns */
-.lith-sidebar-tools-item,
-.lith-sidebar-tools-item > div {
+.lith-sidebar-commands-item,
+.lith-sidebar-commands-item > div {
 	display: flex;
 	justify-content: center;
 	align-items: center;
 	width: 100%;
 }
 
-.lith-sidebar-tools-item p {
+.lith-sidebar-commands-item p {
 	margin: 0 !important;
 }
 
 /* Button Styling - Restricted to tool buttons to avoid affecting dropdown items */
-.lith-sidebar-tools-item > div > button,
-.lith-sidebar-tools-item > div > span > button,
-.lith-sidebar-tools-item > div > label.tc-btn-invisible {
+.lith-sidebar-commands-item > div > button,
+.lith-sidebar-commands-item > div > span > button,
+.lith-sidebar-commands-item > div > label.tc-btn-invisible {
 	display: flex !important;
 	flex-wrap: nowrap !important;
 	align-items: center;
@@ -54,14 +54,14 @@ title: $:/core/ui/SideBar/Tools
 }
 
 /* Specific reset for dropdowns inside the tools grid */
-.lith-sidebar-tools-item .tc-drop-down {
+.lith-sidebar-commands-item .tc-drop-down {
 	display: block !important;
 	width: auto !important;
 	min-width: 160px;
 	text-align: left;
 }
 
-.lith-sidebar-tools-item .tc-drop-down button {
+.lith-sidebar-commands-item .tc-drop-down button {
 	display: block !important;
 	width: 100% !important;
 	max-width: none !important;
@@ -70,26 +70,26 @@ title: $:/core/ui/SideBar/Tools
 	font-size: 0.9em !important;
 }
 
-.lith-sidebar-tools-item button .tc-btn-text,
-.lith-sidebar-tools-item label.tc-btn-invisible .tc-btn-text {
+.lith-sidebar-commands-item button .tc-btn-text,
+.lith-sidebar-commands-item label.tc-btn-invisible .tc-btn-text {
 	font-size: clamp(8px, 12cqw, 0.9em) !important; 
 	white-space: nowrap;
 	overflow: hidden;
 	text-overflow: ellipsis;
 	line-height: 1; 
 }
-.lith-sidebar-tools-item button svg,
-.lith-sidebar-tools-item label.tc-btn-invisible svg {
+.lith-sidebar-commands-item button svg,
+.lith-sidebar-commands-item label.tc-btn-invisible svg {
 	flex-shrink: 0;
 	width: 1.2em;
 	height: 1.2em;
 }
 
 /* Fixes Import functionality while removing it from the visual layout flow */
-.lith-sidebar-tools-item .tc-file-input-wrapper {
+.lith-sidebar-commands-item .tc-file-input-wrapper {
 	position: relative;
 }
-.lith-sidebar-tools-item .tc-file-input-wrapper input[type="file"] {
+.lith-sidebar-commands-item .tc-file-input-wrapper input[type="file"] {
 	position: absolute !important;
 	top: 0;
 	left: 0;
@@ -102,10 +102,10 @@ title: $:/core/ui/SideBar/Tools
 </style>
 
 <$let tv-config-toolbar-icons=yes tv-config-toolbar-text=yes tv-config-toolbar-class="">
-<div class="lith-sidebar-tools-grid">
+<div class="lith-sidebar-commands-grid">
 <$list filter="[[$:/tags/PageControls]tagging[]!is[draft]] :filter[<currentTiddler>addprefix[$:/config/PageControlButtons/Visibility/]get[text]match[hide]] [<currentTiddler>match[$:/core/ui/Buttons/import]]">
-<$droppable actions=<<drop-actions>> tag="div" class="lith-sidebar-tools-item">
-<$draggable tiddler=<<currentTiddler>> tag="div" class="lith-sidebar-tools-item">
+<$droppable actions=<<drop-actions>> tag="div" class="lith-sidebar-commands-item">
+<$draggable tiddler=<<currentTiddler>> tag="div" class="lith-sidebar-commands-item">
 <div class={{{[<currentTiddler>encodeuricomponent[]addprefix[tc-btn-]]}}} style="position:relative; width: 100%;" title={{{ [<currentTiddler>get[description]] }}}>
 <$transclude tiddler=<<currentTiddler>>/>
 </div>

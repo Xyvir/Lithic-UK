@@ -65,9 +65,9 @@ type: text/vnd.tiddlywiki
 
     <$reveal type="nomatch" state="$:/state/edit-site-title" text="yes">
       <$reveal type="nomatch" state="$:/state/edit-site-subtitle" text="yes">
-        <$button class="tc-btn-invisible lithic-tools-toggle-btn" tooltip="Toggle Tools">
-          <$action-setfield $tiddler="$:/state/lithic/show-tools" text={{{ [[$:/state/lithic/show-tools]get[text]match[yes]then[no]else[yes]] }}}/>
-          <div class={{{ [[$:/state/lithic/show-tools]get[text]match[yes]then[lithic-nut-slider active]else[lithic-nut-slider]] }}}>
+        <$button class="tc-btn-invisible lithic-commands-toggle-btn" tooltip="Toggle Commands Sidebar">
+          <$action-setfield $tiddler="$:/state/lithic/show-commands" text={{{ [[$:/state/lithic/show-commands]get[text]match[yes]then[no]else[yes]] }}}/>
+          <div class={{{ [[$:/state/lithic/show-commands]get[text]match[yes]then[lithic-nut-slider active]else[lithic-nut-slider]] }}}>
              <div class="lithic-nut"><div class="lithic-nut-hole"></div></div>
           </div>
         </$button>
