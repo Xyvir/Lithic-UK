@@ -63,19 +63,23 @@ type: text/vnd.tiddlywiki
       </$reveal>
     </div>
 
-    <$button class="tc-btn-invisible lithic-tools-toggle-btn" tooltip="Toggle Tools">
-      <$action-setfield $tiddler="$:/state/lithic/show-tools" text={{{ [[$:/state/lithic/show-tools]get[text]match[yes]then[no]else[yes]] }}}/>
-      <$reveal type="match" state="$:/state/lithic/show-tools" text="yes">
-        <div class="lithic-nut-slider active">
-           <div class="lithic-nut"><div class="lithic-nut-hole"></div></div>
-        </div>
+    <$reveal type="nomatch" state="$:/state/edit-site-title" text="yes">
+      <$reveal type="nomatch" state="$:/state/edit-site-subtitle" text="yes">
+        <$button class="tc-btn-invisible lithic-tools-toggle-btn" tooltip="Toggle Tools">
+          <$action-setfield $tiddler="$:/state/lithic/show-tools" text={{{ [[$:/state/lithic/show-tools]get[text]match[yes]then[no]else[yes]] }}}/>
+          <$reveal type="match" state="$:/state/lithic/show-tools" text="yes">
+            <div class="lithic-nut-slider active">
+               <div class="lithic-nut"><div class="lithic-nut-hole"></div></div>
+            </div>
+          </$reveal>
+          <$reveal type="nomatch" state="$:/state/lithic/show-tools" text="yes">
+            <div class="lithic-nut-slider">
+               <div class="lithic-nut"><div class="lithic-nut-hole"></div></div>
+            </div>
+          </$reveal>
+        </$button>
       </$reveal>
-      <$reveal type="nomatch" state="$:/state/lithic/show-tools" text="yes">
-        <div class="lithic-nut-slider">
-           <div class="lithic-nut"><div class="lithic-nut-hole"></div></div>
-        </div>
-      </$reveal>
-    </$button>
+    </$reveal>
 
   </div>
 </div>
