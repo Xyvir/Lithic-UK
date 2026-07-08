@@ -159,6 +159,11 @@ tags: $:/tags/Macro
 	<$action-createtiddler $basetitle=<<new-node>> text=<<actualStartText>> $template={{$:/config/sq/streams/new-node-tiddler-template}} parent=<<parent>> stream-type="default" stream-list=<<__streamList__>>/>
 	<$set name="parent-nodes" filter="[<parent>get[stream-list]]" select="0">
 	<$set name="next-node" filter="[enlist<parent-nodes>is[tiddler]$insertPosition$<currentTiddler>]" select="0">
+	<$vars datePattern="^[0-9]{1,2}(st|nd|rd|th) [A-Za-z]+ [0-9]{4}$">
+	<$list filter="[<parent>is[missing]regexp<datePattern>]" variable="_NULL">
+		<$action-listops $tiddler=<<parent>> $tags="Journal"/>
+	</$list>
+	</$vars>
 	<$action-listops $tiddler=<<parent>> $field="stream-list" $subfilter="+[is[tiddler]] +[insertbefore:next-node<new-node>]"/>
 	<$list filter="[<parent>!has[stream-type]]" variable="_NULL">
 		<$action-setfield $tiddler=<<parent>> stream-type="default"/>
