@@ -1,10 +1,8 @@
 ## Todo
-- [ ] New builds mistakenly have context-menu as an over-written shadow tiddler; is it a malformed plugin?
+- [X] New builds mistakenly have context-menu as an over-written shadow tiddler; is it a malformed plugin?
 - [ ] Add a Permanent "Navigation" (bookmark) Tiddler area that appears at the top of the sidebar that tiddlers can be 'pinned' to. (it also 'highlights' if it recognizes the story river exactly matches one of the items)
     (Add contextual "Favorites" (with no header)" area in / above the sidebar populated by any of the following tagged Navigation: 1. Saved Filters. 2. Nodestream Parents. 3. Individual Tiddlers. These can be 'sorted' by tag order? (like elsehwere in tiddlywiki) and items can be added to it anytime via drag and drop; removed via right-click context menu?. Also these cannot be edited if the wiki is in 'non-edit' mode.)
     - Going to be called Favorites (with star iconography) A permanently-appearing section below the title but above the sidebar tools. (also below 'search' on mobile sidebar UI)
-    - "Promote to Favorite?" option in Queries sidebar
-    - rework queries sidebar input box to be 'typeable/searchable dropdown', with in-line star and x items in dropdown, and a "plus" icon to the right side for saving new queries. (similar to TiddlyTools SavedFilters plugin)
     - Replace tiddlytools "pin" TiddlerToolbar button with a toggable "star" that adds the "Favorite" tag and puts it in the Favorites area. (No "Pin to Sidebar" button, just a "Favorite" toggle). Use star icon instead of pin icon.
 - [ ] Add custom feedback UI (especially for selfhost) for when save button is clicked but before the save confirmation modal appears.
     (Currently, save actions are silent until the confirmation modal appears. The UI should give immediate feedback that the action has been registered and is being processed, particularly for large wikis where the save operation may take a few seconds.)

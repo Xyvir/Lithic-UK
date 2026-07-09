@@ -11,7 +11,7 @@ title: $:/core/ui/AdvancedSearch/Filter/FilterButtons/dropdown
 
 <$list filter="[<lithic-sidebar-filters>!is[blank]then[yes]else[no]]" variable="override-active">
   <% if [<override-active>match[yes]] %>
-      <$list filter="[enlist<lithic-sidebar-filters>] [all[shadows+tiddlers]prefix[$:/config/TiddlyTools/Filters/]]">
+      <$list filter="[enlist<lithic-sidebar-filters>!match[dummy_ignore_me]] [all[shadows+tiddlers]prefix[$:/config/TiddlyTools/Filters/]]">
          <$link to={{!!filter}}>
            <$let tv-wikilinks="no"><$transclude field="description"/></$let>
          </$link>

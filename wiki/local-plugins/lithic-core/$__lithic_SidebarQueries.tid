@@ -3,7 +3,7 @@ tags: $:/tags/SideBar
 title: $:/lithic/SidebarQueries
 
 \define make-fallback() [all[tiddlers]!has[plugin-type]!prefix[$:/boot/]!prefix[$:/library/]!prefix[$:/temp/advancedsearch]!prefix[$:/temp/queries]!match[$:/lithic/startup/webdav-utils.js]!is[draft]search::literal[$(rawFilter)$]]
-\define make-wildcard-fallback() [all[tiddlers]!has[plugin-type]!prefix[$:/boot/]!prefix[$:/library/]!prefix[$:/temp/advancedsearch]!prefix[$:/temp/queries]!match[$:/lithic/startup/webdav-utils.js]!is[draft]]
+\define make-wildcard-fallback() [all[tiddlers]!has[plugin-type]!prefix[$:/boot/]!prefix[$:/library/]!prefix[$:/temp/advancedsearch]!prefix[$:/temp/queries]!match[$:/lithic/startup/webdav-utils.js]!is[draft]is[shadow]!sort[modified]] [all[tiddlers]!has[plugin-type]!prefix[$:/boot/]!prefix[$:/library/]!prefix[$:/temp/advancedsearch]!prefix[$:/temp/queries]!match[$:/lithic/startup/webdav-utils.js]!is[draft]!is[shadow]!sort[modified]]
 
 \procedure handle-queries-input()
   <$let
@@ -56,7 +56,7 @@ title: $:/lithic/SidebarQueries
 \end
 
 <div class="lithic-sidebar-search">
-<$let lithic-sidebar-filters="$:/core/Filters/SystemTiddlers $:/core/Filters/ShadowTiddlers">
+<$let lithic-sidebar-filters="dummy_ignore_me">
 
   {{$:/core/ui/AdvancedSearch/Filter}}
 
