@@ -1,0 +1,4 @@
+description: Saved Queries
+filter: [all[tiddlers+shadows]prefix[$:/config/TiddlyTools/Filters/]]
+tags: $:/tags/Filter
+title: $:/config/TiddlyTools/Filters/Saved Queries

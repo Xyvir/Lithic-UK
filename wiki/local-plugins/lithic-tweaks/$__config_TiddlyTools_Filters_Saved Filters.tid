@@ -1,4 +1,0 @@
-description: Saved Filters
-filter: [prefix[$:/config/TiddlyTools/Filters/]] -[is[shadow]]
-tags: $:/tags/Filter
-title: $:/config/TiddlyTools/Filters/Saved Filters
