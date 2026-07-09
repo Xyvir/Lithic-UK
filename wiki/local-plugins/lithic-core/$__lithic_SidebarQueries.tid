@@ -2,15 +2,17 @@ caption: Queries
 tags: $:/tags/SideBar
 title: $:/lithic/SidebarQueries
 
-\define make-fallback() [all[tiddlers]search::literal[$(rawFilter)$]] -[prefix[$:/state/]] -[prefix[$:/temp/]]
+\define make-fallback() [all[tiddlers]!has[plugin-type]!prefix[$:/boot/]!prefix[$:/library/]!prefix[$:/temp/advancedsearch]!prefix[$:/temp/queries]!match[$:/lithic/startup/webdav-utils.js]!is[draft]search::literal[$(rawFilter)$]]
+\define make-wildcard-fallback() [all[tiddlers]!has[plugin-type]!prefix[$:/boot/]!prefix[$:/library/]!prefix[$:/temp/advancedsearch]!prefix[$:/temp/queries]!match[$:/lithic/startup/webdav-utils.js]!is[draft]]
 
 \procedure handle-queries-input()
   <$let
     rawFilter={{$:/temp/queries/input}}
     fallbackFilter=<<make-fallback>>
+    wildcardFilter=<<make-wildcard-fallback>>
     regexPattern="(?i)^[a-z0-9\s]+$"
-    isFallback={{{ [<rawFilter>regexp<regexPattern>then[yes]else[no]] }}}
-    actualFilter={{{ [<isFallback>match[yes]then<fallbackFilter>] ~[<rawFilter>] }}}
+    isFallback={{{ [<rawFilter>match[*]then[yes]] ~[<rawFilter>regexp<regexPattern>then[yes]else[no]] }}}
+    actualFilter={{{ [<rawFilter>match[*]then<wildcardFilter>] ~[<isFallback>match[yes]then<fallbackFilter>] ~[<rawFilter>] }}}
   >
     <$action-setfield $tiddler="$:/temp/advancedsearch" text=<<actualFilter>> />
     <$action-setfield $tiddler="$:/temp/advancedsearch/input" text=<<actualFilter>> />
@@ -28,8 +30,12 @@ title: $:/lithic/SidebarQueries
     <$let 
       rawFilter={{$:/temp/queries/input}}
       regexPattern="(?i)^[a-z0-9\s]+$"
-      isFallback={{{ [<rawFilter>regexp<regexPattern>then[yes]else[no]] }}}>
-      <%if [<isFallback>match[yes]] %>
+      isFallback={{{ [<rawFilter>match[*]then[yes]] ~[<rawFilter>regexp<regexPattern>then[yes]else[no]] }}}>
+      <%if [<rawFilter>match[*]] %>
+          <span class="tc-muted" style="font-style: italic; display: block; margin-bottom: 0.5em;">
+              Showing all search targets
+          </span>
+      <%elseif [<isFallback>match[yes]] %>
           <span class="tc-muted" style="font-style: italic; display: block; margin-bottom: 0.5em;">
               String search fallback
           </span>
