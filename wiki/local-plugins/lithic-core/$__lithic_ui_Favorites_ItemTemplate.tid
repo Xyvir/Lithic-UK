@@ -2,14 +2,29 @@ title: $:/lithic/ui/Favorites/ItemTemplate
 
 <$draggable tiddler=<<currentTiddler>>>
 <$set name="displayName" value={{{ [<currentTiddler>get[caption]] ~[<currentTiddler>get[description]] ~[<currentTiddler>] }}}>
+<$let 
+  filterText={{{ [<currentTiddler>get[filter]] }}}
+  expectedList={{{ [<currentTiddler>tag[$:/tags/Filter]] :then[subfilter<filterText>format:titlelist[]join[ ]] :else[<currentTiddler>format:titlelist[]join[ ]] }}}
+  expectedCount={{{ [enlist<expectedList>count[]] }}}
+  actualCount={{{ [list[$:/StoryList]count[]] }}}
+  diffCount={{{ [list[$:/StoryList]] -[enlist<expectedList>] +[count[]] }}}
+  isStandardMatch={{{ [<expectedCount>match<actualCount>] :then[<diffCount>match[0]then[yes]else[no]] :else[[no]] }}}
+  defaultList={{{ [subfilter{$:/DefaultTiddlers}format:titlelist[]join[ ]] }}}
+  defaultCount={{{ [enlist<defaultList>count[]] }}}
+  diffDefaultCount={{{ [list[$:/StoryList]] -[enlist<defaultList>] +[count[]] }}}
+  isDefaultMatch={{{ [<defaultCount>match<actualCount>] :then[<diffDefaultCount>match[0]then[yes]else[no]] :else[[no]] }}}
+  isTopFavorite={{{ [tag[Favorite]first[]match<currentTiddler>then[yes]else[no]] }}}
+  isActive={{{ [<isStandardMatch>match[yes]] ~[<isTopFavorite>match[yes]then<isDefaultMatch>] ~[[no]] }}}
+  activeClass={{{ [<isActive>match[yes]then[lithic-favorite-active]else[]] }}}
+>
   <$list filter="[<currentTiddler>tag[$:/tags/Filter]]" emptyMessage="""
-    <$button class="tc-btn-invisible tc-tiddlylink" style="display:block; text-align:left; width: 100%;">
+    <$button class={{{ [[tc-btn-invisible tc-tiddlylink ]addsuffix<activeClass>] }}} style="display:block; text-align:left; width: 100%;">
       <$action-sendmessage $message="tm-close-all-tiddlers"/>
       <$action-navigate $to=<<currentTiddler>>/>
       <$text text=<<displayName>>/>
     </$button>
   """>
-    <$button class="tc-btn-invisible tc-tiddlylink" style="display:block; text-align:left; width: 100%;">
+    <$button class={{{ [[tc-btn-invisible tc-tiddlylink ]addsuffix<activeClass>] }}} style="display:block; text-align:left; width: 100%;">
       <$action-sendmessage $message="tm-close-all-tiddlers"/>
       <$list filter={{{ [<currentTiddler>get[filter]] }}}>
         <$action-navigate $to=<<currentTiddler>>/>
@@ -17,5 +32,6 @@ title: $:/lithic/ui/Favorites/ItemTemplate
       <$text text=<<displayName>>/>
     </$button>
   </$list>
+</$let>
 </$set>
 </$draggable>

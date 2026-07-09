@@ -1,0 +1,31 @@
+title: $:/lithic/filters/favorite-results.js
+type: application/javascript
+module-type: filteroperator
+
+/*\
+title: $:/lithic/filters/favorite-results.js
+type: application/javascript
+module-type: filteroperator
+
+Filter operator that returns the results of the topmost favorite tiddler.
+\*/
+(function(){
+"use strict";
+
+exports["favorite-results"] = function(source,operator,options) {
+	var favorites = options.wiki.filterTiddlers("[tag[Favorite]]");
+	if(favorites.length === 0) {
+		return [];
+	}
+	var topFavorite = favorites[0];
+	var tiddler = options.wiki.getTiddler(topFavorite);
+	if(tiddler && tiddler.fields.tags && tiddler.fields.tags.indexOf("$:/tags/Filter") !== -1) {
+		var filter = tiddler.fields.filter || "";
+		if(filter) {
+			return options.wiki.filterTiddlers(filter);
+		}
+	}
+	return [topFavorite];
+};
+
+})();

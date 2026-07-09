@@ -1,6 +1,6 @@
 ## Todo
 
-- [ ] Add a Permanent "Navigation" (bookmark) Tiddler area that appears at the top of the sidebar that tiddlers can be 'pinned' to. (it also 'highlights' if it recognizes the story river exactly matches one of the items)
+- [X] Add a Permanent "Navigation" (bookmark) Tiddler area that appears at the top of the sidebar that tiddlers can be 'pinned' to. (it also 'highlights' if it recognizes the story river exactly matches one of the items)
     (Add contextual "Favorites" (with no header)" area in / above the sidebar populated by any of the following tagged Navigation: 1. Saved Queries. 2. Nodestream Parents. 3. Individual Tiddlers. These can be 'sorted' by tag order? (like elsehwere in tiddlywiki) and items can be added to or removed via drag and drop, and sorted via drag and drop; Also these cannot be edited/moved if the wiki is in 'non-edit' mode.)
     - Clicking on these items/links will close everything in the story river and only open the tiddler, save query, or nodestream parent tiddler.
     - The section appears completely 'empty' initially but is stil drag and droppable if you move a wiki in the area between the title and sidebar items.

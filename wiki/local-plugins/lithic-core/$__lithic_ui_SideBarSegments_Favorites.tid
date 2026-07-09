@@ -8,6 +8,14 @@ caption: {{$:/core/images/star-filled}} Favorites
 <$action-listops $tiddler=<<actionTiddler>> $tags="Favorite"/>
 \end
 
+<style>
+.lithic-favorites-sidebar .lithic-favorite-active {
+  font-weight: 700;
+  text-decoration: underline;
+  opacity: 1;
+}
+</style>
+
 <$list filter="[tag[Favorite]limit[1]]" emptyMessage="""
   <$droppable actions=<<drop-actions>> tag="div">
     <div class="tc-droppable-placeholder">&nbsp;</div>
