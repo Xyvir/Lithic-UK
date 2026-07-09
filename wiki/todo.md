@@ -1,14 +1,19 @@
-
 ## Todo
-- Make sidebar Wiki Title and subtitle editable via double-clicking (similar to how stream nodes are already)
+- [ ] New builds mistakenly have context-menu as an over-written shadow tiddler; is it a malformed plugin?
+- [ ] Add a Permanent "Navigation" (bookmark) Tiddler area that appears at the top of the sidebar that tiddlers can be 'pinned' to. (it also 'highlights' if it recognizes the story river exactly matches one of the items)
+    (Add contextual "Favorites" (with no header)" area in / above the sidebar populated by any of the following tagged Navigation: 1. Saved Filters. 2. Nodestream Parents. 3. Individual Tiddlers. These can be 'sorted' by tag order? (like elsehwere in tiddlywiki) and items can be added to it anytime via drag and drop; removed via right-click context menu?. Also these cannot be edited if the wiki is in 'non-edit' mode.)
+    - Going to be called Favorites (with star iconography) A permanently-appearing section below the title but above the sidebar tools. (also below 'search' on mobile sidebar UI)
+    - "Promote to Favorite?" option in Queries sidebar
+    - rework queries sidebar input box to be 'typeable/searchable dropdown', with in-line star and x items in dropdown, and a "plus" icon to the right side for saving new queries. (similar to TiddlyTools SavedFilters plugin)
+    - Replace tiddlytools "pin" TiddlerToolbar button with a toggable "star" that adds the "Favorite" tag and puts it in the Favorites area. (No "Pin to Sidebar" button, just a "Favorite" toggle). Use star icon instead of pin icon.
 - [ ] Add custom feedback UI (especially for selfhost) for when save button is clicked but before the save confirmation modal appears.
     (Currently, save actions are silent until the confirmation modal appears. The UI should give immediate feedback that the action has been registered and is being processed, particularly for large wikis where the save operation may take a few seconds.)
+- [ ] auto-select/focus textbox when Queries sidebar is expanded.
 - [ ] Add proper print styling to Autotable Macros in printstyles.css
 - [ ] For both right-click menus, add guardrails so they 'invert' near screen edges so menu never goes out of view.
 - [ ] Add "reveal" / collapse element to backlink pill clouds; always open by default(but configurable), tracked via state tiddlers that are not saved when the wiki is?
 - [ ] Remove extraneous whitespace on embed-streams macro.
-- [ ] Merge Usage of Dogear, TiddlyTools PIN, and add a Permanent "Navigation" (bookmark) Tiddler area that appears at the top of the sidebar that tiddlers can be 'pinned' to.
-    (Add contextual "Navigation (with no header)" are in / above the sidebar populated by any of the following tagged Navigation: 1. Saved Filters. 2. Nodestream Parents. 3. Individual Tiddlers. These can be 'sorted' by tag order? (like elsehwere in tiddlywiki) and items can be added to it anytime via drag and drop; removed via right-click context menu. Also these cannot be edited if the wiki is in 'non-edit' mode.)
+
 - [ ] add ## 'toggle button' to unieditor line numbers on line 00; that globally toggles the numbers on and off. (via state tiddler?)
 - [ ] Add additional parameter to AutoTable widget that allows for prefilled content per column? 
     - <<AutoTable "One Two Three" "- - {formula}">>
@@ -40,10 +45,10 @@
 - [ ] Make sure the custom.ico is actually saved to GitHub so restoring the GitHub will restore your disambiguation / icon
 
 ## Post Modularization Todo
-- [ ] Create simpleUI TW plugin for Lithic (Lithic Patina)
+- [x] Create simpleUI TW plugin for Lithic (Lithic Patina)
     - [ ] Include backdoor "edit mode" toggle (secret hotkey / 5-tap on wiki title to unlock editing)
         - Backdoor action enabled by default, but add config tiddler to "disable unlock action"
-    - [ ] Hide alternate storyview options (zoomin, etc.) in Patina mode
+    - [X] Hide alternate storyview options (zoomin, etc.) in Patina mode
 - [ ] Expansions to tldraw
     - [ ] Create hotzone macro
     - [ ] "draw over time" animation
@@ -52,6 +57,7 @@
     - [ ] Create parallel layout for "Presentation Mode" that is non-editable and can navigate forward/back between whiteboard pages; with the above animations as toggleable options
 - [ ] When multiple images are drag-and-dropped simultaneously, serialize them into a single multi-page whiteboard (like PDF import) instead of individual whiteboard objects.
 - [ ] Test preserving existing 'rendered height' on unieditor when editing existing nodes/blocks. (IE images which are generally much taller than their sourcecode) Having the viewport jump around in response to editing text can be jarring. (which is the default behavior in logseq but is worth reviewing.)
+- [ ] Simple mobile Camera OCR import as text capture feature?
 - [ ] Revisit iframe-based web app embedding plugins (Treevis, Falstaad, etc.)
 - [ ] Pyramid expansion
     - [ ] Rename to "Treeview"?
@@ -92,6 +98,7 @@
 ---
 
 ## Done
+- [x]Make sidebar Wiki Title and subtitle editable via double-clicking (similar to how stream nodes are already)
 - [X] Add "Copy All Plaintext" button to page control (or Open sidebar?) for Storyriver markdown export or to give AI context. (There is a smaller merge stream plugin that already does this???) (https://talk.tiddlywiki.org/t/buttons-to-merge-streams/14957/4)
 - ~~Embed-wb-text macro? (Shelved — transclusions into whiteboards already cover this use case)~~
 - [x] With Lithic custom importer, on custom import finish automatically copy linked references i.ie [[tiddlername]] to the clipboard for the list of import items.

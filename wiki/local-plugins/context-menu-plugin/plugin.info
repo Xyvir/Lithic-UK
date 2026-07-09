@@ -1,0 +1,11 @@
+{
+    "title": "$:/plugins/ahanniga/context-menu-plugin",
+    "description": "Configurable context menus for tiddlers (Natified by Lithic)",
+    "author": "A Hannigan & Xyvir",
+    "version": "1.0.0",
+    "core-version": ">=5.0.0",
+    "source": "https://github.com/ahanniga/tiddlywiki-context-menu-plugin",
+    "plugin-type": "plugin",
+    "list": "README License",
+    "dependents": ""
+}
