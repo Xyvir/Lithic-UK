@@ -74,5 +74,7 @@ type: text/vnd.tiddlywiki
       </$reveal>
     </$reveal>
 
+    {{$:/lithic/ui/SideBarSegments/Favorites}}
+
   </div>
 </div>

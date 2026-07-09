@@ -1,9 +1,13 @@
 ## Todo
-- [X] New builds mistakenly have context-menu as an over-written shadow tiddler; is it a malformed plugin?
+
 - [ ] Add a Permanent "Navigation" (bookmark) Tiddler area that appears at the top of the sidebar that tiddlers can be 'pinned' to. (it also 'highlights' if it recognizes the story river exactly matches one of the items)
-    (Add contextual "Favorites" (with no header)" area in / above the sidebar populated by any of the following tagged Navigation: 1. Saved Filters. 2. Nodestream Parents. 3. Individual Tiddlers. These can be 'sorted' by tag order? (like elsehwere in tiddlywiki) and items can be added to it anytime via drag and drop; removed via right-click context menu?. Also these cannot be edited if the wiki is in 'non-edit' mode.)
+    (Add contextual "Favorites" (with no header)" area in / above the sidebar populated by any of the following tagged Navigation: 1. Saved Queries. 2. Nodestream Parents. 3. Individual Tiddlers. These can be 'sorted' by tag order? (like elsehwere in tiddlywiki) and items can be added to or removed via drag and drop, and sorted via drag and drop; Also these cannot be edited/moved if the wiki is in 'non-edit' mode.)
+    - Clicking on these items/links will close everything in the story river and only open the tiddler, save query, or nodestream parent tiddler.
+    - The section appears completely 'empty' initially but is stil drag and droppable if you move a wiki in the area between the title and sidebar items.
     - Going to be called Favorites (with star iconography) A permanently-appearing section below the title but above the sidebar tools. (also below 'search' on mobile sidebar UI)
     - Replace tiddlytools "pin" TiddlerToolbar button with a toggable "star" that adds the "Favorite" tag and puts it in the Favorites area. (No "Pin to Sidebar" button, just a "Favorite" toggle). Use star icon instead of pin icon.
+    - Topmost favorite automatically has "Dogear" tag added so it appears top of story-river on wiki-load/home.
+- [ ] Super-cede Dogear bottompill navigation with Favorites[] tag? (remove Dogear tag entirely?)
 - [ ] Add custom feedback UI (especially for selfhost) for when save button is clicked but before the save confirmation modal appears.
     (Currently, save actions are silent until the confirmation modal appears. The UI should give immediate feedback that the action has been registered and is being processed, particularly for large wikis where the save operation may take a few seconds.)
 - [ ] auto-select/focus textbox when Queries sidebar is expanded.
@@ -96,6 +100,7 @@
 ---
 
 ## Done
+- [X] New builds mistakenly have context-menu as an over-written shadow tiddler; is it a malformed plugin?
 - [x]Make sidebar Wiki Title and subtitle editable via double-clicking (similar to how stream nodes are already)
 - [X] Add "Copy All Plaintext" button to page control (or Open sidebar?) for Storyriver markdown export or to give AI context. (There is a smaller merge stream plugin that already does this???) (https://talk.tiddlywiki.org/t/buttons-to-merge-streams/14957/4)
 - ~~Embed-wb-text macro? (Shelved — transclusions into whiteboards already cover this use case)~~

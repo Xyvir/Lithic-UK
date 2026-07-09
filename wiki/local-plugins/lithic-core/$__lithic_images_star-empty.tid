@@ -1,0 +1,6 @@
+title: $:/lithic/images/star-empty
+tags: $:/tags/Image
+
+<svg width="22pt" height="22pt" class="tc-image-star-empty tc-image-button" viewBox="0 0 128 128">
+    <path d="M64 10l15.3 35.8L118 50.4l-28.7 25 8.1 38.6L64 94.6l-33.4 19.4 8.1-38.6L10 50.4l38.7-4.6z" fill="none" stroke="currentColor" stroke-width="10" stroke-linejoin="round"/>
+</svg>

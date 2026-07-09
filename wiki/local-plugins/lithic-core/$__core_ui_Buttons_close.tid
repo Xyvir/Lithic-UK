@@ -3,13 +3,11 @@ description: {{$:/language/Buttons/Close/Hint}}
 tags: $:/tags/ViewToolbar
 title: $:/core/ui/Buttons/close
 
-<$list filter="[all[current]!list[$:/config/TiddlyTools/Pin]]" variable="ignore">
-    <$button tooltip={{$:/language/Buttons/Close/Hint}} aria-label={{$:/language/Buttons/Close/Caption}} class=<<tv-config-toolbar-class>> message="tm-close-tiddler">
-        <%if [<tv-config-toolbar-icons>match[yes]]%>
-            {{$:/core/images/close-button}}
-        <%endif%>
-        <%if [<tv-config-toolbar-text>match[yes]]%>
-            <span class=tc-btn-text><$text text={{$:/language/Buttons/Close/Caption}}/></span>
-        <%endif%>
-    </$button>
-</$list>
+<$button tooltip={{$:/language/Buttons/Close/Hint}} aria-label={{$:/language/Buttons/Close/Caption}} class=<<tv-config-toolbar-class>> message="tm-close-tiddler">
+    <%if [<tv-config-toolbar-icons>match[yes]]%>
+        {{$:/core/images/close-button}}
+    <%endif%>
+    <%if [<tv-config-toolbar-text>match[yes]]%>
+        <span class=tc-btn-text><$text text={{$:/language/Buttons/Close/Caption}}/></span>
+    <%endif%>
+</$button>

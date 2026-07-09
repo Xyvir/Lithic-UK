@@ -1,0 +1,20 @@
+title: $:/lithic/ui/SideBarSegments/Favorites
+tags: $:/tags/SideBarSegment
+list-before: $:/core/ui/SideBarSegments/search
+caption: {{$:/core/images/star-filled}} Favorites
+
+\define drop-actions()
+<$action-listops $tiddler="Favorite" $subfilter="[<actionTiddler>]"/>
+<$action-listops $tiddler=<<actionTiddler>> $tags="Favorite"/>
+\end
+
+<$list filter="[tag[Favorite]limit[1]]" emptyMessage="""
+  <$droppable actions=<<drop-actions>> tag="div">
+    <div class="tc-droppable-placeholder">&nbsp;</div>
+    <div style="min-height: 5px;"></div>
+  </$droppable>
+""">
+<div class="lithic-favorites-sidebar" style="margin-bottom: 1em;">
+  <<list-tagged-draggable tag:"Favorite" itemTemplate:"$:/lithic/ui/Favorites/ItemTemplate">>
+</div>
+</$list>

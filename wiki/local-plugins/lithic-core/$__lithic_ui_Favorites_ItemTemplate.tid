@@ -1,0 +1,21 @@
+title: $:/lithic/ui/Favorites/ItemTemplate
+
+<$draggable tiddler=<<currentTiddler>>>
+<$set name="displayName" value={{{ [<currentTiddler>get[caption]] ~[<currentTiddler>get[description]] ~[<currentTiddler>] }}}>
+  <$list filter="[<currentTiddler>tag[$:/tags/Filter]]" emptyMessage="""
+    <$button class="tc-btn-invisible tc-tiddlylink" style="display:block; text-align:left; width: 100%;">
+      <$action-sendmessage $message="tm-close-all-tiddlers"/>
+      <$action-navigate $to=<<currentTiddler>>/>
+      <$text text=<<displayName>>/>
+    </$button>
+  """>
+    <$button class="tc-btn-invisible tc-tiddlylink" style="display:block; text-align:left; width: 100%;">
+      <$action-sendmessage $message="tm-close-all-tiddlers"/>
+      <$list filter={{{ [<currentTiddler>get[filter]] }}}>
+        <$action-navigate $to=<<currentTiddler>>/>
+      </$list>
+      <$text text=<<displayName>>/>
+    </$button>
+  </$list>
+</$set>
+</$draggable>

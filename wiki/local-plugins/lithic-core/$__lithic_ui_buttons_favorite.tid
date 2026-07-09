@@ -1,0 +1,19 @@
+title: $:/lithic/ui/buttons/favorite
+tags: $:/tags/ViewToolbar
+caption: {{$:/core/images/star-filled}} Favorite
+description: Toggle Favorite
+
+<$button tooltip="Toggle Favorite" aria-label="Favorite" class=<<tv-config-toolbar-class>>>
+<$action-listops $tags="+[toggle[Favorite]]"/>
+<$list filter="[<tv-config-toolbar-icons>match[yes]]" variable="ignore">
+  <$list filter="[<currentTiddler>tag[Favorite]]" variable="ignore">
+    <span style="fill:<<colour external-link-foreground>>; display: flex;">{{$:/core/images/star-filled}}</span>
+  </$list>
+  <$list filter="[<currentTiddler>!tag[Favorite]]" variable="ignore">
+    <span style="fill:<<colour foreground>>; display: flex;">{{$:/lithic/images/star-empty}}</span>
+  </$list>
+</$list>
+<$list filter="[<tv-config-toolbar-text>match[yes]]" variable="ignore">
+  <span class="tc-btn-text">Favorite</span>
+</$list>
+</$button>
