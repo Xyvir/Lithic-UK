@@ -36,7 +36,11 @@ type: text/vnd.tiddlywiki
     <h1 class="tc-site-title" title="Double click to edit">
       <$reveal type="nomatch" state="$:/state/edit-site-title" text="yes">
         <$eventcatcher events="dblclick" actions-dblclick=<<edit-title>>>
-          <div style="cursor: text;">{{$:/SiteTitle}}</div>
+          <div style="cursor: text; min-height: 1.2em;">
+            <$list filter="[[$:/SiteTitle]get[text]is[blank]]" emptyMessage="{{$:/SiteTitle}}">
+              <span class="tc-muted" style="font-style: italic; opacity: 0.5;">Title</span>
+            </$list>
+          </div>
         </$eventcatcher>
       </$reveal>
       <$reveal type="match" state="$:/state/edit-site-title" text="yes">
@@ -51,7 +55,11 @@ type: text/vnd.tiddlywiki
     <div class="tc-site-subtitle" title="Double click to edit">
       <$reveal type="nomatch" state="$:/state/edit-site-subtitle" text="yes">
         <$eventcatcher events="dblclick" actions-dblclick=<<edit-subtitle>>>
-          <div style="cursor: text;">{{$:/SiteSubtitle}}</div>
+          <div style="cursor: text; min-height: 1.2em;">
+            <$list filter="[[$:/SiteSubtitle]get[text]is[blank]]" emptyMessage="{{$:/SiteSubtitle}}">
+              <span class="tc-muted" style="font-style: italic; opacity: 0.5;">Subtitle</span>
+            </$list>
+          </div>
         </$eventcatcher>
       </$reveal>
       <$reveal type="match" state="$:/state/edit-site-subtitle" text="yes">

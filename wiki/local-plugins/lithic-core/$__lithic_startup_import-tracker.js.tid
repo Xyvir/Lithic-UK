@@ -1,0 +1,29 @@
+title: $:/lithic/startup/import-tracker.js
+type: application/javascript
+module-type: startup
+
+/*\
+title: $:/lithic/startup/import-tracker.js
+type: application/javascript
+module-type: startup
+
+Stamps imported tiddlers with an "imported" date field.
+\*/
+(function(){
+
+/*jslint node: true, browser: true */
+/*global $tw: false */
+"use strict";
+
+exports.name = "lithic-import-tracker";
+exports.platforms = ["browser", "node"];
+exports.after = ["startup"];
+exports.synchronous = true;
+
+exports.startup = function() {
+	$tw.hooks.addHook("th-importing-tiddler", function(tiddler) {
+		return new $tw.Tiddler(tiddler, {modified: $tw.utils.stringifyDate(new Date())});
+	});
+};
+
+})();

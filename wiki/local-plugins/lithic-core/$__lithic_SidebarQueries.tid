@@ -52,7 +52,7 @@ title: $:/lithic/SidebarQueries
 \end
 
 \procedure keyboard-driven-input(tiddler, storeTitle, refreshTitle, selectionStateTitle, type, tag, focus, configTiddlerFilter, firstSearchFilterField, inputAcceptActions, inputAcceptVariantActions, inputCancelActions, filterMinLength)
-  <$edit-text tiddler="$:/temp/queries/input" tag="input" type="search" focus=<<focus>> default="" inputActions=<<handle-queries-input>> />
+  <$edit-text tiddler="$:/temp/queries/input" tag="input" type="search" focus="yes" default="" inputActions=<<handle-queries-input>> />
 \end
 
 <div class="lithic-sidebar-search">
