@@ -23,7 +23,7 @@ type: text/css
 }
 
 /* Force single-column on mobile screens */
-@media (max-width: 768px) {
+@media screen and (max-width: 768px) {
     .br-txt-col {
         column-count: 1 !important;
         column-rule: none !important;
