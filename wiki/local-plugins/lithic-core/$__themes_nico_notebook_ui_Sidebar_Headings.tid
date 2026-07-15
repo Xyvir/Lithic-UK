@@ -2,85 +2,51 @@ title: $:/themes/nico/notebook/ui/Sidebar/Headings
 tags: $:/themes/nico/notebook/tags/Sidebar
 type: text/vnd.tiddlywiki
 
-\procedure save-title()
-<$action-setfield $tiddler="$:/SiteTitle" text={{$:/temp/edit-site-title}}/>
-<$action-setfield $tiddler="$:/state/edit-site-title" text="no"/>
-\end
-
-\procedure cancel-title()
-<$action-setfield $tiddler="$:/state/edit-site-title" text="no"/>
-\end
-
-\procedure edit-title()
-<$action-setfield $tiddler="$:/temp/edit-site-title" text={{$:/SiteTitle}}/>
-<$action-setfield $tiddler="$:/state/edit-site-title" text="yes"/>
-\end
-
-\procedure save-subtitle()
-<$action-setfield $tiddler="$:/SiteSubtitle" text={{$:/temp/edit-site-subtitle}}/>
-<$action-setfield $tiddler="$:/state/edit-site-subtitle" text="no"/>
-\end
-
-\procedure cancel-subtitle()
-<$action-setfield $tiddler="$:/state/edit-site-subtitle" text="no"/>
-\end
-
-\procedure edit-subtitle()
-<$action-setfield $tiddler="$:/temp/edit-site-subtitle" text={{$:/SiteSubtitle}}/>
-<$action-setfield $tiddler="$:/state/edit-site-subtitle" text="yes"/>
-\end
-
 <div class="segment">
   <div class="content" style="position: relative;">
     
-    <h1 class="tc-site-title" title="Double click to edit">
-      <$reveal type="nomatch" state="$:/state/edit-site-title" text="yes">
-        <$eventcatcher events="dblclick" actions-dblclick=<<edit-title>>>
-          <div style="cursor: text; min-height: 1.2em;">
-            <$list filter="[[$:/SiteTitle]get[text]is[blank]]" emptyMessage="{{$:/SiteTitle}}">
-              <span class="tc-muted" style="font-style: italic; opacity: 0.5;">Title</span>
-            </$list>
-          </div>
-        </$eventcatcher>
+    <h1 class="tc-site-title">
+      <$reveal type="nomatch" state="$:/state/lithic/tweak-sidebar" text="yes">
+        <div style="min-height: 1.2em;">
+          <$list filter="[[$:/SiteTitle]get[text]is[blank]]" emptyMessage="{{$:/SiteTitle}}">
+            <span class="tc-muted" style="font-style: italic; opacity: 0.5;">Title</span>
+          </$list>
+        </div>
       </$reveal>
-      <$reveal type="match" state="$:/state/edit-site-title" text="yes">
-        <$keyboard key="escape" actions=<<save-title>>>
-          <$keyboard key="enter" actions=<<save-title>>>
-            <$edit-text tiddler="$:/temp/edit-site-title" tag="input" default="" class="lithic-inline-edit" focus="yes"/>
-          </$keyboard>
-        </$keyboard>
+      <$reveal type="match" state="$:/state/lithic/tweak-sidebar" text="yes">
+        <$edit-text tiddler="$:/temp/edit-site-title" tag="input" default="" class="lithic-inline-edit" focus="no"/>
       </$reveal>
     </h1>
     
-    <div class="tc-site-subtitle" title="Double click to edit">
-      <$reveal type="nomatch" state="$:/state/edit-site-subtitle" text="yes">
-        <$eventcatcher events="dblclick" actions-dblclick=<<edit-subtitle>>>
-          <div style="cursor: text; min-height: 1.2em;">
-            <$list filter="[[$:/SiteSubtitle]get[text]is[blank]]" emptyMessage="{{$:/SiteSubtitle}}">
-              <span class="tc-muted" style="font-style: italic; opacity: 0.5;">Subtitle</span>
-            </$list>
-          </div>
-        </$eventcatcher>
+    <div class="tc-site-subtitle">
+      <$reveal type="nomatch" state="$:/state/lithic/tweak-sidebar" text="yes">
+        <div style="min-height: 1.2em;">
+          <$list filter="[[$:/SiteSubtitle]get[text]is[blank]]" emptyMessage="{{$:/SiteSubtitle}}">
+            <span class="tc-muted" style="font-style: italic; opacity: 0.5;">Subtitle</span>
+          </$list>
+        </div>
       </$reveal>
-      <$reveal type="match" state="$:/state/edit-site-subtitle" text="yes">
-        <$keyboard key="escape" actions=<<save-subtitle>>>
-          <$keyboard key="enter" actions=<<save-subtitle>>>
-            <$edit-text tiddler="$:/temp/edit-site-subtitle" tag="input" default="" class="lithic-inline-edit" focus="yes"/>
-          </$keyboard>
-        </$keyboard>
+      <$reveal type="match" state="$:/state/lithic/tweak-sidebar" text="yes">
+        <$edit-text tiddler="$:/temp/edit-site-subtitle" tag="input" default="" class="lithic-inline-edit" focus="no"/>
       </$reveal>
     </div>
 
-    <$reveal type="nomatch" state="$:/state/edit-site-title" text="yes">
-      <$reveal type="nomatch" state="$:/state/edit-site-subtitle" text="yes">
-        <$button class="tc-btn-invisible lithic-commands-toggle-btn" tooltip="Toggle Commands Sidebar">
-          <$action-setfield $tiddler="$:/state/lithic/show-commands" text={{{ [[$:/state/lithic/show-commands]get[text]match[yes]then[no]else[yes]] }}}/>
-          <div class={{{ [[$:/state/lithic/show-commands]get[text]match[yes]then[lithic-nut-slider active]else[lithic-nut-slider]] }}}>
-             <div class="lithic-nut"><div class="lithic-nut-hole"></div></div>
-          </div>
-        </$button>
-      </$reveal>
-    </$reveal>
+    <$button class="tc-btn-invisible lithic-commands-toggle-btn" tooltip="Tweak Sidebar">
+      <%if [[$:/state/lithic/tweak-sidebar]get[text]match[yes]] %>
+        <!-- Exiting tweak mode: save changes -->
+        <$action-setfield $tiddler="$:/state/lithic/tweak-sidebar" text="no"/>
+        <$action-setfield $tiddler="$:/SiteTitle" text={{$:/temp/edit-site-title}}/>
+        <$action-setfield $tiddler="$:/SiteSubtitle" text={{$:/temp/edit-site-subtitle}}/>
+      <%else%>
+        <!-- Entering tweak mode: setup temp fields -->
+        <$action-setfield $tiddler="$:/state/lithic/tweak-sidebar" text="yes"/>
+        <$action-setfield $tiddler="$:/temp/edit-site-title" text={{$:/SiteTitle}}/>
+        <$action-setfield $tiddler="$:/temp/edit-site-subtitle" text={{$:/SiteSubtitle}}/>
+      <%endif%>
+      <div class={{{ [[$:/state/lithic/tweak-sidebar]get[text]match[yes]then[lithic-nut-slider active]else[lithic-nut-slider]] }}}>
+         <div class="lithic-nut"><div class="lithic-nut-hole"></div></div>
+      </div>
+    </$button>
 
     {{$:/lithic/ui/SideBarSegments/Favorites}}
 

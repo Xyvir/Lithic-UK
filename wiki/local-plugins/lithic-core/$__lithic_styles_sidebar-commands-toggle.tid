@@ -2,11 +2,7 @@ title: $:/lithic/styles/sidebar-commands-toggle
 tags: $:/tags/Stylesheet
 type: text/vnd.tiddlywiki
 
-<$reveal type="nomatch" state="$:/state/lithic/show-commands" text="yes">
-.nc-sidebar .segment.section:has(.lithic-commands-section-label) {
-   display: none !important;
-}
-</$reveal>
+
 
 .lithic-commands-toggle-btn {
     position: absolute;
@@ -76,7 +72,7 @@ type: text/vnd.tiddlywiki
     font-family: inherit;
     font-size: inherit;
     font-weight: inherit;
-    width: 100%;
+    width: calc(100% - 50px);
     border-radius: 4px;
     padding: 2px 4px;
     box-sizing: border-box;

@@ -1,0 +1,52 @@
+title: $:/lithic/ui/Sidebar/TweakMode
+type: text/vnd.tiddlywiki
+
+\define sidebarHeading()
+<$vars tv-wikilinks="no">
+  <$transclude field="caption">
+    <$view field="title"/>
+  </$transclude>
+</$vars>
+\end
+
+\define toggleAction()
+<$action-setfield $tiddler={{{ [<currentTiddler>addprefix[$:/config/lithic/sidebar-visibility/]] }}} text={{{ [<currentTiddler>addprefix[$:/config/lithic/sidebar-visibility/]get[text]match[hide]then[show]else[hide]] }}}/>
+\end
+
+\define drop-actions()
+<$action-listops $tiddler="$:/tags/SideBar" $subfilter="+[insertbefore:currentTiddler<actionTiddler>]"/>
+\end
+
+<!-- Visible Items -->
+<$list filter="[list[$:/tags/SideBar]] [all[shadows+tiddlers]tag[$:/tags/SideBar]] +[unique[]] :filter[<currentTiddler>addprefix[$:/config/lithic/sidebar-visibility/]get[text]else[show]!match[hide]]">
+  <$droppable actions=<<drop-actions>> tag="div">
+    <div class="tc-droppable-placeholder">&nbsp;</div>
+    <$draggable tiddler=<<currentTiddler>>>
+      <div class="segment section">
+        <$button class="tc-btn-invisible label">
+          <<toggleAction>>
+          <<sidebarHeading>>
+          <span class="caret" style="opacity: 0.6; display: flex; align-items: center;">
+            {{$:/core/images/preview-open}}
+          </span>
+        </$button>
+      </div>
+    </$draggable>
+  </$droppable>
+</$list>
+<$droppable actions="""<$action-listops $tiddler="$:/tags/SideBar" $subfilter="[<actionTiddler>]"/>""" tag="div">
+  <div class="tc-droppable-placeholder" style="height:0.5em;">&nbsp;</div>
+</$droppable>
+
+<!-- Hidden Items -->
+<$list filter="[list[$:/tags/SideBar]] [all[shadows+tiddlers]tag[$:/tags/SideBar]] +[unique[]] :filter[<currentTiddler>addprefix[$:/config/lithic/sidebar-visibility/]get[text]else[show]match[hide]]">
+  <div class="segment section" style="opacity: 0.5;">
+    <$button class="tc-btn-invisible label">
+      <<toggleAction>>
+      <<sidebarHeading>>
+      <span class="caret" style="opacity: 0.6; display: flex; align-items: center;">
+        {{$:/core/images/preview-closed}}
+      </span>
+    </$button>
+  </div>
+</$list>

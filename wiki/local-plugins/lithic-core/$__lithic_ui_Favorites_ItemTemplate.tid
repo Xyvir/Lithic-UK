@@ -17,21 +17,39 @@ title: $:/lithic/ui/Favorites/ItemTemplate
   isActive={{{ [<isStandardMatch>match[yes]] ~[<isTopFavorite>match[yes]then<isDefaultMatch>] ~[[no]] }}}
   activeClass={{{ [<isActive>match[yes]then[lithic-favorite-active]else[]] }}}
 >
+  <$let tweakClass={{{ [[$:/state/lithic/tweak-sidebar]get[text]match[yes]then[lithic-favorite-item-tweak]else[]] }}}>
   <$list filter="[<currentTiddler>tag[$:/tags/Filter]]" emptyMessage="""
-    <$button class={{{ [[tc-btn-invisible tc-tiddlylink ]addsuffix<activeClass>] }}} style="display:block; text-align:left; width: 100%;">
-      <$action-sendmessage $message="tm-close-all-tiddlers"/>
-      <$action-navigate $to=<<currentTiddler>>/>
-      <$text text=<<displayName>>/>
-    </$button>
-  """>
-    <$button class={{{ [[tc-btn-invisible tc-tiddlylink ]addsuffix<activeClass>] }}} style="display:block; text-align:left; width: 100%;">
-      <$action-sendmessage $message="tm-close-all-tiddlers"/>
-      <$list filter={{{ [<currentTiddler>get[filter]] }}}>
+    <div class=<<tweakClass>> style="display: flex; align-items: center; justify-content: space-between; width: 100%;">
+      <$button class={{{ [[tc-btn-invisible tc-tiddlylink ]addsuffix<activeClass>] }}} style="text-align:left; flex-grow: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">
+        <$action-sendmessage $message="tm-close-all-tiddlers"/>
         <$action-navigate $to=<<currentTiddler>>/>
-      </$list>
-      <$text text=<<displayName>>/>
-    </$button>
+        <$text text=<<displayName>>/>
+      </$button>
+      <$reveal type="match" state="$:/state/lithic/tweak-sidebar" text="yes">
+        <$button class="tc-btn-invisible tc-btn-mini" tooltip="Remove from Favorites" style="opacity: 0.5; margin-left: 4px; padding: 0 4px;">
+          <$action-listops $tiddler=<<currentTiddler>> $tags="-Favorite"/>
+          {{$:/core/images/close-button}}
+        </$button>
+      </$reveal>
+    </div>
+  """>
+    <div class=<<tweakClass>> style="display: flex; align-items: center; justify-content: space-between; width: 100%;">
+      <$button class={{{ [[tc-btn-invisible tc-tiddlylink ]addsuffix<activeClass>] }}} style="text-align:left; flex-grow: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">
+        <$action-sendmessage $message="tm-close-all-tiddlers"/>
+        <$list filter={{{ [<currentTiddler>get[filter]] }}}>
+          <$action-navigate $to=<<currentTiddler>>/>
+        </$list>
+        <$text text=<<displayName>>/>
+      </$button>
+      <$reveal type="match" state="$:/state/lithic/tweak-sidebar" text="yes">
+        <$button class="tc-btn-invisible tc-btn-mini" tooltip="Remove from Favorites" style="opacity: 0.5; margin-left: 4px; padding: 0 4px;">
+          <$action-listops $tiddler=<<currentTiddler>> $tags="-Favorite"/>
+          {{$:/core/images/close-button}}
+        </$button>
+      </$reveal>
+    </div>
   </$list>
+  </$let>
 </$let>
 </$set>
 </$draggable>

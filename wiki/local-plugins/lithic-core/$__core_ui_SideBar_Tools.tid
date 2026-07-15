@@ -1,7 +1,6 @@
 caption: <span class="lithic-commands-section-label">Commands</span>
 tags: $:/tags/SideBar
 title: $:/core/ui/SideBar/Tools
-
 \define lingo-base()$:/language/ControlPanel/
 \define config-title()$:/config/PageControlButtons/Visibility/$(currentTiddler)$
 

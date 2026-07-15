@@ -1,10 +1,10 @@
 ## Todo
-- [ ] Super-cede Dogear bottompill navigation with Favorites[] tag? (remove Dogear tag entirely?)
 - [ ] Add custom feedback UI (especially for selfhost) for when save button is clicked but before the save confirmation modal appears.
     (Currently, save actions are silent until the confirmation modal appears. The UI should give immediate feedback that the action has been registered and is being processed, particularly for large wikis where the save operation may take a few seconds.)
 - [X] auto-select/focus Queries searchbox when Queries sidebar is expanded.
 - [ ] Add proper print styling to Autotable Macros in printstyles.css
 - [ ] For both right-click menus, add guardrails so they 'invert' near screen edges so menu never goes out of view.
+- [ ] Add special macro that can define a print percentage for a particular node/tiddler. (only effects print scale)
 - [ ] Add "reveal" / collapse element to backlink pill clouds; always open by default(but configurable), tracked via state tiddlers that are not saved when the wiki is?
 - [ ] Remove extraneous newlines created when using embed-streams macro.
 
@@ -92,7 +92,7 @@
 ---
 
 ## Done
-
+- [X] Super-cede Dogear bottompill navigation with Favorites[] tag? (remove Dogear tag entirely?)
 - [X] Add a Permanent "Navigation" (bookmark) Tiddler area that appears at the top of the sidebar that tiddlers can be 'pinned' to. (it also 'highlights' if it recognizes the story river exactly matches one of the items)
     (Add contextual "Favorites" (with no header)" area in / above the sidebar populated by any of the following tagged Navigation: 1. Saved Queries. 2. Nodestream Parents. 3. Individual Tiddlers. These can be 'sorted' by tag order? (like elsehwere in tiddlywiki) and items can be added to or removed via drag and drop, and sorted via drag and drop; Also these cannot be edited/moved if the wiki is in 'non-edit' mode.)
     - Clicking on these items/links will close everything in the story river and only open the tiddler, save query, or nodestream parent tiddler.
