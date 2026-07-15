@@ -1,6 +1,6 @@
 tags: $:/tags/Stylesheet
 title: $:/lithic/styles/AdvancedSearch.css
-type: text/css
+type: text/vnd.tiddlywiki
 
 .lithic-sidebar-search .tc-advanced-search input[type="search"] {
     display: block;
@@ -13,4 +13,30 @@ type: text/css
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
+}
+
+.lithic-flex-input {
+    flex: 1 1 0;
+    min-width: 0;
+    width: 100%;
+}
+
+.lithic-core-search-results .tc-advanced-search-filter-buttons {
+    display: none !important;
+}
+
+.lithic-core-search-results .tc-advanced-search {
+    display: none !important;
+}
+
+.lithic-sidebar-search .tc-advanced-search-filter-buttons button svg {
+    width: 1.2em;
+    height: 1.2em;
+    fill: <<colour muted-foreground>>;
+}
+
+.lithic-sidebar-search .tc-advanced-search-filter-buttons button.tc-btn-invisible svg {
+    width: 1.2em;
+    height: 1.2em;
+    fill: <<colour muted-foreground>>;
 }

@@ -14,10 +14,10 @@ title: $:/TiddlyTools/Search/SaveFilter
 <style>.tt-savefilter { width:14em !important; }</style>
 <$let popid=<<qualify "$:/state/popup/savefilter">>>
 <$list filter="[{$:/temp/advancedsearch/input}!match[]]" variable=filt>
-<$button popup=<<popid>> class=tc-btn-invisible tooltip=<<tip>>>{{$:/core/images/save-button}}</$button>
+<$button popup=<<popid>> class="tc-btn-invisible tt-save-filter-btn" tooltip=<<tip>>>{{$:/core/images/new-button}}</$button>
 <$reveal state=<<popid>> type=popup position="below">
 
-<div class="tc-block-dropdown tc-popup-handle" style="margin-left:-8em; padding:0.5em;">
+<div class="tc-block-dropdown tc-popup-handle" style="margin-left:-20em; padding:0.5em;">
 
 <$let tid={{{ [<popid>get[tid]addprefix<config>] }}} filt={{{ [<popid>get[filt]else<filt>] }}}>
 @@float:right;<<btn cancel close "<<close>>">> <<btn "save filter" done "<<ok>>">>@@
@@ -26,6 +26,7 @@ title: $:/TiddlyTools/Search/SaveFilter
 <div style="clear:both;text-align:right;">
 Name:		 <<edit tid	 "focus=yes"		"name">><br>
 Filter:		 <<edit filt "default=<<filt>>"	"filter">>
+</div></div></$reveal></$list></$let>
 \end
 
 <$list filter="[<storyTiddler>match<thisTiddler>!match[]]" emptyMessage=<<show>>>

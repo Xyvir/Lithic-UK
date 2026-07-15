@@ -25,7 +25,7 @@ title: $:/lithic/SidebarQueries
 
 \procedure lingo(title)
   <%if [<title>match[Filter/Hint]] %>
-    <$link to="$:/FilterReference">Search using filter syntax</$link>
+    <!-- Hiding hint from core transclusion because we render it manually -->
   <%elseif [<title>match[Filter/Matches]] %>
     <$let 
       rawFilter={{$:/temp/queries/input}}
@@ -52,13 +52,39 @@ title: $:/lithic/SidebarQueries
 \end
 
 \procedure keyboard-driven-input(tiddler, storeTitle, refreshTitle, selectionStateTitle, type, tag, focus, configTiddlerFilter, firstSearchFilterField, inputAcceptActions, inputAcceptVariantActions, inputCancelActions, filterMinLength)
-  <$edit-text tiddler="$:/temp/queries/input" tag="input" type="search" focus="yes" default="" inputActions=<<handle-queries-input>> />
+  <!-- Input is rendered manually, so we return nothing to hide it in the core transclusion -->
 \end
 
-<div class="lithic-sidebar-search">
+<div class="lithic-sidebar-search tc-advanced-search">
 <$let lithic-sidebar-filters="dummy_ignore_me">
 
-  {{$:/core/ui/AdvancedSearch/Filter}}
+  <div class="lithic-search-hint" style="margin-bottom: 4px;">
+    <$link to="$:/FilterReference">Search using filter syntax</$link>
+  </div>
+
+  <div style="display:flex; align-items:center; gap: 4px; margin-bottom: 4px;">
+    <span class="tc-advanced-search-filter-buttons" style="flex: 0 0 auto; display:flex; align-items:center;">
+      {{$:/core/ui/AdvancedSearch/Filter/FilterButtons/dropdown}}
+    </span>
+    <$edit-text tiddler="$:/temp/queries/input" tag="input" type="search" focus="yes" default="" inputActions=<<handle-queries-input>> class="tc-advanced-search-filter lithic-flex-input" />
+    <span class="tc-advanced-search-filter-buttons" style="flex: 0 0 auto; display:flex; align-items:center;">
+      {{$:/TiddlyTools/Search/SaveFilter}}
+    </span>
+  </div>
+
+  <$list filter="[subfilter{$:/temp/advancedsearch}limit[1]]" variable="ignore">
+    <span class="tc-advanced-search-filter-buttons" style="display:flex; align-items:center; gap: 2px; margin-bottom: 8px; margin-left: calc(1.2em + 12px);">
+      {{$:/core/ui/AdvancedSearch/Filter/FilterButtons/export}}
+      {{$:/core/ui/AdvancedSearch/Filter/FilterButtons/delete}}
+      {{$:/Lithic/mass-tag-search-results}}
+      {{$:/Lithic/transcludify-search-results}}
+      {{$:/PSaT/open-search-results}}
+    </span>
+  </$list>
+
+  <div class="lithic-core-search-results">
+    {{$:/core/ui/AdvancedSearch/Filter}}
+  </div>
 
 </$let>
 </div>

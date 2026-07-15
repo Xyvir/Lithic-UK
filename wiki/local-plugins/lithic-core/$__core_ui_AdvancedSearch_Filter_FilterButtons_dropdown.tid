@@ -1,7 +1,7 @@
 tags: $:/tags/AdvancedSearch/FilterButton
 title: $:/core/ui/AdvancedSearch/Filter/FilterButtons/dropdown
 
-<span class="tc-popup-keep"><$button popup=<<qualify '$:/state/filterDropdown'>> class="tc-btn-invisible">{{$:/core/images/down-arrow}}</$button></span>
+<span class="tc-popup-keep lithic-dropdown-btn"><$button popup=<<qualify '$:/state/filterDropdown'>> class="tc-btn-invisible">{{$:/core/images/down-arrow}}</$button></span>
 
 <$reveal state=<<qualify '$:/state/filterDropdown'>> type="popup" position="belowleft" animate="yes">
 <$let tv-show-missing-links="yes">

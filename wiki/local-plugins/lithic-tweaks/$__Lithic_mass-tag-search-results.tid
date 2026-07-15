@@ -1,0 +1,65 @@
+caption: Mass Tag Results
+tags: $:/tags/AdvancedSearch/FilterButton
+title: $:/Lithic/mass-tag-search-results
+description: Add or remove a tag from all tiddlers matching the current filter
+
+\procedure do-close()
+<$action-setfield $tiddler=<<stateTag>> text=""/>
+<$action-deletetiddler $tiddler=<<popid>>/>
+\end
+
+\procedure show-popup()
+<$button popup=<<popid>> class="tc-btn-invisible" tooltip="Mass tag/untag filter results">{{$:/core/images/tag-button}}</$button>
+<$reveal state=<<popid>> type=popup position="below">
+<div class="tc-block-dropdown tc-popup-handle" style="padding:0.5em; min-width:14em;">
+
+''Mass tag / untag''
+
+<div style="margin:0.5em 0;">
+<$edit-text tiddler=<<stateTag>> field="text" tag="input" placeholder="Type or pick a tag..." default="" class="tt-savefilter" style="width:100%; box-sizing:border-box;"/>
+</div>
+
+<$list filter="[subfilter{$:/temp/advancedsearch}tags[]search{$:/temp/mass-tag/selected}sort[]limit[10]]" emptyMessage="" variable="suggestion">
+<$button class="tc-btn-invisible tc-tiddlylink" style="display:block; width:100%; text-align:left; padding:1px 4px; font-size:0.9em;">
+<$action-setfield $tiddler="$:/temp/mass-tag/selected" text=<<suggestion>>/>
+<$text text=<<suggestion>>/>
+</$button>
+</$list>
+
+<$let selectedTag={{$:/temp/mass-tag/selected}}>
+<div style="margin-top:0.5em; display:flex; gap:8px; justify-content:flex-end;">
+
+<$let affectedCount={{{ [subfilter{$:/temp/advancedsearch}!tag<selectedTag>count[]] }}}>
+<$button class="tc-btn-invisible tc-tiddlylink" tooltip="Add this tag to all filter results" disabled={{{ [{$:/temp/mass-tag/selected}match[]then[yes]] ~[{$:/temp/mass-tag/selected}is[blank]then[yes]else[no]] }}}>
+<$list filter="[subfilter{$:/temp/advancedsearch}]">
+<$action-listops $tiddler=<<currentTiddler>> $tags="[<selectedTag>]"/>
+</$list>
+<$action-sendmessage $message="tm-notify" $param="$:/Lithic/notifications/mass-tag-result" count=<<affectedCount>> verb="tagged"/>
++''Tag all''
+</$button>
+</$let>
+
+<$let affectedCount={{{ [subfilter{$:/temp/advancedsearch}tag<selectedTag>count[]] }}}>
+<$button class="tc-btn-invisible tc-tiddlylink" tooltip="Remove this tag from all filter results" disabled={{{ [{$:/temp/mass-tag/selected}match[]then[yes]] ~[{$:/temp/mass-tag/selected}is[blank]then[yes]else[no]] }}}>
+<$list filter="[subfilter{$:/temp/advancedsearch}]">
+<$action-listops $tiddler=<<currentTiddler>> $tags="-[<selectedTag>]"/>
+</$list>
+<$action-sendmessage $message="tm-notify" $param="$:/Lithic/notifications/mass-tag-result" count=<<affectedCount>> verb="untagged"/>
+–''Untag all''
+</$button>
+</$let>
+
+</div>
+</$let>
+
+</div>
+</$reveal>
+\end
+
+<$reveal state="$:/temp/advancedsearch" type="nomatch" text="">
+<$list filter="[subfilter{$:/temp/advancedsearch}limit[1]]" variable="ignore">
+<$let popid=<<qualify "$:/state/popup/mass-tag">> stateTag="$:/temp/mass-tag/selected">
+<<show-popup>>
+</$let>
+</$list>
+</$reveal>
