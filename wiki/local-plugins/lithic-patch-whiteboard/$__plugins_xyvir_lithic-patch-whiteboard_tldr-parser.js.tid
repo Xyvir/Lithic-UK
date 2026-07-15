@@ -33,7 +33,7 @@ var TldrParser = function(type, text, options) {
 
     var tiddler = options.wiki ? options.wiki.getTiddler(tiddlerTitle) : null;
     var height = (tiddler && tiddler.fields["whiteboard-height"]) || "540px";
-    var wikitext = '<$wb-image board="' + tiddlerTitle + '" height="' + height + '"/>';
+    var wikitext = '<$wb-image board="' + tiddlerTitle + '" height="' + height + '" width="80%"/>';
     var parser = options.wiki ? options.wiki.parseText("text/vnd.tiddlywiki", wikitext, {parseAsInline: false}) : null;
     this.tree = parser ? parser.tree : [];
 };

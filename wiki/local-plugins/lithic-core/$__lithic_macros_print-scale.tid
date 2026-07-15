@@ -1,0 +1,14 @@
+title: $:/lithic/macros/print-scale
+tags: $:/tags/Macro
+type: text/vnd.tiddlywiki
+
+\define print-scale(scale:"100%")
+<span class="print-scale-marker" data-scale="$scale$" style="display:none;"></span>
+<style>
+@media print {
+  .tc-tiddler-frame:has(.print-scale-marker[data-scale="$scale$"]) {
+    zoom: $scale$ !important;
+  }
+}
+</style>
+\end
