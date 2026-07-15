@@ -168,9 +168,9 @@ async function convertPdfDataToTiddlers(arrayBuffer, fileName, setProgress) {
 
         await page.render({ canvasContext: context, viewport: viewport }).promise;
 
-        const dataUri = canvas.toDataURL("image/png");
+        const dataUri = canvas.toDataURL("image/webp", 0.75);
         images.push({
-            filename: "page_" + i + ".png",
+            filename: "page_" + i + ".webp",
             dataUri: dataUri,
             width: viewport.width,
             height: viewport.height
@@ -258,6 +258,7 @@ exports.startup = function() {
                     resolve({
                         filename: file.name,
                         dataUri: dataUri,
+                        imgElement: img,
                         width: img.width,
                         height: img.height
                     });
@@ -276,7 +277,7 @@ exports.startup = function() {
 
     async function handleFiles(files, event) {
         const pdfFiles = Array.from(files).filter(f => f.type === "application/pdf" || f.name.toLowerCase().endsWith(".pdf"));
-        const imageFiles = Array.from(files).filter(f => f.type.startsWith("image/") && f.type !== "image/svg+xml");
+        const imageFiles = Array.from(files).filter(f => f.type.startsWith("image/"));
         if (pdfFiles.length > 0 || imageFiles.length > 0) {
             // We found PDFs or images, so intercept this event completely
             event.preventDefault();
@@ -310,6 +311,18 @@ exports.startup = function() {
                     setProgress("Converting " + file.name + " to whiteboard...");
                     const img = await loadImage(file);
                     
+                    if (file.type !== "image/svg+xml" && !file.name.toLowerCase().endsWith(".svg")) {
+                        const canvas = document.createElement("canvas");
+                        const context = canvas.getContext("2d");
+                        canvas.width = img.width;
+                        canvas.height = img.height;
+                        context.drawImage(img.imgElement, 0, 0);
+
+                        const webpDataUri = canvas.toDataURL("image/webp", 0.75);
+                        img.dataUri = webpDataUri;
+                        img.filename = img.filename.replace(/\.[^/.]+$/, "") + ".webp";
+                    }
+
                     // Apply unique title logic if name is "image.png"
                     let title = file.name;
                     if (title === "image.png") {
