@@ -7,8 +7,11 @@ title: $:/wilk/buttons/copy-code
 <div class="wilk-copy-code-button">
 	<$list filter="[<language>match[jspython]]" variable="ignore">
 		<$button tooltip="Run Code" class="tc-btn-invisible run-jspython-btn">&gt;_
-			<$action-jspython code=<<code>> outputTiddler="$:/ConsoleOutput" />
-			<$action-sendmessage $message="tm-navigate" navigateTo="$:/ConsoleOutput" navigateFromTitle={{{ [<storyTiddler>!is[blank]else<currentTiddler>] }}} />
+			<$set name="consoleTiddler" value={{{ [<currentTiddler>addsuffix[/console]] }}}>
+				<$action-jspython code=<<code>> outputTiddler=<<consoleTiddler>> />
+				<$action-listops $tiddler=<<currentTiddler>> $field="stream-list" $subfilter="[<consoleTiddler>]" />
+				<$action-setfield $tiddler=<<consoleTiddler>> parent=<<currentTiddler>> />
+			</$set>
 		</$button>
 	</$list>
 	<$button

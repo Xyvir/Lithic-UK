@@ -48,6 +48,7 @@ class ActionJSPythonWidget extends Widget {
             document: window.document,
             window: window,
             $tw: $tw,
+            widget: self,
             console: window.console,
             eval_jspython: function(code) {
                 return interpreter.evaluate(code);
@@ -79,8 +80,9 @@ class ActionJSPythonWidget extends Widget {
                 
                 var handleFinish = function() {
                     if (self.outputTiddler) {
-                        $tw.wiki.setText(self.outputTiddler, "text", null, outputBuffer.join("\n"));
-                        $tw.wiki.setText(self.outputTiddler, "type", null, "text/plain");
+                        var outputText = "```\n" + outputBuffer.join("\n") + "\n```";
+                        $tw.wiki.setText(self.outputTiddler, "text", null, outputText);
+                        $tw.wiki.setText(self.outputTiddler, "type", null, "text/markdown");
                     }
                 };
 
@@ -96,8 +98,9 @@ class ActionJSPythonWidget extends Widget {
                         }
                         if (self.outputTiddler) {
                             outputBuffer.push(errorMsg);
-                            $tw.wiki.setText(self.outputTiddler, "text", null, outputBuffer.join("\n"));
-                            $tw.wiki.setText(self.outputTiddler, "type", null, "text/plain");
+                            var outputText = "```\n" + outputBuffer.join("\n") + "\n```";
+                            $tw.wiki.setText(self.outputTiddler, "text", null, outputText);
+                            $tw.wiki.setText(self.outputTiddler, "type", null, "text/markdown");
                         }
                     });
                 } else {
@@ -114,8 +117,9 @@ class ActionJSPythonWidget extends Widget {
                 }
                 if (this.outputTiddler) {
                     outputBuffer.push(errorMsg);
-                    $tw.wiki.setText(this.outputTiddler, "text", null, outputBuffer.join("\n"));
-                    $tw.wiki.setText(this.outputTiddler, "type", null, "text/plain");
+                    var outputText = "```\n" + outputBuffer.join("\n") + "\n```";
+                    $tw.wiki.setText(this.outputTiddler, "text", null, outputText);
+                    $tw.wiki.setText(this.outputTiddler, "type", null, "text/markdown");
                 }
             }
         }

@@ -238,14 +238,6 @@ Starts up the wikitext highlighter
           };
         });
 
-        if (hljs.registerAliases) {
-            hljs.registerAliases(['science'], { languageName: 'python' });
-        } else {
-            var pyLang = hljs.getLanguage('python');
-            if (pyLang) {
-                hljs.registerLanguage('science', function() { return pyLang; });
-            }
-        }
     };
 
 })();
