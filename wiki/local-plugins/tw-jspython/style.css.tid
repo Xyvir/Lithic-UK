@@ -1,4 +1,4 @@
-﻿title: $:/plugins/tw-jspython/jspython/style
+title: $:/plugins/tw-jspython/jspython/style
 tags: $:/tags/Stylesheet
 type: text/css
 
@@ -15,26 +15,30 @@ type: text/css
   }
 	
 	/* Base editor constraints */
-  .CodeMirror,
   .local-editor {
     cursor: text;
     min-width: 100%;
     min-height: 10lh;
-    height: 100%;
-    overflow-y: scroll;
   }
 
-
-  .local-editor{
+  .tc-edit-texteditor-body {
     flex: 1;
     width: 100%;
+    min-height: 200px;
     box-sizing: border-box;
-    height: 200px;
     font-family: monospace;
-    border: 1px solid #aaa;
+    border: 1px solid <<colour tiddler-editor-border>>;
+    background-color: <<colour tiddler-editor-background>>;
     border-radius: 4px;
     font-size: 14px;
-    resize: vertical;
+  }
+  
+  .tc-edit-texteditor-body .unieditor {
+    border: none; /* remove unieditor's internal border since we wrapped it */
+  }
+
+  .uni-preview-toggle {
+    display: none !important;
   }
 
   .tiddler-ide-btns {
@@ -54,30 +58,31 @@ type: text/css
       cursor: pointer;
       font-size: 14px;
       text-decoration: none;
-      transition: background-color 0.2s ease;
+      transition: all 0.2s ease;
       /* Smooth hover effect */
     }
 
     .run-btn {
-      background-color: #f7df1e;
-      color: #333;
-      border: none;
+      background-color: <<colour primary>>;
+      color: <<colour background>>;
+      border: 1px solid <<colour primary>>;
       font-weight: bold;
 
       &:hover {
-        background-color: #d1bc19;
+        filter: brightness(0.9);
       }
     }
 
     .clear-btn {
-      background-color: #eee;
-      color: #333;
-      border: 1px solid #ccc;
+      background-color: <<colour button-background>>;
+      color: <<colour button-foreground>>;
+      border: 1px solid <<colour button-border>>;
       fill: currentColor;
       line-height: 18px;
 
       &:hover {
-        background-color: #ddd;
+        background-color: <<colour background>>;
+        filter: brightness(0.9);
       }
     }
   }
@@ -89,7 +94,7 @@ type: text/css
       display: block;
       font-size: 0.8em;
       font-weight: bold;
-      color: #555;
+      color: <<colour muted-foreground>>;
       margin-bottom: 6px;
       letter-spacing: 0.5px;
     }
@@ -98,8 +103,9 @@ type: text/css
       width: 100%;
       box-sizing: border-box;
       min-height: 100px;
-      background: #222;
-      color: #f7df1e;
+      background: <<colour pre-background>>;
+      color: <<colour code-foreground>>;
+      border: 1px solid <<colour pre-border>>;
       padding: 12px;
       border-radius: 4px;
       overflow-x: auto;

@@ -126,6 +126,22 @@ uniEditorWidget.prototype.render = function(parent,nextSibling) {
 		};
 		this.instance.canvasLayer.updateCanvas = styledUpdate;
 		this.instance.textLayer.updateCanvas = styledUpdate;
+	} else if (this.editInfo.type === 'py' || this.editInfo.type === 'javascript' || this.editInfo.type === 'css') {
+		var hljsLib;
+		try { hljsLib = require("$:/plugins/tiddlywiki/highlight/highlight.js"); } catch(e) {}
+		if (hljsLib && hljsLib.highlight) {
+			var canvasEl = this.instance.canvasLayer.canvas;
+			var lang = this.editInfo.type === 'py' ? 'python' : this.editInfo.type;
+			var styledUpdate = function(code) {
+				try {
+					canvasEl.innerHTML = hljsLib.highlight(code, {language: lang, ignoreIllegals: true}).value;
+				} catch(e) {
+					canvasEl.innerHTML = code.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+				}
+			};
+			this.instance.canvasLayer.updateCanvas = styledUpdate;
+			this.instance.textLayer.updateCanvas = styledUpdate;
+		}
 	}
 	// --- END STYLED MARKDOWN HIGHLIGHTING ---
 
@@ -613,11 +629,11 @@ uniEditorWidget.prototype.getEditInfo = function() {
 		if(tiddler) {
 			// If we've got a tiddler, the value to display is the field string value
 			value = tiddler.getFieldString(this.editField);
-			type = tiddler.getFieldString("type")||'';
+			type = tiddler.getFieldString("type")||self.getAttribute("type")||'';
 		} else {
 			// Otherwise, we need to construct a default value for the editor
 			value = '';
-			type = '';
+			type = self.getAttribute("type")||'';
 		}
 
 		update = function(value) {
