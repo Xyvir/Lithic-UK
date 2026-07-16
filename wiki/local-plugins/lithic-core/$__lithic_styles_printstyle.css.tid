@@ -23,6 +23,12 @@ type: text/css
         display: none !important;
     }
 
+    /* Hide the custom left sidebar and its resizer */
+    .nc-sidebar,
+    .oresizer {
+        display: none !important;
+    }
+
     /* The main TiddlyWiki Sidebar and its header */
     .tc-sidebar-scrollable,
     .tc-sidebar-header {
