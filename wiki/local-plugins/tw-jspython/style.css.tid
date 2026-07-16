@@ -18,13 +18,11 @@ type: text/css
   .local-editor {
     cursor: text;
     min-width: 100%;
-    min-height: 10lh;
   }
 
   .tc-edit-texteditor-body {
     flex: 1;
     width: 100%;
-    min-height: 200px;
     box-sizing: border-box;
     font-family: monospace;
     border: 1px solid <<colour tiddler-editor-border>>;
