@@ -220,8 +220,31 @@ This widgets implements context menus to tiddlers
             // --- HIGHLIGHT PATCH END ---
 
             menu.style.display = 'block';
-            menu.style.left = event.clientX + "px";
-            menu.style.top = event.clientY + "px";
+
+            var menuWidth = menu.offsetWidth;
+            var menuHeight = menu.offsetHeight;
+            var windowWidth = window.innerWidth;
+            var windowHeight = window.innerHeight;
+            
+            var left = event.clientX;
+            var top = event.clientY;
+            
+            // Adjust X axis if going off screen
+            if (left + menuWidth > windowWidth) {
+                left = left - menuWidth;
+                if (left < 0) left = windowWidth - menuWidth - 5;
+                if (left < 0) left = 5;
+            }
+            
+            // Adjust Y axis if going off screen (invert above cursor)
+            if (top + menuHeight > windowHeight) {
+                top = top - menuHeight;
+                if (top < 0) top = windowHeight - menuHeight - 5;
+                if (top < 0) top = 5;
+            }
+            
+            menu.style.left = left + "px";
+            menu.style.top = top + "px";
         }
 
         event.preventDefault();

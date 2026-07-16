@@ -1,0 +1,94 @@
+title: $:/lithic/streams-contextmenu-invert.js
+type: application/javascript
+module-type: startup
+
+/*\
+title: $:/lithic/streams-contextmenu-invert.js
+type: application/javascript
+module-type: startup
+
+Inverts the streams context menu if it goes off the bottom or right of the screen.
+\*/
+(function(){
+"use strict";
+
+exports.name = "streams-contextmenu-invert";
+exports.platforms = ["browser"];
+exports.after = ["startup"];
+exports.synchronous = true;
+
+exports.startup = function() {
+    function adjustPopup(node) {
+        if (node.nodeType === 1 && node.classList && node.classList.contains("tc-popup")) {
+            var hasSqMenu = node.querySelector(".sq-contextmenu");
+            if (hasSqMenu) {
+                // Prevent infinite loop from our own style modifications
+                if (node.dataset.lithicPositioned === "true") return;
+
+                var rect = node.getBoundingClientRect();
+                var windowHeight = window.innerHeight;
+                var windowWidth = window.innerWidth;
+                
+                // Only adjust if it's currently rendered with a valid size
+                if (rect.height === 0 || rect.width === 0) return;
+
+                var top = parseFloat(node.style.top || rect.top);
+                var left = parseFloat(node.style.left || rect.left);
+                
+                var changed = false;
+
+                // Ensure it's above the sidebar
+                if (node.style.zIndex !== "10000") {
+                    node.style.zIndex = "10000";
+                    changed = true;
+                }
+
+                if (rect.bottom > windowHeight) {
+                    var newTop = top - rect.height;
+                    if (newTop < 0) newTop = windowHeight - rect.height - 5;
+                    if (newTop < 0) newTop = 5;
+                    node.style.top = newTop + "px";
+                    changed = true;
+                }
+                
+                if (rect.right > windowWidth) {
+                    var newLeft = left - rect.width;
+                    if (newLeft < 0) newLeft = windowWidth - rect.width - 5;
+                    if (newLeft < 0) newLeft = 5;
+                    node.style.left = newLeft + "px";
+                    changed = true;
+                }
+
+                if (changed) {
+                    node.dataset.lithicPositioned = "true";
+                }
+            }
+        }
+    }
+
+    var observer = new MutationObserver(function(mutations) {
+        mutations.forEach(function(mutation) {
+            if (mutation.type === "childList") {
+                mutation.addedNodes.forEach(function(node) {
+                    adjustPopup(node);
+                    
+                    // Reset positioned flag if a node is re-added
+                    if (node.nodeType === 1 && node.dataset && node.dataset.lithicPositioned) {
+                        delete node.dataset.lithicPositioned;
+                    }
+                });
+            } else if (mutation.type === "attributes") {
+                adjustPopup(mutation.target);
+            }
+        });
+    });
+
+    observer.observe(document.body, { 
+        childList: true, 
+        subtree: true, 
+        attributes: true, 
+        attributeFilter: ['style'] 
+    });
+};
+
+})();

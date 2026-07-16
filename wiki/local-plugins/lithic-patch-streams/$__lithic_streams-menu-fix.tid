@@ -6,3 +6,7 @@ title: $:/lithic/streams-menu-fix
     color: <<colour foreground>> !important; 
     fill: <<colour foreground>> !important;
 }
+
+.sq-contextmenu {
+    z-index: 10000 !important;
+}
