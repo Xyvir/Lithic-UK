@@ -1,0 +1,64 @@
+title: $:/lithic/styles/backlink-cloud-collapser.css
+tags: $:/tags/Stylesheet
+type: text/vnd.tiddlywiki
+
+/* ── Backlink Cloud Collapser ── */
+
+/* Hide wrapper entirely when the footer has no backlink pills */
+.backlink-cloud-wrapper:not(:has(.footer li)) {
+  display: none;
+}
+
+/* Container: position relative for absolute button placement */
+.backlink-cloud-wrapper {
+  position: relative;
+  padding-left: 4px;
+}
+
+/* The collapse toggle button — positioned in the left margin */
+.backlink-cloud-collapser {
+  position: absolute;
+  left: -31px;
+  top: 2px;
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  border: none;
+  background: none;
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 0.15s ease;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1;
+}
+
+.backlink-cloud-collapser svg {
+  fill: <<colour muted-foreground>>;
+  transform: rotate(90deg);
+  transition: transform 0.2s ease;
+}
+
+.backlink-cloud-collapsed .backlink-cloud-collapser svg {
+  transform: rotate(0deg);
+}
+
+/* Show button on hover near the backlink cloud area */
+.backlink-cloud-wrapper:hover .backlink-cloud-collapser {
+  opacity: 1;
+}
+
+/* Always show when cloud IS collapsed (to indicate hidden content) */
+.backlink-cloud-collapsed .backlink-cloud-collapser {
+  opacity: 0.7;
+}
+
+.backlink-cloud-collapsed:hover .backlink-cloud-collapser {
+  opacity: 1;
+}
+
+/* Hide the pill list when collapsed (CSS-based, keeps elements in DOM for :has check) */
+.backlink-cloud-collapsed .footer {
+  display: none;
+}

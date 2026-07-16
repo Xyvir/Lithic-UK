@@ -1,21 +1,22 @@
 ## Todo
 - [ ] Add hotzone for sidebar to autoopen/closen on mouseover.
+    (this is mostly for when exporting static HTML sites)
 - [ ] Add custom feedback UI (especially for selfhost) for when save button is clicked but before the save confirmation modal appears.
     (Currently, save actions are silent until the confirmation modal appears. The UI should give immediate feedback that the action has been registered and is being processed, particularly for large wikis where the save operation may take a few seconds.)
-- [x] Add proper print styling to Autotable Macros in printstyles.css
 - [ ] Add "reveal" / collapse element to backlink pill clouds; always open by default(but configurable), tracked via state tiddlers that are not saved when the wiki is?
 - [ ] Remove extraneous newlines created when using embed-streams macro.
 - [ ] add ## 'toggle button' to unieditor line numbers on line 00; that globally toggles the numbers on and off. (via state tiddler?)
+
+- [ ] Add "Toggle Todo" or "Toggle Prefix" option to one of the right-click menus. (including option <<num>> prefix?)
+    - [ ] Add toggle-prefix hotkey like logseq?
+- [ ] Allow double-bullet (`-` or `*` prefix) nodestream entries to create date/calendar highlights, not just `[ ]` / `[x]` todo items.
+    (Currently only `- [ ] [[date]]` / `- [x] [[date]]` highlight the calendar sidebar. This would also recognize `- [[date]]` and `* [[date]]` for non-task journal entries.)
 - [ ] Extend hover-over 'appear' plugin behavior to be more intuitive
     - [ ] modify behavior to show todo when highlighting calendar datelinks
     - [ ] Fix the alignment for hover-over on sidebar items.
     - [ ] add guardrails so only a bit of context is shown on hoverover.
 - [ ] Add "Alpha Sort" option to nodestream right-click menu.
            (Do twice to toggle ascending/descending)
-- [ ] Add "Toggle Todo" or "Toggle Prefix" option to one of the right-click menus. (including option <<num>> prefix?)
-    - [ ] Add toggle-prefix hotkey like logseq?
-- [ ] Allow double-bullet (`-` or `*` prefix) nodestream entries to create date/calendar highlights, not just `[ ]` / `[x]` todo items.
-    (Currently only `- [ ] [[date]]` / `- [x] [[date]]` highlight the calendar sidebar. This would also recognize `- [[date]]` and `* [[date]]` for non-task journal entries.)
 - [ ] Create/Integrate EPUB Serialization based on current to_lithic logic (but have user provide shortcode instead of AI-generated one); add it to existing pdf-to-whiteboard and name the plugin 'lithic-import' or something.
 
 
@@ -31,6 +32,8 @@
 - [ ] Make sure the custom.ico is actually saved to GitHub so restoring the GitHub will restore your disambiguation / icon
 
 ## Post Modularization Todo
+- [ ] Add special "Lithic Settings" Sidebar menu item that only appears when Tweak Sidebar is active, below the 'hidden' sidebar items; and has a handful of lithic-specific configuration options. Specifically limited. (maybe 10 max?)
+    (if user wants more customization then can navigate to the vanilla TW control panel via Commands; or via a "Advanced Settings" link in the Lithic Settings menu?)
 - [ ] Integrate spaced repetition / flashcard review into Lithic.
     - Candidates: pdeck, twsr (unmaintained). TidMe is too heavyweight as a full edition.
     - Goal: lightweight integration that works within the streams experience (e.g., sidebar review tab, slashcommand to create cards from highlights).
@@ -91,6 +94,7 @@
 ---
 
 ## Done
+- [x] Add proper print styling to Autotable Macros in printstyles.css
 - [x] For both right-click menus, add guardrails so they 'invert' near screen edges so menu never goes out of view.
 - [X] auto-select/focus Queries searchbox when Queries sidebar is expanded.
 - [X] Add special macro that can define a print percentage for a particular node/tiddler. (only effects print scale)

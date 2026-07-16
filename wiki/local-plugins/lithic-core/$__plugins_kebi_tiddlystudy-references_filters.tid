@@ -19,25 +19,41 @@ title: $:/plugins/kebi/tiddlystudy-references/filters
   </$reveal>
 \end
 
-<ul class="footer">
-<$vars 
-  targetTitle=<<currentTiddler>>
-  safeAlias={{{ [enlist{!!aliases}first[]] ~[[$:/no-match-placeholder]] }}} 
-  targets={{{ [<currentTiddler>] [enlist{!!aliases}first[]] +[format:titlelist[]join[ ]] }}}
+<$let
+  backlink-cloud-state={{{ [[$:/state/lithic/backlink-cloud-visibility/]addsuffix<currentTiddler>] }}}
+  backlink-cloud-default={{{ [{$:/config/lithic/backlink-cloud-default}else[show]] }}}
 >
-<$let 
-  lbrack="[[" rbrack="]]" pipe="|"
-  hardLinks={{{ [enlist<targets>addprefix<lbrack>addsuffix<rbrack>] [enlist<targets>addprefix<pipe>addsuffix<rbrack>] +[format:titlelist[]join[ ]] }}}
-  textBacklinks={{{ [enlist<hardLinks>] :map[all[tiddlers]!is[system]!is[image]!type[application/tldr]search:text:literal<currentTiddler>] +[format:titlelist[]join[ ]] }}}
-  allBacklinks={{{ [enlist<targets>backlinks[]] [enlist<textBacklinks>] +[format:titlelist[]join[ ]] }}}
->
-<<generate-list statetiddler:"$:/plugins/kebi/tiddlystudy-references/config/filters/transclusions" filter:"[enlist<targets>backtranscludes[]] -[is[current]] -[is[system]] -[all[shadows]] -[is[image]]" class:"filtertransclude">>
-<<generate-list statetiddler:"$:/plugins/kebi/tiddlystudy-references/config/filters/tags" filter:"[enlist<targets>tagging[]] -[enlist<targets>backtranscludes[]] -[is[current]] -[is[system]] -[all[shadows]]" class:"filtertag">>
-<<generate-list statetiddler:"$:/plugins/kebi/tiddlystudy-references/config/filters/backlinks" filter:"[enlist<allBacklinks>] -[enlist<targets>backtranscludes[]] -[enlist<targets>tagging[]] -[is[current]] -[is[system]] -[all[shadows]] -[is[image]] -[all[current]get[stream-list]enlist-input[]] +[unique[]]" class:"filterbacklink">>
-<<generate-list statetiddler:"$:/plugins/kebi/tiddlystudy-references/config/filters/mentions-title" filter:"[all[tiddlers]!is[system]!is[image]!type[application/tldr]search:title:literal<targetTitle>] [all[tiddlers]!is[system]!is[image]!type[application/tldr]search:title:literal<safeAlias>] +[unique[]] -[enlist<allBacklinks>] -[enlist<targets>backtranscludes[]] -[enlist<targets>tagging[]] -[has[parent]] -[is[current]] -[all[shadows]] -[all[current]get[stream-list]enlist-input[]]" class:"filtertitle">>
+<div class={{{ backlink-cloud-wrapper [<backlink-cloud-state>get[text]else<backlink-cloud-default>match[hide]then[backlink-cloud-collapsed]] +[join[ ]] }}}>
+  <$button class="tc-btn-invisible backlink-cloud-collapser">
+    <$list filter="[<backlink-cloud-state>get[text]else<backlink-cloud-default>match[show]]" variable="ignore">
+      <$action-setfield $tiddler=<<backlink-cloud-state>> text="hide"/>
+    </$list>
+    <$list filter="[<backlink-cloud-state>get[text]else<backlink-cloud-default>!match[show]]" variable="ignore">
+      <$action-setfield $tiddler=<<backlink-cloud-state>> text="show"/>
+    </$list>
+    <svg width="20" height="20" viewBox="0 0 20 20"><path d="M13.75 9.56879C14.0833 9.76124 14.0833 10.2424 13.75 10.4348L8.5 13.4659C8.16667 13.6584 7.75 13.4178 7.75 13.0329L7.75 6.97072C7.75 6.58582 8.16667 6.34525 8.5 6.5377L13.75 9.56879Z"></path></svg>
+  </$button>
+  <ul class="footer">
+  <$vars 
+    targetTitle=<<currentTiddler>>
+    safeAlias={{{ [enlist{!!aliases}first[]] ~[[$:/no-match-placeholder]] }}} 
+    targets={{{ [<currentTiddler>] [enlist{!!aliases}first[]] +[format:titlelist[]join[ ]] }}}
+  >
+  <$let 
+    lbrack="[[" rbrack="]]" pipe="|"
+    hardLinks={{{ [enlist<targets>addprefix<lbrack>addsuffix<rbrack>] [enlist<targets>addprefix<pipe>addsuffix<rbrack>] +[format:titlelist[]join[ ]] }}}
+    textBacklinks={{{ [enlist<hardLinks>] :map[all[tiddlers]!is[system]!is[image]!type[application/tldr]search:text:literal<currentTiddler>] +[format:titlelist[]join[ ]] }}}
+    allBacklinks={{{ [enlist<targets>backlinks[]] [enlist<textBacklinks>] +[format:titlelist[]join[ ]] }}}
+  >
+  <<generate-list statetiddler:"$:/plugins/kebi/tiddlystudy-references/config/filters/transclusions" filter:"[enlist<targets>backtranscludes[]] -[is[current]] -[is[system]] -[all[shadows]] -[is[image]]" class:"filtertransclude">>
+  <<generate-list statetiddler:"$:/plugins/kebi/tiddlystudy-references/config/filters/tags" filter:"[enlist<targets>tagging[]] -[enlist<targets>backtranscludes[]] -[is[current]] -[is[system]] -[all[shadows]]" class:"filtertag">>
+  <<generate-list statetiddler:"$:/plugins/kebi/tiddlystudy-references/config/filters/backlinks" filter:"[enlist<allBacklinks>] -[enlist<targets>backtranscludes[]] -[enlist<targets>tagging[]] -[is[current]] -[is[system]] -[all[shadows]] -[is[image]] -[all[current]get[stream-list]enlist-input[]] +[unique[]]" class:"filterbacklink">>
+  <<generate-list statetiddler:"$:/plugins/kebi/tiddlystudy-references/config/filters/mentions-title" filter:"[all[tiddlers]!is[system]!is[image]!type[application/tldr]search:title:literal<targetTitle>] [all[tiddlers]!is[system]!is[image]!type[application/tldr]search:title:literal<safeAlias>] +[unique[]] -[enlist<allBacklinks>] -[enlist<targets>backtranscludes[]] -[enlist<targets>tagging[]] -[has[parent]] -[is[current]] -[all[shadows]] -[all[current]get[stream-list]enlist-input[]]" class:"filtertitle">>
+  </$let>
+  </$vars>
+  </ul>
+</div>
 </$let>
-</$vars>
-</ul>
 
 <$wikify name="primaryColor" text="<<colour primary>>">
 <$let pillStyle={{{ [[background-color:transparent; border:1px solid ]] [<primaryColor>] [[;]] +[join[]] }}}>
