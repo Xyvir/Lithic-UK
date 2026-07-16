@@ -1,6 +1,6 @@
 title: $:/lithic/slashcommands/mermaid
-caret-pos: 17
+caret-pos: 19
 
-<$mermaid text="
+<$mermaid text="""
 
-"></$mermaid>
+"""></$mermaid>
