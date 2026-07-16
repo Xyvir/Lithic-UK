@@ -238,6 +238,18 @@ Starts up the wikitext highlighter
           };
         });
 
+        // Register jspython as an alias for python
+        if (typeof hljs.registerAliases === "function") {
+            try {
+                hljs.registerAliases('jspython', {languageName: 'python'});
+            } catch (e) {}
+        } else {
+            var py = hljs.getLanguage('python');
+            if (py) {
+                hljs.registerLanguage('jspython', function() { return py; });
+            }
+        }
+
     };
 
 })();

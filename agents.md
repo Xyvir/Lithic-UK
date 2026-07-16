@@ -164,4 +164,21 @@ As a result, if a standard TiddlyWiki tiddler (which implicitly defaults to `vnd
 **STANDARD OPERATING PROCEDURE:**
 If you encounter weird formatting issues where standard tiddlers suddenly behave like markdown after being passed through a `.lith` export/import cycle, be aware of this asymmetrical behavior. Do not try to "fix" the exporter with heavy JS macros unless explicitly requested again.
 
+# Syntax Highlighting for Custom Codeblocks (`highlight.js`)
 
+**CONTEXT:**
+TiddlyWiki's core `HighlightPlugin` uses the `$:/config/HighlightPlugin/LanguageMappings` dictionary to map Tiddler *MIME types* (e.g., `text/x-python`) to languages for rendering entire tiddlers. 
+However, this config dictionary DOES NOT map the identifiers used in Markdown-style codeblocks (e.g., ` ```jspython `).
+
+**PROBLEM:**
+If you try to alias a custom codeblock language like `jspython` to `python` by adding it to `$:/config/HighlightPlugin/LanguageMappings`, the core widget will not recognize it and the codeblock will not be highlighted.
+
+**STANDARD OPERATING PROCEDURE:**
+To register new codeblock languages or aliases so that ` ```customlang ` is properly styled, you must do it programmatically by hooking into the `highlight.js` engine on startup. 
+Create or modify a TiddlyWiki JS startup module (like `wikitext-highlighter.js.tid`) and call `hljs.registerLanguage` or `hljs.registerAliases` directly on the `hljs` object:
+```javascript
+var hljs = window.hljs || require("$:/plugins/tiddlywiki/highlight/highlight.js");
+if (hljs && typeof hljs.registerAliases === "function") {
+    hljs.registerAliases('customlang', {languageName: 'existinglang'});
+}
+```

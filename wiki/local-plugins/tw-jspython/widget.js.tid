@@ -50,6 +50,8 @@ class ActionJSPythonWidget extends Widget {
             $tw: $tw,
             widget: self,
             console: window.console,
+            Math: Math,
+            math: Math,
             eval_jspython: function(code) {
                 return interpreter.evaluate(code);
             },
