@@ -10,7 +10,7 @@ description: Toggle Favorite
     <span style="fill:<<colour external-link-foreground>>; display: flex;">{{$:/core/images/star-filled}}</span>
   </$list>
   <$list filter="[<currentTiddler>!tag[Favorite]]" variable="ignore">
-    <span style="fill:<<colour foreground>>; display: flex;">{{$:/lithic/images/star-empty}}</span>
+    <span style="display: flex;">{{$:/lithic/images/star-empty}}</span>
   </$list>
 </$list>
 <$list filter="[<tv-config-toolbar-text>match[yes]]" variable="ignore">
