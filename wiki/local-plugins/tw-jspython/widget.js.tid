@@ -1,0 +1,87 @@
+﻿title: $:/plugins/tw-jspython/jspython/widget.js
+type: application/javascript
+module-type: widget
+
+/*\
+title: $:/plugins/tw-jspython/jspython/widget.js
+type: application/javascript
+module-type: widget
+
+A widget to dynamically load and execute JSpython.
+\*/
+(function(){
+"use strict";
+
+var Widget = require("$:/core/modules/widgets/widget.js").widget;
+
+class ActionJSPythonWidget extends Widget {
+    render(parent, nextSibling) {
+        this.computeAttributes();
+        this.execute();
+    }
+
+    execute() {
+        this.jspythonCode = this.getAttribute("code");
+        this.outputTarget = this.getAttribute("outputTarget");
+    }
+
+    refresh(changedTiddlers) {
+        var changedAttributes = this.computeAttributes();
+        if(changedAttributes.code || changedAttributes.outputTarget) {
+            this.refreshSelf();
+            return true;
+        }
+        return this.refreshChildren(changedTiddlers);
+    }
+
+    invokeAction(triggeringWidget, event) {
+        var jsPythonModule = require("$:/plugins/tw-jspython/jspython/jspython-interpreter.js");
+        var jsPython = jsPythonModule.jsPython;
+        
+        var interpreter = jsPython();
+        var self = this;
+        
+        // Expose useful DOM and TiddlyWiki APIs
+        interpreter.assignGlobalContext({
+            document: window.document,
+            window: window,
+            $tw: $tw,
+            console: window.console,
+            eval_jspython: function(code) {
+                return interpreter.evaluate(code);
+            },
+            print: function(...args) {
+                if (self.outputTarget) {
+                    var out = window.document.querySelector(self.outputTarget);
+                    if (out) {
+                        out.innerText += args.join(" ") + "\n";
+                        return;
+                    }
+                }
+                console.log(...args);
+            }
+        });
+
+        if (this.jspythonCode) {
+            try {
+                if (this.outputTarget) {
+                    var out = window.document.querySelector(this.outputTarget);
+                    if (out) out.innerText = ""; // Clear output before running
+                }
+                interpreter.evaluate(this.jspythonCode);
+            } catch (e) {
+                console.error("JSpython execution error:", e);
+                if (this.outputTarget) {
+                    var out = window.document.querySelector(this.outputTarget);
+                    if (out) {
+                        out.innerText += "\nâŒ Error: " + (e.message || e.toString());
+                    }
+                }
+            }
+        }
+        return true; // Action was invoked
+    }
+}
+
+exports["action-jspython"] = ActionJSPythonWidget;
+})();

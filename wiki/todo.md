@@ -1,12 +1,12 @@
 ## Todo
-
 - [ ] Context Menu Expansions
     - [ ] Add "Toggle Todo" or "Toggle Prefix" option to one of the right-click menus. (including option <<num>> prefix?)
         - [ ] Add toggle-prefix hotkey like logseq?
     - [ ] Add "Alpha Sort" option to nodestream right-click menu.
        (Do twice to toggle ascending/descending)
     - [ ] Allow double-bullet (`-` or `*` prefix) nodestream entries to create date/calendar highlights, not just `[ ]` / `[x]` todo items.
-    (Currently only `- [ ] [[date]]` / `- [x] [[date]]` highlight the calendar sidebar. This would also recognize `- [[date]]` and `* [[date]]` for non-task journal entries.)
+    (Currently only `- [ ] [[date]]` / `- [x] [[date]]` highlight the calendar sidebar. This would also recognize `- [[date]]` and `* [[date]]` for non-task journal title references to higlight the associated date on the calendar.)
+    - [ ] Create or modify a new default saved filter for all 'marked' calendar items using the new above format. ("All Scheduled Items" filter)
 - [ ] Extend hover-over 'appear' plugin behavior to be more intuitive
     - [ ] modify behavior to show todo when highlighting calendar datelinks
     - [ ] Fix the alignment for hover-over on sidebar items.
@@ -34,10 +34,12 @@
 - [ ] Remove extraneous newlines created when using embed-streams macro.
 - [ ] add ## 'toggle button' to unieditor line numbers on line 00; that globally toggles the numbers on and off. (via state tiddler?)
 - [ ] Add special "Lithic Settings" Sidebar menu item that only appears when Tweak Sidebar is active, below the 'hidden' sidebar items; and has a handful of lithic-specific configuration options. Specifically limited. (maybe 10 max?)
+    - option to include/not include 'base' shadow tiddlers in Query sidebar.
     - Default Backlink pill cloud state (expanded/collapsed)
     - Disable/enable hover-over expand (for sidebar, and backlink clouds, and maybe collapsed nodeparents)
     - Default code line-number starting state (on or off)
     (if user wants more customization then can navigate to the vanilla TW control panel via Commands; or via a "Advanced Settings" link in the Lithic Settings menu?)
+    - option to completely disable / enable the non-recommended Browse and Commands sidebar items.
 - [ ] Integrate spaced repetition / flashcard review into Lithic.
     - Candidates: pdeck, twsr (unmaintained). TidMe is too heavyweight as a full edition. Deafult or add as 'official' plugin.
     - Goal: lightweight integration that works within the streams experience (e.g., sidebar review tab, slashcommand to create cards from highlights).

@@ -1,0 +1,9 @@
+{
+    "title": "$:/plugins/tw-jspython/jspython",
+    "description": "JSpython interpreter for TiddlyWiki",
+    "version": "1.0.0",
+    "core-version": ">=5.0.0",
+    "source": "",
+    "plugin-type": "plugin",
+    "list": "readme playground"
+}

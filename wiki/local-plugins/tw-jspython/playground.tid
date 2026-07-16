@@ -1,0 +1,25 @@
+﻿title: $:/plugins/tw-jspython/jspython/playground
+tags: $:/tags/SideBar
+caption: JSpython
+
+\define temp() $:/temp/jspython
+
+<div class="tiddler-jspython-ide-container">
+  <$edit type="text/x-python" tiddler=<<temp>> tag="textarea" class="local-editor tc-edit-texteditor" placeholder="print('Hello from TiddlyWiki!')" />
+
+  <div class="tiddler-ide-btns" >
+    <$button class="run-btn">
+      â–¶  <span>Run</span>
+      <$action-jspython code={{{ [<temp>get[text]] }}} outputTarget=".local-console" />
+    </$button>
+    <$button class="clear-btn">
+      {{$:/core/images/cancel-button}} <span>Clear Console</span>
+      <$action-jspython code="" outputTarget=".local-console" />
+    </$button>
+  </div>
+
+  <div class="console-output">
+    <label>CONSOLE OUTPUT:</label>
+    <pre class="local-console"></pre>
+  </div>
+</div>

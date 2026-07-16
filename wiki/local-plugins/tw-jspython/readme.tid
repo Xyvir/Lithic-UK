@@ -1,0 +1,7 @@
+﻿title: $:/plugins/tw-jspython/jspython/readme
+
+Local JSpython interpreter for TiddlyWiki.
+
+Provides an `<$action-jspython>` widget for executing Python code in the browser using JSpython.
+
+Features a playground in the sidebar for quickly testing scripts.
