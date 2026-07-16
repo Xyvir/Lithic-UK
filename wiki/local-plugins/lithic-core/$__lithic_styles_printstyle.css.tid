@@ -238,7 +238,18 @@ type: text/css
     }
 
     /* =======================================================
-       10. PRINT SCALING
+       10. AUTOTABLE HIDE CONTROLS
+       (Hides the drag handle column and the 'Add Row' final row)
+       ======================================================= */
+
+    table:has(.lithic-row-droppable) th:last-child,
+    table:has(.lithic-row-droppable) td:last-child,
+    table:has(.lithic-row-droppable) tbody tr:last-child {
+        display: none !important;
+    }
+
+    /* =======================================================
+       11. PRINT SCALING
        ======================================================= */
 
     /* Bake in 75% zoom scaling for Chrome */

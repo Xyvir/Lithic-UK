@@ -2,7 +2,7 @@
 - [ ] Add hotzone for sidebar to autoopen/closen on mouseover.
 - [ ] Add custom feedback UI (especially for selfhost) for when save button is clicked but before the save confirmation modal appears.
     (Currently, save actions are silent until the confirmation modal appears. The UI should give immediate feedback that the action has been registered and is being processed, particularly for large wikis where the save operation may take a few seconds.)
-- [ ] Add proper print styling to Autotable Macros in printstyles.css
+- [x] Add proper print styling to Autotable Macros in printstyles.css
 - [ ] Add "reveal" / collapse element to backlink pill clouds; always open by default(but configurable), tracked via state tiddlers that are not saved when the wiki is?
 - [ ] Remove extraneous newlines created when using embed-streams macro.
 - [ ] add ## 'toggle button' to unieditor line numbers on line 00; that globally toggles the numbers on and off. (via state tiddler?)
