@@ -15,7 +15,9 @@ TiddlyWiki parses `.tid` files and relies on specific formatting for headers and
 Including a trailing newline at the end of a plugin `*.tid` file can sometimes cause formatting or parsing issues within the wiki.
 
 **STANDARD OPERATING PROCEDURE:**
-When creating or editing plugin `*.tid` tiddlers, make sure that they DO NOT have a trailing newline after the last character of the body content.
+When creating or editing plugin `*.tid` tiddlers, make sure that they DO NOT have a trailing newline after the last character of the body content. 
+To guarantee this, after creating or editing a tiddler you should always execute the provided `trim.ps1` script, passing in the paths of the files you modified:
+`powershell -ExecutionPolicy Bypass -File c:\Users\temp\Lithic_Dev\Lithic\assets\trim.ps1 -Files <path_to_file>`
 
 **Bad Example (Trailing newline):**
 ```yaml

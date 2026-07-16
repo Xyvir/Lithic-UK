@@ -1,0 +1,8 @@
+key: ((streams-unindent))
+sq-contextmenu-name: un-indent
+sq-contextmenu-subtitle: 
+tags: $:/tags/streams/keyboard-shortcuts $:/tags/streams/contextmenu
+title: $:/plugins/sq/streams/keyboard-shortcuts/unindent-node
+type: text/vnd.tiddlywiki
+
+<<unindent-node-actions>>
