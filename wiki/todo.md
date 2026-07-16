@@ -1,15 +1,12 @@
 ## Todo
+- [ ] Add hotzone for sidebar to autoopen/closen on mouseover.
 - [ ] Add custom feedback UI (especially for selfhost) for when save button is clicked but before the save confirmation modal appears.
     (Currently, save actions are silent until the confirmation modal appears. The UI should give immediate feedback that the action has been registered and is being processed, particularly for large wikis where the save operation may take a few seconds.)
 - [ ] Add proper print styling to Autotable Macros in printstyles.css
 - [ ] For both right-click menus, add guardrails so they 'invert' near screen edges so menu never goes out of view.
 - [ ] Add "reveal" / collapse element to backlink pill clouds; always open by default(but configurable), tracked via state tiddlers that are not saved when the wiki is?
 - [ ] Remove extraneous newlines created when using embed-streams macro.
-
 - [ ] add ## 'toggle button' to unieditor line numbers on line 00; that globally toggles the numbers on and off. (via state tiddler?)
-- [ ] Add additional parameter to AutoTable widget that allows for prefilled content per column? 
-    - <<AutoTable "One Two Three" "- - {formula}">>
-    - dash here is a placeholder for no prefilled content.
 - [ ] Extend hover-over 'appear' plugin behavior to be more intuitive
     - [ ] modify behavior to show todo when highlighting calendar datelinks
     - [ ] Fix the alignment for hover-over on sidebar items.
@@ -24,6 +21,7 @@
 - [ ] Integrate spaced repetition / flashcard review into Lithic.
     - Candidates: pdeck, twsr (unmaintained). TidMe is too heavyweight as a full edition.
     - Goal: lightweight integration that works within the streams experience (e.g., sidebar review tab, slashcommand to create cards from highlights).
+- [ ] JsxGraph plugin?
 
 ## launcher.html modularization Project
 - [ ] Allow specifying 'modes' via http parameters so the launcher monolith html can be forced into specific modes to make unit tests easier; (all unit tests can be performed in 1 test environment this way, but with multiple test profiles/users)
@@ -37,6 +35,9 @@
 - [ ] Make sure the custom.ico is actually saved to GitHub so restoring the GitHub will restore your disambiguation / icon
 
 ## Post Modularization Todo
+- [ ] Add additional parameter to AutoTable widget that allows for prefilled content per column? 
+    - <<AutoTable "One Two Three" "- - {formula}">>
+    - dash here is a placeholder for no prefilled content.
 - [x] Create simpleUI TW plugin for Lithic (Lithic Patina)
     - [ ] Include backdoor "edit mode" toggle (secret hotkey / 5-tap on wiki title to unlock editing)
         - Backdoor action enabled by default, but add config tiddler to "disable unlock action"
