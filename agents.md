@@ -6,6 +6,33 @@ Please note, the below instructions are loosely organized by priority, with most
 **CRITICAL RULE FOR ALL AGENTS:**
 If you need source context that is NOT available locally within this repository (such as vanilla TiddlyWiki core files or external third-party plugins), **DO NOT** attempt to find or download it yourself. Instead, you MUST explicitly **ASK THE USER (THE DEVELOPER)** to provide the relevant context manually. 
 
+# Tiddler File Format (`*.tid`)
+
+**CONTEXT:**
+TiddlyWiki parses `.tid` files and relies on specific formatting for headers and body content.
+
+**PROBLEM:**
+Including a trailing newline at the end of a plugin `*.tid` file can sometimes cause formatting or parsing issues within the wiki.
+
+**STANDARD OPERATING PROCEDURE:**
+When creating or editing plugin `*.tid` tiddlers, make sure that they DO NOT have a trailing newline after the last character of the body content.
+
+**Bad Example (Trailing newline):**
+```yaml
+title: $:/config/lithic/sidebar-visibility/$:/core/ui/SideBar/More
+type: text/vnd.tiddlywiki
+
+hide\n
+```
+
+**Good Example (No trailing newline):**
+```yaml
+title: $:/config/lithic/sidebar-visibility/$:/core/ui/SideBar/More
+type: text/vnd.tiddlywiki
+
+hide
+```
+
 # Lithic Design Philosophy & Feature Integration Guidelines
 
 **CONTEXT:**
