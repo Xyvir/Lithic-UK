@@ -1538,7 +1538,6 @@ exports.startup = function() {
               "tiddlywiki/highlight",
               "tiddlywiki/katex",
               "tiddlywiki/markdown",
-              "tw-jspython",
               "xyvir/anchors-for-streams",
               "xyvir/lithic-core",
               "xyvir/lithic-default-configs",
@@ -1552,7 +1551,8 @@ exports.startup = function() {
               "xyvir/lithic-pdf-to-whiteboard",
               "xyvir/lithic-python-codeblocks",
               "xyvir/lithic-tweaks",
-              "xyvir/lithic-wikitext-highlight"
+              "xyvir/lithic-wikitext-highlight",
+              "xyvir/tw-jspython"
             ];
           const pluginExclusions = defaultPlugins.map(p => `-[[$:/plugins/${p}]]`).join(' ');
           const baseFilter = "[all[tiddlers]!is[system]] [all[tiddlers]is[system]!prefix[$:/core]!prefix[$:/themes]!prefix[$:/temp]!prefix[$:/state]!prefix[$:/HistoryList]] [is[shadow]] -[prefix[$:/boot/]] -[[$:/isEncrypted]] -[[$:/library/sjcl.js]] -[[$:/status/RequireReloadDueToPluginChange]] -[[$:/StoryList]] -[[$:/config/PageControlButtons/Visibility/$:/core/ui/Buttons/new-journal]] -[[$:/lithic/startup/webdav-utils.js]]";
@@ -1708,7 +1708,6 @@ exports.startup = function() {
               "tiddlywiki/highlight",
               "tiddlywiki/katex",
               "tiddlywiki/markdown",
-              "tw-jspython",
               "xyvir/anchors-for-streams",
               "xyvir/lithic-core",
               "xyvir/lithic-default-configs",
@@ -1722,7 +1721,8 @@ exports.startup = function() {
               "xyvir/lithic-pdf-to-whiteboard",
               "xyvir/lithic-python-codeblocks",
               "xyvir/lithic-tweaks",
-              "xyvir/lithic-wikitext-highlight"
+              "xyvir/lithic-wikitext-highlight",
+              "xyvir/tw-jspython"
             ];
             const pluginExclusions = defaultPlugins.map(p => `-[[$:/plugins/${p}]]`).join(' ');
             const baseFilter = "[all[tiddlers]!is[system]] [all[tiddlers]is[system]!prefix[$:/core]!prefix[$:/themes]!prefix[$:/temp]!prefix[$:/state]!prefix[$:/HistoryList]] [is[shadow]] -[prefix[$:/boot/]] -[[$:/isEncrypted]] -[[$:/library/sjcl.js]] -[[$:/status/RequireReloadDueToPluginChange]] -[[$:/StoryList]] -[[$:/config/PageControlButtons/Visibility/$:/core/ui/Buttons/new-journal]] -[[$:/lithic/startup/webdav-utils.js]]";
