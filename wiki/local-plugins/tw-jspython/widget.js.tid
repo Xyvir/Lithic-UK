@@ -1,4 +1,4 @@
-﻿title: $:/plugins/tw-jspython/jspython/widget.js
+title: $:/plugins/tw-jspython/jspython/widget.js
 type: application/javascript
 module-type: widget
 
@@ -23,11 +23,12 @@ class ActionJSPythonWidget extends Widget {
     execute() {
         this.jspythonCode = this.getAttribute("code");
         this.outputTarget = this.getAttribute("outputTarget");
+        this.outputTiddler = this.getAttribute("outputTiddler");
     }
 
     refresh(changedTiddlers) {
         var changedAttributes = this.computeAttributes();
-        if(changedAttributes.code || changedAttributes.outputTarget) {
+        if(changedAttributes.code || changedAttributes.outputTarget || changedAttributes.outputTiddler) {
             this.refreshSelf();
             return true;
         }
@@ -40,6 +41,7 @@ class ActionJSPythonWidget extends Widget {
         
         var interpreter = jsPython();
         var self = this;
+        var outputBuffer = [];
         
         // Expose useful DOM and TiddlyWiki APIs
         interpreter.assignGlobalContext({
@@ -51,6 +53,10 @@ class ActionJSPythonWidget extends Widget {
                 return interpreter.evaluate(code);
             },
             print: function(...args) {
+                if (self.outputTiddler) {
+                    outputBuffer.push(args.join(" "));
+                    return;
+                }
                 if (self.outputTarget) {
                     var out = window.document.querySelector(self.outputTarget);
                     if (out) {
@@ -68,14 +74,48 @@ class ActionJSPythonWidget extends Widget {
                     var out = window.document.querySelector(this.outputTarget);
                     if (out) out.innerText = ""; // Clear output before running
                 }
-                interpreter.evaluate(this.jspythonCode);
+                
+                var result = interpreter.evaluate(this.jspythonCode);
+                
+                var handleFinish = function() {
+                    if (self.outputTiddler) {
+                        $tw.wiki.setText(self.outputTiddler, "text", null, outputBuffer.join("\n"));
+                        $tw.wiki.setText(self.outputTiddler, "type", null, "text/plain");
+                    }
+                };
+
+                if (result && typeof result.then === 'function') {
+                    result.then(handleFinish).catch(function(e) {
+                        console.error("JSpython async execution error:", e);
+                        var errorMsg = "❌ Error: " + (e.message || e.toString());
+                        if (self.outputTarget) {
+                            var out = window.document.querySelector(self.outputTarget);
+                            if (out) {
+                                out.innerText += "\n" + errorMsg;
+                            }
+                        }
+                        if (self.outputTiddler) {
+                            outputBuffer.push(errorMsg);
+                            $tw.wiki.setText(self.outputTiddler, "text", null, outputBuffer.join("\n"));
+                            $tw.wiki.setText(self.outputTiddler, "type", null, "text/plain");
+                        }
+                    });
+                } else {
+                    handleFinish();
+                }
             } catch (e) {
                 console.error("JSpython execution error:", e);
+                var errorMsg = "❌ Error: " + (e.message || e.toString());
                 if (this.outputTarget) {
                     var out = window.document.querySelector(this.outputTarget);
                     if (out) {
-                        out.innerText += "\nâŒ Error: " + (e.message || e.toString());
+                        out.innerText += "\n" + errorMsg;
                     }
+                }
+                if (this.outputTiddler) {
+                    outputBuffer.push(errorMsg);
+                    $tw.wiki.setText(this.outputTiddler, "text", null, outputBuffer.join("\n"));
+                    $tw.wiki.setText(this.outputTiddler, "type", null, "text/plain");
                 }
             }
         }

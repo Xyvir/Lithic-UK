@@ -15,3 +15,17 @@ div.wilk-copy-code-button > button.tc-btn-invisible {
 div.wilk-copy-code-button > button.tc-btn-invisible:hover {
 	fill: <<colour tiddler-controls-foreground-hover>>;
 }
+
+div.wilk-copy-code-button > button.run-jspython-btn {
+	position: absolute;
+	right: 1.8em;
+	padding: 0.1em 0.2em;
+	fill: <<colour tiddler-controls-foreground>>;
+	color: <<colour tiddler-controls-foreground>>;
+	font-weight: bold;
+}
+
+div.wilk-copy-code-button > button.run-jspython-btn:hover {
+	fill: <<colour tiddler-controls-foreground-hover>>;
+	color: <<colour tiddler-controls-foreground-hover>>;
+}

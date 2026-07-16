@@ -141,6 +141,7 @@ function highlight(code) {
 				inCodeBlock = true;
 				codeBlockFence = fenceMatch[1];
 				codeBlockLang = fenceMatch[2];
+				if (codeBlockLang === 'jspython') codeBlockLang = 'python';
 				result.push('<span class="md-code-fence">' + escaped + '</span>');
 				codeBlockBuffer = [];
 				continue;

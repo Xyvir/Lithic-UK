@@ -5,6 +5,12 @@ title: $:/wilk/buttons/copy-code
 
 \widget $codeblock(code, language)
 <div class="wilk-copy-code-button">
+	<$list filter="[<language>match[jspython]]" variable="ignore">
+		<$button tooltip="Run Code" class="tc-btn-invisible run-jspython-btn">&gt;_
+			<$action-jspython code=<<code>> outputTiddler="$:/ConsoleOutput" />
+			<$action-sendmessage $message="tm-navigate" navigateTo="$:/ConsoleOutput" navigateFromTitle={{{ [<storyTiddler>!is[blank]else<currentTiddler>] }}} />
+		</$button>
+	</$list>
 	<$button
 	message="tm-copy-to-clipboard"
 	param=<<code>>
