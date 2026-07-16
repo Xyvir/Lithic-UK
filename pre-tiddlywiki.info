@@ -1,5 +1,7 @@
 {
     "description": "Lithic (Pre)",
-    "plugins": [],
+    "plugins": [
+        "tw-jspython/jspython"
+    ],
     "themes": []
 }
