@@ -7,7 +7,17 @@ title: $:/lithic/streams-contextmenu-invert.js
 type: application/javascript
 module-type: startup
 
-Inverts the streams context menu if it goes off the bottom or right of the screen.
+Fixes the streams context menu popup rendering behind the sidebar.
+
+Root cause: TW's $reveal widget sets position:absolute on the popup, which is
+evaluated within its ancestor's stacking context chain. Something in that chain
+(stream container, tiddler frame, etc.) has a lower effective stacking rank than
+the sidebar's z-index:500, so raising z-index on the popup alone does nothing.
+
+Fix: Convert to position:fixed using getBoundingClientRect() to get the current
+viewport coordinates, then re-position at root viewport level where z-index:100000
+cleanly beats the sidebar's z-index:500. Also corrects position if the menu would
+overlap the sidebar or overflow the screen edges.
 \*/
 (function(){
 "use strict";
@@ -18,76 +28,66 @@ exports.after = ["startup"];
 exports.synchronous = true;
 
 exports.startup = function() {
-    function adjustPopup(node) {
-        if (node.nodeType === 1 && node.classList && node.classList.contains("tc-popup")) {
-            var hasSqMenu = node.querySelector(".sq-contextmenu");
-            if (hasSqMenu) {
-                // Prevent infinite loop from our own style modifications
-                if (node.dataset.lithicPositioned === "true") return;
 
-                var rect = node.getBoundingClientRect();
-                var windowHeight = window.innerHeight;
-                var windowWidth = window.innerWidth;
-                
-                // Only adjust if it's currently rendered with a valid size
-                if (rect.height === 0 || rect.width === 0) return;
+    function fixPopup(node) {
+        if (node.nodeType !== 1 || !node.classList || !node.classList.contains("tc-popup")) return;
+        if (!node.querySelector(".sq-contextmenu")) return;
 
-                var top = parseFloat(node.style.top || rect.top);
-                var left = parseFloat(node.style.left || rect.left);
-                
-                var changed = false;
-
-                // Ensure it's above the sidebar
-                if (node.style.zIndex !== "10000") {
-                    node.style.zIndex = "10000";
-                    changed = true;
-                }
-
-                if (rect.bottom > windowHeight) {
-                    var newTop = top - rect.height;
-                    if (newTop < 0) newTop = windowHeight - rect.height - 5;
-                    if (newTop < 0) newTop = 5;
-                    node.style.top = newTop + "px";
-                    changed = true;
-                }
-                
-                if (rect.right > windowWidth) {
-                    var newLeft = left - rect.width;
-                    if (newLeft < 0) newLeft = windowWidth - rect.width - 5;
-                    if (newLeft < 0) newLeft = 5;
-                    node.style.left = newLeft + "px";
-                    changed = true;
-                }
-
-                if (changed) {
-                    node.dataset.lithicPositioned = "true";
-                }
-            }
+        // If the element hasn't laid out yet, defer one frame and retry
+        var rect = node.getBoundingClientRect();
+        if (rect.width === 0 || rect.height === 0) {
+            requestAnimationFrame(function() { fixPopup(node); });
+            return;
         }
+
+        var sidebarWidth = 0;
+        var sidebar = document.querySelector(".nc-sidebar");
+        if (sidebar) sidebarWidth = sidebar.getBoundingClientRect().right;
+
+        // Use current viewport coordinates as the basis for fixed positioning.
+        // getBoundingClientRect() gives viewport-relative coords regardless of
+        // how the element is currently positioned.
+        var left = rect.left;
+        var top  = rect.top;
+
+        // Push right if the menu overlaps the sidebar
+        if (left < sidebarWidth + 4) {
+            left = sidebarWidth + 4;
+        }
+
+        // Push left if it overflows the right viewport edge
+        if (left + rect.width > window.innerWidth - 4) {
+            left = window.innerWidth - rect.width - 4;
+        }
+
+        // Push up if it overflows the bottom viewport edge
+        if (top + rect.height > window.innerHeight - 4) {
+            top = top - rect.height;
+        }
+        if (top < 4) top = 4;
+
+        // Switch to fixed positioning at the corrected viewport coordinates.
+        // position:fixed competes at the root stacking context level, so
+        // z-index:100000 will definitively beat the sidebar's z-index:500.
+        node.style.position = "fixed";
+        node.style.left     = left + "px";
+        node.style.top      = top  + "px";
+        node.style.zIndex   = "100000";
     }
 
     var observer = new MutationObserver(function(mutations) {
         mutations.forEach(function(mutation) {
             if (mutation.type === "childList") {
                 mutation.addedNodes.forEach(function(node) {
-                    adjustPopup(node);
-                    
-                    // Reset positioned flag if a node is re-added
-                    if (node.nodeType === 1 && node.dataset && node.dataset.lithicPositioned) {
-                        delete node.dataset.lithicPositioned;
-                    }
+                    fixPopup(node);
                 });
-            } else if (mutation.type === "attributes") {
-                adjustPopup(mutation.target);
             }
         });
     });
 
-    observer.observe(document.body, { 
-        childList: true, 
-        subtree: true, 
-        attributes: true, 
-        attributeFilter: ['style'] 
+    observer.observe(document.body, {
+        childList: true,
+        subtree: true
     });
 };
 

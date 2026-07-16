@@ -7,6 +7,16 @@ title: $:/lithic/streams-menu-fix
     fill: <<colour foreground>> !important;
 }
 
+/* The Notebook theme applies `animation: pop` (which uses transform: scale) to .tc-drop-down.
+   An active CSS transform creates a new stacking context, trapping the popup below the sidebar
+   even with a high z-index on the outer tc-popup wrapper. The fix is to set z-index directly
+   on the animated element (.sq-contextmenu is also .tc-drop-down) so it wins within its
+   own stacking context relative to the fixed sidebar. */
 .sq-contextmenu {
-    z-index: 10000 !important;
+    z-index: 100000 !important;
+}
+
+/* Belt-and-suspenders: also raise the outer tc-popup wrapper */
+.tc-popup:has(.sq-contextmenu) {
+    z-index: 100000 !important;
 }
