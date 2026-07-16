@@ -1,9 +1,9 @@
-title: $:/plugins/tw-jspython/jspython/widget.js
+title: $:/plugins/xyvir/tw-jspython/widget.js
 type: application/javascript
 module-type: widget
 
 /*\
-title: $:/plugins/tw-jspython/jspython/widget.js
+title: $:/plugins/xyvir/tw-jspython/widget.js
 type: application/javascript
 module-type: widget
 
@@ -36,7 +36,7 @@ class ActionJSPythonWidget extends Widget {
     }
 
     invokeAction(triggeringWidget, event) {
-        var jsPythonModule = require("$:/plugins/tw-jspython/jspython/jspython-interpreter.js");
+        var jsPythonModule = require("$:/plugins/xyvir/tw-jspython/jspython-interpreter.js");
         var jsPython = jsPythonModule.jsPython;
         
         var interpreter = jsPython();
@@ -70,13 +70,19 @@ class ActionJSPythonWidget extends Widget {
         });
 
         if (this.jspythonCode) {
+            // Expand Tiddlywiki transclusions like {{TiddlerName}} or {{Tiddler!!field}}
+            var codeToRun = this.jspythonCode.replace(/\{\{([^}]+)\}\}/g, function(match, textRef) {
+                var ref = $tw.wiki.getTextReference(textRef, null, self.getVariable("currentTiddler"));
+                return (ref !== null && ref !== undefined) ? ref : match;
+            });
+
             try {
                 if (this.outputTarget) {
                     var out = window.document.querySelector(this.outputTarget);
                     if (out) out.innerText = ""; // Clear output before running
                 }
                 
-                var result = interpreter.evaluate(this.jspythonCode);
+                var result = interpreter.evaluate(codeToRun);
                 
                 var handleFinish = function() {
                     if (self.outputTiddler) {

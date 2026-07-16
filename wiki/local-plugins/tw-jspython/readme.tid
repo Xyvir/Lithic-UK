@@ -1,6 +1,6 @@
-﻿title: $:/plugins/tw-jspython/jspython/readme
+title: $:/plugins/xyvir/tw-jspython/readme
 
-Local JSpython interpreter for TiddlyWiki.
+The jspython engine allows you to run python in tiddlywiki.
 
 Provides an `<$action-jspython>` widget for executing Python code in the browser using JSpython.
 

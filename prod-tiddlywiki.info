@@ -38,7 +38,7 @@
         "xyvir/lithic-patch-unieditor",
         "orange/mermaid-tw5",
         "byper/advanced-search",
-        "tw-jspython"
+        "xyvir/tw-jspython"
     ],
     "themes": [
         "tiddlywiki/vanilla",
