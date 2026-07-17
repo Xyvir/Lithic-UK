@@ -5,6 +5,7 @@ title: $:/core/ui/SideBar/Open
 \whitespace trim
 \define lingo-base() $:/language/CloseAll/
 
+
 \define drop-actions()
 <$action-listops $tiddler=<<tv-story-list>> $subfilter="+[insertbefore:currentTiddler<actionTiddler>]"/>
 \end
@@ -23,8 +24,13 @@ $button$
 </$droppable>
 \end
 
+\define check-active-filter()
+[<currentTiddler>] [<currentTiddler>list[!!stream-list]] [<currentTiddler>list[!!stream-list]list[!!stream-list]] +[match<activeNode>limit[1]then[yes]]
+\end
+
 \define open-item-template()
-<div class="tc-sidebar-tab-open-item">
+<$set name="isHighlighted" filter=<<check-active-filter>>>
+<div class={{{ [<isHighlighted>match[yes]then[tc-sidebar-tab-open-item lithic-active-sidebar-item]else[tc-sidebar-tab-open-item]] }}}>
    <$macrocall $name="droppable-item" button="""<$button message="tm-close-tiddler" tooltip={{$:/language/Buttons/Close/Hint}} aria-label={{$:/language/Buttons/Close/Caption}} class="tc-btn-invisible tc-btn-mini tc-small-gap-right">{{$:/core/images/close-button}}</$button><$link to={{!!title}}><$view field="title"/></$link>"""/>
    <$list filter="[<currentTiddler>has[stream-list]]">
       <div style="margin-left: 22px; border-left: 1px solid #ddd; padding-left: 6px; font-size: 0.85em; opacity: 0.8;">
@@ -45,11 +51,41 @@ $button$
       </div>
    </$list>
 </div>
+</$set>
 \end
 
-<$set name="storyCount" filter="[list<tv-story-list>count[]]">
-<div class="tc-sidebar-tab-open">
+\define stream-drop-actions()
+<$action-listops $tiddler=<<singleTiddler>> $field="stream-list" $subfilter="+[insertbefore:currentTiddler<actionTiddler>]"/>
+\end
 
+\define stream-droppable-item(button)
+\whitespace trim
+<$droppable actions=<<stream-drop-actions>> enable=<<tv-allow-drag-and-drop>>>
+<<placeholder>>
+<div>
+$button$
+</div>
+</$droppable>
+\end
+
+\define stream-item-template()
+<$set name="isHighlighted" filter=<<check-active-filter>>>
+<div class={{{ [<isHighlighted>match[yes]then[tc-sidebar-tab-open-item lithic-active-sidebar-item]else[tc-sidebar-tab-open-item]] }}}>
+   <$macrocall $name="stream-droppable-item" button="""<$link to={{!!title}}><$view field="title"/></$link>"""/>
+   <div style="margin-left: 22px; border-left: 1px solid #ddd; padding-left: 6px; font-size: 0.85em; opacity: 0.8;">
+      <div class="tc-menu-item" style="display:-webkit-box; -webkit-line-clamp:5; -webkit-box-orient:vertical; overflow:hidden; text-overflow:ellipsis; white-space:normal; line-height:1.4em; padding-bottom:2px;">
+         <$link to={{!!title}} class="tc-tiddlylink" style="color:inherit; text-decoration:none;">
+            <$transclude field="caption">
+               <$view field="text" format="text" />
+            </$transclude>
+         </$link>
+      </div>
+   </div>
+</div>
+</$set>
+\end
+
+\define show-normal-open()
 <!-- Classic View: <= 15 items -->
 <$list filter="[<storyCount>compare:number:lteq[15]]" variable="ignore">
 <$list filter="[list<tv-story-list>]" history=<<tv-history-list>> storyview="pop">
@@ -85,6 +121,39 @@ $button$
 </$set>
 </$set>
 </$list>
+\end
+
+\define show-stream-open()
+<$list filter="[<singleTiddler>list[!!stream-list]]" history=<<tv-history-list>> storyview="pop">
+<<stream-item-template>>
+</$list>
+\end
+
+<style>
+.lithic-active-sidebar-item {
+    background-color: <<colour code-background>>;
+    border-left: 2px solid <<colour primary>>;
+    border-radius: 2px;
+    padding-left: 2px;
+    margin-left: -4px;
+}
+</style>
+
+<$set name="storyCount" filter="[list<tv-story-list>count[]]">
+<$set name="singleTiddler" filter="[list<tv-story-list>first[]]">
+<$set name="activeNode" value={{{ [prefix[$:/state/sq/streams/current-edit-tiddler]get[text]first[]] }}}>
+
+<div class="tc-sidebar-tab-open">
+
+<$list filter="[<storyCount>match[1]]" variable="ignore">
+   <$list filter="[<singleTiddler>has[stream-list]]" emptyMessage="<<show-normal-open>>">
+      <<show-stream-open>>
+   </$list>
+</$list>
+
+<$list filter="[<storyCount>!match[1]]" variable="ignore">
+   <<show-normal-open>>
+</$list>
 
 <$tiddler tiddler="">
 <div style="display:flex; justify-content:space-between; align-items:center; margin-top:4px;">
@@ -97,4 +166,7 @@ $button$
 </$tiddler>
 
 </div>
+
+</$set>
+</$set>
 </$set>

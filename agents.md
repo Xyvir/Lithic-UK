@@ -182,3 +182,42 @@ if (hljs && typeof hljs.registerAliases === "function") {
     hljs.registerAliases('customlang', {languageName: 'existinglang'});
 }
 ```
+
+# TiddlyWiki Macro Pragmas (`\define`)
+
+**CONTEXT:**
+TiddlyWiki parses files from top to bottom. Macro definitions (`\define`) and other pragmas (`\rules`, `\whitespace`) are interpreted differently from regular wikitext body elements.
+
+**PROBLEM:**
+If you place HTML elements (like a `<style>` block) or normal wikitext *before* or *in between* `\define` statements, the TiddlyWiki parser switches from "pragma mode" to "body mode". Any subsequent `\define` macros will not be parsed as macros, but instead will be rendered directly to the screen as raw text.
+
+**STANDARD OPERATING PROCEDURE:**
+All `\define` macros and pragmas MUST be placed at the absolute top of the `.tid` file, consecutively, before any HTML tags, styles, or standard wikitext. If you need to add a `<style>` block or HTML, place it *after* all `\define` blocks have concluded.
+
+# Theme-Responsive Styling (The `<<colour>>` Macro)
+
+**CONTEXT:**
+Lithic users frequently switch between light and dark themes (palettes). Hardcoding HEX or RGB colors in styles will break the UI contrast when the theme changes.
+
+**STANDARD OPERATING PROCEDURE:**
+When applying custom styling, always use TiddlyWiki's core `<<colour>>` macro to resolve colors dynamically from the active palette, rather than hardcoding static hex colors.
+
+**Common Lithic Palette Variables:**
+- `<<colour primary>>`: The main accent color (great for borders, highlights, active states).
+- `<<colour background>>` / `<<colour foreground>>`: The base wiki background and text color.
+- `<<colour tiddler-background>>`: The background color of standard tiddler frames.
+- `<<colour code-background>>`: Very subtle off-background color (great for subtle UI highlights).
+- `<<colour muted-foreground>>`: Dimmer text for secondary or inactive information.
+- `<<colour selection-background>>`: The highlight color used when selecting text.
+
+**Example Implementation:**
+If injecting styles via a `<style>` block in wikitext, you can evaluate the macro directly:
+```css
+<style>
+.my-custom-class {
+    background-color: <<colour code-background>>;
+    border-left: 2px solid <<colour primary>>;
+    color: <<colour muted-foreground>>;
+}
+</style>
+```
