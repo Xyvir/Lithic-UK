@@ -2,6 +2,8 @@ title: Introduction
 stream-list: Introduction/1 Introduction/2 Introduction/3 Introduction/4 Introduction/5 Introduction/6 Introduction/7 Introduction/8 Introduction/9 Introduction/10 Introduction/11 Introduction/12
 type: text/markdown
 
+Unlike Obsidian and Logseq which rely on a complex filesystem of markdown files, Lithic is a self-contained, single-file personal knowledge management system powered by TiddlyWiki. It is built around a streams-first outliner experience, prioritizing zero-friction capture and infinite customizability without sacrificing portability.
+
 Here is a quick introduction to some of the features Lithic has to offer:
 ⁂⁂⁂
 title: Introduction/1
