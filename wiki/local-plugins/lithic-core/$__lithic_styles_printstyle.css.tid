@@ -265,4 +265,40 @@ type: text/css
             content: counter(page);
         }
     }
+
+    /* =======================================================
+       12. INLINE CODE FORMATTING
+       (Custom bracket styling for printed inline code)
+       ======================================================= */
+
+    code:not(pre code) {
+        color: #464646ff !important;
+        background: transparent !important;
+        border: none !important;
+        border-radius: 0 !important;
+        padding: 0 3px !important;
+        position: relative !important;
+    }
+
+    code:not(pre code)::before {
+        content: "" !important;
+        position: absolute !important;
+        top: 0 !important;
+        left: 0 !important;
+        width: 4px !important;
+        height: 4px !important;
+        border-top: 1px solid #000 !important;
+        border-left: 1px solid #000 !important;
+    }
+
+    code:not(pre code)::after {
+        content: "" !important;
+        position: absolute !important;
+        bottom: 0 !important;
+        right: 0 !important;
+        width: 4px !important;
+        height: 4px !important;
+        border-bottom: 1px solid #000 !important;
+        border-right: 1px solid #000 !important;
+    }
 }
