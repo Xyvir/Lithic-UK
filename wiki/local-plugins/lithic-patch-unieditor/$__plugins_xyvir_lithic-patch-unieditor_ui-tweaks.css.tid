@@ -14,6 +14,18 @@ title: $:/plugins/xyvir/lithic-patch-unieditor/ui-tweaks.css
 	caret-color: <<colour primary>> !important;
 }
 
+/* Ensure uniform word wrapping between textarea and display layers to prevent cursor desync */
+.unieditor textarea,
+.unieditor textarea.unieditor__textarea,
+.unieditor textarea.unieditor_controlwrap,
+.unieditor canvas,
+.unieditor .textlayer {
+	white-space: pre-wrap !important;
+	word-wrap: break-word !important;
+	overflow-wrap: break-word !important;
+	word-break: break-word !important;
+}
+
 /* Override upstream .overflowy { overflow-y: scroll !important } —
    the textarea auto-expands so forced scroll is just visual clutter. */
 .unieditor .overflowy {
