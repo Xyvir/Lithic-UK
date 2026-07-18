@@ -268,7 +268,7 @@ type: text/css
 
     /* =======================================================
        12. INLINE CODE FORMATTING
-       (Custom bracket styling for printed inline code)
+       (Angled dashed underline for printed inline code)
        ======================================================= */
 
     code:not(pre code) {
@@ -276,29 +276,25 @@ type: text/css
         background: transparent !important;
         border: none !important;
         border-radius: 0 !important;
-        padding: 0 3px !important;
-        position: relative !important;
-    }
+        padding: 0 2px 3px 2px !important;
 
-    code:not(pre code)::before {
-        content: "" !important;
-        position: absolute !important;
-        top: 0 !important;
-        left: 0 !important;
-        width: 4px !important;
-        height: 4px !important;
-        border-top: 1px solid #000 !important;
-        border-left: 1px solid #000 !important;
-    }
+        /* Force background to print for the underline trick */
+        -webkit-print-color-adjust: exact !important;
+        print-color-adjust: exact !important;
+        -webkit-box-decoration-break: clone !important;
+        box-decoration-break: clone !important;
 
-    code:not(pre code)::after {
-        content: "" !important;
-        position: absolute !important;
-        bottom: 0 !important;
-        right: 0 !important;
-        width: 4px !important;
-        height: 4px !important;
-        border-bottom: 1px solid #000 !important;
-        border-right: 1px solid #000 !important;
+        /* Angled dashed underline mimicking the barber pole */
+        background-image: repeating-linear-gradient(
+            -45deg,
+            #000 0px,
+            #000 1.5px,
+            transparent 1.5px,
+            transparent 4px
+        ) !important;
+        background-position: center bottom !important;
+        background-size: calc(100% - 6px) 2px !important;
+        background-repeat: no-repeat !important;
+        
     }
 }

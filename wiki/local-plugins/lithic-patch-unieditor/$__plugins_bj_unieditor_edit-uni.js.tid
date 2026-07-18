@@ -326,6 +326,22 @@ uniEditorWidget.prototype.render = function(parent,nextSibling) {
 		textarea.addEventListener("keydown", function(e) {
 			if (e.__isStreamsCloned) return;
 			
+			if (e.key === "PageUp") {
+				e.preventDefault();
+				e.stopImmediatePropagation();
+				textarea.setSelectionRange(0, 0);
+				textarea.scrollTop = 0;
+				return;
+			}
+			if (e.key === "PageDown") {
+				e.preventDefault();
+				e.stopImmediatePropagation();
+				var len = textarea.value.length;
+				textarea.setSelectionRange(len, len);
+				textarea.scrollTop = textarea.scrollHeight;
+				return;
+			}
+
 			if (e.key === "'") {
 				// Prevent uniEditor's double-quote auto-close feature
 				e.preventDefault();
