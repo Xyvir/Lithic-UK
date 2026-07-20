@@ -1,0 +1,148 @@
+title: $:/macros/lithic/Calendar/weekview.js
+type: application/javascript
+module-type: macro
+
+/*\
+title: $:/macros/lithic/Calendar/weekview.js
+type: application/javascript
+module-type: macro
+
+<<weekview>>
+\*/
+(function () {
+
+    /*jslint node: true, browser: true */
+    /*global $tw: false */
+    "use strict";
+
+    exports.name = "weekview";
+
+    exports.params = [
+        { name: "weeknumber" },
+        { name: "year" },
+        { name: "opts" }
+    ];
+
+    function escapeRegExp(string) {
+        return string.replace(/[.*+?^${}()|[\]\\]/g, function(match){ return '\\\\' + match; });
+    }
+
+    function getISOWeekInfo(date) {
+        var d = new Date(date.getTime());
+        d.setHours(0, 0, 0, 0);
+        d.setDate(d.getDate() + 3 - (d.getDay() + 6) % 7);
+        var week1 = new Date(d.getFullYear(), 0, 4);
+        var wn = 1 + Math.round(((d.getTime() - week1.getTime()) / 86400000 - 3 + (week1.getDay() + 6) % 7) / 7);
+        return { week: wn, year: d.getFullYear() };
+    }
+
+    exports.run = function (weeknumber, year, opts) {
+        var options = $tw.wiki.getTiddlerData("$:/config/bj/Calendar.json")["default"] ||
+            { lastDayOfWeek: "6" };
+            
+        var format = $tw.wiki.getTiddlerText("$:/config/NewJournal/Title") || "YYYY MM DD";
+        
+        var baseDate = new Date();
+        var currentIso = getISOWeekInfo(baseDate);
+        
+        var targetWeek = weeknumber ? parseInt(weeknumber, 10) : currentIso.week;
+        var targetYear = year ? parseInt(year, 10) : currentIso.year;
+
+        // Calculate Monday of the target ISO week
+        var jan4 = new Date(targetYear, 0, 4);
+        var day = jan4.getDay();
+        var diffFromMonday = (day === 0 ? 6 : day - 1);
+        var firstMonday = new Date(targetYear, 0, 4 - diffFromMonday);
+        var targetMonday = new Date(firstMonday.getFullYear(), firstMonday.getMonth(), firstMonday.getDate() + (targetWeek - 1) * 7);
+
+        // Determine start of week based on options.lastDayOfWeek (0=Sun, 1=Mon... 6=Sat)
+        // targetMonday is ISO week start (Monday). If user prefers Sunday (lastDayOfWeek=6), adjust.
+        var wkstart = (parseInt(options.lastDayOfWeek, 10) + 1) % 7; 
+        var mDay = targetMonday.getDay();
+        var diff = (mDay >= wkstart) ? (mDay - wkstart) : (7 - wkstart + mDay);
+        var startDate = new Date(targetMonday.getFullYear(), targetMonday.getMonth(), targetMonday.getDate() - diff);
+        
+        var day_of_week = (function () {
+            var days = [];
+            for (var i = 0; i < 7; i++) { days[i] = $tw.language.getString("Date/Short/Day/" + i); }
+            return days;
+        })();
+        
+        var html = '<$multi.column count="7" border="yes" break="yes" gap="2px">\n';
+        
+        for(var i=0; i<7; i++) {
+            var d = new Date(startDate.getFullYear(), startDate.getMonth(), startDate.getDate() + i);
+            var tiddlerDate = $tw.utils.formatDateString(d, format);
+            var dayLabel = day_of_week[d.getDay()];
+            var isToday = (d.toDateString() === new Date().toDateString());
+            
+            var items = [];
+            var tiddler = $tw.wiki.getTiddler(tiddlerDate);
+            
+            // 1. Check Journal Entry Itself
+            if (tiddler) {
+                if (/^[ \t]*([-*]\s+)?\[\s?\]/m.test(tiddler.fields.text || "")) {
+                    items.push(tiddler.fields.title);
+                }
+
+                // 2. Check Stream Children
+                if (tiddler.fields["stream-list"]) {
+                    var childList = $tw.utils.parseStringArray(tiddler.fields["stream-list"]);
+                    if (childList) {
+                        for (var c = 0; c < childList.length; c++) {
+                            var childTid = $tw.wiki.getTiddler(childList[c]);
+                            if (childTid && /^[ \t]*([-*]\s+)?\[\s?\]/m.test(childTid.fields.text || "")) {
+                                items.push(childTid.fields.title);
+                            }
+                        }
+                    }
+                }
+            }
+            
+            // 3. Check Backlinks
+            var backlinks = $tw.wiki.getTiddlerBacklinks(tiddlerDate);
+            if (backlinks && backlinks.length > 0) {
+                var safeDate = escapeRegExp(tiddlerDate);
+                var backlinkRegex = new RegExp("^[ \\t]*([-*]\\s+)?\\[\\s?\\].*\\[\\[" + safeDate + "\\]\\]", "m");
+
+                for (var b = 0; b < backlinks.length; b++) {
+                    var blTid = $tw.wiki.getTiddler(backlinks[b]);
+                    if (blTid && backlinkRegex.test(blTid.fields.text)) {
+                        if (items.indexOf(blTid.fields.title) === -1) {
+                            items.push(blTid.fields.title);
+                        }
+                    }
+                }
+            }
+            
+            // Sort items numerically/alphabetically (lowest to highest)
+            items.sort();
+            
+            // Add column break if not the first column
+            if (i > 0) {
+                html += '<hr><hr>\n';
+            }
+            
+            // Header: Day + Date link
+            var headerText = dayLabel + ' ' + d.getDate();
+            var headerClass = isToday ? "lithic-weekview-header lithic-weekview-today" : "lithic-weekview-header";
+            html += '<div class="' + headerClass + '"><$link to="""' + tiddlerDate + '""">' + headerText + '</$link></div>\n\n';
+            
+            // Transclude items
+            html += '<div class="lithic-weekview-items">\n\n';
+            if (items.length === 0) {
+                html += '<div style="text-align:center; color:<<colour muted-foreground>>; font-style:italic; font-size:0.85em; margin-top:5px;">*Free*</div>\n\n';
+            } else {
+                for (var j = 0; j < items.length; j++) {
+                    html += '{{' + items[j] + '||$:/plugins/sq/streams/templates/stream-row-body}}\n\n';
+                }
+            }
+            html += '</div>\n';
+        }
+        
+        html += '</$multi.column>';
+        
+        return html;
+    }
+
+})();

@@ -131,7 +131,7 @@ Options:$:/macros/diary/options.json
             if (dates && dates.length > 0) {
                 for (var j = 0; j < dates.length; j++) {
                     if ($tw.wiki.getTiddler(dates[j])) {
-                        actionString += '<$action-navigate $to="""' + dates[j] + '""" $scroll="no"/>';
+                        actionString += '<$action-navigate $to="""' + dates[j] + '""" $scroll="yes"/>';
                     }
                 }
             }
@@ -155,13 +155,14 @@ Options:$:/macros/diary/options.json
             return dates;
         }
 
-        function getWeekNumber(date) {
+        function getWeekNumberAndYear(date) {
             var d = new Date(date.getTime());
             var week1;
             d.setHours(0, 0, 0, 0);
             d.setDate(d.getDate() + 3 - (d.getDay() + 6) % 7);
             week1 = new Date(d.getFullYear(), 0, 4);
-            return 1 + Math.round(((d.getTime() - week1.getTime()) / 86400000 - 3 + (week1.getDay() + 6) % 7) / 7);
+            var wn = 1 + Math.round(((d.getTime() - week1.getTime()) / 86400000 - 3 + (week1.getDay() + 6) % 7) / 7);
+            return { week: wn, year: d.getFullYear() };
         }
 
         function formatAsMonth(month, blankdays, previewMode, mth, year, options) {
@@ -171,17 +172,16 @@ Options:$:/macros/diary/options.json
 
             function getWeekCell(dayNumber) {
                 var cellDate = new Date(year, mth - 1, dayNumber);
-                var dates = getWeekDates(cellDate, options);
-                var tooltipText = "Targeting: " + dates.join(' | ');
-                var actionString = "";
-                if (dates && dates.length > 0) {
-                    for (var j = 0; j < dates.length; j++) {
-                        if ($tw.wiki.getTiddler(dates[j])) {
-                            actionString += '<$action-navigate $to="""' + dates[j] + '""" $scroll="no"/>';
-                        }
-                    }
-                }
-                var wn = getWeekNumber(cellDate);
+                var iso = getWeekNumberAndYear(cellDate);
+                var wn = iso.week;
+                var isoYear = iso.year;
+                var caption = "Week " + ("0"+wn).slice(-2) + ", " + isoYear;
+                var targetTitle = "$:/Weekview";
+                
+                var tooltipText = "Targeting: " + caption;
+                var actionString = '<$action-setfield $tiddler="""' + targetTitle + '""" text="""<<weekview ' + wn + ' ' + isoYear + '>>""" caption="""' + caption + '""" />' +
+                                   '<$action-navigate $to="""' + targetTitle + '""" $scroll="yes"/>';
+                
                 var button = '<$button class="tc-btn-invisible tc-tiddlylink" tooltip="' + tooltipText.replace(/"/g, "'") + '">' + ("0"+wn).slice(-2) + actionString + '</$button>';
                 return centre(button);
             }
@@ -231,7 +231,7 @@ Options:$:/macros/diary/options.json
                     if (targetDates && targetDates.length > 0) {
                         for (var j = 0; j < targetDates.length; j++) {
                             if ($tw.wiki.getTiddler(targetDates[j])) {
-                                actionString += '<$action-navigate $to="""' + targetDates[j] + '""" $scroll="no"/>';
+                                actionString += '<$action-navigate $to="""' + targetDates[j] + '""" $scroll="yes"/>';
                             }
                         }
                     }
