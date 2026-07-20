@@ -21,7 +21,7 @@ exports.prototype = {};
 exports.prototype.getEditorType = function() {
     var EDITOR_MAPPING_PREFIX = "$:/config/EditorTypeMappings/";
     var tiddler = this.wiki.getTiddler(this.editTitle);
-	var type = tiddler.fields.type || "text/vnd.tiddlywiki";
+	var type = (tiddler && tiddler.fields && tiddler.fields.type) || "text/vnd.tiddlywiki";
 	var editorType;
 	if(type === "text/vnd.tiddlywiki") {
 		editorType = this.wiki.getTiddlerText("$:/config/sq/streams/editor-engine");

@@ -94,3 +94,16 @@ tags: $:/tags/Stylesheet
     font-weight: bold;
     text-shadow: 0 0 6px <<colour code-background>>;
 }
+
+/* Mobile Portrait Stacked Layout for Weekview (Skinny Mode) */
+@media screen and (max-width: 768px) {
+    .lithic-weekview-container .br-txt-col {
+        column-count: 1 !important;
+        column-rule: none !important;
+    }
+    
+    .lithic-weekview-container .lithic-weekview-header {
+        border-radius: 4px;
+        margin-bottom: 8px;
+    }
+}

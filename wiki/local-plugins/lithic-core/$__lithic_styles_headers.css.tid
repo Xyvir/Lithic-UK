@@ -92,7 +92,7 @@ type: text/css
      This avoids touching the .stream-row container which handles the 
      right-click context menu logic.
   */
-  .markdown:has(:is(h1, h2, h3, h4, h5, h6)) {
+  .markdown:has(:is(h1, h2)) {
     position: relative;
     /* Extra padding ensures the underlay doesn't look cramped against the text */
     padding: 4px 8px;

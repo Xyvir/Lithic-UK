@@ -68,8 +68,20 @@ module-type: macro
             for (var i = 0; i < 7; i++) { days[i] = $tw.language.getString("Date/Short/Day/" + i); }
             return days;
         })();
+
+        var month_of_year = (function () {
+            var months = [];
+            for (var i = 1; i < 13; i++) { months[i] = $tw.language.getString("Date/Long/Month/" + i); }
+            return months;
+        })();
+        var startMonth = month_of_year[startDate.getMonth() + 1];
+        var endDate = new Date(startDate.getFullYear(), startDate.getMonth(), startDate.getDate() + 6);
+        var endMonth = month_of_year[endDate.getMonth() + 1];
+        var monthLabel = startMonth === endMonth ? startMonth : startMonth + " / " + endMonth;
         
-        var html = '<$multi.column count="7" border="yes" break="yes" gap="2px">\n';
+        var html = '<h3>' + monthLabel + ' during Week ' + targetWeek + ' of ' + targetYear + '</h3>\n\n' +
+                   '<div class="lithic-weekview-container">\n\n' +
+                   '<$multi.column count="7" border="yes" break="yes" gap="2px">\n';
         
         for(var i=0; i<7; i++) {
             var d = new Date(startDate.getFullYear(), startDate.getMonth(), startDate.getDate() + i);
@@ -153,7 +165,7 @@ module-type: macro
             html += '</div>\n';
         }
         
-        html += '</$multi.column>';
+        html += '</$multi.column>\n</div>';
         
         return html;
     }
