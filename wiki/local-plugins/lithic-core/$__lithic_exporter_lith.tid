@@ -3,7 +3,7 @@ extension: .lith
 tags: $:/tags/Exporter
 title: $:/lithic/exporter/lith
 
-<$list filter=<<exportFilter>> counter="counter">
+<$list filter="[subfilter<exportFilter>!is[image]!type[application/tldr]!type[application/pdf]] [subfilter<exportFilter>is[image]] [subfilter<exportFilter>type[application/tldr]] [subfilter<exportFilter>type[application/pdf]]" counter="counter">
 {{{ [<currentTiddler>] ||$:/core/templates/tid-tiddler }}}
 <$reveal default=<<counter-last>> type="nomatch" text="yes">
 

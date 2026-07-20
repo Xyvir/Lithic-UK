@@ -1304,6 +1304,24 @@
     function serializeJsonToLith(jsonArrayText) {
       try {
         const tiddlers = JSON.parse(jsonArrayText);
+        
+        tiddlers.sort((a, b) => {
+          const isBulky = (t) => {
+            if (t.type && (t.type.startsWith('image/') || t.type === 'application/pdf' || t.type === 'application/tldr')) return true;
+            if (t.text && t.text.length > 50000) return true;
+            return false;
+          };
+          const aBulky = isBulky(a);
+          const bBulky = isBulky(b);
+          
+          if (aBulky && !bBulky) return 1;
+          if (!aBulky && bBulky) return -1;
+          
+          const titleA = a.title || "";
+          const titleB = b.title || "";
+          return titleA.localeCompare(titleB);
+        });
+
         const lithBlocks = tiddlers.map(t => {
           let text = "";
           let fields = Object.keys(t).filter(k => k !== "text").sort();
