@@ -1,0 +1,9 @@
+title: $:/lithic/streams/styles/retain-fix.css
+tags: $:/tags/Stylesheet
+type: text/css
+
+@media screen {
+    .stream-row-children[hidden] {
+        display: none !important;
+    }
+}

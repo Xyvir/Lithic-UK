@@ -112,6 +112,7 @@ title: $:/plugins/sq/streams/templates/stream-row-template
 	stateTitle=<<row-children-visibility-state>>
 	text="hide"
 	class="stream-row-children"
+	retain="yes"
 >
 		{{||$:/plugins/sq/streams/templates/stream-root-template}}
 </$reveal>
