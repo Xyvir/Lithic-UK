@@ -119,6 +119,15 @@ module-type: macro
                 }
             }
             
+            // 4. Check Recurring Tiddlers (tagged with full weekday name, e.g. "Monday")
+            var fullDayNames = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
+            var recurring = $tw.wiki.filterTiddlers("[tag[" + fullDayNames[d.getDay()] + "]!is[system]]");
+            for (var r = 0; r < recurring.length; r++) {
+                if (items.indexOf(recurring[r]) === -1) {
+                    items.push(recurring[r]);
+                }
+            }
+            
             // Sort items numerically/alphabetically (lowest to highest)
             items.sort();
             
