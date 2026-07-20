@@ -6,12 +6,28 @@ type: text/vnd.tiddlywiki
 <$reveal state="$:/temp/plugins/bj/Calendar" text="Year" type="nomatch">
 <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px;">
   <$button set="$:/temp/plugins/bj/Calendar" setTo="Year">Year</$button>
-  <$button class="tc-btn-invisible" tooltip="Refresh Calendar">
-    <$action-setfield $tiddler="$:/temp/calendar/refresh" text=<<now "YYYY0MM0DD0hh0mm0ss">> />
-    {{$:/core/images/refresh-button}}
-  </$button>
+  
+  <div style="display: flex; align-items: center; gap: 16px;">
+      <$button class="tc-btn-invisible" tooltip="Previous Month">
+          <$action-setfield $tiddler="$:/state/calendar/monthOffset" text={{{ [[$:/state/calendar/monthOffset]get[text]else[0]subtract[1]] }}} />
+          &lt; prev
+      </$button>
+      <$let currentOffset={{{ [[$:/state/calendar/monthOffset]get[text]else[0]] }}}>
+      <$let btnClass={{{ [<currentOffset>match[0]then[tc-btn-invisible lithic-calendar-now-active]else[tc-btn-invisible]] }}}>
+      <$button class=<<btnClass>> tooltip="Current Month / Refresh">
+          <$action-setfield $tiddler="$:/state/calendar/monthOffset" text="0" />
+          <$action-setfield $tiddler="$:/temp/calendar/refresh" text=<<now "YYYY0MM0DD0hh0mm0ss">> />
+          now
+      </$button>
+      </$let>
+      </$let>
+      <$button class="tc-btn-invisible" tooltip="Next Month">
+          <$action-setfield $tiddler="$:/state/calendar/monthOffset" text={{{ [[$:/state/calendar/monthOffset]get[text]else[0]add[1]] }}} />
+          next &gt;
+      </$button>
+  </div>
 </div>
-<$macrocall $name="calendar" year="" month="" refresh={{$:/temp/calendar/refresh}} />
+<$macrocall $name="calendar" year="" month="" refresh={{$:/temp/calendar/refresh}} offset={{$:/state/calendar/monthOffset}} />
 </$reveal>
 <$reveal state="$:/temp/plugins/bj/Calendar" text="Year" type="match">
 <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px;">

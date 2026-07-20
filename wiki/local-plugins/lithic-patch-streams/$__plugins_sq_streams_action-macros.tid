@@ -108,11 +108,11 @@ tags: $:/tags/Macro
 <$list filter="[<selectionEnd>!is[blank]else[0]!match[0]]" variable="_NULL">
 <$list filter="[<currentTiddler>get[text]length[]subtract<selectionEnd>!match[0]]" variable="_NULL" emptyMessage=<<add-node-actions>>>
 	<$macrocall $name="add-node-actions" startText={{{[<currentTiddler>get[text]split[]rest<selectionEnd>join[]trim[]]}}} streamList={{!!stream-list}} /><$vars 
-	  todo1="[ ] " todo2="- [ ] " done1="[x] " done2="[X] " done3="- [x] " done4="- [X] " num1="<<num>> "
+	  todo1="[ ] " todo2="- [ ] " done1="[x] " done2="[X] " done3="- [x] " done4="- [X] " num1="<<num>> " bullet1="- " bullet2="* "
 	>
 	<$let 
 	  tText={{{ [<currentTiddler>get[text]] }}}
-	  prefixText={{{ [<tText>prefix<num1>then<num1>] ~[<tText>prefix<todo1>then<todo1>] ~[<tText>prefix<todo2>then<todo2>] ~[<tText>prefix<done1>then<done1>] ~[<tText>prefix<done2>then<done2>] ~[<tText>prefix<done3>then<done3>] ~[<tText>prefix<done4>then<done4>] }}}
+	  prefixText={{{ [<tText>prefix<num1>then<num1>] ~[<tText>prefix<todo1>then<todo1>] ~[<tText>prefix<todo2>then<todo2>] ~[<tText>prefix<done1>then<done1>] ~[<tText>prefix<done2>then<done2>] ~[<tText>prefix<done3>then<done3>] ~[<tText>prefix<done4>then<done4>] ~[<tText>prefix<bullet1>then<bullet1>] ~[<tText>prefix<bullet2>then<bullet2>] }}}
 	  pLen={{{ [<prefixText>length[]] ~[[0]] }}}
 	>
 	<$action-setfield $tiddler="$:/state/sq/streams/caret-position" text=<<pLen>>/>
@@ -150,10 +150,12 @@ tags: $:/tags/Macro
   done3="- [x] " 
   done4="- [X] "
   num1="<<num>> "
+  bullet1="- "
+  bullet2="* "
 >
 <$let 
   tText={{{ [<currentTiddler>get[text]] }}}
-  prefixText={{{ [<tText>prefix<num1>then<num1>] ~[<tText>prefix<todo1>then<todo1>] ~[<tText>prefix<todo2>then<todo2>] ~[<tText>prefix<done1>then<done1>] ~[<tText>prefix<done2>then<done2>] ~[<tText>prefix<done3>then<done3>] ~[<tText>prefix<done4>then<done4>] }}}
+  prefixText={{{ [<tText>prefix<num1>then<num1>] ~[<tText>prefix<todo1>then<todo1>] ~[<tText>prefix<todo2>then<todo2>] ~[<tText>prefix<done1>then<done1>] ~[<tText>prefix<done2>then<done2>] ~[<tText>prefix<done3>then<done3>] ~[<tText>prefix<done4>then<done4>] ~[<tText>prefix<bullet1>then<bullet1>] ~[<tText>prefix<bullet2>then<bullet2>] }}}
   actualStartText={{{ [<__startText__>match[]then<prefixText>] ~[<__startText__>!match[]then<__startText__>] }}}
 >
 	<$action-createtiddler $basetitle=<<new-node>> text=<<actualStartText>> $template={{$:/config/sq/streams/new-node-tiddler-template}} parent=<<parent>> stream-type="default" stream-list=<<__streamList__>>/>
@@ -197,9 +199,9 @@ tags: $:/tags/Macro
 
 \define cancel-edit-node-actions()
 <$vars 
-  todo1="[ ] " todo2="- [ ] " done1="[x] " done2="[X] " done3="- [x] " done4="- [X] " num1="<<num>> "
+  todo1="[ ] " todo2="- [ ] " done1="[x] " done2="[X] " done3="- [x] " done4="- [X] " num1="<<num>> " bullet1="- " bullet2="* "
 >
-<$list filter="[<currentTiddler>!has[stream-list]!has[text]] [<currentTiddler>!has[stream-list]get[text]match<num1>] [<currentTiddler>!has[stream-list]get[text]match<todo1>] [<currentTiddler>!has[stream-list]get[text]match<todo2>] [<currentTiddler>!has[stream-list]get[text]match<done1>] [<currentTiddler>!has[stream-list]get[text]match<done2>] [<currentTiddler>!has[stream-list]get[text]match<done3>] [<currentTiddler>!has[stream-list]get[text]match<done4>]" variable="_NULL">
+<$list filter="[<currentTiddler>!has[stream-list]!has[text]] [<currentTiddler>!has[stream-list]get[text]match<num1>] [<currentTiddler>!has[stream-list]get[text]match<todo1>] [<currentTiddler>!has[stream-list]get[text]match<todo2>] [<currentTiddler>!has[stream-list]get[text]match<done1>] [<currentTiddler>!has[stream-list]get[text]match<done2>] [<currentTiddler>!has[stream-list]get[text]match<done3>] [<currentTiddler>!has[stream-list]get[text]match<done4>] [<currentTiddler>!has[stream-list]get[text]match<bullet1>] [<currentTiddler>!has[stream-list]get[text]match<bullet2>]" variable="_NULL">
 	<$action-listops $tiddler={{{[{!!parent}]}}} $field="stream-list" $subfilter="+[is[tiddler]] -[<currentTiddler>]"/>
 	<$action-deletetiddler $tiddler=<<currentTiddler>> />
 </$list>

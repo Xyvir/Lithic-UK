@@ -16,7 +16,7 @@ title: $:/plugins/sq/streams/templates/stream-row-template
 >
 	<div class="tc-droppable-placeholder"/>
 	
-    <div class={{{ stream-row [<row-children-visibility-state>get[text]match[hide]then[stream-row-children-collapsed]] +[join[ ]]}}}
+    <div class={{{ stream-row [<row-children-visibility-state>get[text]match[hide]then[stream-row-children-collapsed]] [<currentTiddler>get[text]regexp[\n]then[stream-row-rich]] [<currentTiddler>get[text]search:text[<<]then[stream-row-rich]] [<currentTiddler>get[text]search:text[<]then[stream-row-rich]] [<currentTiddler>get[text]search:text[{{]then[stream-row-rich]] [<currentTiddler>get[text]prefix[!]then[stream-row-rich]] [<currentTiddler>get[text]prefix[#]then[stream-row-rich]] [<currentTiddler>type[application/tldr]then[stream-row-rich]] [<currentTiddler>get[text]regexp[\[img]then[stream-row-rich]] [<currentTiddler>get[text]prefix[- ]then[stream-row-rich]] [<currentTiddler>get[text]prefix[* ]then[stream-row-rich]] [<row-edit-state>get[text]match<currentTiddler>then[stream-row-editing]] +[unique[]join[ ]]}}}
 		style="position: relative;"
         data-node-title=<<currentTiddler>>
 		data-node-tags={{!!tags}}

@@ -20,7 +20,8 @@ module-type: macro
     exports.params = [
         { name: "weeknumber" },
         { name: "year" },
-        { name: "opts" }
+        { name: "opts" },
+        { name: "refresh" }
     ];
 
     function escapeRegExp(string) {
@@ -81,7 +82,8 @@ module-type: macro
             
             // 1. Check Journal Entry Itself
             if (tiddler) {
-                if (/^[ \t]*([-*]\s+)?\[\s?\]/m.test(tiddler.fields.text || "")) {
+                var itemRegexStr = $tw.wiki.getTiddlerText("$:/config/lithic/Calendar/RegexItems") || "^[ \\t]*(?:[-*]\\s+(?:\\[[ xX]?\\]\\s*)?|\\[[ xX]?\\]\\s+)";
+                if (new RegExp(itemRegexStr, "m").test(tiddler.fields.text || "")) {
                     items.push(tiddler.fields.title);
                 }
 
@@ -91,7 +93,8 @@ module-type: macro
                     if (childList) {
                         for (var c = 0; c < childList.length; c++) {
                             var childTid = $tw.wiki.getTiddler(childList[c]);
-                            if (childTid && /^[ \t]*([-*]\s+)?\[\s?\]/m.test(childTid.fields.text || "")) {
+                            var itemRegexStr = $tw.wiki.getTiddlerText("$:/config/lithic/Calendar/RegexItems") || "^[ \\t]*(?:[-*]\\s+(?:\\[[ xX]?\\]\\s*)?|\\[[ xX]?\\]\\s+)";
+                            if (childTid && new RegExp(itemRegexStr, "m").test(childTid.fields.text || "")) {
                                 items.push(childTid.fields.title);
                             }
                         }
@@ -103,7 +106,8 @@ module-type: macro
             var backlinks = $tw.wiki.getTiddlerBacklinks(tiddlerDate);
             if (backlinks && backlinks.length > 0) {
                 var safeDate = escapeRegExp(tiddlerDate);
-                var backlinkRegex = new RegExp("^[ \\t]*([-*]\\s+)?\\[\\s?\\].*\\[\\[" + safeDate + "\\]\\]", "m");
+                var itemRegexStr = $tw.wiki.getTiddlerText("$:/config/lithic/Calendar/RegexItems") || "^[ \\t]*(?:[-*]\\s+(?:\\[[ xX]?\\]\\s*)?|\\[[ xX]?\\]\\s+)";
+                var backlinkRegex = new RegExp(itemRegexStr + ".*\\[\\[" + safeDate + "\\]\\]", "m");
 
                 for (var b = 0; b < backlinks.length; b++) {
                     var blTid = $tw.wiki.getTiddler(backlinks[b]);
@@ -126,15 +130,15 @@ module-type: macro
             // Header: Day + Date link
             var headerText = dayLabel + ' ' + d.getDate();
             var headerClass = isToday ? "lithic-weekview-header lithic-weekview-today" : "lithic-weekview-header";
-            html += '<div class="' + headerClass + '"><$link to="""' + tiddlerDate + '""">' + headerText + '</$link></div>\n\n';
+            html += '<div class="' + headerClass + '"><$link to="""' + tiddlerDate + '""">' + headerText + '</$link></div>\n';
             
             // Transclude items
-            html += '<div class="lithic-weekview-items">\n\n';
+            html += '<div class="lithic-weekview-items">\n';
             if (items.length === 0) {
-                html += '<div style="text-align:center; color:<<colour muted-foreground>>; font-style:italic; font-size:0.85em; margin-top:5px;">*Free*</div>\n\n';
+                html += '<div style="text-align:center; color:<<colour muted-foreground>>; font-style:italic; font-size:0.85em; margin-top:5px;">*Free*</div>\n';
             } else {
                 for (var j = 0; j < items.length; j++) {
-                    html += '{{' + items[j] + '||$:/plugins/sq/streams/templates/stream-row-body}}\n\n';
+                    html += '{{' + items[j] + '||$:/plugins/sq/streams/templates/stream-row-body}}\n';
                 }
             }
             html += '</div>\n';

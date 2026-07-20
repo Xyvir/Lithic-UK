@@ -7,3 +7,31 @@ type: text/css
         display: none !important;
     }
 }
+
+.stream-node-handle-inner {
+    border-radius: 1.5px !important;
+}
+
+/* For rich/tall stream rows, make the handle grow to fill the vertical space */
+.stream-row-rich:not(.stream-row-editing) > .stream-node-control {
+    bottom: 0 !important; /* Stretch control to full row height */
+    align-items: flex-start !important; /* Push children to top if it's a flex container */
+}
+
+.stream-row-rich:not(.stream-row-editing) .stream-node-collapser {
+    margin-top: 4px !important; /* Keep arrow aligned with text baseline */
+}
+
+.stream-row-rich:not(.stream-row-editing) .stream-node-handle {
+    height: 100% !important;
+    padding-top: 4px !important;
+    padding-bottom: 25px !important;
+    box-sizing: border-box !important;
+}
+
+.stream-row-rich:not(.stream-row-editing) .stream-node-handle-inner {
+    height: 100% !important;
+    width: 6px !important;
+    min-height: 6px !important;
+    border-radius: 1.5px !important;
+}

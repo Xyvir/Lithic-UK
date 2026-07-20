@@ -29,7 +29,8 @@ module-type: global
         var strong = '', tiddlerDate, format = $tw.wiki.getTiddlerText("$:/config/NewJournal/Title") || "YYYY MM DD";
         var date = (new Date(year, mnth - 1, i));
 
-        if (options.highlightLinks == "yes") strong = '!';
+        var isToday = (year === Calendar.getFullYear() && mnth === (Calendar.getMonth() + 1) && i === Calendar.getDate());
+        if (isToday) strong = '!';
 
         tiddlerDate = $tw.utils.formatDateString(date, format);
         var tiddler = $tw.wiki.getTiddler(tiddlerDate);
@@ -39,7 +40,8 @@ module-type: global
 
         // 1. Check Journal Entry Itself (Only if tiddler exists)
         if (tiddler) {
-            if (/^[ \t]*([-*]\s+)?\[\s?\]/m.test(tiddler.fields.text || "")) {
+            var itemRegexStr = $tw.wiki.getTiddlerText("$:/config/lithic/Calendar/RegexItems") || "^[ \\t]*(?:[-*]\\s+(?:\\[[ xX]?\\]\\s*)?|\\[[ xX]?\\]\\s+)";
+            if (new RegExp(itemRegexStr, "m").test(tiddler.fields.text || "")) {
                 isUrgent = true;
             }
 
@@ -49,7 +51,8 @@ module-type: global
                 if (childList) {
                     for (var c = 0; c < childList.length; c++) {
                         var childTid = $tw.wiki.getTiddler(childList[c]);
-                        if (childTid && /^[ \t]*([-*]\s+)?\[\s?\]/m.test(childTid.fields.text || "")) {
+                        var itemRegexStr = $tw.wiki.getTiddlerText("$:/config/lithic/Calendar/RegexItems") || "^[ \\t]*(?:[-*]\\s+(?:\\[[ xX]?\\]\\s*)?|\\[[ xX]?\\]\\s+)";
+                        if (childTid && new RegExp(itemRegexStr, "m").test(childTid.fields.text || "")) {
                             isUrgent = true;
                             break;
                         }
@@ -63,8 +66,9 @@ module-type: global
             var backlinks = $tw.wiki.getTiddlerBacklinks(tiddlerDate);
             if (backlinks && backlinks.length > 0) {
                 var safeDate = escapeRegExp(tiddlerDate);
-                // Look for [ ] ... [[YYYY MM DD]]
-                var backlinkRegex = new RegExp("^[ \\t]*([-*]\\s+)?\\[\\s?\\].*\\[\\[" + safeDate + "\\]\\]", "m");
+                // Look for [ ] or [x] or bare bullets `- ` pointing to the date
+                var itemRegexStr = $tw.wiki.getTiddlerText("$:/config/lithic/Calendar/RegexItems") || "^[ \\t]*(?:[-*]\\s+(?:\\[[ xX]?\\]\\s*)?|\\[[ xX]?\\]\\s+)";
+                var backlinkRegex = new RegExp(itemRegexStr + ".*\\[\\[" + safeDate + "\\]\\]", "m");
 
                 for (var b = 0; b < backlinks.length; b++) {
                     var blTid = $tw.wiki.getTiddler(backlinks[b]);

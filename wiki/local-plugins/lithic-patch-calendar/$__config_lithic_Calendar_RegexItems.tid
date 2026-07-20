@@ -1,0 +1,4 @@
+title: $:/config/lithic/Calendar/RegexItems
+type: text/vnd.tiddlywiki
+
+^[ \t]*(?:[-*]\s+(?:\[[ xX]?\]\s*)?|\[[ xX]?\]\s+)

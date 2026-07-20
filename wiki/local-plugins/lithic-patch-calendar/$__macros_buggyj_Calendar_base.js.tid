@@ -22,7 +22,7 @@ Options:$:/macros/diary/options.json
     exports.name = "calendarbase";
 
     exports.params = [
-        { name: "year" }, { name: "month" }, { name: "opts" }
+        { name: "year" }, { name: "month" }, { name: "opts" }, { name: "offset" }
     ];
 
     exports.run = function (year, month, opts) {
@@ -93,11 +93,18 @@ Options:$:/macros/diary/options.json
                     currentYear = parseInt(ayear, 10) + Math.floor(tmpI / 12);
                     cal += calendar(currentMonth, currentYear, options) + lf;
                 }
-            }
-            else {
+            } else {
                 // CASE 3: Current Month View (Default)
-                cal += calendar(thismonth, thisyear, options) + lf;
-                var next = getNext(thismonth, thisyear);
+                var targetMonth = thismonth;
+                var targetYear = thisyear;
+                var monthOffset = parseInt($tw.wiki.getTiddlerText("$:/state/calendar/monthOffset") || "0", 10);
+                if (monthOffset) {
+                    targetMonth += monthOffset;
+                    while (targetMonth > 12) { targetMonth -= 12; targetYear++; }
+                    while (targetMonth < 1) { targetMonth += 12; targetYear--; }
+                }
+                cal += calendar(targetMonth, targetYear, options) + lf;
+                var next = getNext(targetMonth, targetYear);
                 cal += calendar(next.m, next.y, options, true); // Append next 2 weeks
             }
         }
@@ -179,7 +186,8 @@ Options:$:/macros/diary/options.json
                 var targetTitle = "$:/Weekview";
                 
                 var tooltipText = "Targeting: " + caption;
-                var actionString = '<$action-setfield $tiddler="""' + targetTitle + '""" text="""<<weekview ' + wn + ' ' + isoYear + '>>""" caption="""' + caption + '""" />' +
+                var actionString = '<$action-setfield $tiddler="$:/temp/calendar/refresh" text=<<now "YYYY0MM0DD0hh0mm0ss">> />' +
+                                   '<$action-setfield $tiddler="""' + targetTitle + '""" text="""<$macrocall $name="weekview" weeknumber="' + wn + '" year="' + isoYear + '" refresh={{$:/temp/calendar/refresh}}/>""" caption="""' + caption + '""" />' +
                                    '<$action-navigate $to="""' + targetTitle + '""" $scroll="yes"/>';
                 
                 var button = '<$button class="tc-btn-invisible tc-tiddlylink" tooltip="' + tooltipText.replace(/"/g, "'") + '">' + ("0"+wn).slice(-2) + actionString + '</$button>';

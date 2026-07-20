@@ -5,15 +5,16 @@
     - [ ] Add "Alpha Sort" option to nodestream right-click menu.
        (Do twice to toggle ascending/descending)
     - [ ] Allow double-bullet (`-` or `*` prefix) nodestream entries to create date/calendar highlights, not just `[ ]` / `[x]` todo items.
-    (Currently only `- [ ] [[date]]` / `- [x] [[date]]` highlight the calendar sidebar. This would also recognize `- [[date]]` and `* [[date]]` for non-task journal title references to higlight the associated date on the calendar.)
+    (Currently only `- [ ] foobar [[date]]` / `- [x] foobar [[date]]` / `[x] foobar  [[date]]` / `[ ] foobar  [[date]]` highlight the calendar sidebar. This would also recognize `- foobar [[date]]` and `* foobar [[date]]` for non-task journal title references to higlight the associated date on the calendar.)
     - [ ] Create or modify a new default saved filter for all 'marked' calendar items using the new above format. ("All Scheduled Items" filter)
 - [ ] Extend hover-over 'appear' plugin behavior to be more intuitive
     - [ ] modify behavior to show todo when highlighting calendar datelinks
-    - [ ] Fix the alignment for hover-over on sidebar items.
-    - [ ] add guardrails so only a bit of context is shown on hoverover.
+    - [ ] Fix the alignment  when sidebar open.
+    - [ ] add  size guardrails so only a bit of context is shown on hoverover.
 
 - [ ] Create/Integrate EPUB Serialization based on current to_lithic logic (but have user provide shortcode instead of AI-generated one); add it to existing pdf-to-whiteboard and name the plugin 'lithic-import' or something.
 
+- [ ] Automate lithic-lite generation workflow?
 
 ## launcher.html modularization Project
 - [ ] Allow specifying 'modes' via http parameters so the launcher monolith html can be forced into specific modes to make unit tests easier; (all unit tests can be performed in 1 test environment this way, but with multiple test profiles/users)
@@ -27,6 +28,7 @@
 - [ ] Make sure the custom.ico is actually saved to GitHub so restoring the GitHub will restore your disambiguation / icon
 
 ## Post Modularization Todo
+- [ ] make links and transclusions in uni-editor clickable and hover-able (appear plugin)
 - [ ] Add hotzone for sidebar to autoopen/closen on mouseover.
     (this is mostly for when exporting static HTML sites)
 - [ ] Add custom feedback UI (especially for selfhost) for when save button is clicked but before the save confirmation modal appears.
