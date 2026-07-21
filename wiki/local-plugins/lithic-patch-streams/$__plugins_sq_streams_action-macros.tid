@@ -72,6 +72,9 @@ tags: $:/tags/Macro
 	<$action-listops $tiddler=<<previous-node>> $field="stream-list" $subfilter="+[is[tiddler]] [<currentTiddler>]"/>
 	<$action-listops $tiddler={{!!parent}} $field="stream-list" $subfilter="+[is[tiddler]] -[<currentTiddler>]"/>
 	<$action-setfield $tiddler=<<currentTiddler>> parent=<<previous-node>> />
+	<$list filter="[<previous-node>links[]first[]]" variable="parentTag">
+		<$action-listops $tiddler=<<currentTiddler>> $tags="[<parentTag>]"/>
+	</$list>
 </$list>
 </$vars>
 \end
@@ -159,6 +162,9 @@ tags: $:/tags/Macro
   actualStartText={{{ [<__startText__>match[]then<prefixText>] ~[<__startText__>!match[]then<__startText__>] }}}
 >
 	<$action-createtiddler $basetitle=<<new-node>> text=<<actualStartText>> $template={{$:/config/sq/streams/new-node-tiddler-template}} parent=<<parent>> stream-type="default" stream-list=<<__streamList__>>/>
+	<$list filter="[<parent>links[]first[]]" variable="parentTag">
+		<$action-listops $tiddler=<<new-node>> $tags="[<parentTag>]"/>
+	</$list>
 	<$set name="parent-nodes" filter="[<parent>get[stream-list]]" select="0">
 	<$set name="next-node" filter="[enlist<parent-nodes>is[tiddler]$insertPosition$<currentTiddler>]" select="0">
 	<$vars datePattern="^[0-9]{1,2}(st|nd|rd|th) [A-Za-z]+ [0-9]{4}$">
@@ -204,6 +210,9 @@ tags: $:/tags/Macro
   actualStartText={{{ [<__startText__>match[]then<prefixText>] ~[<__startText__>!match[]then<__startText__>] }}}
 >
 	<$action-createtiddler $basetitle=<<new-node>> text=<<actualStartText>> $template={{$:/config/sq/streams/new-node-tiddler-template}} parent=<<currentTiddler>> stream-type="default" stream-list=<<__streamList__>>/>
+	<$list filter="[<currentTiddler>links[]first[]]" variable="parentTag">
+		<$action-listops $tiddler=<<new-node>> $tags="[<parentTag>]"/>
+	</$list>
 	<$set name="first-child" filter="[<currentTiddler>get[stream-list]enlist-input[]is[tiddler]first[]]" select="0">
 	<$vars datePattern="^[0-9]{1,2}(st|nd|rd|th) [A-Za-z]+ [0-9]{4}$">
 	<$list filter="[<currentTiddler>is[missing]regexp<datePattern>]" variable="_NULL">
