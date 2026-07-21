@@ -3,6 +3,7 @@ type: text/vnd.tiddlywiki
 
 \define menu-item(title,subtitle:"",actions:"")
 		<$button class="tc-menu-list-item tc-btn-invisible" actions=<<__actions__>> >
+			<$action-deletetiddler $tiddler=<<contextmenu-state>>/>
 			<span class="sq-contextmenu-itemwrapper">
 				<span class="sq-contextmenu-itemtext">$title$</span>
 				<span class="sq-contextmenu-itemicon"><$macrocall $name="displayshortcuts" $output="text/plain" shortcuts="$subtitle$" prefix="" separator=" " suffix=""/></span>
@@ -14,8 +15,8 @@ type: text/vnd.tiddlywiki
 
 <$reveal type="popup" state=<<contextmenu-state>> position={{{[<contextmenu-state>get[position]]}}} tag="div">
 	<div class={{{tc-drop-down sq-contextmenu [<contextmenu-state>get[position]match[right]then[sq-contextmenu-alignright]else[]] +[join[ ]]}}}>
-		<$macrocall $name="menu-item" title="insert above" actions="""<$macrocall $name="add-node-actions" insertPosition="match"/>"""/>
-		<$macrocall $name="menu-item" title="insert below" actions="""<$macrocall $name="add-node-actions" insertPosition="after"/>"""/>
+		<$macrocall $name="menu-item" title="insert node above" actions="""<$macrocall $name="add-node-actions" insertPosition="match"/>""" />
+		<$macrocall $name="menu-item" title="insert subnode below" actions="""<$macrocall $name="add-child-node-actions"/>""" />
 		<$macrocall $name="menu-item" title="rename" subtitle="((streams-rename))" actions=<<rename-node-actions>>/>
 		<$list filter="[all[shadows+tiddlers]tag[$:/tags/streams/contextmenu]]" variable="listItem">
 			<$macrocall $name="menu-item"

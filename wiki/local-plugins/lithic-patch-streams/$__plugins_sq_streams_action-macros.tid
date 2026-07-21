@@ -184,6 +184,49 @@ tags: $:/tags/Macro
 \end
 
 
+\define add-child-node-actions(startText:"",streamList:"")
+<$wikify name="new-node" text={{$:/config/sq/streams/new-node-title}}>
+<$wikify name="new-node" text={{{[[<<unusedtitle """]addsuffix<new-node>addsuffix[""">>]]}}}>
+<$vars 
+  todo1="[ ] " 
+  todo2="- [ ] " 
+  done1="[x] " 
+  done2="[X] " 
+  done3="- [x] " 
+  done4="- [X] "
+  num1="<<num>> "
+  bullet1="- "
+  bullet2="* "
+>
+<$let 
+  tText={{{ [<currentTiddler>get[text]] }}}
+  prefixText={{{ [<tText>prefix<num1>then<num1>] ~[<tText>prefix<todo1>then<todo1>] ~[<tText>prefix<todo2>then<todo2>] ~[<tText>prefix<done1>then<done1>] ~[<tText>prefix<done2>then<done2>] ~[<tText>prefix<done3>then<done3>] ~[<tText>prefix<done4>then<done4>] ~[<tText>prefix<bullet1>then<bullet1>] ~[<tText>prefix<bullet2>then<bullet2>] }}}
+  actualStartText={{{ [<__startText__>match[]then<prefixText>] ~[<__startText__>!match[]then<__startText__>] }}}
+>
+	<$action-createtiddler $basetitle=<<new-node>> text=<<actualStartText>> $template={{$:/config/sq/streams/new-node-tiddler-template}} parent=<<currentTiddler>> stream-type="default" stream-list=<<__streamList__>>/>
+	<$set name="first-child" filter="[<currentTiddler>get[stream-list]enlist-input[]is[tiddler]first[]]" select="0">
+	<$vars datePattern="^[0-9]{1,2}(st|nd|rd|th) [A-Za-z]+ [0-9]{4}$">
+	<$list filter="[<currentTiddler>is[missing]regexp<datePattern>]" variable="_NULL">
+		<$action-listops $tiddler=<<currentTiddler>> $tags="Journal"/>
+	</$list>
+	</$vars>
+	<$action-listops $tiddler=<<currentTiddler>> $field="stream-list" $subfilter="+[is[tiddler]] +[insertbefore:first-child<new-node>]"/>
+	<$list filter="[<currentTiddler>!has[stream-type]]" variable="_NULL">
+		<$action-setfield $tiddler=<<currentTiddler>> stream-type="default"/>
+	</$list>
+	<$list filter="[enlist<__streamList__>]">
+		<$action-setfield $tiddler=<<currentTiddler>> parent=<<new-node>>/>
+	</$list>
+	</$set>
+	<$action-setfield $tiddler=<<row-edit-state>> text=<<new-node>>/>
+	<$action-setfield $tiddler={{{ [[$:/state/sq/streams/visibility/]addsuffix<currentTiddler>] }}} text="show"/>
+</$let>
+</$vars>
+</$wikify>
+</$wikify>
+\end
+
+
 \define save-multiple-actions()
 <$action-confirm $message="Split into multiple nodes?" $prompt={{$:/config/sq/streams/prompt-split-to-multiple}}>
 <$list filter="[{!!text}splitregexp{$:/config/sq/streams/node-split-regexp}rest[]reverse[]]" variable="fragment">
