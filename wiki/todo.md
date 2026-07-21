@@ -1,12 +1,9 @@
 ## Todo
-- [ ] add 'skinny mode' (inline) to weevkiew for portrait orientatino on mobile.
 - [ ] Context Menu Expansions
     - [ ] Add "Toggle Todo" or "Toggle Prefix" option to one of the right-click menus. (including option <<num>> prefix?)
         - [ ] Add toggle-prefix hotkey like logseq?
     - [ ] Add "Alpha Sort" option to nodestream right-click menu.
        (Do twice to toggle ascending/descending)
-    - [x] Allow double-bullet (`-` or `*` prefix) nodestream entries to create date/calendar highlights, not just `[ ]` / `[x]` todo items.
-    (Currently only `- [ ] foobar [[date]]` / `- [x] foobar [[date]]` / `[x] foobar  [[date]]` / `[ ] foobar  [[date]]` highlight the calendar sidebar. This would also recognize `- foobar [[date]]` and `* foobar [[date]]` for non-task journal title references to higlight the associated date on the calendar.)
     - [ ] Create or modify a new default saved filter for all 'marked' calendar items using the new above format. ("All Scheduled Items" filter)
 - [ ] Extend hover-over 'appear' plugin behavior to be more intuitive
     - [ ] modify behavior to show todo when highlighting calendar datelinks
@@ -16,6 +13,7 @@
 - [ ] Create/Integrate EPUB Serialization based on current to_lithic logic (but have user provide shortcode instead of AI-generated one); add it to existing pdf-to-whiteboard and name the plugin 'lithic-import' or something.
 
 - [ ] Automate lithic-lite generation workflow?
+
 - [ ] update /anchor to use double --- --- instead of single --- for header vs pre-filled content, so the content can include single <hr> (also brings into alingment with column and pagebreaks)
 - [ ] update slashcommands for /hrule `---` vs /hardbreak `---\n---`
 
@@ -107,6 +105,9 @@
 ---
 
 ## Done
+- [x] Allow double-bullet (`-` or `*` prefix) nodestream entries to create date/calendar highlights, not just `[ ]` / `[x]` todo items.
+    (Currently only `- [ ] foobar [[date]]` / `- [x] foobar [[date]]` / `[x] foobar  [[date]]` / `[ ] foobar  [[date]]` highlight the calendar sidebar. This would also recognize `- foobar [[date]]` and `* foobar [[date]]` for non-task journal title references to higlight the associated date on the calendar.)
+- [X] add 'skinny mode' (inline) to weevkiew for portrait orientatino on mobile.
 - [X] Add "reveal" / collapse element to backlink pill clouds; always open by default(but configurable), tracked via state tiddlers that are not saved when the wiki is?
 - [x] Add proper print styling to Autotable Macros in printstyles.css
 - [x] For both right-click menus, add guardrails so they 'invert' near screen edges so menu never goes out of view.

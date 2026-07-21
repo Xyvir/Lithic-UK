@@ -95,11 +95,25 @@ tags: $:/tags/Stylesheet
     text-shadow: 0 0 6px <<colour code-background>>;
 }
 
-/* Mobile Portrait Stacked Layout for Weekview (Skinny Mode) */
-@media screen and (max-width: 768px) {
+/* Mobile Portrait Stacked Layout for Weekview (Skinny Mode) using Container Queries */
+.lithic-weekview-container {
+    container-type: inline-size;
+    width: 100%;
+}
+
+@container (max-width: 680px) {
     .lithic-weekview-container .br-txt-col {
         column-count: 1 !important;
         column-rule: none !important;
+    }
+    
+    /* Disable the horizontal column breaks so elements stack vertically, but keep dividers invisible */
+    .lithic-weekview-container .br-txt-col hr + hr {
+        border: none !important;
+        margin: 0 !important;
+        height: 0 !important;
+        display: block !important;
+        break-before: auto !important;
     }
     
     .lithic-weekview-container .lithic-weekview-header {
