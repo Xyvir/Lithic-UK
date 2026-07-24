@@ -6,83 +6,101 @@ module-type: widget
 title: $:/plugins/orange/mermaid-tw5/wrapper.js
 type: application/javascript
 module-type: widget
-
-Mermaid wrapper widget for rendering Mermaid diagrams with error handling.
+author: Nathaniel Jones 2017-05-26
+modified: E Furlan 2022-05-08
 \*/
-(function(){
+(function() {
+    // jslint node: true, browser: true
+    // global $tw: false
+    'use strict';
 
-/*javascript-protected*/
-"use strict";
+    var uniqueID = 1,
+        Rocklib = require("$:/plugins/orange/mermaid-tw5/widget-tools.js").rocklib,
+        Widget = require("$:/core/modules/widgets/widget.js").widget,
+        rocklib = new Rocklib(),
+        mermaidAPI = require("$:/plugins/orange/mermaid-tw5/mermaid.min.js")
+        .mermaidAPI;
 
-var Widget = require("$:/core/modules/widgets/widget.js").widget;
+        // Add D3 library to support pan and zoom
+        // by fkmiec 2023-05-21
+        var d3 = require("$:/plugins/orange/mermaid-tw5/d3.v6.min.js");
 
-var MermaidWidget = function(parseTreeNode,options) {
-	this.initialise(parseTreeNode,options);
-};
+    let MermaidWidget = function(parseTreeNode, options) {
+        this.initialise(parseTreeNode, options);
+    };
+    MermaidWidget.prototype = new Widget();
+    // Render this widget into the DOM
+    MermaidWidget.prototype.render = function(parent, nextSibling) {
+        this.parentDomNode = parent;
+        this.computeAttributes();
+        this.execute();
+        var tag = "mermaid",
+            scriptBody = rocklib.getScriptBody(this, "text"),
+            divNode = rocklib.getCanvas(this, tag),
+            _insertSVG = function(svgCode, bindFunctions) {
+                divNode.innerHTML = svgCode;
 
-MermaidWidget.prototype = new Widget();
+                // Add bind functions to support click events
+                // by fkmiec 2023-05-21
+                if (bindFunctions) {
+                    bindFunctions(divNode);
+                }
+            };
+        try {
+            let options = {
+                theme: ""
+            };
+            rocklib.getOptions(this, tag, options);
 
-MermaidWidget.prototype.render = function(parent,nextSibling) {
-	this.parentDomNode = parent;
-	this.computeAttributes();
-	this.execute();
+            // Add securityLevel: 'loose' configuration to support click events
+            // by fkmiec 2023-05-21
+            mermaidAPI.initialize({
+                startOnLoad: false,
+                flowchart: { useMaxWidth: true, htmlLabels: true },
+                securityLevel: 'loose',
+            });
+            // START ZOOM LOGIC: Enable zooming the mermaid diagram with D3
+            // by fkmiec 2023-05-21
+            let zoomEventListenersApplied = false;
+            let isZoomEnabled = false;
 
-	var tag = "div";
-	var divNode = this.document.createElement(tag);
-	divNode.className = "mermaid";
+            divNode.addEventListener('click', function() {
+                if(!zoomEventListenersApplied) {
+                    if (!this.firstChild || typeof this.firstChild.setAttribute !== 'function') {
+                        return;
+                    }
+                    var id = Date.now().toString(36);
+                    this.firstChild.setAttribute("id",id);
+                    var svg = d3.select("#" + id);
+                    svg.html("<g>" + svg.html() + "</g>");
+                    var inner = svg.select("g");
+                    var zoom = d3.zoom().filter(() => isZoomEnabled).on("zoom", function(event) {
+                        inner.attr("transform", event.transform);
+                    });
+                    svg.call(zoom);
+                    zoomEventListenersApplied = true;
+                }
+                isZoomEnabled?isZoomEnabled=false:isZoomEnabled=true;
+            });
+            //END ZOOM LOGIC
 
-	var text = this.getAttribute("text", "");
-	divNode.innerText = text;
+            mermaidAPI.render(divNode.id, scriptBody, _insertSVG);
 
-	var id = "mermaid_" + Math.floor(Math.random() * 100000);
-	divNode.setAttribute("id", id);
-
-	divNode.addEventListener('click', function() {
-		try {
-			if (!this.firstChild || typeof this.firstChild.setAttribute !== 'function') {
-				return;
-			}
-			var svg = this.firstChild;
-			var id = svg.getAttribute("id");
-			if (id && window.svgPanZoom) {
-				svgPanZoom("#" + id, {
-					zoomEnabled: true,
-					controlIconsEnabled: true,
-					fit: true,
-					center: true
-				});
-			}
-		} catch (e) {
-			console.warn("Mermaid zoom click ignored:", e);
-		}
-	});
-
-	parent.insertBefore(divNode,nextSibling);
-	this.renderChildren(divNode,null);
-	this.domNodes.push(divNode);
-
-	if (window.mermaid) {
-		try {
-			window.mermaid.init(undefined, divNode);
-		} catch(err) {
-			console.error("Mermaid render error:", err);
-		}
-	}
-};
-
-MermaidWidget.prototype.execute = function() {
-};
-
-MermaidWidget.prototype.refresh = function(changedTiddlers) {
-	var changedAttributes = this.computeAttributes();
-	if(Object.keys(changedAttributes).length > 0) {
-		this.refreshSelf();
-		return true;
-	} else {
-		return this.subordinateRefresh(changedTiddlers);
-	}
-};
-
-exports.mermaid = MermaidWidget;
-
+        } catch (ex) {
+            divNode.innerText = ex;
+        }
+        parent.insertBefore(divNode, nextSibling);
+        this.domNodes.push(divNode);
+    };
+    MermaidWidget.prototype.execute = function() {
+        // Nothing to do
+    };
+    /*
+    Selectively refreshes the widget if needed. Returns true if the
+    widget or any of its children needed re-rendering
+    */
+    MermaidWidget.prototype.refresh = function(changedTiddlers) {
+        return false;
+    };
+    exports.mermaid = MermaidWidget;
 })();
