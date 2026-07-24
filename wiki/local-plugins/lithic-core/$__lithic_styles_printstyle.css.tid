@@ -298,4 +298,17 @@ type: text/css
         background-repeat: no-repeat !important;
         
     }
+
+    /* =======================================================
+       13. MERMAID DIAGRAMS & SVGS
+       (Preserve colors when printing)
+       ======================================================= */
+    svg,
+    .mermaid,
+    .mermaid .label,
+    .mermaid .nodeLabel,
+    .mermaid .edgeLabel {
+        -webkit-print-color-adjust: exact !important;
+        print-color-adjust: exact !important;
+    }
 }
