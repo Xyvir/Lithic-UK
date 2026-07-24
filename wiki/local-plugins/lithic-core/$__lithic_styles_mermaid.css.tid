@@ -3,6 +3,6 @@ tags: $:/tags/Stylesheet
 type: text/vnd.tiddlywiki
 
 /* Prevent mermaid diagrams from intercepting the scroll wheel and zooming */
-div[id^="mermaid_"] svg {
+.mermaid-container svg {
     pointer-events: none;
 }

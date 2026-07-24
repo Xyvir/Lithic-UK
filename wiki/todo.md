@@ -4,7 +4,6 @@
         - [ ] Add toggle-prefix hotkey like logseq?
     - [ ] Add "Alpha Sort" option to nodestream right-click menu.
        (Do twice to toggle ascending/descending)
-    - [ ] Create or modify a new default saved filter for all 'marked' calendar items using the new above format. ("All Scheduled Items" filter)
 - [ ] Extend hover-over 'appear' plugin behavior to be more intuitive
     - [ ] modify behavior to show todo when highlighting calendar datelinks
     - [ ] Fix the alignment  when sidebar open.
@@ -16,6 +15,8 @@
 
 - [ ] update /anchor to use double --- --- instead of single --- for header vs pre-filled content, so the content can include single <hr> (also brings into alingment with column and pagebreaks)
 - [ ] update slashcommands for /hrule `---` vs /hardbreak `---\n---`
+
+- [ ] Create self-destroying /anchor option based on <<stamp>> macro, maybe even super-ceding stamp?
 
 ## launcher.html modularization Project
 - [ ] Allow specifying 'modes' via http parameters so the launcher monolith html can be forced into specific modes to make unit tests easier; (all unit tests can be performed in 1 test environment this way, but with multiple test profiles/users)
