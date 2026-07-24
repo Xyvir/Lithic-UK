@@ -53,8 +53,8 @@
   url: https://raw.githubusercontent.com/kookma/TW-PluginLibrary/main/docs/library/recipes/library/tiddlers/%2524%253A%252Fplugins%252Fkookma%252Fquickview.json
   type: json-plugin
 
-- name: oeyoews-mermaid
-  url: https://tiddlywiki-starter-kit.vercel.app/
+- name: mermaid-tw5
+  url: https://efurlanm.github.io/mermaid-tw5/
   type: plugins
 
 - name: advanced-search

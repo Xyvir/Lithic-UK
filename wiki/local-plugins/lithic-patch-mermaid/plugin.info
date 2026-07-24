@@ -1,0 +1,11 @@
+{
+	"title": "$:/plugins/xyvir/lithic-patch-mermaid",
+	"description": "Lithic patch for orange/mermaid-tw5 wrapper event listeners",
+	"author": "Lithic",
+	"core-version": ">=5.0.0",
+	"plugin-type": "plugin",
+	"parent-plugin": "$:/plugins/orange/mermaid-tw5",
+	"dependents": ["$:/plugins/orange/mermaid-tw5"],
+	"list": "readme",
+	"priority": "2"
+}

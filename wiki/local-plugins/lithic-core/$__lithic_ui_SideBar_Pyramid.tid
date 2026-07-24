@@ -40,7 +40,7 @@ graph TD
     <$list filter="[<targetNode>has[stream-list]]" emptyMessage="*No child streams to display for this node.*">
         <$wikify name="pyramidData" text="<$macrocall $name='build-pyramid-data' rootNode=<<targetNode>> />">
             <$let nl={{{ [charcode[10]] }}} fullChart={{{ [<pyramidData>addsuffix<nl>addsuffix[linkStyle default stroke:#d3d3d3,stroke-width:2px;]addsuffix<nl>addsuffix[classDef parentStyle fill:#444,stroke:#fff,stroke-width:2px,color:#fff,font-weight:normal;]addsuffix<nl>addsuffix[classDef childStyle fill:#666,stroke:#ccc,stroke-width:1px,color:#fff,font-weight:normal;]addsuffix<nl>addsuffix[classDef activeStyle fill:#aaa,stroke:#fff,stroke-width:2px,color:#111,font-weight:bold;]] }}}>
-                <$codeblock code=<<fullChart>> language="mermaid" />
+                <$mermaid text=<<fullChart>> />
                 <div style="display:flex; justify-content:flex-end; margin-top:4px;">
                    <$button message="tm-copy-to-clipboard" param=<<pyramidData>> tooltip="Copy mermaid code" class="tc-btn-invisible tc-btn-mini tc-tiddlylink">
                       copy

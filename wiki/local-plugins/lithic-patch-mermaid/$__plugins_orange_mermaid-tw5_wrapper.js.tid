@@ -1,0 +1,88 @@
+title: $:/plugins/orange/mermaid-tw5/wrapper.js
+type: application/javascript
+module-type: widget
+
+/*\
+title: $:/plugins/orange/mermaid-tw5/wrapper.js
+type: application/javascript
+module-type: widget
+
+Mermaid wrapper widget for rendering Mermaid diagrams with error handling.
+\*/
+(function(){
+
+/*javascript-protected*/
+"use strict";
+
+var Widget = require("$:/core/modules/widgets/widget.js").widget;
+
+var MermaidWidget = function(parseTreeNode,options) {
+	this.initialise(parseTreeNode,options);
+};
+
+MermaidWidget.prototype = new Widget();
+
+MermaidWidget.prototype.render = function(parent,nextSibling) {
+	this.parentDomNode = parent;
+	this.computeAttributes();
+	this.execute();
+
+	var tag = "div";
+	var divNode = this.document.createElement(tag);
+	divNode.className = "mermaid";
+
+	var text = this.getAttribute("text", "");
+	divNode.innerText = text;
+
+	var id = "mermaid_" + Math.floor(Math.random() * 100000);
+	divNode.setAttribute("id", id);
+
+	divNode.addEventListener('click', function() {
+		try {
+			if (!this.firstChild || typeof this.firstChild.setAttribute !== 'function') {
+				return;
+			}
+			var svg = this.firstChild;
+			var id = svg.getAttribute("id");
+			if (id && window.svgPanZoom) {
+				svgPanZoom("#" + id, {
+					zoomEnabled: true,
+					controlIconsEnabled: true,
+					fit: true,
+					center: true
+				});
+			}
+		} catch (e) {
+			console.warn("Mermaid zoom click ignored:", e);
+		}
+	});
+
+	parent.insertBefore(divNode,nextSibling);
+	this.renderChildren(divNode,null);
+	this.domNodes.push(divNode);
+
+	if (window.mermaid) {
+		try {
+			window.mermaid.init(undefined, divNode);
+		} catch(err) {
+			console.error("Mermaid render error:", err);
+		}
+	}
+};
+
+MermaidWidget.prototype.execute = function() {
+};
+
+MermaidWidget.prototype.refresh = function(changedTiddlers) {
+	var changedAttributes = this.computeAttributes();
+	if(Object.keys(changedAttributes).length > 0) {
+		this.refreshSelf();
+		return true;
+	} else {
+		return this.subordinateRefresh(changedTiddlers);
+	}
+};
+
+exports.mermaid = MermaidWidget;
+
+})();
