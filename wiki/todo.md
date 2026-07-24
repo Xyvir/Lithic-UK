@@ -1,4 +1,6 @@
 ## Todo
+- [ ] "Favorites" sidebar area vertical linespacing is not the same in tweak vs use mode, need to align these so the favorites don't visually shift on tweak mode toggle.
+
 - [ ] Context Menu Expansions
     - [ ] Add "Toggle Todo" or "Toggle Prefix" option to one of the right-click menus. (including option <<num>> prefix?)
         - [ ] Add toggle-prefix hotkey like logseq?
