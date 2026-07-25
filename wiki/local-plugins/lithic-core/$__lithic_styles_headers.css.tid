@@ -80,13 +80,14 @@ type: text/css
   padding: 0;
   text-align: center;
   opacity: 0.8; 
+  font-variant: small-caps;
+  text-transform: none;
 }
 
 .markdown h6::before {
   content: '';
   display: block;
-  width: 350px;
-  max-width: 80%;
+  width: 75%;
   height: 6px;
   border-bottom: 1px solid currentColor;
   border-left: 1px solid currentColor;
