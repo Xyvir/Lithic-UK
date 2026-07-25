@@ -82,6 +82,19 @@ type: text/css
   opacity: 0.8; 
 }
 
+.markdown h6::before {
+  content: '';
+  display: block;
+  width: 350px;
+  max-width: 80%;
+  height: 6px;
+  border-bottom: 1px solid currentColor;
+  border-left: 1px solid currentColor;
+  border-right: 1px solid currentColor;
+  margin: 0 auto 6px auto;
+  opacity: 0.4;
+}
+
 .markdown h6::after {
   display: none;
 }
