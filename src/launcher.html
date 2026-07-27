@@ -1405,7 +1405,7 @@ class ActionEphemeralWidget extends Widget {
                 const childTitle = $tw.wiki.generateNewTitle(this.parentTiddler + "/stdout");
                 $tw.wiki.addTiddler(new $tw.Tiddler({
                     title: childTitle,
-                    text: "\\\`\\\`\\\`\\n" + data.stdout + "\\n\\\`\\\`\\\`",
+                    text: data.stdout,
                     type: "text/x-markdown",
                     parent: this.parentTiddler,
                     "stream-type": "default"

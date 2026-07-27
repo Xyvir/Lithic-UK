@@ -173,7 +173,7 @@ ln -sf "${INSTALL_DIR}/autoupdate.sh" /usr/local/bin/lithic-autoupdate
 # --- Enable and start ---
 systemctl daemon-reload
 systemctl enable "${SERVICE_NAME}"
-systemctl start "${SERVICE_NAME}"
+systemctl restart "${SERVICE_NAME}"
 
 # Enable daily updates if requested via environment variable
 if [ "${LITHIC_AUTOUPDATE:-false}" = "true" ]; then
@@ -184,7 +184,13 @@ fi
 # Enable Ephemeral if requested via environment variable
 if [ "${ENABLE_EPHEMERAL:-false}" = "true" ]; then
   echo "Installing Ephemeral Code Execution Engine..."
-  curl -sSL https://raw.githubusercontent.com/Xyvir/Ephemeral.exe/main/install.sh | sudo bash
+  TMP_EPH_DIR=$(mktemp -d)
+  git clone https://github.com/Xyvir/Ephemeral.exe.git "$TMP_EPH_DIR"
+  cd "$TMP_EPH_DIR"
+  chmod +x install.sh
+  ./install.sh
+  cd - > /dev/null
+  rm -rf "$TMP_EPH_DIR"
 fi
 
 # Source the env file to get the final values for the summary
