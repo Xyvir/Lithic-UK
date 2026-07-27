@@ -33,3 +33,27 @@ jobs:
       - name: Verify Service Status
         run: |
           sudo systemctl status lithic
+          
+      - name: Verify Web Server HTTP
+        run: |
+          # Give services a few seconds to fully initialize
+          sleep 5
+          # Expecting connection to succeed (even if auth/404 is returned)
+          curl -Isv http://localhost:8080
+          
+      - name: Verify Ephemeral API
+        run: |
+          # Check the Ephemeral service status explicitly
+          sudo systemctl status ephemeral-api || true
+          # Expecting connection to Ephemeral API to succeed
+          curl -Isv http://localhost:8787
+          
+      - name: Verify Ephemeral API Code Execution
+        run: |
+          # Create a base64 encoded markdown payload
+          PAYLOAD_B64=$(printf '```python\nprint("hello world")\n```' | base64 -w 0)
+          
+          # Send to Ephemeral API
+          curl -fsv -X POST http://localhost:8787/ephemeral/api/v1/run \
+            -H "Content-Type: application/json" \
+            -d "{\"document_blob\": \"$PAYLOAD_B64\"}"
