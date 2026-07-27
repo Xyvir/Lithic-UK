@@ -99,6 +99,22 @@ run_update() {
     else
         echo "[Autoupdate] All files are up to date."
     fi
+
+    # Update Ephemeral API if it is installed
+    if [ "$HAS_SYSTEMD" -eq 1 ] && run_systemctl is-enabled ephemeral-api.service >/dev/null 2>&1; then
+        echo "[Autoupdate] Ephemeral API is installed. Updating..."
+        TMP_EPH_DIR=$(mktemp -d)
+        if git clone https://github.com/Xyvir/Ephemeral.exe.git "$TMP_EPH_DIR" >/dev/null 2>&1; then
+            cd "$TMP_EPH_DIR" || exit
+            chmod +x install.sh
+            ./install.sh
+            cd - > /dev/null || exit
+            echo "[Autoupdate] Ephemeral API updated successfully."
+        else
+            echo "[Autoupdate] ERROR: Failed to clone Ephemeral.exe repository for update."
+        fi
+        rm -rf "$TMP_EPH_DIR"
+    fi
 }
 
 enable_timer() {
