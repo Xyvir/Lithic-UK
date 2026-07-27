@@ -54,6 +54,18 @@ jobs:
           PAYLOAD_B64=$(printf '```python\nprint("hello world")\n```' | base64 -w 0)
           
           # Send to Ephemeral API
-          curl -fsv -X POST http://localhost:8787/ephemeral/api/v1/run \
+          HTTP_CODE=$(curl -sv -X POST http://localhost:8787/ephemeral/api/v1/run \
             -H "Content-Type: application/json" \
-            -d "{\"document_blob\": \"$PAYLOAD_B64\"}"
+            -d "{\"document_blob\": \"$PAYLOAD_B64\"}" \
+            -o api_response.json \
+            -w "%{http_code}")
+            
+          echo "HTTP Status Code: $HTTP_CODE"
+          cat api_response.json || true
+          echo ""
+          
+          if [ "$HTTP_CODE" -ne 200 ]; then
+            echo "API request failed with code $HTTP_CODE. Dumping ephemeral-api logs:"
+            sudo journalctl -u ephemeral-api --no-pager
+            exit 1
+          fi
