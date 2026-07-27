@@ -1345,6 +1345,280 @@
     }
 
     /* --- CORE ENGINE FETCHER --- */
+    const EPHEMERAL_INTEGRATION_JSON = [
+      {
+        "title": "$:/plugins/lithic/ephemeral/action-ephemeral.js",
+        "type": "application/javascript",
+        "module-type": "widget",
+        "text": `/*\\
+title: $:/plugins/lithic/ephemeral/action-ephemeral.js
+type: application/javascript
+module-type: widget
+
+Action widget to run Ephemeral code.
+\\*/
+(function(){
+"use strict";
+
+var Widget = require("$:/core/modules/widgets/widget.js").widget;
+
+class ActionEphemeralWidget extends Widget {
+    render(parent, nextSibling) {
+        this.computeAttributes();
+        this.execute();
+    }
+    execute() {
+        this.code = this.getAttribute("code");
+        this.language = this.getAttribute("language") || "bash";
+        this.parentTiddler = this.getAttribute("parentTiddler") || this.getVariable("currentTiddler");
+    }
+    refresh(changedTiddlers) {
+        var changedAttributes = this.computeAttributes();
+        if(changedAttributes.code || changedAttributes.parentTiddler) {
+            this.refreshSelf();
+            return true;
+        }
+        return this.refreshChildren(changedTiddlers);
+    }
+
+    async invokeAction(triggeringWidget, event) {
+        if (!this.code) return true;
+        
+        try {
+            const markdownPayload = "\\\`\\\`\\\`" + this.language + "\\n" + this.code + "\\n\\\`\\\`\\\`";
+            const utf8str = new TextEncoder().encode(markdownPayload);
+            let binary = '';
+            for (let i = 0; i < utf8str.byteLength; i++) {
+                binary += String.fromCharCode(utf8str[i]);
+            }
+            const base64code = window.btoa(binary);
+            
+            const response = await fetch('/ephemeral/api/v1/run', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({ document_blob: base64code, timeout: 300 })
+            });
+            
+            const data = await response.json();
+            
+            if (data.stdout && data.stdout.trim()) {
+                const childTitle = $tw.wiki.generateNewTitle(this.parentTiddler + "/stdout");
+                $tw.wiki.addTiddler(new $tw.Tiddler({
+                    title: childTitle,
+                    text: "\\\`\\\`\\\`\\n" + data.stdout + "\\n\\\`\\\`\\\`",
+                    type: "text/x-markdown",
+                    parent: this.parentTiddler,
+                    "stream-type": "default"
+                }));
+                this.appendToStream(this.parentTiddler, childTitle);
+            }
+            
+            if (data.artifact_file) {
+                const artifactUrl = '/sync/ephemeral/' + encodeURIComponent(data.artifact_file);
+                
+                if (data.artifact_file.match(/\\.(png|jpe?g|webp|gif|svg)$/i)) {
+                    const imgRes = await fetch(artifactUrl);
+                    const blob = await imgRes.blob();
+                    
+                    const reader = new FileReader();
+                    reader.onload = () => {
+                        const dataUri = reader.result;
+                        const img = new Image();
+                        img.onload = () => {
+                            const payload = this.generateWhiteboardData([{
+                                filename: data.artifact_file,
+                                dataUri: dataUri,
+                                width: img.width,
+                                height: img.height
+                            }]);
+                            
+                            const wbTitle = $tw.wiki.generateNewTitle(this.parentTiddler + "/artifact");
+                            const isPortrait = img.height > img.width;
+                            const wbHeight = isPortrait ? "1056px" : "540px";
+                            
+                            $tw.wiki.addTiddler(new $tw.Tiddler({
+                                title: wbTitle,
+                                text: JSON.stringify(payload),
+                                type: "application/tldr",
+                                parent: this.parentTiddler,
+                                "stream-type": "default",
+                                "whiteboard-height": wbHeight
+                            }));
+                            this.appendToStream(this.parentTiddler, wbTitle);
+                        };
+                        img.src = dataUri;
+                    };
+                    reader.readAsDataURL(blob);
+                } else {
+                    const a = document.createElement("a");
+                    a.href = artifactUrl;
+                    a.download = data.artifact_file;
+                    document.body.appendChild(a);
+                    a.click();
+                    document.body.removeChild(a);
+                }
+            }
+            
+        } catch (e) {
+            console.error("Ephemeral API Error:", e);
+            const errTitle = $tw.wiki.generateNewTitle(this.parentTiddler + "/error");
+            $tw.wiki.addTiddler(new $tw.Tiddler({
+                title: errTitle,
+                text: "❌ **Ephemeral API Error:**\\n\\n\\\`\\\`\\\`\\n" + e.toString() + "\\n\\\`\\\`\\\`",
+                type: "text/x-markdown",
+                parent: this.parentTiddler,
+                "stream-type": "default"
+            }));
+            this.appendToStream(this.parentTiddler, errTitle);
+        }
+        
+        return true;
+    }
+    
+    appendToStream(parentTitle, childTitle) {
+        var parent = $tw.wiki.getTiddler(parentTitle);
+        var list = parent ? ($tw.utils.parseStringArray(parent.fields["stream-list"]) || []) : [];
+        if (!list.includes(childTitle)) {
+            list.push(childTitle);
+            $tw.wiki.addTiddler(new $tw.Tiddler(parent, {"stream-list": $tw.utils.stringifyList(list)}));
+        }
+    }
+    
+    generateUUID() {
+        if (typeof crypto !== "undefined" && crypto.randomUUID) {
+            return crypto.randomUUID();
+        }
+        return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {
+            var r = Math.random() * 16 | 0, v = c == 'x' ? r : (r & 0x3 | 0x8);
+            return v.toString(16);
+        });
+    }
+
+    generateWhiteboardData(images) {
+        const documentId = "doc";
+        const pages = {};
+        const assets = {};
+        const pageStates = {};
+
+        images.forEach((img, index) => {
+            const i = index + 1;
+            const uuidAsset = this.generateUUID();
+            const uuidShape = this.generateUUID();
+            const uuidPage = i === 1 ? "page" : this.generateUUID();
+
+            pages[uuidPage] = {
+                id: uuidPage,
+                name: \`Page \${i}\`,
+                childIndex: i,
+                shapes: {},
+                bindings: {}
+            };
+
+            assets[uuidAsset] = {
+                id: uuidAsset,
+                type: "image",
+                fileName: img.filename,
+                src: img.dataUri,
+                size: [img.width, img.height]
+            };
+
+            pages[uuidPage].shapes[uuidShape] = {
+                id: uuidShape,
+                type: "image",
+                name: "Image",
+                parentId: uuidPage,
+                childIndex: 1,
+                point: [0, 0],
+                size: [img.width, img.height],
+                rotation: 0,
+                style: {
+                    color: "black",
+                    size: "small",
+                    isFilled: false,
+                    dash: "draw",
+                    scale: 1
+                },
+                assetId: uuidAsset,
+                isLocked: true
+            };
+
+            const sidebarMargin = 0; 
+            const topMargin = 50;
+            const viewerWidth = 1200;
+            const isPortrait = img.height > img.width;
+
+            let zoom, viewerHeight;
+            if (isPortrait) {
+                zoom = 0.75;
+                viewerHeight = 1056; 
+            } else {
+                viewerHeight = 540;
+                zoom = Math.min(
+                    (viewerWidth - sidebarMargin) / img.width,
+                    (viewerHeight - topMargin) / img.height,
+                    1
+                );
+            }
+
+            pageStates[uuidPage] = {
+                id: uuidPage,
+                selectedIds: [],
+                camera: {
+                    point: [sidebarMargin / zoom, topMargin / zoom],
+                    zoom: zoom
+                }
+            };
+        });
+
+        return {
+            document: {
+                id: documentId,
+                name: "PDF Canvas",
+                version: 15.5,
+                pages: pages,
+                pageStates: pageStates,
+                assets: assets
+            }
+        };
+    }
+}
+
+exports["action-ephemeral"] = ActionEphemeralWidget;
+})();\`
+      },
+      {
+        "title": "~$:/plugins/lithic/ephemeral/codeblock-override",
+        "tags": "$:/tags/Global",
+        "text": `\\widget $codeblock(code, language)
+<div class="wilk-copy-code-button">
+	<$list filter="[<language>match[jspython]]" variable="ignore">
+		<$button tooltip="Run Code" class="tc-btn-invisible run-jspython-btn">&gt;_
+			<$set name="consoleTiddler" value={{{ [<currentTiddler>addsuffix[/console]] }}}>
+				<$action-jspython code=<<code>> outputTiddler=<<consoleTiddler>> />
+				<$action-listops $tiddler=<<currentTiddler>> $field="stream-list" $subfilter="[<consoleTiddler>]" />
+				<$action-setfield $tiddler=<<consoleTiddler>> parent=<<currentTiddler>> />
+			</$set>
+		</$button>
+	</$list>
+	<$list filter="[<language>!match[jspython]]" variable="ignore">
+		<$button tooltip="Run on Ephemeral API" class="tc-btn-invisible run-jspython-btn">&gt;_
+			<$action-ephemeral code=<<code>> language=<<language>> parentTiddler=<<currentTiddler>> />
+		</$button>
+	</$list>
+	<$button
+	message="tm-copy-to-clipboard"
+	param=<<code>>
+	tooltip="Copy"
+	class="tc-btn-invisible">
+		{{$:/core/images/copy-clipboard}}
+	</$button>
+	<$genesis $type="$codeblock" $remappable="no" code=<<code>> language=<<language>>/>
+</div>
+\\end`
+      }
+    ];
+
+    /* --- CORE ENGINE FETCHER --- */
     const WEBDAV_UTILS_JS = `/*
 title: $:/lithic/startup/webdav-utils.js
 type: application/javascript
@@ -1652,6 +1926,8 @@ exports.startup = function() {
               type: "application/javascript",
               "module-type": "startup"
             });
+            // Inject Ephemeral integration
+            window.pendingImports.push(...EPHEMERAL_INTEGRATION_JSON);
           }
 
           replacePageContents(coreHtml, true);

@@ -23,6 +23,7 @@ echo "============================================"
 echo "  User:  ${LITHIC_USER}"
 echo "  Port:  ${LITHIC_PORT}"
 echo "  Data:  ${DATA_DIR}"
+echo "  Ephemeral Host: ${EPHEMERAL_HOST:-127.0.0.1}"
 echo "============================================"
 
 # --- Validate ---
@@ -189,7 +190,12 @@ ${CADDY_SITE_ADDRESS} {
         }
     }
 
-    # 4. Web Server 
+    # 4. Ephemeral API Proxy (Optional Sidecar)
+    handle /ephemeral/api/v1/* {
+        reverse_proxy ${EPHEMERAL_HOST:-127.0.0.1}:8787
+    }
+
+    # 5. Web Server 
     # Serves all public assets. If a request made it past basic_auth, it lands here.
     handle * {
         file_server {
@@ -222,7 +228,8 @@ server.modules = (
     "mod_webdav",
     "mod_cgi",
     "mod_setenv",
-    "mod_rewrite"
+    "mod_rewrite",
+    "mod_proxy"
 )
 
 server.document-root = "${PUBLIC_DIR}"
@@ -272,6 +279,18 @@ alias.url += ( "/sync/" => "${DATA_DIR}/" )
     webdav.activate = "enable"
     webdav.is-readonly = "disable"
     setenv.add-response-header = ( "Content-Type" => "text/plain; charset=utf-8" )
+}
+
+# Ephemeral API Proxy (Optional Sidecar)
+\$HTTP["url"] =~ "^/ephemeral/api/v1/" {
+    proxy.server = (
+        "" => (
+            (
+                "host" => "${EPHEMERAL_HOST:-127.0.0.1}",
+                "port" => 8787
+            )
+        )
+    )
 }
 EOF
     

@@ -181,6 +181,12 @@ if [ "${LITHIC_AUTOUPDATE:-false}" = "true" ]; then
   systemctl enable --now "${SERVICE_NAME}-autoupdate.timer"
 fi
 
+# Enable Ephemeral if requested via environment variable
+if [ "${ENABLE_EPHEMERAL:-false}" = "true" ]; then
+  echo "Installing Ephemeral Code Execution Engine..."
+  curl -sSL https://raw.githubusercontent.com/Xyvir/Ephemeral.exe/main/install.sh | sudo bash
+fi
+
 # Source the env file to get the final values for the summary
 source "${ENV_FILE}"
 

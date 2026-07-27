@@ -38,6 +38,11 @@
 		}
 	}
 
+	# Ephemeral API Proxy (Optional Sidecar)
+	route /ephemeral/api/v1/* {
+		reverse_proxy localhost:8787
+	}
+
 	# Static file server for Lithic UI
 	route * {
 		file_server {

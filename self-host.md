@@ -53,6 +53,8 @@ Bypass the prompts by providing the variables inline. This will automatically se
 curl -fsSL sh.lithic.uk | sudo SERVER_BACKEND=caddy LITHIC_FQDN=lithic.example.com LITHIC_USER=your_username LITHIC_AUTOUPDATE=true bash
 ```
 
+> **Note:** To optionally include the **Ephemeral Code Execution Engine**, append `ENABLE_EPHEMERAL=true` to the environment variables before piping to bash.
+
 ### Method D: Manual Install
 
 1. Download the latest `lithic-server.tar.gz` from [GitHub Releases](https://github.com/Xyvir/Lithic/releases).
@@ -67,6 +69,42 @@ curl -fsSL sh.lithic.uk | sudo SERVER_BACKEND=caddy LITHIC_FQDN=lithic.example.c
    LITHIC_USER=admin LITHIC_PASSWORD=your-secret-password /app/entrypoint.sh
    ```
 
+### Method E: Docker Compose (with Ephemeral Sidecar)
+
+For users who want to run Lithic alongside the optional **Ephemeral Code Execution Engine**, `docker-compose` is the recommended method. Create a `docker-compose.yml` file:
+
+```yaml
+version: '3.8'
+
+services:
+  lithic:
+    image: ghcr.io/xyvir/lithic:latest
+    container_name: lithic
+    ports:
+      - "8080:8080"
+    environment:
+      - LITHIC_USER=admin
+      - LITHIC_PASSWORD=your-secret-password
+      - EPHEMERAL_HOST=ephemeral
+    volumes:
+      - lithic-data:/data
+    restart: unless-stopped
+
+  ephemeral:
+    image: ghcr.io/xyvir/ephemeral:latest
+    container_name: ephemeral
+    # Internal port 8787 is used for the API; Lithic proxies this automatically.
+    # No ports need to be exposed to the host machine.
+    volumes:
+      - lithic-data:/data
+    restart: unless-stopped
+
+volumes:
+  lithic-data:
+```
+
+Run with `docker-compose up -d`.
+
 ---
 
 ## Configuration
@@ -78,6 +116,7 @@ The server is configured entirely through environment variables:
 | `LITHIC_USER` | `admin` | BasicAuth username |
 | `LITHIC_PASSWORD` | `changeme` | BasicAuth password |
 | `LITHIC_PORT` | `8080` | HTTP listen port |
+| `EPHEMERAL_HOST` | `127.0.0.1` | Hostname of Ephemeral sidecar (e.g. `ephemeral` in Docker) |
 
 For the LXC install, these are stored in `/etc/default/lithic`.
 
