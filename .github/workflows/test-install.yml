@@ -1,0 +1,35 @@
+name: Test LXC Installer
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - 'deploy/install-lxc.sh'
+  pull_request:
+    paths:
+      - 'deploy/install-lxc.sh'
+  workflow_dispatch:
+
+jobs:
+  test-install:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        backend: [caddy, lighttpd]
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Test LXC Installer with Ephemeral
+        env:
+          SERVER_BACKEND: ${{ matrix.backend }}
+          ENABLE_EPHEMERAL: "true"
+          LITHIC_USER: "admin"
+          LITHIC_PASSWORD: "password"
+        run: |
+          sudo -E bash deploy/install-lxc.sh
+          
+      - name: Verify Service Status
+        run: |
+          sudo systemctl status lithic
