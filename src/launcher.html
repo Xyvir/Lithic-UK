@@ -1304,7 +1304,7 @@
     function serializeJsonToLith(jsonArrayText) {
       try {
         const tiddlers = JSON.parse(jsonArrayText);
-        
+
         tiddlers.sort((a, b) => {
           const isBulky = (t) => {
             if (t.type && (t.type.startsWith('image/') || t.type === 'application/pdf' || t.type === 'application/tldr')) return true;
@@ -1313,10 +1313,10 @@
           };
           const aBulky = isBulky(a);
           const bBulky = isBulky(b);
-          
+
           if (aBulky && !bBulky) return 1;
           if (!aBulky && bBulky) return -1;
-          
+
           const titleA = a.title || "";
           const titleB = b.title || "";
           return titleA.localeCompare(titleB);
@@ -1441,7 +1441,7 @@ class ActionEphemeralWidget extends Widget {
                             
                             $tw.wiki.addTiddler(new $tw.Tiddler({
                                 title: childTitle,
-                                text: "<<wb-image \\"[[\\" + wbTitle + \\"]]\\" \\"80%\\">>",
+                                text: "<<wb-image \\"[[\\"" + wbTitle + "\\"]]\\" \\"80%\\">>",
                                 type: "text/vnd.tiddlywiki",
                                 parent: this.parentTiddler,
                                 "stream-type": "default"
@@ -1837,46 +1837,46 @@ exports.startup = function() {
         let jsonText;
         try {
           const defaultPlugins = [
-              "ahanniga/context-menu-plugin",
-              "bj/Calendar",
-              "bj/unieditor",
-              "byper/advanced-search",
-              "flibbles/relink",
-              "flibbles/relink-markdown",
-              "flibbles/relink-titles",
-              "kebi/relink-tweaks",
-              "kebi/tiddlystudy",
-              "kebi/tiddlystudy-references",
-              "kookma/quickview",
-              "linonetwo/tw-react",
-              "linonetwo/tw-whiteboard",
-              "mklauber/aliases",
-              "nico/notebook-mobile",
-              "oeyoews/notebook-theme-sidebar-resizer",
-              "orange/mermaid-tw5",
-              "snowgoon88/edit-comptext",
-              "sq/streams",
-              "tiddlywiki/dynaview",
-              "tiddlywiki/freelinks",
-              "tiddlywiki/highlight",
-              "tiddlywiki/katex",
-              "tiddlywiki/markdown",
-              "xyvir/anchors-for-streams",
-              "xyvir/lithic-core",
-              "xyvir/lithic-default-configs",
-              "xyvir/lithic-patch-appear",
-              "xyvir/lithic-patch-calendar",
-              "xyvir/lithic-patch-comptext",
-              "xyvir/lithic-patch-markdown",
-              "xyvir/lithic-patch-streams",
-              "xyvir/lithic-patch-unieditor",
-              "xyvir/lithic-patch-whiteboard",
-              "xyvir/lithic-pdf-to-whiteboard",
-              "xyvir/lithic-python-codeblocks",
-              "xyvir/lithic-tweaks",
-              "xyvir/lithic-wikitext-highlight",
-              "xyvir/tw-jspython"
-            ];
+            "ahanniga/context-menu-plugin",
+            "bj/Calendar",
+            "bj/unieditor",
+            "byper/advanced-search",
+            "flibbles/relink",
+            "flibbles/relink-markdown",
+            "flibbles/relink-titles",
+            "kebi/relink-tweaks",
+            "kebi/tiddlystudy",
+            "kebi/tiddlystudy-references",
+            "kookma/quickview",
+            "linonetwo/tw-react",
+            "linonetwo/tw-whiteboard",
+            "mklauber/aliases",
+            "nico/notebook-mobile",
+            "oeyoews/notebook-theme-sidebar-resizer",
+            "orange/mermaid-tw5",
+            "snowgoon88/edit-comptext",
+            "sq/streams",
+            "tiddlywiki/dynaview",
+            "tiddlywiki/freelinks",
+            "tiddlywiki/highlight",
+            "tiddlywiki/katex",
+            "tiddlywiki/markdown",
+            "xyvir/anchors-for-streams",
+            "xyvir/lithic-core",
+            "xyvir/lithic-default-configs",
+            "xyvir/lithic-patch-appear",
+            "xyvir/lithic-patch-calendar",
+            "xyvir/lithic-patch-comptext",
+            "xyvir/lithic-patch-markdown",
+            "xyvir/lithic-patch-streams",
+            "xyvir/lithic-patch-unieditor",
+            "xyvir/lithic-patch-whiteboard",
+            "xyvir/lithic-pdf-to-whiteboard",
+            "xyvir/lithic-python-codeblocks",
+            "xyvir/lithic-tweaks",
+            "xyvir/lithic-wikitext-highlight",
+            "xyvir/tw-jspython"
+          ];
           const pluginExclusions = defaultPlugins.map(p => `-[[$:/plugins/${p}]]`).join(' ');
           const baseFilter = "[all[tiddlers]!is[system]] [all[tiddlers]is[system]!prefix[$:/core]!prefix[$:/themes]!prefix[$:/temp]!prefix[$:/state]!prefix[$:/HistoryList]] [is[shadow]] -[prefix[$:/boot/]] -[[$:/isEncrypted]] -[[$:/library/sjcl.js]] -[[$:/status/RequireReloadDueToPluginChange]] -[[$:/StoryList]] -[[$:/config/PageControlButtons/Visibility/$:/core/ui/Buttons/new-journal]] -[[$:/lithic/startup/webdav-utils.js]]";
           const userTiddlerFilter = `${baseFilter} ${pluginExclusions}`;
@@ -2471,17 +2471,17 @@ exports.startup = function() {
       });
     };
 
-    window.openIntro = async function(e) {
+    window.openIntro = async function (e) {
       e.preventDefault();
-      
+
       const el = e.currentTarget;
       const originalHtml = el.innerHTML;
       el.innerHTML = '...';
       el.style.pointerEvents = 'none';
 
-      let targetUrl = (window.location.protocol === 'file:') 
-          ? 'https://raw.githubusercontent.com/Xyvir/Lithic-UK/refs/heads/main/intro.lith' 
-          : '/intro.lith';
+      let targetUrl = (window.location.protocol === 'file:')
+        ? 'https://raw.githubusercontent.com/Xyvir/Lithic-UK/refs/heads/main/intro.lith'
+        : '/intro.lith';
 
       try {
         const res = await fetch(targetUrl);
@@ -2490,17 +2490,17 @@ exports.startup = function() {
           let parsedData;
           try {
             parsedData = JSON.parse(text);
-          } catch(e) {
+          } catch (e) {
             parsedData = parseLithToJSON(text);
           }
-          
+
           if (Array.isArray(parsedData) && parsedData.length > 0) {
             let node = parsedData[0];
             node.tags = node.tags ? [...new Set([...(Array.isArray(node.tags) ? node.tags : (typeof node.tags === 'string' ? node.tags.split(' ') : [])), 'Dogear'])].join(' ') : 'Dogear';
-            
+
             window.pendingImports = window.pendingImports.concat(parsedData);
             window.openNewBlankLith();
-            
+
             el.innerHTML = originalHtml;
             el.style.pointerEvents = 'auto';
             return;
@@ -2516,12 +2516,12 @@ exports.startup = function() {
       } else {
         alert("Could not load introduction. You appear to be offline and the local intro file is missing.");
       }
-      
+
       el.innerHTML = originalHtml;
       el.style.pointerEvents = 'auto';
     };
 
-    window.handleSearchKeydown = function(e, inputElem) {
+    window.handleSearchKeydown = function (e, inputElem) {
       if (e.key === 'Escape') {
         e.preventDefault();
         inputElem.value = '';
@@ -2722,9 +2722,9 @@ exports.startup = function() {
       try {
         const urlObj = new URL(urlStr);
         const normalizedUrl = urlObj.origin;
-        
+
         let requiresManualConfirm = false;
-        
+
         if (document.getElementById('global-loading-overlay')) {
           document.getElementById('global-loading-text').innerText = "Verifying Instance...";
           document.getElementById('global-loading-overlay').style.display = 'flex';
@@ -2733,10 +2733,10 @@ exports.startup = function() {
         try {
           const controller = new AbortController();
           const timeoutId = setTimeout(() => controller.abort(), 5000);
-          
+
           const res = await fetch(normalizedUrl + '/manifest.json', { method: 'GET', signal: controller.signal });
           clearTimeout(timeoutId);
-          
+
           if (res.ok) {
             const manifest = await res.json();
             if (manifest && (manifest.name === "Lithic" || manifest.short_name === "Lithic")) {
@@ -2744,7 +2744,7 @@ exports.startup = function() {
             } else {
               if (document.getElementById('global-loading-overlay')) document.getElementById('global-loading-overlay').style.display = 'none';
               alert("The provided URL has a manifest.json but it does not appear to be a Lithic instance.");
-              return; 
+              return;
             }
           } else if (res.status === 401 || res.status === 403) {
             // Basic auth or forbidden
@@ -2764,9 +2764,9 @@ exports.startup = function() {
         if (document.getElementById('global-loading-overlay')) document.getElementById('global-loading-overlay').style.display = 'none';
 
         if (requiresManualConfirm) {
-           if (!confirm(`We couldn't verify the manifest (it appears to be protected by Basic Authentication or Forbidden).\n\nAre you sure you want to bookmark ${normalizedUrl}?`)) {
-              return;
-           }
+          if (!confirm(`We couldn't verify the manifest (it appears to be protected by Basic Authentication or Forbidden).\n\nAre you sure you want to bookmark ${normalizedUrl}?`)) {
+            return;
+          }
         }
 
         let bookmarks = (await idbKeyval.get('bookmarkedInstances')) || [];
@@ -4302,8 +4302,7 @@ exports.startup = function() {
         style="text-decoration: none; color: var(--text-color); font-size: 1.2rem; opacity: 0.7; transition: opacity 0.2s; display: flex; align-items: center; justify-content: center; width: 30px; height: 30px; border-radius: 50%; border: 2px solid var(--border-color); margin-left: 10px;"
         onmouseover="this.style.opacity='1'; this.style.borderColor='var(--accent-color)'; this.style.color='var(--accent-color)'"
         onmouseout="this.style.opacity='0.7'; this.style.borderColor='var(--border-color)'; this.style.color='var(--text-color)'"
-        onclick="openIntro(event)"
-        title="View Introduction">?</a>
+        onclick="openIntro(event)" title="View Introduction">?</a>
       <button id="github-sync-btn" onclick="openGithubSyncModal()" title="GitHub Sync Settings">
         <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2"
           stroke-linecap="round" stroke-linejoin="round">
