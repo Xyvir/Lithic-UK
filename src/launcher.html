@@ -1401,6 +1401,10 @@ class ActionEphemeralWidget extends Widget {
             
             const data = await response.json();
             
+            if (data.stderr && data.stderr.trim()) {
+                console.warn("Ephemeral API Stderr:", data.stderr);
+            }
+            
             if (data.stdout && data.stdout.trim()) {
                 const childTitle = $tw.wiki.generateNewTitle(this.parentTiddler + "/stdout");
                 $tw.wiki.addTiddler(new $tw.Tiddler({
