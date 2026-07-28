@@ -1659,12 +1659,12 @@ exports["action-ephemeral"] = ActionEphemeralWidget;
       {
         "title": "$:/plugins/lithic/ephemeral/styles.css",
         "tags": "$:/tags/Stylesheet",
-        "type": "text/css",
+        "type": "text/vnd.tiddlywiki",
         "text": `
 @keyframes ephemeral-bob {
-    0% { transform: translateY(0px); color: <<colour primary>>; }
-    50% { transform: translateY(-3px); color: <<colour primary>>; text-shadow: 0 0 8px <<colour primary>>; }
-    100% { transform: translateY(0px); color: <<colour primary>>; }
+    0% { transform: translateY(0px); color: <<colour foreground>>; }
+    50% { transform: translateY(-3px); color: <<colour primary>>; }
+    100% { transform: translateY(0px); color: <<colour foreground>>; }
 }
 .ephemeral-running {
     animation: ephemeral-bob 1s infinite ease-in-out !important;
