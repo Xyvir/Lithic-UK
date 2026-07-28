@@ -1,4 +1,5 @@
 ## Todo
+- [ ] update pdf-to-whiteboard plugin to convert svgs into editable "native whiteboards" maintaing individual objects?
 - [ ] "Favorites" sidebar area vertical linespacing is not the same in tweak vs use mode, need to align these so the favorites don't visually shift on tweak mode toggle.
 
 - [ ] Context Menu Expansions
@@ -25,6 +26,7 @@
 ## launcher.html modularization Project
 - [ ] Allow specifying 'modes' via http parameters so the launcher monolith html can be forced into specific modes to make unit tests easier; (all unit tests can be performed in 1 test environment this way, but with multiple test profiles/users)
 - [ ] Create unit tests for all lithic.html and launcher.html UI elements, logic and functions
+    - [ ] this can also intercept bad manual builds and prevent them from pushing 'bad' releases.
 - [ ] Modularize launcher.html into separate javascript / html / css files
     - [ ] begin modularizing launcher.html and test packaging into prelauncher.html
     - [ ] once all unit tests pass, update the build-wiki to package launcher.html into the build

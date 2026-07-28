@@ -1441,7 +1441,7 @@ class ActionEphemeralWidget extends Widget {
                             
                             $tw.wiki.addTiddler(new $tw.Tiddler({
                                 title: childTitle,
-                                text: `<<wb-image "[[${wbTitle}]]" "80%">>`,
+                                text: "<<wb-image \\"[[\\" + wbTitle + \\"]]\\" \\"80%\\">>",
                                 type: "text/vnd.tiddlywiki",
                                 parent: this.parentTiddler,
                                 "stream-type": "default"
