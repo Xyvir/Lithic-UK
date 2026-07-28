@@ -1384,6 +1384,13 @@ class ActionEphemeralWidget extends Widget {
     async invokeAction(triggeringWidget, event) {
         if (!this.code) return true;
         
+        let btn = null;
+        if (event && event.target) {
+            btn = typeof event.target.closest === "function" ? event.target.closest('.run-jspython-btn') : null;
+            if (!btn && event.target.classList && event.target.classList.contains('run-jspython-btn')) btn = event.target;
+            if (btn) btn.classList.add("ephemeral-running");
+        }
+        
         try {
             const markdownPayload = "\\\`\\\`\\\`" + this.language + "\\n" + this.code + "\\n\\\`\\\`\\\`";
             const utf8str = new TextEncoder().encode(markdownPayload);
@@ -1441,7 +1448,7 @@ class ActionEphemeralWidget extends Widget {
                             
                             $tw.wiki.addTiddler(new $tw.Tiddler({
                                 title: childTitle,
-                                text: "<<wb-image \\"[[\\"" + wbTitle + "\\"]]\\" \\"80%\\">>",
+                                text: "<<wb-image \\"[[" + wbTitle + "]]\\" \\"80%\\">>",
                                 type: "text/vnd.tiddlywiki",
                                 parent: this.parentTiddler,
                                 "stream-type": "default"
@@ -1501,6 +1508,8 @@ class ActionEphemeralWidget extends Widget {
                 "stream-type": "default"
             }));
             this.appendToStream(this.parentTiddler, errTitle);
+        } finally {
+            if (btn) btn.classList.remove("ephemeral-running");
         }
         
         return true;
@@ -1646,6 +1655,21 @@ exports["action-ephemeral"] = ActionEphemeralWidget;
 	<$genesis $type="$codeblock" $remappable="no" code=<<code>> language=<<language>>/>
 </div>
 \\end`
+      },
+      {
+        "title": "$:/plugins/lithic/ephemeral/styles.css",
+        "tags": "$:/tags/Stylesheet",
+        "type": "text/css",
+        "text": `
+@keyframes ephemeral-bob {
+    0% { transform: translateY(0px); color: <<colour primary>>; }
+    50% { transform: translateY(-3px); color: <<colour primary>>; text-shadow: 0 0 8px <<colour primary>>; }
+    100% { transform: translateY(0px); color: <<colour primary>>; }
+}
+.ephemeral-running {
+    animation: ephemeral-bob 1s infinite ease-in-out !important;
+}
+`
       }
     ];
 
