@@ -1404,63 +1404,90 @@ class ActionEphemeralWidget extends Widget {
             if (data.stderr && data.stderr.trim()) {
                 console.warn("Ephemeral API Stderr:", data.stderr);
             }
-            
-            if (data.stdout && data.stdout.trim()) {
+              if (data.stdout && data.stdout.trim()) {
                 const childTitle = $tw.wiki.generateNewTitle(this.parentTiddler + "/stdout");
-                $tw.wiki.addTiddler(new $tw.Tiddler({
-                    title: childTitle,
-                    text: data.stdout,
-                    type: "text/x-markdown",
-                    parent: this.parentTiddler,
-                    "stream-type": "default"
-                }));
-                this.appendToStream(this.parentTiddler, childTitle);
-            }
-            
-            if (data.artifact_file) {
-                const artifactUrl = '/sync/ephemeral/' + encodeURIComponent(data.artifact_file);
                 
-                if (data.artifact_file.match(/\\.(png|jpe?g|webp|gif|svg)$/i)) {
-                    const imgRes = await fetch(artifactUrl);
-                    const blob = await imgRes.blob();
-                    
-                    const reader = new FileReader();
-                    reader.onload = () => {
-                        const dataUri = reader.result;
+                if (data.artifact_ext) {
+                    const ext = data.artifact_ext.toLowerCase();
+                    if (ext === ".svg") {
+                        $tw.wiki.addTiddler(new $tw.Tiddler({
+                            title: childTitle,
+                            text: data.stdout,
+                            type: "image/svg+xml",
+                            parent: this.parentTiddler,
+                            "stream-type": "default"
+                        }));
+                        this.appendToStream(this.parentTiddler, childTitle);
+                    } else if (ext.match(/^\.(png|jpe?g|webp|gif)$/)) {
+                        const mime = ext === ".png" ? "image/png" : ext === ".webp" ? "image/webp" : ext === ".gif" ? "image/gif" : "image/jpeg";
+                        const dataUri = "data:" + mime + ";base64," + data.stdout.trim();
+                        
                         const img = new Image();
                         img.onload = () => {
                             const payload = this.generateWhiteboardData([{
-                                filename: data.artifact_file,
+                                filename: "artifact" + ext,
                                 dataUri: dataUri,
                                 width: img.width,
                                 height: img.height
                             }]);
                             
-                            const wbTitle = $tw.wiki.generateNewTitle(this.parentTiddler + "/artifact");
-                            const isPortrait = img.height > img.width;
-                            const wbHeight = isPortrait ? "1056px" : "540px";
+                            const wbTitle = $tw.wiki.generateNewTitle(this.parentTiddler + "/artifact-wb");
                             
                             $tw.wiki.addTiddler(new $tw.Tiddler({
                                 title: wbTitle,
                                 text: JSON.stringify(payload),
-                                type: "application/tldr",
-                                parent: this.parentTiddler,
-                                "stream-type": "default",
-                                "whiteboard-height": wbHeight
+                                type: "application/tldr"
                             }));
-                            this.appendToStream(this.parentTiddler, wbTitle);
+                            
+                            $tw.wiki.addTiddler(new $tw.Tiddler({
+                                title: childTitle,
+                                text: `<<wb-image "[[${wbTitle}]]" "80%">>`,
+                                type: "text/vnd.tiddlywiki",
+                                parent: this.parentTiddler,
+                                "stream-type": "default"
+                            }));
+                            this.appendToStream(this.parentTiddler, childTitle);
                         };
                         img.src = dataUri;
-                    };
-                    reader.readAsDataURL(blob);
+                    } else if (ext === ".csv") {
+                        $tw.wiki.addTiddler(new $tw.Tiddler({
+                            title: childTitle,
+                            text: data.stdout,
+                            type: "text/csv",
+                            parent: this.parentTiddler,
+                            "stream-type": "default"
+                        }));
+                        this.appendToStream(this.parentTiddler, childTitle);
+                    } else {
+                        $tw.wiki.addTiddler(new $tw.Tiddler({
+                            title: childTitle,
+                            text: data.stdout,
+                            type: "text/plain",
+                            parent: this.parentTiddler,
+                            "stream-type": "default"
+                        }));
+                        this.appendToStream(this.parentTiddler, childTitle);
+                    }
                 } else {
-                    const a = document.createElement("a");
-                    a.href = artifactUrl;
-                    a.download = data.artifact_file;
-                    document.body.appendChild(a);
-                    a.click();
-                    document.body.removeChild(a);
+                    $tw.wiki.addTiddler(new $tw.Tiddler({
+                        title: childTitle,
+                        text: data.stdout,
+                        type: "text/x-markdown",
+                        parent: this.parentTiddler,
+                        "stream-type": "default"
+                    }));
+                    this.appendToStream(this.parentTiddler, childTitle);
                 }
+            }
+            
+            if (data.artifact_file && (!data.artifact_ext || data.artifact_ext === ".zip")) {
+                const artifactUrl = '/sync/ephemeral/' + encodeURIComponent(data.artifact_file);
+                const a = document.createElement("a");
+                a.href = artifactUrl;
+                a.download = data.artifact_file;
+                document.body.appendChild(a);
+                a.click();
+                document.body.removeChild(a);
             }
             
         } catch (e) {

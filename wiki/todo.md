@@ -20,6 +20,8 @@
 
 - [ ] Create self-destroying /anchor option based on <<stamp>> macro, maybe even super-ceding stamp?
 
+- [ ] include 'prettylinks' ?
+
 ## launcher.html modularization Project
 - [ ] Allow specifying 'modes' via http parameters so the launcher monolith html can be forced into specific modes to make unit tests easier; (all unit tests can be performed in 1 test environment this way, but with multiple test profiles/users)
 - [ ] Create unit tests for all lithic.html and launcher.html UI elements, logic and functions
@@ -105,6 +107,7 @@
 - [ ] Add local 2fa totp for backend wiki access?
     - Maybe just suggest cloudflare tunnels for this instead. Or only include in `lithic-teams` or desktop apps
 - [ ] "zoomin" doesn't play nice with Dynaview; so we need to update the storyriver viewfilter to fallback to 'normal' when using "zoomin"
+- [ ] create some static "preview blocks" when lithic public share links are used elsewhere (discord, github, etc.) so the link has some visual cues and doesn't just show up as a ugly broken block.
 ---
 
 ## Done
