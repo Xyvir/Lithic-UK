@@ -21,7 +21,10 @@ t.prototype.show = function(options) {
     // core's `absolute: true` option (with the "@" coordinate prefix) already
     // handles page-absolute positioning natively, correctly, and without any
     // hard-coded offsets. This override exists only to neutralise the legacy
-    // shim shipped by the external quickview plugin.
+    // shim shipped by the external quickview plugin. This override only works
+    // because this tiddler shadows the external quickview plugin's copy of the
+    // same title; if that shadow relationship ever changes, verify that the
+    // wrapped `show` is still core's and not the legacy shim.
     originalShow.apply(this, arguments);
 };
 

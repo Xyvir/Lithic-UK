@@ -84,26 +84,35 @@ function getCaretCoordinates(element, position, options) {
   
   // 1. Get the physical location of the textarea relative to the viewport
   var rect = element.getBoundingClientRect();
+  // If the textarea lives inside an iframe (the framed editor engine), translate
+  // its iframe-relative rect into the main document's viewport coordinates,
+  // because the caller's popup node lives in the main document with position:fixed.
+  if (element.ownerDocument && element.ownerDocument !== document) {
+    var frameElement = element.ownerDocument.defaultView && element.ownerDocument.defaultView.frameElement;
+    if (frameElement) {
+      var frameRect = frameElement.getBoundingClientRect();
+      rect = { left: rect.left + frameRect.left, top: rect.top + frameRect.top };
+    }
+  }
   
-  // 2. Get the current scroll position of the entire page
-  var pageScrollY = window.pageYOffset || document.documentElement.scrollTop;
-  var pageScrollX = window.pageXOffset || document.documentElement.scrollLeft;
+  // 2. Calculate viewport position of the caret.
+  // span.offsetTop/Left: cursor position relative to the textarea's content box
+  //   (the mirror div copies the textarea's box model, so these are layout-local)
+  // rect.top/left: physical position of the textarea in the browser window (viewport)
+  // element.scrollTop/Left: how far the text has been scrolled inside the textarea
+  // NOTE: returning VIEWPORT coordinates pairs with `position: fixed` on the caller's
+  // popup node, so page scroll, sidebar width and nested containers are all handled
+  // for free - no offsetParent walks, no hard-coded px offsets.
+  var viewportTop = rect.top + span.offsetTop + parseInt(computed['borderTopWidth']) - element.scrollTop;
+  var viewportLeft = rect.left + span.offsetLeft + parseInt(computed['borderLeftWidth']) - element.scrollLeft;
 
-  // 3. Calculate absolute position on the page
-  // span.offsetTop/Left: position of cursor relative to the textarea's top-left
-  // rect.top/left: physical position of the textarea in the browser window
-  // pageScroll: how far the page has been scrolled
-  // element.scrollTop: how far the text has been scrolled inside the textarea
-  var absoluteTop = span.offsetTop + rect.top + pageScrollY + parseInt(computed['borderTopWidth']) - element.scrollTop;
-  var absoluteLeft = span.offsetLeft + rect.left + pageScrollX + parseInt(computed['borderLeftWidth']) - element.scrollLeft;
-
-  // 4. Vertical Offset
+  // 3. Vertical Offset
   // We add a small offset so the box appears exactly one line below the cursor
   var lineHeight = parseInt(computed['lineHeight']) || parseInt(computed['fontSize']) * 1.2 || 20;
 
   var coordinates = {
-    top: absoluteTop + lineHeight,
-    left: absoluteLeft
+    top: viewportTop + lineHeight,
+    left: viewportLeft
   };
   // -------------------------------
 

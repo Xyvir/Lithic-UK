@@ -11,7 +11,7 @@ tc-popup appear appear-block appear-reveal tc-preview-tiddler tc-preview-tiddler
 \end
 
 \define level(num)
-<$reveal tag="div" type="popup" state=<<state $num$>> class=<<classes $num$>>>
+<$reveal tag="div" type="popup" state=<<state $num$>> class=<<classes $num$>> clamp="right" updatePopupPosition="yes">
 <$tiddler tiddler={{$:/temp/tobibeer/preview-$num$-tiddler}}>
 <$transclude tiddler={{$:/plugins/tobibeer/preview/defaults/template}} mode="block"/>
 </$tiddler>
@@ -23,3 +23,17 @@ tc-popup appear appear-block appear-reveal tc-preview-tiddler tc-preview-tiddler
 <$macrocall $name="level" num={{!!title}}/>
 </$list>
 </$vars>
+<style>
+/* Appear preview popovers must never stretch the page horizontally: cap the
+   popup to the viewport width (keeping the plugin's 600px ceiling on wide
+   screens) and scroll any content that is wider than the popup itself.
+   clamp="right" on the reveals above keeps the popup inside the viewport's
+   right edge; this style is the companion that guarantees no page scrollbar.
+   Note: keep the 2rem margin - 100vw includes the scrollbar width while core's
+   clamp measures against window.innerWidth, so 2rem is the slack that keeps
+   the popup strictly inside the viewport. */
+.tc-popup.tc-preview-tiddler.appear-reveal {
+	max-width: min(600px, calc(100vw - 2rem));
+	overflow: auto;
+}
+</style>

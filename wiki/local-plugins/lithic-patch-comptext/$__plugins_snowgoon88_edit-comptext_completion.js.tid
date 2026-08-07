@@ -324,38 +324,35 @@ TODO : CHECK if needed
 
 					this.previewTimeout = setTimeout(function() {
 						$tw.utils.addClass(targetNode, "tc-popup-handle");
-						$tw.utils.addClass(targetNode, "tc-popup-absolute");
 						
 						var u = "$:/temp/tobibeer/preview-";
 						var popupTitle = u + targetLevel;
 						wiki.setText(popupTitle + "-tiddler", "text", null, titleToPreview);
 						
-						if ($tw.popup.findPopup(popupTitle) === -1) {
-							$tw.popup.triggerPopup({
-								domNode: targetNode,
-								title: popupTitle,
-								wiki: wiki
-							});
-						}
+						// Always reposition the preview, even when it is already open for this
+						// level (e.g. the mouse moves between items). The preview reveal template
+						// ($:/plugins/tobibeer/preview/popups) sets updatePopupPosition="yes", so
+						// rewriting the state tiddler below repositions the open reveal natively;
+						// if the reveal is closed, the rewrite simply opens it at these coords.
+						// Position the preview with NATIVE absolute coordinates:
+						// getBoundingClientRect gives viewport coords; adding page scroll gives
+						// document coords, which pair with the "@" absolute prefix that the core
+						// reveal widget converts into its own containing block.
+						var popupRect = self._popNode.getBoundingClientRect();
+						var itemRect = targetNode.getBoundingClientRect();
 
-						// Custom positioning for autocomplete dropdowns: to the right of the dropdown box
-						var getAbsoluteCoords = function(el) {
-							var left = 0, top = 0, e = el;
-							do {
-								left += e.offsetLeft || 0;
-								top += e.offsetTop || 0;
-								e = e.offsetParent;
-							} while (e);
-							return { left: left, top: top };
-						};
-						var dropdownCoords = getAbsoluteCoords(self._popNode);
-						var itemCoords = getAbsoluteCoords(targetNode);
-						
 						// Always position to the right of the dropdown + 5px gap
-						var desiredLeft = dropdownCoords.left + self._popNode.offsetWidth + 5;
-						var desiredTop = itemCoords.top;
-						
-						wiki.setTextReference(popupTitle, "(" + desiredLeft + "," + desiredTop + ",0,0)");
+						var desiredLeft = popupRect.left + window.pageXOffset + self._popNode.offsetWidth + 5;
+						var desiredTop = itemRect.top + window.pageYOffset;
+						wiki.setTextReference(popupTitle, "@(" + desiredLeft + "," + desiredTop + ",0,0)");
+						// Register the popup with the manager for click-outside zapping; only
+						// push if it is not already registered for this title.
+						if ($tw.popup.findPopup(popupTitle) === -1) {
+							$tw.popup.popups.push({title: popupTitle, wiki: wiki, domNode: targetNode});
+							if ($tw.popup.popups.length > 0) {
+								$tw.popup.rootElement.addEventListener("click", $tw.popup, true);
+							}
+						}
 					}, delay);
 				}
 			}
@@ -386,13 +383,15 @@ TODO : CHECK if needed
 		this._display = function (areaNode, popupNode) {
 			if (popupNode.style.display == 'none') {
 				// Must get coordinate
-				// Cursor coordinates within area + area coordinates + scroll
+				// cursor-position.js returns VIEWPORT coordinates (getBoundingClientRect
+				// based) and the popup node is position:fixed, so no offsetParent math
+				// is needed. Robust to page scroll, sidebar width and nested containers.
 				var coord = getCaretCoordinates(areaNode, areaNode.selectionEnd);
 				var styleSize = getComputedStyle(areaNode).getPropertyValue('font-size');
 				var fontSize = parseFloat(styleSize);
 
-				popupNode.style.left = (this._offLeft + areaNode.offsetLeft - areaNode.scrollLeft + coord.left) + 'px';
-				popupNode.style.top = (this._offTop + areaNode.offsetTop - areaNode.scrollTop + coord.top + fontSize * 2) + 'px';
+				popupNode.style.left = coord.left + 'px';
+				popupNode.style.top = coord.top + fontSize * 2 + 'px';
 				popupNode.style.display = 'block';
 			}
 		};
@@ -764,7 +763,7 @@ TODO : CHECK if needed
 		// Insert a special "div" element for poping up
 		// Its 'display' property in 'style' control its visibility
 		var popupNode = widget.document.createElement("div");
-		popupNode.setAttribute("style", "display:none; position: absolute;");
+		popupNode.setAttribute("style", "display:none; position: fixed;");
 		popupNode.className = "tc-block-dropdown ect-block-dropdown";
 		// Insert the element into the DOM
 		node.parentNode.insertBefore(popupNode, node.nextSibling);
