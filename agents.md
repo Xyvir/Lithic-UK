@@ -19,6 +19,8 @@ When creating or editing plugin `*.tid` tiddlers, make sure that they DO NOT hav
 To guarantee this, after creating or editing a tiddler you should always execute the provided `trim.ps1` script, passing in the paths of the files you modified:
 `powershell -ExecutionPolicy Bypass -File c:\Users\temp\Lithic_Dev\Lithic\assets\trim.ps1 -Files <path_to_file>`
 
+Additional conventions: repo `.tid` files are **CRLF-encoded** — if your editing tool wrote LF, convert to CRLF first (see Environment & Workflow Notes). Pass **one path per `-Files` invocation**; the comma-joined multi-path form had `$_` quoting issues and silently did nothing.
+
 **Bad Example (Trailing newline):**
 ```yaml
 title: $:/config/lithic/sidebar-visibility/$:/core/ui/SideBar/More
@@ -194,6 +196,55 @@ If you place HTML elements (like a `<style>` block) or normal wikitext *before* 
 **STANDARD OPERATING PROCEDURE:**
 All `\define` macros and pragmas MUST be placed at the absolute top of the `.tid` file, consecutively, before any HTML tags, styles, or standard wikitext. If you need to add a `<style>` block or HTML, place it *after* all `\define` blocks have concluded.
 
+# Headless Testing of TiddlyWiki Logic (The Chrome Harness)
+
+**CONTEXT:**
+TiddlyWiki filter syntax and widget/action behavior are subtle and under-documented. The built monoliths (`pre.html`, `src/lithic.html`) embed the entire wiki as a JSON tiddler store, and Chrome can boot them headlessly. Empirically validating filter chains and action wikitext this way caught multiple real bugs that reading minified core source alone did not (sortsub operand parsing, `$let` first-element resolution, `$action-setfield` list mangling).
+
+**STANDARD OPERATING PROCEDURE:**
+1. **Tools:** Node.js is NOT reliably available in this dev environment. Use Python (`/c/Python313/python.exe`) for scripting and Chrome (`/c/Program Files/Google/Chrome/Application/chrome.exe`) for execution.
+2. **Pick a bootable build:** `pre.html` boots fast and embeds the same core (5.4.1) as the current `src/lithic.html` — grep to confirm before trusting it. `assets/blank_no_server.html` is NOT bootable (bare store, no boot machinery). `src/lithic.html` is the monolith Tauri rolls up.
+3. **Inject a harness:** write a small Python builder that reads the build HTML, inserts a `<script>` test block immediately before `</body>`, and writes a copy (e.g. `scripts/_test.html`). The harness polls `window.$tw && $tw.wiki && $tw.rootWidget` on a `setInterval` (boot is asynchronous), then runs assertions into a `<pre id="out">` element.
+4. **Run it:** `"/c/Program Files/Google/Chrome/Application/chrome.exe" --headless=new --disable-gpu --no-sandbox --virtual-time-budget=30000 --dump-dom "file:///.../_test.html"` then extract the `<pre id="out">` text (sed between the `<pre>` tags and strip tags).
+5. **Invoke context-menu action wikitext:** `wiki.parseText("text/vnd.tiddlywiki", body).tree` → `$tw.rootWidget.makeChildWidget({type:"widget", children: tree})` → `w.render(container, null)` → recursively walk the tree calling `invokeAction(node, null)` on every widget that exposes it.
+6. **Invoke a single action widget directly:** build `{type: "action-listops", attributes: {name: {type:"string", value: ...}}}`. CRITICAL: call `widget.render(host, null)` BEFORE `invokeAction()` — attributes (e.g. `$subfilter`) are only computed in `render()` → `computeAttributes()`/`execute()`. Skipping render silently no-ops the action.
+
+**GOTCHA:** fixtures must be realistic. Alpha-sort tests passed with space-less titles but failed on real data: use bracket-wrapped, space-containing list entries (e.g. `[[6th August 2026@1:40:02.470]]`) and multi-child streams.
+
+# TiddlyWiki Filter & Widget Gotchas (Field-Tested)
+
+**CONTEXT:** all verified empirically against TiddlyWiki 5.4.1 headlessly; several contradict the official docs or common usage.
+
+1. **`sortsub` is broken for field operands.** `sortsub[{!!text}trim[]lowercase[]]` (the documented idiom) evaluates to nothing in 5.4.1 — the operand is parsed as a literal title. Use the `sort` operator directly: `[enlist{!!stream-list}sort[text]]` sorts the input by a field, case-insensitively by default.
+2. **`enlist[]` reads its OPERAND, not the input.** To parse the filter's input as a list use `enlist-input[]` — that is why streams writes `enlist{!!stream-list}` (operand form) everywhere, and why conditions must use `[<currentTiddler>get[stream-list]enlist-input[]count[]!match[0]]`.
+3. **NEVER write a list field via `$action-setfield` from a filter result.** `$value={{{[enlist<var>]}}}` writes bare titles; TW's list parser treats spaces as separators, so `6th August 2026@1:40:02.470` shreds to `2026@1:40:02.470`. Always use `$action-listops` with `$subfilter` (or `$filter`) — core parses the field via `getTiddlerList` and writes it back via `stringifyList` as `[[bracketed]]` entries that round-trip.
+4. **`$action-listops` `$subfilter` semantics:** core prepends `"[all[]] "` to the subfilter, and `[all[]]` with an EMPTY operand is an IDENTITY (returns the input unchanged) — so the subfilter genuinely operates on the parsed list (e.g. `$subfilter="[sort[text]]"` sorts the list in place; `reverse[]` flips it).
+5. **Multi-value `$let` variables expose only their FIRST element as the string `value`** (the full array lives in a hidden `resultList`). So `[<children>match<ascending>]` silently compares first elements only — effectively always "equal" for permutations sharing the first item. Compare JOINED strings instead: `$let sorted={{{[enlist{!!stream-list}sort[text]join[|]]}}}` then `[enlist{!!stream-list}join[|]match<sorted>]`.
+6. **Use `join[|]` as a list-join delimiter, not `join[,]`** — commas are legal in tiddler titles; `|` is not, and `join[|]` parses fine as an operand (verified).
+7. **`has[done]` checks a FIELD; `tag[done]` checks the TAG.** The streams interactive checkbox stores state as the `done` tag — a `has[done]` condition silently never matches.
+8. **Avoid literal bracket-prefix operands** like `prefix[[x] ]]` — operand parsing gets ambiguous. Define prefixes as variables (`$vars todo1="[ ] " done1="[x] " num1="<<num>> "`) and use `prefix<todo1>` / `removeprefix<todo1>` — the established streams pattern.
+9. **Don't chain `+[op...]` after `~` union alternatives** — attach the chain inside each run: `[<t>removeprefix<done1>addprefix<num1>] ~[<t>removeprefix<done2>addprefix<num1>]`.
+10. **`match` compares single strings.** For list-equality, join both sides first (see #5).
+11. `removeprefix` / `addprefix` / `prefix` / `then` / `else` / `count` / `reverse` / `first[]` / `is[tiddler]` / `tag[]` are all verified working as expected.
+
+# Streams Context Menu Extension & Streams Internals
+
+**CONTEXT:** the vanilla Streams plugin source is NOT in the repo (fetched at build time via `external.yml`); a reference copy lives at `assets/streams_and_fusion.json` (a JSON array of plugin blobs — each blob's `text` field is itself JSON containing that plugin's tiddlers). Streams-specific patches live in `wiki/local-plugins/lithic-patch-streams/`.
+
+**Adding an item to the nodestream right-click menu** (the Streams context menu — distinct from the standalone generic context-menu plugin):
+1. Create a tiddler tagged `$:/tags/streams/contextmenu` with:
+   - `sq-contextmenu-name: <menu label>` (shown in the menu)
+   - `text:` = the action wikitext (invoked on click; `currentTiddler` is the right-clicked node)
+   - OPTIONAL `sq-contextmenu-condition:` = a filter; if it evaluates empty the item is hidden (e.g. `[<currentTiddler>get[stream-list]enlist-input[]count[]!match[0]]` hides on childless nodes). The template override in lithic-patch-streams (`$:/plugins/sq/streams/contextmenu/contextmenu-template`) wraps every item in a conditional `<$list>` with an `else[yes]` fallback, so items without the field remain visible — backward compatible.
+2. Operate on children with `[enlist{!!stream-list}is[tiddler]]`; operate on the node itself when childless by branching on `[enlist{!!stream-list}is[tiddler]count[]!match[0]]` with an `emptyMessage` that re-runs the ops on `<<currentTiddler>>`.
+3. For multi-target ops use `<$list filter="..." variable="target">` with inner `$let`/`$list` conditionals and `$action-setfield`/`$action-listops`. Widget attributes are computed at RENDER time from pre-click state, so keep per-target transitions free of cross-target dependencies.
+4. Reference implementations: `$__lithic_streams_contextmenu_alpha-sort.tid` and `$__lithic_streams_contextmenu_cycle-leadmark.tid`.
+
+**Streams internals worth knowing:**
+- The interactive checkbox is `<$checkbox tag="done"/>` (in `$:/plugins/sq/streams/templates/stream-row-body`) — checked state = the **`done` tag** on the child tiddler, not a field.
+- The autonumber leadmark is the literal **`<<num>> `** prefix; `$:/lithic/macros/num` renders the node's 1-based position within its parent via `[<currentTiddler>get[parent]get[stream-list]enlist-input[]allbefore<currentTiddler>count[]add[1]]`.
+- Leadmark prefix conventions (from `$:/plugins/sq/streams/action-macros`): `todo1="[ ] "`, `todo2="- [ ] "`, `done1="[x] "`, `done2="[X] "`, `done3="- [x] "`, `done4="- [X] "`, `num1="<<num>> "`, plus bullets `- ` / `* `.
+
 # Theme-Responsive Styling (The `<<colour>>` Macro)
 
 **CONTEXT:**
@@ -221,3 +272,10 @@ If injecting styles via a `<style>` block in wikitext, you can evaluate the macr
 }
 </style>
 ```
+
+# Environment & Workflow Notes
+
+- **No Node.js in this dev environment** (`which node` fails). Python 3.13 lives at `/c/Python313/python.exe`; Chrome at `/c/Program Files/Google/Chrome/Application/chrome.exe`.
+- **`pre.html` vs `src/lithic.html`:** `pre.html` is an older build; `src/lithic.html` is the current monolith Tauri rolls up. Both embed core 5.4.1 (verified) — grep to reconfirm before using `pre.html` for validation. `assets/blank_no_server.html` is NOT bootable.
+- **Line endings:** repo `.tid` files (and `agents.md`) are CRLF. Editing tools write LF — convert to CRLF BEFORE running `trim.ps1`, and pass ONE file path per `trim.ps1 -Files` invocation.
+- **Reading core sources:** every built HTML embeds all plugins as a JSON array inside `<script class="tiddlywiki-tiddler-store" type="application/json">`. Locate the `$:/core` plugin object (the preceding character must be `{`), then `json.loads(core["text"])["tiddlers"]` yields every core module (widgets, filter operators) — far more reliable than grepping minified blobs. A module lives at a key like `$:/core/modules/widgets/action-listops.js`.
