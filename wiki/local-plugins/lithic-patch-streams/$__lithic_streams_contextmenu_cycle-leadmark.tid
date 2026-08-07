@@ -1,10 +1,12 @@
 title: $:/lithic/streams/contextmenu/cycle-leadmark
 tags: $:/tags/streams/contextmenu
 sq-contextmenu-name: cycle leadmark
+sq-contextmenu-name-children: cycle child leadmarks
+sq-contextmenu-name-siblings: cycle sibling leadmarks
 type: text/vnd.tiddlywiki
 
 \whitespace trim
-\define cycle-leadmark-ops()
+\define cycle-leadmark-mass()
 <$vars
 	todo1="[ ] "
 	todo2="- [ ] "
@@ -14,33 +16,46 @@ type: text/vnd.tiddlywiki
 	done4="- [X] "
 	num1="<<num>> "
 >
-	<$list filter="[<target>get[text]]" variable="t">
-		<$list filter="[<t>prefix<num1>]" variable="_NULL">
-			<$action-setfield $tiddler=<<target>> text={{{ [<t>removeprefix<num1>] }}}/>
-			<$action-listops $tiddler=<<target>> $tags="-[done]"/>
-		</$list>
-		<$list filter="[<t>prefix<done1>] ~[<t>prefix<done2>] ~[<t>prefix<done3>] ~[<t>prefix<done4>]" variable="_NULL">
-			<$action-setfield $tiddler=<<target>> text={{{ [<t>removeprefix<done1>addprefix<num1>] ~[<t>removeprefix<done2>addprefix<num1>] ~[<t>removeprefix<done3>addprefix<num1>] ~[<t>removeprefix<done4>addprefix<num1>] }}}/>
-			<$action-listops $tiddler=<<target>> $tags="-[done]"/>
-		</$list>
-		<$list filter="[<t>prefix<todo1>] ~[<t>prefix<todo2>]" variable="_NULL">
-			<$list filter="[<target>tag[done]]" variable="_NULL">
-				<$action-listops $tiddler=<<target>> $tags="-[done]"/>
+	<$let
+		srcTodo={{{ [<source>tag[done]then<todo1>] ~[<done1>] }}}
+		nextState={{{ [<source>get[text]prefix<num1>then[none]] ~[<source>get[text]prefix<done1>then<num1>] ~[<source>get[text]prefix<done2>then<num1>] ~[<source>get[text]prefix<done3>then<num1>] ~[<source>get[text]prefix<done4>then<num1>] ~[<source>get[text]prefix<todo1>then<srcTodo>] ~[<source>get[text]prefix<todo2>then<srcTodo>] ~[<todo1>] }}}
+	>
+		<$let
+			t={{{ [<target>get[text]] }}}
+			stripped={{{ [<t>removeprefix<todo1>] ~[<t>removeprefix<todo2>] ~[<t>removeprefix<done1>] ~[<t>removeprefix<done2>] ~[<t>removeprefix<done3>] ~[<t>removeprefix<done4>] ~[<t>removeprefix<num1>] ~[<t>] }}}
+		>
+			<$list filter="[<nextState>match[none]]" variable="_NULL">
+				<$action-setfield $tiddler=<<target>> text=<<stripped>>/>
 			</$list>
-			<$list filter="[<target>!tag[done]]" variable="_NULL">
-				<$action-setfield $tiddler=<<target>> text={{{ [<t>removeprefix<todo1>addprefix<done1>] ~[<t>removeprefix<todo2>addprefix<done1>] }}}/>
+			<$list filter="[<nextState>!match[none]]" variable="_NULL">
+				<$action-setfield $tiddler=<<target>> text={{{ [<stripped>addprefix<nextState>] }}}/>
 			</$list>
-		</$list>
-		<$list filter="[<t>!prefix<num1>!prefix<done1>!prefix<done2>!prefix<done3>!prefix<done4>!prefix<todo1>!prefix<todo2>]" variable="_NULL">
-			<$action-setfield $tiddler=<<target>> text={{{ [<t>addprefix<todo1>] }}}/>
-			<$action-listops $tiddler=<<target>> $tags="-[done]"/>
-		</$list>
-	</$list>
+			<$action-listops $tiddler=<<target>> $tags="-[[done]]"/>
+		</$let>
+	</$let>
 </$vars>
 \end
 
-<$list filter="[enlist{!!stream-list}is[tiddler]count[]!match[0]]" variable="_NULL" emptyMessage="""<$vars target=<<currentTiddler>>><<cycle-leadmark-ops>></$vars>""">
-	<$list filter="[enlist{!!stream-list}is[tiddler]]" variable="target">
-		<<cycle-leadmark-ops>>
-	</$list>
+<$list filter="[<currentTiddler>get[stream-list]enlist-input[]is[tiddler]count[]!match[0]]" variable="_NULL">
+	<$let source={{{ [<currentTiddler>get[stream-list]enlist-input[]is[tiddler]first[]] }}}>
+		<$list filter="[enlist{!!stream-list}is[tiddler]]" variable="target">
+			<<cycle-leadmark-mass>>
+		</$list>
+	</$let>
+</$list>
+<$list filter="[<currentTiddler>get[stream-list]enlist-input[]is[tiddler]count[]match[0]]" variable="_NULL">
+	<$let source=<<currentTiddler>>>
+		<$list filter="[<currentTiddler>get[parent]get[stream-list]enlist-input[]is[tiddler]count[]!match[0]]" variable="_NULL">
+			<$set name="currentTiddler" filter="[<currentTiddler>get[parent]]" select="0">
+				<$list filter="[enlist{!!stream-list}is[tiddler]]" variable="target">
+					<<cycle-leadmark-mass>>
+				</$list>
+			</$set>
+		</$list>
+		<$list filter="[<currentTiddler>get[parent]get[stream-list]enlist-input[]is[tiddler]count[]match[0]]" variable="_NULL">
+			<$list filter="[<currentTiddler>is[tiddler]]" variable="target">
+				<<cycle-leadmark-mass>>
+			</$list>
+		</$list>
+	</$let>
 </$list>

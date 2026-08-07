@@ -1,3 +1,9 @@
 wiki/plugins/external/calendar/tiddlers/TagListDemo.tid
 wiki/external/
 /scratch/
+
+# Local per-machine agent instructions (see .freebuff/local/agents.local.md)
+.freebuff/local/
+
+# Local-only convenience exports for meatspace testing (regenerable via scripts/make-rollup.py)
+/rollups/

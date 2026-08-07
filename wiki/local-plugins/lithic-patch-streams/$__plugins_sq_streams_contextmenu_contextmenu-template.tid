@@ -1,8 +1,9 @@
 title: $:/plugins/sq/streams/contextmenu/contextmenu-template
 type: text/vnd.tiddlywiki
 
-\define menu-item(title,subtitle:"",actions:"")
-		<$button class="tc-menu-list-item tc-btn-invisible" actions=<<__actions__>> >
+\define menu-item(title,subtitle:"",actions:"",ctxclass:"")
+		<$button class={{{ tc-menu-list-item tc-btn-invisible [<__ctxclass__>match[yes]then[sq-ctx-item]] +[join[ ]] }}}
+			actions=<<__actions__>> >
 			<$action-deletetiddler $tiddler=<<contextmenu-state>>/>
 			<span class="sq-contextmenu-itemwrapper">
 				<span class="sq-contextmenu-itemtext">$title$</span>
@@ -18,13 +19,20 @@ type: text/vnd.tiddlywiki
 		<$macrocall $name="menu-item" title="insert node above" actions="""<$macrocall $name="add-node-actions" insertPosition="match"/>""" />
 		<$macrocall $name="menu-item" title="insert subnode below" actions="""<$macrocall $name="add-child-node-actions"/>""" />
 		<$macrocall $name="menu-item" title="rename" subtitle="((streams-rename))" actions=<<rename-node-actions>>/>
-		<$list filter="[all[shadows+tiddlers]tag[$:/tags/streams/contextmenu]]" variable="listItem">
-			<$list filter={{{[<listItem>get[sq-contextmenu-condition]else[yes]]}}} variable="condResult">
-				<$macrocall $name="menu-item"
-					title={{{[<listItem>get[sq-contextmenu-name]]}}} 
-					subtitle={{{[<listItem>get[key]] [<listItem>get[sq-contextmenu-subtitle]] +[first[]]}}} 
-					actions={{{[<listItem>get[text]]}}} />
+		<$let
+			ctxChildCount={{{ [<currentTiddler>get[stream-list]enlist-input[]count[]] }}}
+			ctxPeersCount={{{ [<currentTiddler>get[parent]get[stream-list]enlist-input[]is[tiddler]count[]] }}}
+			ctxLabelKey={{{ [<ctxChildCount>!match[0]then[sq-contextmenu-name-children]] ~[<ctxPeersCount>match[1]then[sq-contextmenu-name]] ~[<ctxPeersCount>match[0]then[sq-contextmenu-name]] ~[[sq-contextmenu-name-siblings]] }}}
+		>
+			<$list filter="[all[shadows+tiddlers]tag[$:/tags/streams/contextmenu]]" variable="listItem">
+				<$list filter={{{[<listItem>get[sq-contextmenu-condition]else[yes]]}}} variable="condResult">
+					<$macrocall $name="menu-item"
+						title={{{ [<listItem>get<ctxLabelKey>] ~[<listItem>get[sq-contextmenu-name]] +[first[]] }}}
+						subtitle={{{[<listItem>get[key]] [<listItem>get[sq-contextmenu-subtitle]] +[first[]]}}} 
+						actions={{{[<listItem>get[text]]}}}
+						ctxclass={{{[<listItem>get[sq-contextmenu-name-children]!is[blank]then[yes]]}}} />
+				</$list>
 			</$list>
-		</$list>
+		</$let>
 	</div>
 </$reveal>

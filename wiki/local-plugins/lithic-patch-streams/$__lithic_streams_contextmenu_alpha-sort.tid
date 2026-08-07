@@ -1,18 +1,30 @@
 title: $:/lithic/streams/contextmenu/alpha-sort
 tags: $:/tags/streams/contextmenu
 sq-contextmenu-name: alphasort
-sq-contextmenu-condition: [<currentTiddler>get[stream-list]enlist-input[]count[]!match[0]]
+sq-contextmenu-name-children: alphasort children
+sq-contextmenu-name-siblings: alphasort siblings
+sq-contextmenu-condition: [<currentTiddler>get[stream-list]enlist-input[]count[]!match[0]] ~[<currentTiddler>get[parent]get[stream-list]enlist-input[]is[tiddler]count[]!match[0]!match[1]]
 type: text/vnd.tiddlywiki
 
-<$list filter="[<currentTiddler>has[stream-list]]" variable="_NULL">
-	<$let
-		sorted={{{ [enlist{!!stream-list}sort[text]join[|]] }}}
-	>
-		<$list filter="[enlist{!!stream-list}join[|]match<sorted>]" variable="_NULL">
-			<$action-listops $tiddler=<<currentTiddler>> $field="stream-list" $subfilter="[sort[text]reverse[]]"/>
-		</$list>
-		<$list filter="[enlist{!!stream-list}join[|]!match<sorted>]" variable="_NULL">
-			<$action-listops $tiddler=<<currentTiddler>> $field="stream-list" $subfilter="[sort[text]]"/>
-		</$list>
-	</$let>
+\whitespace trim
+\define alphasort-ops()
+<$let
+	sorted={{{ [enlist{!!stream-list}sort[text]join[|]] }}}
+>
+	<$list filter="[enlist{!!stream-list}join[|]match<sorted>]" variable="_NULL">
+		<$action-listops $tiddler=<<currentTiddler>> $field="stream-list" $subfilter="[sort[text]reverse[]]"/>
+	</$list>
+	<$list filter="[enlist{!!stream-list}join[|]!match<sorted>]" variable="_NULL">
+		<$action-listops $tiddler=<<currentTiddler>> $field="stream-list" $subfilter="[sort[text]]"/>
+	</$list>
+</$let>
+\end
+
+<$list filter="[<currentTiddler>get[stream-list]enlist-input[]count[]!match[0]]" variable="_NULL">
+	<<alphasort-ops>>
+</$list>
+<$list filter="[<currentTiddler>get[stream-list]enlist-input[]count[]match[0]]" variable="_NULL">
+	<$set name="currentTiddler" filter="[<currentTiddler>get[parent]]" select="0">
+		<<alphasort-ops>>
+	</$set>
 </$list>

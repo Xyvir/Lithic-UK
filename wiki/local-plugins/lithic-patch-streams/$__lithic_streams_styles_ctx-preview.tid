@@ -1,0 +1,44 @@
+title: $:/lithic/streams/styles/ctx-preview
+tags: $:/tags/Stylesheet
+type: text/vnd.tiddlywiki
+
+\whitespace trim
+\define ctx-preview-rules()
+.stream-row[data-node-title="{{!!current}}"] .stream-node-handle .stream-node-handle-inner {
+	border-color: <<colour primary>>;
+}
+\end
+
+<$vars currentTiddler={{{[prefix[$:/state/sq-context-popup]]}}}>
+<<ctx-preview-rules>>
+<$let
+	ctxCurrent={{{ [<currentTiddler>get[current]!is[blank]first[]] }}}
+>
+<$list filter="[<ctxCurrent>!is[blank]]" variable="_NULL">
+<$list filter="[<ctxCurrent>get[stream-list]enlist-input[]is[tiddler]count[]!match[0]]" variable="_NULL">
+<$list filter="[<ctxCurrent>get[stream-list]enlist-input[]is[tiddler]]" variable="previewNode">
+.stream-root:has(.sq-contextmenu .sq-ctx-item:hover) [data-node-title="<<previewNode>>"] {
+	background: <<colour notification-background>>;
+	color: <<colour message-foreground>>;
+}
+.stream-root:has(.sq-contextmenu .sq-ctx-item:hover) [data-node-title="<<previewNode>>"] .stream-node-handle .stream-node-handle-inner {
+	border: 5px solid <<colour primary>>;
+	opacity: 1;
+}
+</$list>
+</$list>
+<$list filter="[<ctxCurrent>get[stream-list]enlist-input[]is[tiddler]count[]match[0]]" variable="_NULL">
+<$list filter="[<ctxCurrent>get[parent]get[stream-list]enlist-input[]is[tiddler]]" variable="previewNode">
+.stream-root:has(.sq-contextmenu .sq-ctx-item:hover) [data-node-title="<<previewNode>>"] {
+	background: <<colour notification-background>>;
+	color: <<colour message-foreground>>;
+}
+.stream-root:has(.sq-contextmenu .sq-ctx-item:hover) [data-node-title="<<previewNode>>"] .stream-node-handle .stream-node-handle-inner {
+	border: 5px solid <<colour primary>>;
+	opacity: 1;
+}
+</$list>
+</$list>
+</$list>
+</$let>
+</$vars>

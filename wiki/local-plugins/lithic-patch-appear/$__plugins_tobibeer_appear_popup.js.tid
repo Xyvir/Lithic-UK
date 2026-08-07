@@ -16,42 +16,13 @@ var t=require("$:/core/modules/utils/dom/popup.js").Popup,
 var originalShow = t.prototype.show;
 
 t.prototype.show = function(options) {
-    var domNode = options.domNode;
-    
-    // THE ROUTER: Check if this is explicitly a QuickView popup
-    var isLegacyAppear = domNode ? $tw.utils.hasClass(domNode,"tc-popup-absolute") : false;
-
-    if (isLegacyAppear) {
-        // --- TOBIAS BEER'S 2016 LEGACY MATH ---
-        var o = this.popupInfo(domNode);
-        var popupLevel = o.popupLevel;
-        if(o.isHandle) { popupLevel++; }
-        this.cancel(popupLevel);
-
-        if(this.findPopup(options.title) === -1) {
-            this.popups.push({title: options.title, wiki: options.wiki, domNode: domNode});
-        }
-
-        var absoluteMath = function(node){
-            var curr = node, left = 0, top = 0;
-            do {
-                left += curr.offsetLeft || 0;
-                top += curr.offsetTop || 0;
-                curr = curr.offsetParent;
-            } while(curr);
-            return {left: left, top: top};
-        };
-        var coords = absoluteMath(domNode);
-        options.wiki.setTextReference(options.title, "(" + coords.left + "," + coords.top + "," + domNode.offsetWidth + "," + domNode.offsetHeight + ")");
-
-        if(this.popups.length > 0) {
-            this.rootElement.addEventListener("click", this, true);
-        }
-    } else {
-        // --- MODERN TW CORE ---
-        // Hand everything else (like Streams) back to the untouched core engine
-        originalShow.apply(this, arguments);
-    }
+    // TYLER'S DIRECTIVE: always use the pristine modern TiddlyWiki core popup.
+    // The legacy tobibeer `tc-popup-absolute` offsetParent math has been removed:
+    // core's `absolute: true` option (with the "@" coordinate prefix) already
+    // handles page-absolute positioning natively, correctly, and without any
+    // hard-coded offsets. This override exists only to neutralise the legacy
+    // shim shipped by the external quickview plugin.
+    originalShow.apply(this, arguments);
 };
 
 t.prototype.popupInfo=function(t){var e,s=false,p=t;while(p&&e===undefined){if($tw.utils.hasClass(p,"tc-popup-handle")||$tw.utils.hasClass(p,"tc-popup-keep")){s=true}if($tw.utils.hasClass(p,"tc-reveal")&&($tw.utils.hasClass(p,"tc-popup")||$tw.utils.hasClass(p,"tc-popup-handle"))){e=parseInt(p.style.zIndex)-1e3}p=p.parentNode}var o={popupLevel:e||0,isHandle:s};return o};

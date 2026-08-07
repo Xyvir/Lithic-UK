@@ -1,23 +1,17 @@
 ## Todo
-- [ ] update pdf-to-whiteboard plugin to convert svgs into editable "native whiteboards" maintaing individual objects?
+- [ ] update pdf-to-whiteboard plugin to convert svgs into editable "native whiteboards" maintaining individual objects?
+
 - [ ] "Favorites" sidebar area vertical linespacing is not the same in tweak vs use mode, need to align these so the favorites don't visually shift on tweak mode toggle.
 
-- [ ] Context Menu Expansions
-    - [ ] Add "Toggle Todo" or "Toggle Prefix" option to one of the right-click menus. (including option <<num>> prefix?)
-        - [ ] Add toggle-prefix hotkey like logseq?
-    - [ ] Add "Alpha Sort" option to nodestream right-click menu.
-       (Do twice to toggle ascending/descending)
-- [ ] Extend hover-over 'appear' plugin behavior to be more intuitive
-    - [ ] modify behavior to show todo when highlighting calendar datelinks
-    - [ ] Fix the alignment  when sidebar open.
-    - [ ] add  size guardrails so only a bit of context is shown on hoverover.
 
 - [ ] Create/Integrate EPUB Serialization based on current to_lithic logic (but have user provide shortcode instead of AI-generated one); add it to existing pdf-to-whiteboard and name the plugin 'lithic-import' or something.
 
 - [ ] Automate lithic-lite generation workflow?
 
-- [ ] update /anchor to use double --- --- instead of single --- for header vs pre-filled content, so the content can include single <hr> (also brings into alingment with column and pagebreaks)
-- [ ] update slashcommands for /hrule `---` vs /hardbreak `---\n---`
+- [ ] hardbreak vs horizontal rule standardizations:
+	hardbreaks is my term for markdown ---\n--- (double hr) this forces pagebreaks on PDF prints, newcolumns in multicolumn layout, and should also be content deviders on anchors with prefill spawn.
+	- [ ] update /anchor to use double --- --- instead of single --- for header vs pre-filled content, so the content can include single <hr> (also brings into alingment with column and pagebreaks)
+	- [ ] update slashcommands for /hrule `---` vs /hardbreak `---\n---`
 
 - [ ] Create self-destroying /anchor option based on <<stamp>> macro, maybe even super-ceding stamp?
 
@@ -113,6 +107,10 @@
 ---
 
 ## Done
+- [x] Extend hover-over 'appear' plugin behavior to be more intuitive
+    - [x] modify behavior to show todo when highlighting calendar datelinks
+    - [x] Fix the alignment  when sidebar open.
+    - [ ] add  size guardrails so only a bit of context is shown on hoverover.
 - [x] Allow double-bullet (`-` or `*` prefix) nodestream entries to create date/calendar highlights, not just `[ ]` / `[x]` todo items.
     (Currently only `- [ ] foobar [[date]]` / `- [x] foobar [[date]]` / `[x] foobar  [[date]]` / `[ ] foobar  [[date]]` highlight the calendar sidebar. This would also recognize `- foobar [[date]]` and `* foobar [[date]]` for non-task journal title references to higlight the associated date on the calendar.)
 - [X] add 'skinny mode' (inline) to weevkiew for portrait orientatino on mobile.
@@ -152,3 +150,9 @@
     - Just handle by embed-stream macro for now.
 - [X] Freeze external plugin integrations once I'm happy with the base featureset. (currently only bypersearch and columns are candidates)
 - [X] Create some way to disambiguate if someone wants to self-host multiple backends for different groups of wikis.
+- [X] Context Menu Expansions
+
+    - [X] Add "Toggle Prefix" option to one of the right-click menus. (including option <<num>> prefix?)
+        - [ ] Add toggle-prefix hotkey like logseq?
+    - [X] Add "Alpha Sort" option to nodestream right-click menu.
+       (Do twice to toggle ascending/descending)
