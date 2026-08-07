@@ -2,9 +2,162 @@ module-type: startup
 title: $:/plugins/tobibeer/preview/link.js
 type: application/javascript
 
-/*\
-title: $:/plugins/tobibeer/preview/link.js
+/*title: $:/plugins/tobibeer/preview/link.js
 type: application/javascript
 module-type: startup
+
+Hover-preview for wikilinks (tobibeer/preview, patched by Lithic):
+- Positions previews with core's native absolute coordinates
+  (triggerPopup with absolute:true + "@" state prefix), which keeps them
+  correct under page scroll, nested containers and the adjustable sidebar.
+- Deliberate sidebar behaviour: when the hovered link lives inside a sidebar
+  container (.nc-sidebar / .tc-sidebar / .tc-sidebar-scrollable), the preview
+  is shifted sideways past the sidebar's edge by the sidebar's live width, so
+  it floats over the story area instead of obscuring sidebar contents. This
+  restores the useful part of the old broken offset math on purpose.
 \*/
-(function(){var e,t=require("$:/core/modules/widgets/link.js").link,i=t.prototype.render,o=t.prototype.handleClickEvent;t.prototype.render=function(){i.apply(this,arguments);var t=this,o=this.wiki,p=this.domNodes[0],r=o.getTiddler(t.to),n="$:/plugins/tobibeer/preview/defaults/",u="$:/temp/tobibeer/preview-",l=$tw.utils.parseKeyDescriptorTB(o.getTextReference(n+"keys","").toUpperCase()),s=o.getTextReference(n+"delay").toUpperCase(),a=function(e){var i=$tw.popup.popupInfo(e),p=i.popupLevel;return o.getTextReference(u+p)&&o.getTextReference(u+p+"-tiddler")===t.to?null:i},f=function(){var i,r=a(p);if(r){i=r.popupLevel;clearTimeout(t.previewTimeout);$tw.popup.cancel(i);i++;o.setText(u+i+"-tiddler","text",null,t.to);if($tw.popup.findPopup(u+i)===-1){setTimeout(function(){$tw.popup.triggerPopup({domNode:p,title:u+i,wiki:o});e=0},50)}}},d=function(){if($tw.utils.hasClass(p,"tc-freelink"))return 0;var e,i,r=1,u=o.getTextReference(n+"not","");if(u){$tw.utils.each(u.split(" "),function(e){var t=p;while(t&&r){if($tw.utils.hasClass(t,e)){r=0;return false}t=t.parentNode}})}if(r){i=o.getTextReference(n+"exclude","");e=i?o.filterTiddlers(i):[];if(e.indexOf(t.to)>=0){r=0}}return r};s=s!==undefined?parseInt(s):null;if(s!==null&&isNaN(s)){s=0}if(r){$tw.utils.addClass(p,"tc-popup-handle");$tw.utils.addClass(p,"tc-popup-absolute");["mouseover","mouseout","contextmenu"].forEach(function(i){p.addEventListener(i,function(o){var p=o||window.event;if(i==="mouseover"){if(t._previewSuppressed){return}if(d()){if(!p.keyCode){p.keyCode=0}if($tw.utils.checkKeyDescriptorTB(p,l)){if(!e){e=1;f()}}else if(s!==null){e=0;t.previewTimeout=setTimeout(f,s)}}}else if(i==="contextmenu"){e=0;t._previewSuppressed=true;clearTimeout(t.previewTimeout);$tw.popup.cancel(0)}else{e=0;t._previewSuppressed=false;clearTimeout(t.previewTimeout)}})})}};t.prototype.handleClickEvent=function(){o.apply(this,arguments);clearTimeout(this.previewTimeout);$tw.popup.cancel(Math.max(0,$tw.popup.popupInfo(this.domNodes[0]).popupLevel))}})();
+(function(){
+
+"use strict";
+
+var link = require("$:/core/modules/widgets/link.js").link,
+	render = link.prototype.render,
+	handleClickEvent = link.prototype.handleClickEvent;
+
+link.prototype.render = function() {
+	render.apply(this, arguments);
+	var self = this,
+		wiki = this.wiki,
+		domNode = this.domNodes[0],
+		tiddler = wiki.getTiddler(this.to),
+		defaults = "$:/plugins/tobibeer/preview/defaults/",
+		preview = "$:/temp/tobibeer/preview-",
+		keyDescriptor = $tw.utils.parseKeyDescriptorTB(wiki.getTextReference(defaults + "keys", "").toUpperCase()),
+		delay = wiki.getTextReference(defaults + "delay", "").toUpperCase(),
+		hovering = 0, // per-link hover lock (the upstream original shared this flag module-wide)
+		// If a preview is already open for this tiddler at this level, don't re-trigger
+		getPopupInfo = function(node) {
+			var info = $tw.popup.popupInfo(node),
+				level = info.popupLevel;
+			return wiki.getTextReference(preview + level) && wiki.getTextReference(preview + level + "-tiddler") === self.to ? null : info;
+		},
+		// Horizontal shift (away from the sidebar edge) when the link lives
+		// inside a sidebar container; 0 otherwise. Measured live so it tracks
+		// the adjustable sidebar width with no hard-coded pixels.
+		sidebarShift = function(node) {
+			var el = node;
+			while(el && el !== document.body) {
+				if($tw.utils.hasClass(el, "nc-sidebar") || $tw.utils.hasClass(el, "tc-sidebar") || el.id === "tc-sidebar" || $tw.utils.hasClass(el, "tc-sidebar-scrollable")) {
+					var rect = el.getBoundingClientRect();
+					return rect.width ? (rect.left < window.innerWidth / 2 ? rect.width : -rect.width) : 0;
+				}
+				el = el.parentNode;
+			}
+			return 0;
+		},
+		triggerPreview = function() {
+			var info = getPopupInfo(domNode),
+				level;
+			if(info) {
+				level = info.popupLevel;
+				clearTimeout(self.previewTimeout);
+				$tw.popup.cancel(level);
+				level++;
+				wiki.setText(preview + level + "-tiddler", "text", null, self.to);
+				if($tw.popup.findPopup(preview + level) === -1) {
+					setTimeout(function() {
+						$tw.popup.triggerPopup({domNode: domNode, title: preview + level, wiki: wiki, absolute: true});
+						// Sidebar-aware offset: push the preview past the sidebar's
+						// edge so it never covers sidebar contents. Repositioning an
+						// already-open reveal relies on the bundled preview/popups
+						// template override carrying updatePopupPosition="yes" - keep
+						// both tiddlers installed together.
+						var shift = sidebarShift(domNode);
+						if(shift) {
+							var state = wiki.getTextReference(preview + level, ""),
+								coords = /^@\((-?[0-9.E]+),(-?[0-9.E]+),(-?[0-9.E]+),(-?[0-9.E]+)\)$/.exec(state);
+							if(coords) {
+								wiki.setTextReference(preview + level, "@(" + (parseFloat(coords[1]) + shift) + "," + coords[2] + "," + coords[3] + "," + coords[4] + ")");
+							}
+						}
+						hovering = 0;
+					}, 50);
+				}
+			}
+		},
+		shouldPreview = function() {
+			if($tw.utils.hasClass(domNode, "tc-freelink")) {
+				return false;
+			}
+			var not = wiki.getTextReference(defaults + "not", ""),
+				exclude = wiki.getTextReference(defaults + "exclude", ""),
+				ok = true;
+			if(not) {
+				$tw.utils.each(not.split(" "), function(className) {
+					var node = domNode;
+					while(node && ok) {
+						if($tw.utils.hasClass(node, className)) {
+							ok = false;
+							return false;
+						}
+						node = node.parentNode;
+					}
+				});
+			}
+			if(ok && exclude) {
+				var excluded = wiki.filterTiddlers(exclude);
+				if(excluded.indexOf(self.to) >= 0) {
+					ok = false;
+				}
+			}
+			return ok;
+		};
+	delay = delay !== undefined ? parseInt(delay) : null;
+	if(delay !== null && isNaN(delay)) {
+		delay = 0;
+	}
+	if(tiddler) {
+		$tw.utils.addClass(domNode, "tc-popup-handle");
+		["mouseover", "mouseout", "contextmenu"].forEach(function(eventName) {
+			domNode.addEventListener(eventName, function(event) {
+				event = event || window.event;
+				if(eventName === "mouseover") {
+					if(self._previewSuppressed) {
+						return;
+					}
+					if(shouldPreview()) {
+						if(!event.keyCode) {
+							event.keyCode = 0;
+						}
+						if($tw.utils.checkKeyDescriptorTB(event, keyDescriptor)) {
+							if(!hovering) {
+								hovering = 1;
+								triggerPreview();
+							}
+						} else if(delay !== null) {
+							hovering = 0;
+							self.previewTimeout = setTimeout(triggerPreview, delay);
+						}
+					}
+				} else if(eventName === "contextmenu") {
+					hovering = 0;
+					self._previewSuppressed = true;
+					clearTimeout(self.previewTimeout);
+					$tw.popup.cancel(0);
+				} else {
+					hovering = 0;
+					self._previewSuppressed = false;
+					clearTimeout(self.previewTimeout);
+				}
+			});
+		});
+	}
+};
+
+link.prototype.handleClickEvent = function() {
+	handleClickEvent.apply(this, arguments);
+	clearTimeout(this.previewTimeout);
+	$tw.popup.cancel(Math.max(0, $tw.popup.popupInfo(this.domNodes[0]).popupLevel));
+};
+
+})();
