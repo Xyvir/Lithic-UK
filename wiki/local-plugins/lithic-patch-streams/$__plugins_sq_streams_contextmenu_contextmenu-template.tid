@@ -19,10 +19,12 @@ type: text/vnd.tiddlywiki
 		<$macrocall $name="menu-item" title="insert subnode below" actions="""<$macrocall $name="add-child-node-actions"/>""" />
 		<$macrocall $name="menu-item" title="rename" subtitle="((streams-rename))" actions=<<rename-node-actions>>/>
 		<$list filter="[all[shadows+tiddlers]tag[$:/tags/streams/contextmenu]]" variable="listItem">
-			<$macrocall $name="menu-item"
-				title={{{[<listItem>get[sq-contextmenu-name]]}}} 
-				subtitle={{{[<listItem>get[key]] [<listItem>get[sq-contextmenu-subtitle]] +[first[]]}}} 
-				actions={{{[<listItem>get[text]]}}} />
+			<$list filter={{{[<listItem>get[sq-contextmenu-condition]else[yes]]}}} variable="condResult">
+				<$macrocall $name="menu-item"
+					title={{{[<listItem>get[sq-contextmenu-name]]}}} 
+					subtitle={{{[<listItem>get[key]] [<listItem>get[sq-contextmenu-subtitle]] +[first[]]}}} 
+					actions={{{[<listItem>get[text]]}}} />
+			</$list>
 		</$list>
 	</div>
 </$reveal>

@@ -1,0 +1,18 @@
+title: $:/lithic/streams/contextmenu/alpha-sort
+tags: $:/tags/streams/contextmenu
+sq-contextmenu-name: alphasort
+sq-contextmenu-condition: [<currentTiddler>get[stream-list]enlist-input[]count[]!match[0]]
+type: text/vnd.tiddlywiki
+
+<$list filter="[<currentTiddler>has[stream-list]]" variable="_NULL">
+	<$let
+		sorted={{{ [enlist{!!stream-list}sort[text]join[|]] }}}
+	>
+		<$list filter="[enlist{!!stream-list}join[|]match<sorted>]" variable="_NULL">
+			<$action-listops $tiddler=<<currentTiddler>> $field="stream-list" $subfilter="[sort[text]reverse[]]"/>
+		</$list>
+		<$list filter="[enlist{!!stream-list}join[|]!match<sorted>]" variable="_NULL">
+			<$action-listops $tiddler=<<currentTiddler>> $field="stream-list" $subfilter="[sort[text]]"/>
+		</$list>
+	</$let>
+</$list>
