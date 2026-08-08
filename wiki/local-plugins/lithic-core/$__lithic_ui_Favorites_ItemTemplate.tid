@@ -26,7 +26,7 @@ title: $:/lithic/ui/Favorites/ItemTemplate
         <$text text=<<displayName>>/>
       </$button>
       <$reveal type="match" state="$:/state/lithic/tweak-sidebar" text="yes">
-        <$button class="tc-btn-invisible tc-btn-mini" tooltip="Remove from Favorites" style="opacity: 0.5; margin-left: 4px; padding: 0 4px;">
+        <$button class="tc-btn-invisible tc-btn-mini" tooltip="Remove from Favorites" style="opacity: 0.5; margin-left: 4px; padding: 0 2px; display: flex; align-items: center;">
           <$action-listops $tiddler=<<currentTiddler>> $tags="-Favorite"/>
           {{$:/core/images/close-button}}
         </$button>
@@ -42,7 +42,7 @@ title: $:/lithic/ui/Favorites/ItemTemplate
         <$text text=<<displayName>>/>
       </$button>
       <$reveal type="match" state="$:/state/lithic/tweak-sidebar" text="yes">
-        <$button class="tc-btn-invisible tc-btn-mini" tooltip="Remove from Favorites" style="opacity: 0.5; margin-left: 4px; padding: 0 4px;">
+        <$button class="tc-btn-invisible tc-btn-mini" tooltip="Remove from Favorites" style="opacity: 0.5; margin-left: 4px; padding: 0 2px; display: flex; align-items: center;">
           <$action-listops $tiddler=<<currentTiddler>> $tags="-Favorite"/>
           {{$:/core/images/close-button}}
         </$button>

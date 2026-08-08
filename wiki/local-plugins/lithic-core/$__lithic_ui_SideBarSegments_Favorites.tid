@@ -15,9 +15,16 @@ caption: {{$:/core/images/star-filled}} Favorites
   opacity: 1;
 }
 .lithic-favorite-item-tweak {
-  padding: 2px 4px;
+  /* horizontal-only padding keeps row height identical to non-edit mode */
+  padding: 0 4px;
   border-radius: 4px;
   transition: background 0.1s;
+}
+.lithic-favorite-item-tweak .tc-image-close-button {
+  /* close-button has no \parameters(size) pragma, so size via CSS (a transclusion
+     size param silently renders nothing for this image tiddler) */
+  width: 12px;
+  height: 12px;
 }
 .lithic-favorite-item-tweak:hover {
   background: rgba(128,128,128,0.2);
