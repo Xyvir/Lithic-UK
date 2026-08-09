@@ -1,0 +1,18 @@
+tags: 
+title: $:/plugins/richlink/f@txt
+
+\define rl-txt(link)
+<$let h={{{ [<1>!is[blank]else[300px]] }}}>
+<div class="rl-txt">
+    <$txtviewer
+        src=<<link>>
+        height=<<h>>
+    />
+    <div class="rl-txt-fallback">
+        <a href="$link$" target="_blank" rel="noopener noreferrer">$link$</a>
+    </div>
+</div>
+</$let>
+\end
+
+<$macrocall $name=rl-txt link=<<link>> />

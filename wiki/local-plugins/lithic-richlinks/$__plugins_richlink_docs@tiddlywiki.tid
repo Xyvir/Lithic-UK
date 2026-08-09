@@ -1,0 +1,10 @@
+tags: 
+title: $:/plugins/richlink/docs@tiddlywiki
+
+\define btn(label, link) [[$label$|$link$]]
+
+<$set name=label filter="[<link>split:after[#]search[%20]split[%20]] [<link>split:after[#]!search[%20]] ">
+<div class="twd">
+<$macrocall $name=btn label=<<label>> link=<<link>>/> 
+</div>
+</$set>

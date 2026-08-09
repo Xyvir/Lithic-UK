@@ -1,0 +1,30 @@
+tags: 
+title: $:/plugins/richlink/f3dmodel@gltf@glb
+
+<div class="rl-3dmodel">
+    <div class="rl-3dmodel-header">
+        <span class="rl-3dmodel-icon">◆</span>
+
+        <$element
+            tag="a"
+            class="rl-3dmodel-link"
+            href=<<link>>
+            target="_blank"
+            rel="noopener noreferrer">
+
+            <$text text={{{ [<link>split[/]last[]split[?]first[]split[#]first[]decodeuricomponent[]] }}}/>
+
+        </$element>
+    </div>
+
+    <$modelviewer
+        src=<<link>>
+        height="450px"
+        camera-controls="yes"
+        auto-rotate="yes"
+        environment-image="neutral"
+        exposure="1"
+        shadow-intensity="1"
+        statusTiddler="$:/temp/richlink/modelviewer/status"
+    />
+</div>

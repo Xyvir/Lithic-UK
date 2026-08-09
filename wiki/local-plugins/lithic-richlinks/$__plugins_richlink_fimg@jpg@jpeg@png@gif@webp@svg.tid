@@ -1,0 +1,15 @@
+tags: 
+title: $:/plugins/richlink/fimg@jpg@jpeg@png@gif@webp@svg
+
+<$let
+    filename={{{ [<link>split[/]last[]split[?]first[]split[#]first[]decodeuricomponent[]] }}}
+    caption={{{ [<1>!is[blank]else<filename>] }}}>
+
+<div class="richlink-img">
+    <a href=<<link>> target="_blank" rel="noopener noreferrer">
+        <$image source=<<link>>/>
+    </a>
+    <span class="richlink-img-caption"><$text text=<<caption>>/></span>
+</div>
+
+</$let>

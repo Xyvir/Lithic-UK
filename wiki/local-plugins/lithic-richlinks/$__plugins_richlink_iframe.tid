@@ -1,0 +1,49 @@
+tags: 
+title: $:/plugins/richlink/iframe
+
+<$let
+    resolved-url={{{ [<iframe-url>!is[blank]] ~[<link>] }}}
+    resolved-description={{{ [<iframe-description>!is[blank]] ~[all[current]get[caption]!is[blank]] ~[all[current]get[title]] ~[<resolved-url>split[/]last[]split[?]first[]decodeuricomponent[]] }}}
+    resolved-site={{{ [<iframe-site>!is[blank]] ~[<resolved-url>split[://]last[]split[/]first[]search-replace:g[www.],[]] }}}
+    resolved-height={{{ [<iframe-height>!is[blank]] ~[<1>!is[blank]] ~[[900px]] }}}>
+
+<$list filter="[<resolved-url>!is[blank]]">
+
+<div class="rl-iframe-card">
+    <div class="rl-iframe-credit">
+        <a class="rl-iframe-title" href=<<resolved-url>> target="_blank" rel="noopener noreferrer">
+            <$text text=<<resolved-description>>/>
+        </a>
+
+        <span class="rl-iframe-by"> by </span>
+
+        <a class="rl-iframe-site" href=<<resolved-url>> target="_blank" rel="noopener noreferrer">
+            <$text text=<<resolved-site>>/>
+        </a>
+    </div>
+
+    <div class="rl-iframe-wrap" style=`height: $(resolved-height)$;`>
+        <iframe
+            class="rl-iframe"
+            src=<<resolved-url>>
+            title=<<resolved-description>>
+            loading="lazy"
+            frameborder="0"
+            allowfullscreen
+            referrerpolicy="no-referrer-when-downgrade">
+        </iframe>
+    </div>
+</div>
+
+</$list>
+
+<$list filter="[<resolved-url>is[blank]]">
+    <div class="rl-iframe-card rl-iframe-empty">
+        <strong>RichLinks iframe template</strong><br>
+        No iframe URL was supplied.<br>
+        Use:<br>
+        <code>&lt;&lt;richlink iframe "url" "description" "site" "height"&gt;&gt;</code>
+    </div>
+</$list>
+
+</$let>

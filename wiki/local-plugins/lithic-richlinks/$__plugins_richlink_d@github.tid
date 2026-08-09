@@ -1,0 +1,15 @@
+tags: 
+title: $:/plugins/richlink/d@github
+
+\define btn(label, link) [[$label$|$link$]]
+
+\define issue-button(link)
+<$list variable=label filter="[<link>split:after[TiddlyWiki5/]]">
+<div class="gh-issue">
+  <$macrocall $name=btn label=<<label>> link=<<link>> />
+  {{$:/core/images/github}}
+</div>
+</$list>
+\end
+
+<$macrocall $name="issue-button" link="<<link>>" />

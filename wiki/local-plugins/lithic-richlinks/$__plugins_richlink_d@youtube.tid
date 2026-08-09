@@ -1,0 +1,12 @@
+tags: 
+title: $:/plugins/richlink/d@youtube
+
+\define rich-youtube(link)
+<iframe class=rich-iframe src="$link$" frameborder="0" width=100% allowfullscreen/>
+\end
+
+<$set name=link
+    filter="[<link>split[v=]last[]addprefix[https://www.youtube.com/embed/]] " 
+    emptyValue=<<link>> >
+<$macrocall $name=rich-youtube link=<<link>>  />
+</$set>

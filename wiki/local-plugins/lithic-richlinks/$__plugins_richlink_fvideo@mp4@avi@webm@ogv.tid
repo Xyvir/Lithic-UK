@@ -1,0 +1,6 @@
+tags: 
+title: $:/plugins/richlink/fvideo@mp4@avi@webm@ogv
+
+<video src=<<link>> controls preload="auto" class="richlink-video">
+<p>Your browser doesn't support HTML5 video.<br>Instead, go directly to <<link>></p> 
+</video>

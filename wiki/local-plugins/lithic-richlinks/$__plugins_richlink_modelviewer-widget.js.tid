@@ -1,0 +1,320 @@
+type: application/javascript
+module-type: widget
+title: $:/plugins/richlink/modelviewer-widget.js
+
+/*\
+title: $:/plugins/richlink/modelviewer-widget.js
+type: application/javascript
+module-type: widget
+\*/
+
+(function(){
+
+"use strict";
+
+function normaliseModelUrl(url) {
+    if(!url) {
+        return "";
+    }
+
+    url = url.trim();
+
+    // Encode accidental spaces without double-encoding existing %20
+    url = url.replace(/ /g,"%20");
+
+    // GitHub blob URL:
+    // https://github.com/OWNER/REPO/blob/BRANCH/path/to/file.ext
+    var githubBlobMatch = url.match(/^https:\/\/github\.com\/([^\/]+)\/([^\/]+)\/blob\/([^\/]+)\/(.+)$/);
+    if(githubBlobMatch) {
+        return "https://raw.githubusercontent.com/" +
+            githubBlobMatch[1] + "/" +
+            githubBlobMatch[2] + "/" +
+            githubBlobMatch[3] + "/" +
+            githubBlobMatch[4];
+    }
+
+    // Common mistaken hybrid:
+    // https://raw.githubusercontent.com/OWNER/REPO/blob/BRANCH/path/to/file.ext
+    var rawBlobMatch = url.match(/^https:\/\/raw\.githubusercontent\.com\/([^\/]+)\/([^\/]+)\/blob\/([^\/]+)\/(.+)$/);
+    if(rawBlobMatch) {
+        return "https://raw.githubusercontent.com/" +
+            rawBlobMatch[1] + "/" +
+            rawBlobMatch[2] + "/" +
+            rawBlobMatch[3] + "/" +
+            rawBlobMatch[4];
+    }
+
+    // jsDelivr GitHub CDN URLs and already-raw URLs pass through unchanged
+    return url;
+}
+
+var Widget = require("$:/core/modules/widgets/widget.js").widget;
+
+var scriptPromise = null;
+
+function loadModelViewer(document, statusCallback) {
+    if(window.customElements && customElements.get("model-viewer")) {
+        statusCallback("model-viewer already registered");
+        return Promise.resolve();
+    }
+
+    if(scriptPromise) {
+        statusCallback("waiting for existing model-viewer script");
+        return scriptPromise;
+    }
+
+    statusCallback("loading model-viewer script");
+
+    scriptPromise = new Promise(function(resolve,reject) {
+        var script = document.createElement("script");
+        script.type = "module";
+
+        // Primary CDN
+        script.src = "https://ajax.googleapis.com/ajax/libs/model-viewer/3.3.0/model-viewer.min.js";
+        script.setAttribute("data-tw-modelviewer","yes");
+
+        script.onload = function() {
+            setTimeout(function() {
+                if(window.customElements && customElements.get("model-viewer")) {
+                    statusCallback("model-viewer registered");
+                    resolve();
+                } else {
+                    statusCallback("script loaded, but model-viewer not registered");
+                    reject(new Error("model-viewer custom element was not registered"));
+                }
+            },500);
+        };
+
+        script.onerror = function() {
+            statusCallback("primary CDN failed; trying unpkg");
+
+            var fallback = document.createElement("script");
+            fallback.type = "module";
+            fallback.src = "https://unpkg.com/@google/model-viewer@3.3.0/dist/model-viewer.min.js";
+            fallback.setAttribute("data-tw-modelviewer","yes");
+
+            fallback.onload = function() {
+                setTimeout(function() {
+                    if(window.customElements && customElements.get("model-viewer")) {
+                        statusCallback("model-viewer registered from fallback CDN");
+                        resolve();
+                    } else {
+                        statusCallback("fallback script loaded, but model-viewer not registered");
+                        reject(new Error("model-viewer custom element was not registered from fallback"));
+                    }
+                },500);
+            };
+
+            fallback.onerror = function() {
+                statusCallback("model-viewer script failed to load");
+                reject(new Error("model-viewer script failed to load"));
+            };
+
+            document.head.appendChild(fallback);
+        };
+
+        document.head.appendChild(script);
+    });
+
+    return scriptPromise;
+}
+
+var ModelViewerWidget = function(parseTreeNode,options) {
+    this.initialise(parseTreeNode,options);
+};
+
+ModelViewerWidget.prototype = new Widget();
+
+ModelViewerWidget.prototype.render = function(parent,nextSibling) {
+    this.parentDomNode = parent;
+    this.computeAttributes();
+    this.execute();
+
+    var container = this.document.createElement("div");
+    container.className = "tw-modelviewer-widget";
+
+    var status = this.document.createElement("div");
+    status.className = "tw-modelviewer-status";
+    status.textContent = "Preparing 3D viewer…";
+    container.appendChild(status);
+
+    var frame = this.document.createElement("div");
+    frame.className = "tw-modelviewer-frame";
+    container.appendChild(frame);
+
+    var footer = this.document.createElement("div");
+    footer.className = "tw-modelviewer-footer";
+
+    var openLink = this.document.createElement("a");
+    openLink.className = "tw-modelviewer-open";
+    openLink.href = this.src;
+    openLink.target = "_blank";
+    openLink.rel = "noopener noreferrer";
+    openLink.textContent = "Open raw model file";
+
+    footer.appendChild(openLink);
+    container.appendChild(footer);
+
+    parent.insertBefore(container,nextSibling);
+    this.domNodes.push(container);
+
+    var self = this;
+
+    function setStatus(text) {
+        status.textContent = text;
+        if(self.statusTiddler) {
+            $tw.wiki.addTiddler(new $tw.Tiddler({
+                title: self.statusTiddler,
+                text: text
+            }));
+        }
+    }
+
+    if(!this.src) {
+        setStatus("No model source supplied");
+        return;
+    }
+
+    loadModelViewer(this.document,setStatus).then(function() {
+        frame.innerHTML = "";
+
+        var viewer = self.document.createElement("model-viewer");
+        viewer.className = "tw-modelviewer-element";
+        viewer.setAttribute("src",self.src);
+        viewer.setAttribute("alt",self.alt || "3D model");
+
+        // modelviewer.dev/editor-style attributes
+        if(self.cameraControls) {
+            viewer.setAttribute("camera-controls","");
+        }
+        if(self.autoRotate) {
+            viewer.setAttribute("auto-rotate","");
+        }
+        if(self.ar) {
+            viewer.setAttribute("ar","");
+        }
+
+        viewer.setAttribute("loading",self.loading || "eager");
+        viewer.setAttribute("reveal",self.reveal || "auto");
+        viewer.setAttribute("shadow-intensity",self.shadowIntensity || "1");
+        viewer.setAttribute("exposure",self.exposure || "1");
+        viewer.setAttribute("tone-mapping",self.toneMapping || "neutral");
+
+        if(self.environmentImage) {
+            viewer.setAttribute("environment-image",self.environmentImage);
+        }
+        if(self.skyboxImage) {
+            viewer.setAttribute("skybox-image",self.skyboxImage);
+        }
+        if(self.poster) {
+            viewer.setAttribute("poster",self.poster);
+        }
+        if(self.cameraOrbit) {
+            viewer.setAttribute("camera-orbit",self.cameraOrbit);
+        }
+        if(self.fieldOfView) {
+            viewer.setAttribute("field-of-view",self.fieldOfView);
+        }
+        if(self.minCameraOrbit) {
+            viewer.setAttribute("min-camera-orbit",self.minCameraOrbit);
+        }
+        if(self.maxCameraOrbit) {
+            viewer.setAttribute("max-camera-orbit",self.maxCameraOrbit);
+        }
+        if(self.interactionPrompt) {
+            viewer.setAttribute("interaction-prompt",self.interactionPrompt);
+        }
+        if(self.crossorigin) {
+            viewer.setAttribute("crossorigin",self.crossorigin);
+        }
+
+        viewer.style.width = "100%";
+        viewer.style.height = self.height || "450px";
+        // Transparent: the palette-coloured frame shows through (theme-reactive)
+        viewer.style.background = "transparent";
+
+        var fallback = self.document.createElement("div");
+        fallback.setAttribute("slot","poster");
+        fallback.className = "tw-modelviewer-poster";
+        fallback.textContent = self.posterText || "Loading 3D model…";
+        viewer.appendChild(fallback);
+
+        viewer.addEventListener("load",function() {
+            setStatus("model loaded");
+        });
+
+        viewer.addEventListener("error",function(event) {
+            var message = "model failed to load (CORS or network error — try a raw.githubusercontent.com or jsDelivr URL)";
+            if(event && event.detail && event.detail.type) {
+                message = message + ": " + event.detail.type;
+            }
+            setStatus(message);
+        });
+
+        viewer.addEventListener("progress",function(event) {
+            if(event && event.detail && event.detail.totalProgress !== undefined) {
+                var percentage = Math.round(event.detail.totalProgress * 100);
+                setStatus("loading model: " + percentage + "%");
+            }
+        });
+
+        frame.appendChild(viewer);
+        setStatus("model-viewer ready");
+
+    }).catch(function(error) {
+        setStatus(error.message || "model-viewer failed");
+    });
+};
+
+ModelViewerWidget.prototype.execute = function() {
+    this.originalSrc = this.getAttribute("src","");
+    this.src = normaliseModelUrl(this.originalSrc);
+    this.height = this.getAttribute("height","450px");
+    this.alt = this.getAttribute("alt","3D model");
+    this.posterText = this.getAttribute("posterText","Loading 3D model…");
+    this.statusTiddler = this.getAttribute("statusTiddler","");
+
+    this.cameraControls = this.getAttribute("camera-controls","yes") !== "no";
+    this.autoRotate = this.getAttribute("auto-rotate","no") === "yes";
+    this.ar = this.getAttribute("ar","no") === "yes";
+
+    this.loading = this.getAttribute("loading","eager");
+    this.reveal = this.getAttribute("reveal","auto");
+    this.shadowIntensity = this.getAttribute("shadow-intensity","1");
+    this.exposure = this.getAttribute("exposure","1");
+    this.toneMapping = this.getAttribute("tone-mapping","neutral");
+    this.environmentImage = this.getAttribute("environment-image","neutral");
+    this.skyboxImage = this.getAttribute("skybox-image","");
+    this.poster = this.getAttribute("poster","");
+    this.cameraOrbit = this.getAttribute("camera-orbit","");
+    this.fieldOfView = this.getAttribute("field-of-view","");
+    this.minCameraOrbit = this.getAttribute("min-camera-orbit","");
+    this.maxCameraOrbit = this.getAttribute("max-camera-orbit","");
+    this.interactionPrompt = this.getAttribute("interaction-prompt","auto");
+    this.crossorigin = this.getAttribute("crossorigin","anonymous");
+    this.background = this.getAttribute("background","#ffffff");
+
+    this.makeChildWidgets();
+};
+
+ModelViewerWidget.prototype.refresh = function(changedTiddlers) {
+    var changedAttributes = this.computeAttributes();
+    if(changedAttributes.src ||
+            changedAttributes.height ||
+            changedAttributes["camera-controls"] ||
+            changedAttributes["auto-rotate"] ||
+            changedAttributes["shadow-intensity"] ||
+            changedAttributes.exposure ||
+            changedAttributes["tone-mapping"] ||
+            changedAttributes["environment-image"] ||
+            changedAttributes["camera-orbit"] ||
+            changedAttributes["field-of-view"]) {
+        this.refreshSelf();
+        return true;
+    }
+    return this.refreshChildren(changedTiddlers);
+};
+
+exports.modelviewer = ModelViewerWidget;
+
+})();

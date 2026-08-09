@@ -12,6 +12,7 @@
         "xyvir/lithic-patch-markdown",
         "xyvir/lithic-patch-streams",
         "xyvir/lithic-patch-whiteboard",
+        "xyvir/lithic-richlinks",
         "xyvir/lithic-tweaks",
         "linonetwo/tw-react",
         "linonetwo/tw-whiteboard",

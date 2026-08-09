@@ -1,0 +1,336 @@
+type: application/javascript
+module-type: widget
+title: $:/plugins/richlink/stlviewer-widget.js
+
+/*\
+title: $:/plugins/richlink/stlviewer-widget.js
+type: application/javascript
+module-type: widget
+\*/
+
+(function(){
+
+"use strict";
+
+function normaliseModelUrl(url) {
+    if(!url) {
+        return "";
+    }
+
+    url = url.trim();
+
+    // Encode accidental spaces without double-encoding existing %20
+    url = url.replace(/ /g,"%20");
+
+    // GitHub blob URL:
+    // https://github.com/OWNER/REPO/blob/BRANCH/path/to/file.ext
+    var githubBlobMatch = url.match(/^https:\/\/github\.com\/([^\/]+)\/([^\/]+)\/blob\/([^\/]+)\/(.+)$/);
+    if(githubBlobMatch) {
+        return "https://raw.githubusercontent.com/" +
+            githubBlobMatch[1] + "/" +
+            githubBlobMatch[2] + "/" +
+            githubBlobMatch[3] + "/" +
+            githubBlobMatch[4];
+    }
+
+    // Common mistaken hybrid:
+    // https://raw.githubusercontent.com/OWNER/REPO/blob/BRANCH/path/to/file.ext
+    var rawBlobMatch = url.match(/^https:\/\/raw\.githubusercontent\.com\/([^\/]+)\/([^\/]+)\/blob\/([^\/]+)\/(.+)$/);
+    if(rawBlobMatch) {
+        return "https://raw.githubusercontent.com/" +
+            rawBlobMatch[1] + "/" +
+            rawBlobMatch[2] + "/" +
+            rawBlobMatch[3] + "/" +
+            rawBlobMatch[4];
+    }
+
+    // jsDelivr GitHub CDN URLs and already-raw URLs pass through unchanged
+    return url;
+}
+
+var Widget = require("$:/core/modules/widgets/widget.js").widget;
+
+var threePromise = null;
+
+function loadScript(document,src) {
+    return new Promise(function(resolve,reject) {
+        var existing = document.querySelector("script[src='" + src + "']");
+        if(existing) {
+            resolve();
+            return;
+        }
+
+        var script = document.createElement("script");
+        script.src = src;
+        script.onload = function() {
+            resolve();
+        };
+        script.onerror = function() {
+            reject(new Error("Failed to load " + src));
+        };
+        document.head.appendChild(script);
+    });
+}
+
+function loadThree(document,statusCallback) {
+    if(window.THREE && window.THREE.STLLoader && window.THREE.OrbitControls) {
+        statusCallback("Three.js STL support already loaded");
+        return Promise.resolve();
+    }
+
+    if(threePromise) {
+        statusCallback("waiting for existing Three.js loader");
+        return threePromise;
+    }
+
+    statusCallback("loading Three.js STL support");
+
+    threePromise = loadScript(
+        document,
+        "https://cdn.jsdelivr.net/npm/three@0.128.0/build/three.min.js"
+    ).then(function() {
+        return loadScript(
+            document,
+            "https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/STLLoader.js"
+        );
+    }).then(function() {
+        return loadScript(
+            document,
+            "https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"
+        );
+    }).then(function() {
+        if(window.THREE && window.THREE.STLLoader) {
+            statusCallback("Three.js STL support loaded");
+        } else {
+            throw new Error("THREE.STLLoader was not registered");
+        }
+    });
+
+    return threePromise;
+}
+
+var STLViewerWidget = function(parseTreeNode,options) {
+    this.initialise(parseTreeNode,options);
+};
+
+STLViewerWidget.prototype = new Widget();
+
+STLViewerWidget.prototype.render = function(parent,nextSibling) {
+    this.parentDomNode = parent;
+    this.computeAttributes();
+    this.execute();
+
+    var container = this.document.createElement("div");
+    container.className = "tw-stlviewer-widget";
+
+    var status = this.document.createElement("div");
+    status.className = "tw-stlviewer-status";
+    status.textContent = "Preparing STL viewer…";
+    container.appendChild(status);
+
+    var frame = this.document.createElement("div");
+    frame.className = "tw-stlviewer-frame";
+    frame.style.height = this.height;
+    container.appendChild(frame);
+
+    var footer = this.document.createElement("div");
+    footer.className = "tw-stlviewer-footer";
+
+    var openLink = this.document.createElement("a");
+    openLink.className = "tw-stlviewer-open";
+    openLink.href = this.src;
+    openLink.textContent = "Open raw STL file";
+    openLink.target = "_blank";
+    openLink.rel = "noopener noreferrer";
+    openLink.textContent = "Open STL file";
+
+    footer.appendChild(openLink);
+    container.appendChild(footer);
+
+    parent.insertBefore(container,nextSibling);
+    this.domNodes.push(container);
+
+    var self = this;
+
+    function setStatus(text) {
+        status.textContent = text;
+        if(self.statusTiddler) {
+            $tw.wiki.addTiddler(new $tw.Tiddler({
+                title: self.statusTiddler,
+                text: text
+            }));
+        }
+    }
+
+    if(!this.src) {
+        setStatus("No STL source supplied");
+        return;
+    }
+
+    loadThree(this.document,setStatus).then(function() {
+        self.startSTLViewer(frame,setStatus);
+    }).catch(function(error) {
+        setStatus(error.message || "STL viewer failed");
+    });
+};
+
+STLViewerWidget.prototype.startSTLViewer = function(frame,setStatus) {
+    var self = this;
+    var THREE = window.THREE;
+
+    frame.innerHTML = "";
+
+    var width = frame.clientWidth || 640;
+    var height = frame.clientHeight || parseInt(this.height,10) || 450;
+
+    var scene = new THREE.Scene();
+    // Transparent canvas: the palette-coloured frame shows through (theme-reactive)
+    scene.background = null;
+
+    var camera = new THREE.PerspectiveCamera(45,width / height,0.1,100000);
+    camera.position.set(0,-100,60);
+
+    var renderer = new THREE.WebGLRenderer({
+        antialias: true,
+        alpha: true
+    });
+    renderer.setClearColor(0x000000,0);
+    renderer.setPixelRatio(window.devicePixelRatio || 1);
+    renderer.setSize(width,height);
+    frame.appendChild(renderer.domElement);
+
+    var controls = new THREE.OrbitControls(camera,renderer.domElement);
+    controls.enableDamping = true;
+    controls.dampingFactor = 0.08;
+
+    var hemiLight = new THREE.HemisphereLight(0xffffff,0x444444,1.2);
+    hemiLight.position.set(0,0,200);
+    scene.add(hemiLight);
+
+    var dirLight = new THREE.DirectionalLight(0xffffff,0.9);
+    dirLight.position.set(100,-100,150);
+    scene.add(dirLight);
+
+    var loader = new THREE.STLLoader();
+
+    setStatus("loading STL model");
+
+    loader.load(
+        this.src,
+        function(geometry) {
+            geometry.computeBoundingBox();
+            geometry.computeBoundingSphere();
+
+            var material = new THREE.MeshStandardMaterial({
+                color: new THREE.Color(self.colour || "#b8b8b8"),
+                metalness: parseFloat(self.metalness || "0.1"),
+                roughness: parseFloat(self.roughness || "0.55")
+            });
+
+            var mesh = new THREE.Mesh(geometry,material);
+
+            if(self.side === "double") {
+                material.side = THREE.DoubleSide;
+            }
+
+            // Centre model
+            var box = geometry.boundingBox;
+            var centre = new THREE.Vector3();
+            box.getCenter(centre);
+            mesh.position.sub(centre);
+
+            scene.add(mesh);
+
+            // Fit camera to model
+            var sphere = geometry.boundingSphere;
+            var radius = sphere && sphere.radius ? sphere.radius : 100;
+            var distance = radius * 2.8;
+
+            camera.position.set(distance,-distance,distance * 0.65);
+            camera.near = Math.max(distance / 1000,0.1);
+            camera.far = distance * 100;
+            camera.updateProjectionMatrix();
+
+            controls.target.set(0,0,0);
+            controls.update();
+
+            setStatus("STL model loaded");
+
+            function animate() {
+                if(self.destroyed) {
+                    return;
+                }
+                requestAnimationFrame(animate);
+                controls.update();
+                renderer.render(scene,camera);
+            }
+
+            animate();
+        },
+        function(xhr) {
+            if(xhr && xhr.total) {
+                var pct = Math.round((xhr.loaded / xhr.total) * 100);
+                setStatus("loading STL model: " + pct + "%");
+            } else {
+                setStatus("loading STL model");
+            }
+        },
+        function(error) {
+            setStatus("STL model failed to load (CORS or network error — try a raw.githubusercontent.com or jsDelivr URL)");
+            if(console && console.error) {
+                console.error(error);
+            }
+        }
+    );
+
+    this.cleanup = function() {
+        self.destroyed = true;
+        try {
+            controls.dispose();
+            renderer.dispose();
+        } catch(e) {}
+    };
+};
+
+STLViewerWidget.prototype.execute = function() {
+    this.originalSrc = this.getAttribute("src","");
+    this.src = normaliseModelUrl(this.originalSrc);
+    this.height = this.getAttribute("height","450px");
+    this.background = this.getAttribute("background","#ffffff");
+    this.colour = this.getAttribute("colour","#b8b8b8");
+    this.metalness = this.getAttribute("metalness","0.1");
+    this.roughness = this.getAttribute("roughness","0.55");
+    this.side = this.getAttribute("side","single");
+    this.statusTiddler = this.getAttribute("statusTiddler","");
+    this.destroyed = false;
+    this.makeChildWidgets();
+};
+
+STLViewerWidget.prototype.refresh = function(changedTiddlers) {
+    var changedAttributes = this.computeAttributes();
+    if(changedAttributes.src ||
+            changedAttributes.height ||
+            changedAttributes.background ||
+            changedAttributes.colour ||
+            changedAttributes.metalness ||
+            changedAttributes.roughness ||
+            changedAttributes.side) {
+        if(this.cleanup) {
+            this.cleanup();
+        }
+        this.refreshSelf();
+        return true;
+    }
+    return this.refreshChildren(changedTiddlers);
+};
+
+STLViewerWidget.prototype.removeChildDomNodes = function() {
+    if(this.cleanup) {
+        this.cleanup();
+    }
+    Widget.prototype.removeChildDomNodes.call(this);
+};
+
+exports.stlviewer = STLViewerWidget;
+
+})();

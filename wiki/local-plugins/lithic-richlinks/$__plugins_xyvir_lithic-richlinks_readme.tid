@@ -1,0 +1,56 @@
+title: $:/plugins/xyvir/lithic-richlinks/readme
+tags: 
+
+!Lithic Richlinks
+
+Displays external links as rich objects. Type:
+
+```
+<<richlink "https://www.youtube.com/watch?v=VIDEO_ID">>
+```
+
+and the link is replaced by an embedded player, viewer or styled link depending on what it points to. One command, many shapes — the URL itself picks the template:
+
+* Domain templates (e.g. `d@youtube`, `d@github`, `d@wikipedia`, `d@soundcloud`, `d@jsfiddle`, `d@disq.us`, `d@twitter`, `docs@tiddlywiki`)
+* File templates (e.g. `f@txt`, `fimg@jpg@jpeg@png@gif@webp@svg`, `faudio@mp3@ogg@wav@flac`, `fvideo@mp4@avi@webm@ogv`, `f3dmodel@gltf@glb`, `f3dmodel@stl`)
+* Generic [[$:/plugins/richlink/iframe]] template as a fallback
+
+!Extra parameters
+
+Some templates accept extra parameters after the URL, e.g. an image caption or an iframe height:
+
+```
+<<richlink "https://example.com/photo.jpg" "my caption">>
+<<richlink iframe "https://example.com/page" "description" "site" "600px">>
+```
+
+Within a template the URL is available as `<<link>>` and the extra parameters as `<<1>>`, `<<2>>`, `<<3>>` and `<<4>>`.
+
+!In the editor
+
+Type `/richlinks` in the editor to insert `<<richlink "">>` with the caret placed inside the quotes — just paste a URL.
+
+!Test links
+
+Verified embed-friendly URLs for each template:
+
+```
+<<richlink "https://www.youtube.com/watch?v=dQw4w9WgXcQ">>                          <!-- d@youtube     -->
+<<richlink "https://github.com/Jermolene/TiddlyWiki5">>                            <!-- d@github      -->
+<<richlink "https://en.wikipedia.org/wiki/TiddlyWiki">>                            <!-- d@wikipedia   -->
+<<richlink "https://raw.githubusercontent.com/KhronosGroup/glTF-Sample-Models/master/2.0/Duck/glTF-Binary/Duck.glb">>  <!-- f3dmodel@glb -->
+<<richlink "https://raw.githubusercontent.com/Buildbee/example-stl/main/binary_cube.stl">>  <!-- f3dmodel@stl -->
+<<richlink "https://example.com/">>                                               <!-- iframe fallback -->
+<<richlink iframe "https://www.openstreetmap.org/export/embed.html?bbox=-0.004,51.476,0.006,51.482&amp;layer=mapnik" "OpenStreetMap" "openstreetmap.org" "450px">>  <!-- forced iframe -->
+```
+
+Iframe-embeddable targets (no `X-Frame-Options` / CSP `frame-ancestors` block): `example.com`, the OpenStreetMap / YouTube / Vimeo / Bing Maps embed endpoints, and Wikipedia pages.
+
+!Notes
+
+* The tweet template renders tweets via the official Twitter plugin when installed, and falls back to a plain link otherwise.
+* The 3D model templates lazily load the Google model-viewer / Three.js STL viewer scripts from a CDN the first time they are used.
+* The 3D viewers fetch the model file with CORS; use a `raw.githubusercontent.com`, jsDelivr (`https://cdn.jsdelivr.net/gh/user/repo@branch/path`) or other CORS-enabled host for the file to load.
+* Text files are fetched and rendered inline with palette colours when the host allows CORS (e.g. `raw.githubusercontent.com`); otherwise they fall back to an unstyled iframe. The 3D canvases are transparent so the card always follows the active palette.
+* SoundCloud only embeds track/set URLs (e.g. `https://soundcloud.com/zedd/clarity-1`), not the homepage.
+* Based on the [[RichLinks revisited demosite|https://richlinkrevistedii.tiddlyhost.com/]] by Mat von TWaddle and JanJo.

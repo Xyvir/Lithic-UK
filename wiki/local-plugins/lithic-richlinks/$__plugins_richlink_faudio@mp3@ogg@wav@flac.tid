@@ -1,0 +1,4 @@
+tags: 
+title: $:/plugins/richlink/faudio@mp3@ogg@wav@flac
+
+<audio src=<<link>> controls preload="auto" class="richlink-audio"/>

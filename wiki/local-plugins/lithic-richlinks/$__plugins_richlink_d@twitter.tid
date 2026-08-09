@@ -1,0 +1,11 @@
+tags: $:/template/richlink
+title: $:/plugins/richlink/d@twitter
+
+<$list filter="[all[shadows]title[$:/plugins/tiddlywiki/twitter]]">
+<$set name="xx" filter="[<link>split:last[/]]">
+<$twitter type="tweet" tweetID=<<xx>>/>
+</$set>
+</$list>
+<$list filter="[all[shadows]!title[$:/plugins/tiddlywiki/twitter]]">
+<a href=<<link>> target="_blank" rel="noopener noreferrer" class="tc-tiddlylink-external">View tweet</a>
+</$list>

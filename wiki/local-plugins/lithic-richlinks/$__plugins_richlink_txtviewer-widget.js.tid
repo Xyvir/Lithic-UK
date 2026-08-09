@@ -1,0 +1,165 @@
+type: application/javascript
+module-type: widget
+title: $:/plugins/richlink/txtviewer-widget.js
+
+/*\
+title: $:/plugins/richlink/txtviewer-widget.js
+type: application/javascript
+module-type: widget
+\*/
+
+(function(){
+
+"use strict";
+
+var Widget = require("$:/core/modules/widgets/widget.js").widget;
+
+/*
+Resolve a palette colour the same way <<colour>> does:
+$:/palette (dictionary tiddler) -> $:/palettes/Vanilla -> $:/config/DefaultColourMappings/<name>.
+Values that reference other colours (<<colour x>>) are resolved recursively.
+Never throws: returns "" on any failure so callers simply skip the inline style.
+*/
+function paletteColour(name) {
+    try {
+        var wiki = $tw.wiki,
+            visited = {},
+            resolve = function(value) {
+                if(typeof value !== "string") {
+                    return "";
+                }
+                var m = value.match(/^<<colour\s+([^>]+)>>\s*$/);
+                if(m && !visited[m[1]]) {
+                    visited[m[1]] = true;
+                    return paletteColour(m[1]);
+                }
+                return value;
+            },
+            lookup = function(title) {
+                var t = wiki.getTiddler(title);
+                if(!t || typeof t.fields.text !== "string") {
+                    return undefined;
+                }
+                var re = new RegExp("^" + name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&") + "\\s*:\\s*(.*)$", "m");
+                var m = t.fields.text.match(re);
+                return m ? m[1].trim() : undefined;
+            };
+        var val = lookup(wiki.getTiddlerText("$:/palette"));
+        if(val === undefined) {
+            val = lookup("$:/palettes/Vanilla");
+        }
+        if(val === undefined) {
+            val = wiki.getTiddlerText("$:/config/DefaultColourMappings/" + name);
+        }
+        return resolve(val || "");
+    } catch(e) {
+        return "";
+    }
+}
+
+var TxtViewerWidget = function(parseTreeNode,options) {
+    this.initialise(parseTreeNode,options);
+};
+
+TxtViewerWidget.prototype = new Widget();
+
+TxtViewerWidget.prototype.render = function(parent,nextSibling) {
+    this.parentDomNode = parent;
+    this.computeAttributes();
+    this.execute();
+
+    var foreground = paletteColour("foreground"),
+        background = paletteColour("background"),
+        pageBackground = paletteColour("page-background"),
+        border = paletteColour("tiddler-border");
+
+    var container = this.document.createElement("div");
+    container.className = "rl-txt-frame-wrap";
+    container.style.height = this.height || "300px";
+    container.style.overflow = "hidden";
+    container.style.border = "1px solid " + border;
+    container.style.borderRadius = "0.4em";
+    container.style.background = pageBackground;
+    parent.insertBefore(container,nextSibling);
+    this.domNodes.push(container);
+
+    var self = this;
+
+    // Iframes are not subject to CORS, so this always displays the document —
+    // used when the cross-origin fetch is blocked by the host.
+    function renderIframeFallback() {
+        container.innerHTML = "";
+        var frame = self.document.createElement("iframe");
+        frame.src = self.src;
+        frame.style.display = "block";
+        frame.style.width = "100%";
+        frame.style.height = "100%";
+        frame.style.border = "0";
+        // The embedded document is cross-origin, so we can't style its contents —
+        // it renders with browser defaults. Force a solid light background and
+        // light color-scheme so the default black text stays readable over the
+        // dark card.
+        frame.style.background = "#ffffff";
+        frame.style.colorScheme = "light";
+        frame.setAttribute("loading","lazy");
+        container.appendChild(frame);
+    }
+
+    if(!self.src) {
+        container.textContent = "No text source supplied";
+        return;
+    }
+
+    container.textContent = "Loading text…";
+
+    fetch(self.src,{mode:"cors",credentials:"omit"}).then(function(response) {
+        if(!response.ok) {
+            throw new Error("HTTP " + response.status);
+        }
+        return response.text();
+    }).then(function(text) {
+        // Success — render the text inline, styled by the active palette.
+        // Colours are applied inline so nothing in the host app can override them.
+        container.innerHTML = "";
+        var pre = self.document.createElement("pre");
+        pre.className = "rl-txt-body";
+        pre.style.margin = "0";
+        pre.style.padding = "0.6em 0.8em";
+        pre.style.maxHeight = "100%";
+        pre.style.overflow = "auto";
+        pre.style.whiteSpace = "pre-wrap";
+        pre.style.wordBreak = "break-word";
+        pre.style.fontFamily = "inherit";
+        pre.style.fontSize = "0.9em";
+        pre.style.lineHeight = "1.45";
+        if(foreground) {
+            pre.style.color = foreground;
+        }
+        if(background) {
+            pre.style.background = background;
+        }
+        pre.textContent = text;
+        container.appendChild(pre);
+    }).catch(function() {
+        renderIframeFallback();
+    });
+};
+
+TxtViewerWidget.prototype.execute = function() {
+    this.src = this.getAttribute("src","");
+    this.height = this.getAttribute("height","300px");
+    this.makeChildWidgets();
+};
+
+TxtViewerWidget.prototype.refresh = function(changedTiddlers) {
+    var changedAttributes = this.computeAttributes();
+    if(changedAttributes.src || changedAttributes.height) {
+        this.refreshSelf();
+        return true;
+    }
+    return this.refreshChildren(changedTiddlers);
+};
+
+exports.txtviewer = TxtViewerWidget;
+
+})();

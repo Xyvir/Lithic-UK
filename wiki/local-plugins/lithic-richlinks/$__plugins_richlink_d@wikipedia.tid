@@ -1,0 +1,18 @@
+tags: $:/templates/richlink
+title: $:/plugins/richlink/d@wikipedia
+
+<a
+    class="rl-wikipedia"
+    href={{{ [<link>] }}}
+    target="_blank"
+    rel="noopener noreferrer">
+
+    <span class="rl-wikipedia-icon" aria-hidden="true">
+        {{$:/core/images/globe}}
+    </span>
+
+    <span class="rl-wikipedia-title">
+        <$text text={{{ [<link>split[/wiki/]last[]split[?]first[]split[#]first[]decodeuricomponent[]search-replace:g[_],[ ]] }}}/>
+    </span>
+
+</a>

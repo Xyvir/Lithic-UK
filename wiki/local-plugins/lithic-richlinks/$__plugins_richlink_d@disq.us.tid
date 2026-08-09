@@ -1,0 +1,10 @@
+tags: 
+title: $:/plugins/richlink/d@disq.us
+
+\define rl-disqus(id, height:"300")
+<iframe src="https://embed.disqus.com/$id$" width="100%" height="$height$" seamless="seamless" scrolling="no" frameborder="0" allowtransparency="true"></iframe>
+\end
+
+<$set name=id filter="[<link>split:after[http://disq.us/]]">
+<$macrocall $name=rl-disqus id=<<id>> height=<<1>>/>
+</$set>

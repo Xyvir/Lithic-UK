@@ -1,0 +1,27 @@
+tags: 
+title: $:/plugins/richlink/f3dmodel@stl
+
+<div class="rl-3dmodel">
+    <div class="rl-3dmodel-header">
+        <span class="rl-3dmodel-icon">◆</span>
+
+        <$element
+            tag="a"
+            class="rl-3dmodel-link"
+            href=<<link>>
+            target="_blank"
+            rel="noopener noreferrer">
+
+            <$text text={{{ [<link>split[/]last[]split[?]first[]split[#]first[]decodeuricomponent[]] }}}/>
+
+        </$element>
+    </div>
+
+    <$stlviewer
+        src=<<link>>
+        height="450px"
+        colour="#b8b8b8"
+        side="double"
+        statusTiddler="$:/temp/richlink/stlviewer/status"
+    />
+</div>

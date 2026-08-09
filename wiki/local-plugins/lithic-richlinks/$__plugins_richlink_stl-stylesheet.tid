@@ -1,0 +1,36 @@
+tags: $:/tags/Stylesheet
+type: text/vnd.tiddlywiki
+title: $:/plugins/richlink/stl-stylesheet
+
+.tw-stlviewer-widget {
+    display: block;
+    max-width: 48em;
+    margin: 0.35em 0;
+}
+
+.tw-stlviewer-status {
+    margin: 0 0 0.35em 0;
+    color: <<colour muted-foreground>>;
+    font-size: 0.85em;
+}
+
+.tw-stlviewer-frame {
+    border: 1px solid <<colour tiddler-border>>;
+    border-radius: 0.4em;
+    overflow: hidden;
+    background: <<colour page-background>>;
+}
+
+.tw-stlviewer-footer {
+    margin-top: 0.35em;
+    font-size: 0.85em;
+}
+
+.tw-stlviewer-open {
+    color: <<colour primary>>;
+    text-decoration: none;
+}
+
+.tw-stlviewer-open:hover {
+    text-decoration: underline;
+}

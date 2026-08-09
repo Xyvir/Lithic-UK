@@ -1,0 +1,53 @@
+tags: $:/tags/Stylesheet
+type: text/vnd.tiddlywiki
+title: $:/plugins/richlink/viewer-stylesheet
+
+.tw-modelviewer-widget {
+    display: block;
+    max-width: 48em;
+    margin: 0.35em 0;
+}
+
+.tw-modelviewer-status {
+    margin: 0 0 0.35em 0;
+    color: <<colour muted-foreground>>;
+    font-size: 0.85em;
+}
+
+.tw-modelviewer-frame {
+    border: 1px solid <<colour tiddler-border>>;
+    border-radius: 0.4em;
+    overflow: hidden;
+    background: <<colour page-background>>;
+}
+
+.tw-modelviewer-element {
+    display: block;
+    width: 100%;
+    min-height: 240px;
+    background: <<colour page-background>>;
+}
+
+.tw-modelviewer-poster {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 100%;
+    height: 100%;
+    color: <<colour muted-foreground>>;
+    font-size: 0.9em;
+}
+
+.tw-modelviewer-footer {
+    margin-top: 0.35em;
+    font-size: 0.85em;
+}
+
+.tw-modelviewer-open {
+    color: <<colour primary>>;
+    text-decoration: none;
+}
+
+.tw-modelviewer-open:hover {
+    text-decoration: underline;
+}

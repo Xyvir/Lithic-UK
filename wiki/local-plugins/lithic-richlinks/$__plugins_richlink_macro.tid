@@ -1,0 +1,60 @@
+tags: $:/tags/Macro
+title: $:/plugins/richlink/macro
+
+\define abevregexp() ^(?:(?:[a-z]{2,3}|m)\.)?([a-zA-Z0-9_]{5}).*
+
+\define domainLinks()
+<$list filter="""[<link>split[://]last[]search-replace::regexp[www.],[]search-replace::regexp<abevregexp>,[@$1]] +[limit[1]]""" >
+    <$list filter="[all[shadows+tiddlers]prefix[$:/plugins/richlink/d]search:title:{!!title}]">
+        <$tiddler tiddler={{!!title}}>
+            <$transclude/>
+        </$tiddler>
+        <$list-empty>
+            <$tiddler tiddler="$:/plugins/richlink/iframe">
+                <$transclude/>
+            </$tiddler>
+        </$list-empty>
+    </$list>
+</$list>
+\end
+
+\define applytemplate(signum)
+<$list filter="[all[shadows+tiddlers]prefix[$:/plugins/richlink/f]search:title:[$signum$]]" emptyMessage=<<domainLinks>>>
+    <$tiddler tiddler={{!!title}}>
+        <$transclude/>
+    </$tiddler>
+</$list>
+\end
+
+\define richlink(link, 1, 2, 3, 4)
+
+<$vars command="$link$">
+
+<!-- FORCED IFRAME MODE -->
+<$list filter="[<command>match[iframe]]">
+    <$vars
+        iframe-url="$1$"
+        iframe-description="$2$"
+        iframe-site="$3$"
+        iframe-height="$4$">
+        <$tiddler tiddler="$:/plugins/richlink/iframe">
+            <$transclude/>
+        </$tiddler>
+    </$vars>
+</$list>
+
+<!-- NORMAL MODE -->
+<$list filter="[<command>!match[iframe]]">
+    <$vars link="$link$" 1="$1$" 2="$2$" 3="$3$" 4="$4$">
+        <$list filter="""[<link>split[.]last[]addprefix[@]] [<link>split[://]last[]search-replace::regexp[www.],[]search-replace::regexp<abevregexp>,[@$1]] +[limit[1]]""" >
+            <$macrocall $name=applytemplate signum={{!!title}} />
+        </$list>
+    </$vars>
+</$list>
+
+</$vars>
+\end
+
+<$list filter="[all[current]has[richlink]get[richlink]]" variable="link">
+{{$:/core/images/import-button}}<$macrocall $name=richlink link=<<link>>/>
+</$list>

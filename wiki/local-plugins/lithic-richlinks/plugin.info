@@ -1,0 +1,10 @@
+{
+    "title": "$:/plugins/xyvir/lithic-richlinks",
+    "description": "Displays external links as rich objects: YouTube, GitHub, Wikipedia, SoundCloud, jsFiddle, Disqus, tweets, PDFs, text files, images, audio, video, 3D models (glTF/GLB/STL) and generic iframes. Nativized into a proper plugin from the RichLinks revisited demosite.",
+    "name": "Lithic Richlinks",
+    "plugin-type": "plugin",
+    "version": "0.0.1",
+    "author": "Xyvir",
+    "plugin-priority": "5",
+    "list": "readme"
+}

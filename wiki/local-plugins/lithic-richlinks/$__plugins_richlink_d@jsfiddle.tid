@@ -1,0 +1,8 @@
+tags: 
+title: $:/plugins/richlink/d@jsfiddle
+
+\define jsfiddle(link, height:"300")
+<iframe width="100%" height="$height$" src="$link$embedded/result,html,css,js/" allowfullscreen="allowfullscreen" frameborder="0"></iframe>
+\end
+
+<$macrocall $name=jsfiddle link=<<link>> height=<<1>>/>
