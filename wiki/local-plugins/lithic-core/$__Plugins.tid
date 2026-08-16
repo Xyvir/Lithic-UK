@@ -1,0 +1,5 @@
+title: $:/Plugins
+caption: Plugins
+icon: $:/core/images/plugin-generic-plugin
+
+{{$:/core/ui/ControlPanel/Plugins}}

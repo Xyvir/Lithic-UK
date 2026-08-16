@@ -50,3 +50,5 @@ type: text/vnd.tiddlywiki
     </$button>
   </div>
 </$list>
+
+{{$:/lithic/ui/Sidebar/LithicSettings}}

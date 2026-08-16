@@ -1,0 +1,28 @@
+title: $:/lithic/ui/Sidebar/LithicSettings
+type: text/vnd.tiddlywiki
+
+\define lithicSettingsToggle(target, label, default, reload, hint)
+<$vars target="$target$" label="$label$" default="$default$" reload="$reload$" hint="$hint$">
+  <$button class="tc-btn-invisible lithic-settings-row" tooltip=<<label>>>
+    <$action-setfield $tiddler=<<target>> text={{{ [<target>get[text]else<default>match[yes]then[no]else[yes]] }}}/>
+    <$action-deletetiddler $tiddler="$:/temp/HidePluginWarning" $condition={{{ [<reload>match[yes]] }}}/>
+    <$action-setfield $tiddler="$:/status/RequireReloadDueToPluginChange" text="yes" $condition={{{ [<reload>match[yes]] }}}/>
+    <span class="lithic-settings-label"><<label>> <$list filter="[<hint>!is[blank]]" variable="ignore"><span class="lithic-settings-hint"><<hint>></span></$list></span>
+    <span class={{{ [<target>get[text]else<default>match[yes]then[lithic-nut-slider active]else[lithic-nut-slider]] }}}>
+      <span class="lithic-nut"><span class="lithic-nut-hole"></span></span>
+    </span>
+  </$button>
+</$vars>
+\end
+
+<div class="segment section lithic-settings-section">
+  <div class="lithic-settings-heading">Lithic Settings</div>
+  <<lithicSettingsToggle target:"$:/config/AutoSave" label:"Autosave" default:"no" reload:"yes" hint:"(takes effect after reload)">>
+  <<lithicSettingsToggle target:"$:/themes/nico/notebook/options/stickytitles" label:"Sticky titles" default:"yes">>
+  <div class="lithic-settings-link">
+    <$button class="tc-btn-invisible lithic-settings-link-btn">
+      <$action-navigate $to="$:/Plugins"/>
+      Manage plugins…
+    </$button>
+  </div>
+</div>
