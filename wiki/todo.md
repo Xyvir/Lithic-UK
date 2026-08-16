@@ -1,9 +1,6 @@
 ## Todo
 
-- [x] hardbreak vs horizontal rule standardizations:
-	hardbreaks is my term for markdown ---\n--- (double hr) this forces pagebreaks on PDF prints, newcolumns in multicolumn layout, and should also be content deviders on anchors with prefill spawn.
-	- [x] update /anchor to use double --- --- instead of single --- for header vs pre-filled content, so the content can include single <hr> (also brings into alingment with column and pagebreaks)
-	- [x] update slashcommands for /hrule `---` vs /hardbreak `---\n---`
+
 
 ## launcher.html modularization Project
 - [ ] Allow specifying 'modes' via http parameters so the launcher monolith html can be forced into specific modes to make unit tests easier; (all unit tests can be performed in 1 test environment this way, but with multiple test profiles/users)
@@ -20,25 +17,33 @@
 ## Post Modularization Todo
 - [ ] update pdf-to-whiteboard plugin to convert svgs into editable "native whiteboards" maintaining individual objects?
 - [ ] Create self-destroying /anchor option based on <<stamp>> macro, maybe even super-ceding stamp?
+	-I'm making this too complicated, just create a new tiddler and use slashcommands to fill in a re-usable todo template. (This is literlaly it's use case) Maybe I should make a workflow to save convert existing content as a new slashcommands though.
 
 - [ ] Create/Integrate EPUB Serialization based on current to_lithic logic (but have user provide shortcode instead of AI-generated one); add it to existing pdf-to-whiteboard and name the plugin 'lithic-import' or something.
-- [ ] make links and transclusions in uni-editor clickable and hover-able (appear plugin)
-- [ ] Add hotzone for sidebar to autoopen/closen on mouseover.
+- [ ] make links and transclusions in uni-editor edit-mode clickable and hover-able (appear plugin)
+- [ ] Add hotzone for sidebar to autoopen/closen on mouseover?
     (this is mostly for when exporting static HTML sites)
 - [ ] Add custom feedback UI (especially for selfhost) for when save button is clicked but before the save confirmation modal appears.
     (Currently, save actions are silent until the confirmation modal appears. The UI should give immediate feedback that the action has been registered and is being processed, particularly for large wikis where the save operation may take a few seconds.)
 - [ ] Remove extraneous newlines created when using embed-streams macro.
+
 - [ ] add ## 'toggle button' to unieditor line numbers on line 00; that globally toggles the numbers on and off. (via state tiddler?)
-- [ ] Add special "Lithic Settings" Sidebar menu item that only appears when Tweak Sidebar is active, below the 'hidden' sidebar items; and has a handful of lithic-specific configuration options. Specifically limited. (maybe 10 max?)
+	- add to lithic settings for default on-load behavior? (but toggleable while interactive)
+
+- [X] Add special "Lithic Settings" Sidebar menu item that only appears when Tweak Sidebar is active, below the 'hidden' sidebar items; and has a handful of lithic-specific configuration options. Specifically limited. (maybe 10 max?)
     - option to include/not include 'base' shadow tiddlers in Query sidebar.
     - Default Backlink pill cloud state (expanded/collapsed)
     - Disable/enable hover-over expand (for sidebar, and backlink clouds, and maybe collapsed nodeparents)
     - Default code line-number starting state (on or off)
     (if user wants more customization then can navigate to the vanilla TW control panel via Commands; or via a "Advanced Settings" link in the Lithic Settings menu?)
     - option to completely disable / enable the non-recommended Browse and Commands sidebar items.
+
 - [ ] Integrate spaced repetition / flashcard review into Lithic?
     - Candidates: pdeck, twsr (unmaintained). TidMe is too heavyweight as a full edition. Deafult or add as 'official' plugin.
     - Goal: lightweight integration that works within the streams experience (e.g., sidebar review tab, slashcommand to create cards from highlights).
+    - Maybe encorporate into whiteboard instead (as it is more visual)
+    - Create a mechanism to easily print the flashcards as well
+
 - [ ] JsxGraph plugin? (I believe updated mermaidgraph supports x/y plot so this is redundant)
      Deafult or add as 'official' plugin?
 - [ ] Add additional parameter to AutoTable widget that allows for prefilled content per column? 
@@ -49,16 +54,20 @@
     - [ ] Clean up all reference to TW lingo in 'main' UI.
         - Backdoor action enabled by default, but add config tiddler to "disable unlock action"
     - [X] Hide alternate storyview options (zoomin, etc.) in Patina mode
+
 - [ ] Expansions to tldraw
     - [ ] Create hotzone macro
     - [ ] "draw over time" animation
     - [ ] "typewriter" animation
     - [ ] Add "view frame" background item to DefaultCanvas
     - [ ] Create parallel layout for "Presentation Mode" that is non-editable and can navigate forward/back between whiteboard pages; with the above animations as toggleable options
+
 - [ ] When multiple images are drag-and-dropped simultaneously, serialize them into a single multi-page whiteboard (like PDF import) instead of individual whiteboard objects.
+
 - [ ] Test preserving existing 'rendered height' on unieditor when editing existing nodes/blocks. (IE images which are generally much taller than their sourcecode) Having the viewport jump around in response to editing text can be jarring. (which is the default behavior in logseq but is worth reviewing.)
 - [ ] Simple mobile Camera OCR import as text capture feature?
-- [ ] Revisit iframe-based web app embedding plugins (Treevis, Falstaad, etc.)
+
+- [ ] Revisit iframe-based web app embedding plugins (Treevis, Falstaad, etc.) Tiddlytools Webtools)
 
 - [ ] Pyramid expansion
     - [ ] Rename to "Treeview"?
@@ -69,10 +78,12 @@
         - (currently limited to showing treeview for tiddler at top of story river.)
         - This will act as a sort of 'ad-hoc' graph in place of the 'global graph' features of other PKMS; but it's more ideologically more focused.
     - [ ] Add smart behavior for tiddlers that have prev / next fields (like showing the corresponding pyramids the sidebar)
-- [ ] "Deep copy" transclusions on single tiddler exporter, or automatic transclusion inclusion on multi tiddler exporter?
+
+- [ ] "Deep copy" transclusions on single tiddler exporter, or automatic transclusion inclusion on multi tiddler exporter? (implicit standalone exports)
 
 - [ ] Add a whiteboard button that transcludes a parent's stream-list nodes as paginated stickynotes on a whiteboard. (Pre-presentation creation)
     - Highest level nodes are pages and their children are individual stickynotes on that page.
+
 - [ ] Create "Official" Lithic plugin store for Lithic-specific plugins/extensions.
     - [ ] circuitJS
     - [ ] "Lithic Native" Treevis / Chesstree implementation
@@ -80,6 +91,7 @@
     - [ ] Audio Editor/podcast plugin from talk.tiddlywiki.
     - [ ] Dogreader?
     - [ ] Card deck creation plugin/tool?
+
 - [ ] Create external "Lithic Reference Wiki" with template/snippet library for anchors and saved filters.
     - Browsable anchor templates with inline previews; users drag-and-drop desired templates into their own wiki.
     - Include example dashboard filters (weekly review, overdue todos, recently modified, orphan detection) as importable FilterOps presets.
@@ -103,6 +115,10 @@
 
 ## Done
 
+- [x] hardbreak vs horizontal rule standardizations:
+	hardbreaks is my term for markdown ---\n--- (double hr) this forces pagebreaks on PDF prints, newcolumns in multicolumn layout, and should also be content deviders on anchors with prefill spawn.
+	- [x] update /anchor to use double --- --- instead of single --- for header vs pre-filled content, so the content can include single <hr> (also brings into alingment with column and pagebreaks)
+	- [x] update slashcommands for /hrule `---` vs /hardbreak `---\n---`
 - [X] include 'prettylinks' ?
 - [x] Extend hover-over 'appear' plugin behavior to be more intuitive
     - [x] modify behavior to show todo when highlighting calendar datelinks
