@@ -8,13 +8,13 @@ title: $:/anchor
 }}}>
     <$list filter="[<p-tiddler>!is[blank]]" variable="ignore">
         
-        <$vars lb={{{ [charcode[10]] }}} reg-pattern="[^a-zA-Z0-9]">
+        <$vars lb={{{ [charcode[10]] }}} reg-pattern="[^a-zA-Z0-9]" hr="---">
             
             <$vars tag-name={{{ 
                 [<currentTiddler>get[text]search-replace:g[{{||$:/anchor}}],[]trim[]split<lb>first[]splitregexp<reg-pattern>join[]trim[]first[30]] 
-            }}}>
+            }}} hardbreak={{{ [<hr>addsuffix<lb>addsuffix<hr>] }}}>
                 
-                <$list filter="[<currentTiddler>get[text]split[---]rest[]trim[]!is[blank]reverse[]] ~[[__EMPTY__]]" variable="payload">
+                <$list filter="[<currentTiddler>get[text]split<hardbreak>rest[]trim[]!is[blank]reverse[]] ~[[__EMPTY__]]" variable="payload">
                 <$vars node-text={{{ [<payload>match[__EMPTY__]then[]else<payload>] }}}>
                 <$wikify name="title-fmt" text={{$:/config/sq/streams/new-node-title}}>
                 <$wikify name="new-title" text={{{ [[<<unusedtitle "]] [<title-fmt>] [[">>]] +[join[]] }}}>
