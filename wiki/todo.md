@@ -1,21 +1,9 @@
 ## Todo
-- [ ] update pdf-to-whiteboard plugin to convert svgs into editable "native whiteboards" maintaining individual objects?
 
-- [ ] "Favorites" sidebar area vertical linespacing is not the same in tweak vs use mode, need to align these so the favorites don't visually shift on tweak mode toggle.
-
-
-- [ ] Create/Integrate EPUB Serialization based on current to_lithic logic (but have user provide shortcode instead of AI-generated one); add it to existing pdf-to-whiteboard and name the plugin 'lithic-import' or something.
-
-- [ ] Automate lithic-lite generation workflow?
-
-- [ ] hardbreak vs horizontal rule standardizations:
+- [x] hardbreak vs horizontal rule standardizations:
 	hardbreaks is my term for markdown ---\n--- (double hr) this forces pagebreaks on PDF prints, newcolumns in multicolumn layout, and should also be content deviders on anchors with prefill spawn.
-	- [ ] update /anchor to use double --- --- instead of single --- for header vs pre-filled content, so the content can include single <hr> (also brings into alingment with column and pagebreaks)
-	- [ ] update slashcommands for /hrule `---` vs /hardbreak `---\n---`
-
-- [ ] Create self-destroying /anchor option based on <<stamp>> macro, maybe even super-ceding stamp?
-
-- [ ] include 'prettylinks' ?
+	- [x] update /anchor to use double --- --- instead of single --- for header vs pre-filled content, so the content can include single <hr> (also brings into alingment with column and pagebreaks)
+	- [x] update slashcommands for /hrule `---` vs /hardbreak `---\n---`
 
 ## launcher.html modularization Project
 - [ ] Allow specifying 'modes' via http parameters so the launcher monolith html can be forced into specific modes to make unit tests easier; (all unit tests can be performed in 1 test environment this way, but with multiple test profiles/users)
@@ -30,6 +18,10 @@
 - [ ] Make sure the custom.ico is actually saved to GitHub so restoring the GitHub will restore your disambiguation / icon
 
 ## Post Modularization Todo
+- [ ] update pdf-to-whiteboard plugin to convert svgs into editable "native whiteboards" maintaining individual objects?
+- [ ] Create self-destroying /anchor option based on <<stamp>> macro, maybe even super-ceding stamp?
+
+- [ ] Create/Integrate EPUB Serialization based on current to_lithic logic (but have user provide shortcode instead of AI-generated one); add it to existing pdf-to-whiteboard and name the plugin 'lithic-import' or something.
 - [ ] make links and transclusions in uni-editor clickable and hover-able (appear plugin)
 - [ ] Add hotzone for sidebar to autoopen/closen on mouseover.
     (this is mostly for when exporting static HTML sites)
@@ -44,10 +36,10 @@
     - Default code line-number starting state (on or off)
     (if user wants more customization then can navigate to the vanilla TW control panel via Commands; or via a "Advanced Settings" link in the Lithic Settings menu?)
     - option to completely disable / enable the non-recommended Browse and Commands sidebar items.
-- [ ] Integrate spaced repetition / flashcard review into Lithic.
+- [ ] Integrate spaced repetition / flashcard review into Lithic?
     - Candidates: pdeck, twsr (unmaintained). TidMe is too heavyweight as a full edition. Deafult or add as 'official' plugin.
     - Goal: lightweight integration that works within the streams experience (e.g., sidebar review tab, slashcommand to create cards from highlights).
-- [ ] JsxGraph plugin?
+- [ ] JsxGraph plugin? (I believe updated mermaidgraph supports x/y plot so this is redundant)
      Deafult or add as 'official' plugin?
 - [ ] Add additional parameter to AutoTable widget that allows for prefilled content per column? 
     - <<AutoTable "One Two Three" "- - {formula}">>
@@ -67,6 +59,7 @@
 - [ ] Test preserving existing 'rendered height' on unieditor when editing existing nodes/blocks. (IE images which are generally much taller than their sourcecode) Having the viewport jump around in response to editing text can be jarring. (which is the default behavior in logseq but is worth reviewing.)
 - [ ] Simple mobile Camera OCR import as text capture feature?
 - [ ] Revisit iframe-based web app embedding plugins (Treevis, Falstaad, etc.)
+
 - [ ] Pyramid expansion
     - [ ] Rename to "Treeview"?
     - [ ] Add "depth" field ie depth:3 that modifies how far the "Pyramid" sidebar view shows children.
@@ -77,6 +70,7 @@
         - This will act as a sort of 'ad-hoc' graph in place of the 'global graph' features of other PKMS; but it's more ideologically more focused.
     - [ ] Add smart behavior for tiddlers that have prev / next fields (like showing the corresponding pyramids the sidebar)
 - [ ] "Deep copy" transclusions on single tiddler exporter, or automatic transclusion inclusion on multi tiddler exporter?
+
 - [ ] Add a whiteboard button that transcludes a parent's stream-list nodes as paginated stickynotes on a whiteboard. (Pre-presentation creation)
     - Highest level nodes are pages and their children are individual stickynotes on that page.
 - [ ] Create "Official" Lithic plugin store for Lithic-specific plugins/extensions.
@@ -96,6 +90,7 @@
 - [ ] Add agents.md to back-end server if anyone wants to clone the github sync in their own LLM-IDE.
 - [ ] Greatly improve existing intro.lith to capture ALL current features and workflows.
 - [ ] Create "Lithic for Teams" backend version based on Multi-Wiki Server.
+
 - Tauri App Ideas:
     - [ ] Add 'run code' button next to copy code that hooks into ephemeral.exe
     - [ ] Allow file associations for *.txt; *.py, *.md etc so it can act as a lightweight text editor for local files.
@@ -107,6 +102,8 @@
 ---
 
 ## Done
+
+- [X] include 'prettylinks' ?
 - [x] Extend hover-over 'appear' plugin behavior to be more intuitive
     - [x] modify behavior to show todo when highlighting calendar datelinks
     - [x] Fix the alignment  when sidebar open.
@@ -156,3 +153,5 @@
         - [ ] Add toggle-prefix hotkey like logseq?
     - [X] Add "Alpha Sort" option to nodestream right-click menu.
        (Do twice to toggle ascending/descending)
+
+- [X] "Favorites" sidebar area vertical linespacing is not the same in tweak vs use mode, need to align these so the favorites don't visually shift on tweak mode toggle.

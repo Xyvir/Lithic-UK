@@ -1,0 +1,18 @@
+title: $:/bj/ui/EditorToolbar/search-dropdown
+
+<$let bjsearch=<<qualify "$:/temp/bjsearch">> bjreplace=<<qualify "$:/temp/bjreplace">>>
+<div style="display:flex;">
+<$edit-text tiddler=<<bjsearch>> tag="input" default=""/>
+<$button> replace with 
+
+<$action-sendmessage $message="tm-edit-text-operation" $param="replace-selection" find={{{ [<bjsearch>get[text]] }}} text={{{ [<bjreplace>get[text]] }}} />
+<$action-deletetiddler $tiddler=<<dropdown-state>>
+/>
+</$button><$edit-text tiddler=<<bjreplace>> tag="input" default=""/>
+<$button> all
+<$action-sendmessage $message="tm-edit-text-operation" $param="replace-all" find={{{ [<bjsearch>get[text]] }}} text={{{ [<bjreplace>get[text]] }}}/>
+<$action-deletetiddler $tiddler=<<dropdown-state>>
+/>
+</$button>
+</div>
+</$let>

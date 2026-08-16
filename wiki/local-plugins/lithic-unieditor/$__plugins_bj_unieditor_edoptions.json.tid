@@ -1,0 +1,12 @@
+title: $:/plugins/bj/unieditor/edoptions.json
+type: application/json
+
+{
+    "tabs": "    ",
+    "brackets": true,
+    "indents": true,
+    "spellCheck": ["tw"],
+    "height": "80vh",
+    "historySize":"32",
+    "bullets":["*","#"]
+}

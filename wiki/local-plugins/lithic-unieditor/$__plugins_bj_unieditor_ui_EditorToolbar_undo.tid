@@ -1,0 +1,9 @@
+title: $:/plugins/bj/unieditor/ui/EditorToolbar/undo
+caption: Undo
+condition: [<targetTiddler>!has[type]] [<targetTiddler>get[type]!prefix[image/]] [<targetTiddler>get[type]match[image/svg+xml]]
+description: undo 
+icon: $:/core/images/left-arrow
+tags: $:/tags/EditorToolbar
+type: text/vnd.tiddlywiki
+
+<$action-sendmessage	$message="tm-edit-text-operation"	$param="historyUndo"/>

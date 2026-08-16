@@ -1,0 +1,11 @@
+{
+    "title": "$:/plugins/bj/unieditor",
+    "name": "Unieditor (for Lithic)",
+    "author": "Jeffrey Wilkinson (BJ)",
+    "description": "edit js and css and html — Lithic fork with CompText auto-completion and styled markdown highlighting",
+    "plugin-type": "plugin",
+    "version": "0.0.8",
+    "core-version": ">=5.3.5",
+    "list": "readme license",
+    "source": "https://github.com/buggyj/unieditor"
+}

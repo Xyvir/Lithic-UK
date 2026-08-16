@@ -1,0 +1,10 @@
+title: $:/bj/customiconchange
+tags: $:/tags/Image
+
+\parameters (size:"22pt")
+<svg width=<<size>> height=<<size>> class="tc-image-theme-button tc-image-button" viewBox="0 0 128 128">
+  <rect width="128" height="128" fill="none" />
+  <text x="50%" y="75%" font-size="110" font-family="Arial, sans-serif" text-anchor="middle" alignment-baseline="middle">
+ ℀
+  </text>
+</svg>

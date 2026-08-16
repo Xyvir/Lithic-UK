@@ -1,0 +1,11 @@
+title: $:/bj/ui/EditorToolbar/search
+button-classes: tc-text-editor-toolbar-item-start-group
+caption: replace
+condition: [<targetTiddler>!has[type]] [<targetTiddler>type[text/vnd.tiddlywiki]]
+description: replace text
+dropdown: $:/bj/ui/EditorToolbar/search-dropdown
+icon: $:/bj/customiconchange
+tags: $:/tags/EditorToolbar
+type: text/vnd.tiddlywiki
+
+

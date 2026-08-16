@@ -1,0 +1,723 @@
+title: $:/plugins/bj/unieditor/edit-uni.js
+module-type: widget
+type: application/javascript
+
+/*\
+title: $:/plugins/bj/unieditor/edit-uni.js
+type: application/javascript
+module-type: widget
+
+Lithic-native uniEditor adapter — adds CompText auto-completion
+and styled markdown highlighting support.
+Merged from the upstream $:/plugins/bj/unieditor/edit-uni.js.
+
+\*/
+(function(){
+
+/*jslint node: true, browser: true */
+/*global $tw: false */
+"use strict";
+const consolelog = function () {}
+var MIN_TEXT_AREA_HEIGHT = 100; //in px
+
+var Widget = require("$:/core/modules/widgets/widget.js").widget;
+
+// --- COMPTEXT INTEGRATION ---
+var CompletionLib;
+try {
+	CompletionLib = require("$:/plugins/snowgoon88/edit-comptext/completion.js");
+} catch (e) { console.log("CompText library not found (optional)."); }
+// ----------------------------
+
+// --- STYLED MARKDOWN HIGHLIGHTING ---
+var mdHighlight;
+try {
+	mdHighlight = require("$:/plugins/bj/unieditor/md-highlight.js");
+} catch (e) { console.log("MD highlight library not found (optional)."); }
+// ------------------------------------
+
+var newid=0;
+var uniEditorWidget = function(parseTreeNode,options) {
+			// Initialise the editor operations if they've not been done already
+		if(!this.editorOperations) {
+			uniEditorWidget.prototype.editorOperations = {};
+			$tw.modules.applyMethods("texteditoroperation",this.editorOperations);
+		}
+	this.initialise(parseTreeNode,options);
+};
+if($tw.browser) {
+var uniEditor =	require("$:/plugins/bj/unieditor/unieditor.js").uniEditor;
+}
+
+uniEditorWidget.prototype = new Widget();
+
+const modetid="$:/config/TextEditor/EditorHeight/Mode"
+const Heighttid="$:/config/TextEditor/EditorHeight/Height"
+uniEditorWidget.prototype.render = function(parent,nextSibling) {
+	var self = this;
+	consolelog("enter render")
+    this.passThru = false;
+	this.parentDomNode = parent;
+	consolelog(this.children)
+	
+	this.computeAttributes();
+	this.execute();
+	//only edit with tool bar, else use text editor
+	if  (!this.children || this.children.length == 0 || this.document.isTiddlyWikiFakeDom){
+		this.passThru = true;
+		this.makeChildWidgets([{
+			type: "edit-" + "text",
+			attributes: this.parseTreeNode.attributes,
+			children: this.parseTreeNode.children
+		}]);
+		this.renderChildren(parent,nextSibling);
+		return;
+	}
+	
+ 	// create toolbarNode — hidden but kept in DOM for keyboard shortcuts
+	this.toolbarNode = this.document.createElement("div");
+	this.toolbarNode.className = "tc-editor-toolbar";
+	this.toolbarNode.style.display = "none";
+	parent.insertBefore(this.toolbarNode,nextSibling);
+	this.domNodes.push(this.toolbarNode);
+	this.editInfo = this.getEditInfo();
+    this._committedValue = this.editInfo.value;
+    this.latestValue = this.editInfo.value;
+     
+    this.lastSearch = "" 
+    this.lastReplace = ""
+	this.renderChildren(this.toolbarNode,null);
+	this.domNode = this.document.createElement("div");
+	this.domNode.classList.add("tc-edit-texteditor","tc-edit-texteditor-body")
+	this.domNode.style.display = "inline-block";
+	parent.insertBefore(this.domNode,nextSibling);
+ 	this.domNodes.push(this.domNode);
+	var mode = $tw.wiki.getTiddlerText(modetid)
+		if (mode ==="fixed") this.editopts.height = $tw.wiki.getTiddlerText(Heighttid)
+		else this.editopts.height =""
+	this.editopts.language=this.editInfo.type;
+	
+	var isStreams = (this.editClass && this.editClass.indexOf("streams-editor") !== -1);
+	if (isStreams) {
+		this.editopts.minHeight = "20px";
+	}
+	// --- STYLED MARKDOWN HIGHLIGHTING ---
+	// Pass a highlight function into the engine via options; the canvas layer
+	// uses it in-place instead of Prism when editing markdown/code content.
+	var highlightFn = null;
+	if (mdHighlight && mdHighlight.highlight && this.editInfo.type === 'md') {
+		highlightFn = function(code) {
+			return mdHighlight.highlight(code);
+		};
+	} else if (this.editInfo.type === 'py' || this.editInfo.type === 'javascript' || this.editInfo.type === 'css') {
+		var hljsLib;
+		try { hljsLib = require("$:/plugins/tiddlywiki/highlight/highlight.js"); } catch(e) {}
+		if (hljsLib && hljsLib.highlight) {
+			var lang = this.editInfo.type === 'py' ? 'python' : this.editInfo.type;
+			highlightFn = function(code) {
+				try {
+					return hljsLib.highlight(code, {language: lang, ignoreIllegals: true}).value;
+				} catch(e) {
+					return code.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+				}
+			};
+		}
+	}
+	this.editopts.highlight = highlightFn;
+	// --- END STYLED MARKDOWN HIGHLIGHTING ---
+
+	// --- STREAMS ENTER/TAB INTERCEPTION (INLINE HOOK) ---
+	// The engine calls this at the top of its own keydown handling. Returning
+	// true means "I handled this key" and skips the engine's built-in
+	// tabs/brackets/indents handling, letting the event bubble untouched to
+	// Streams' $keyboard-plus widget. No capture-phase listener, no synthetic
+	// event cloning.
+	this.editopts.onBeforeKeydown = function(e) {
+		return self.handleBeforeKeydown(e);
+	};
+	// --- END STREAMS ENTER/TAB INTERCEPTION ---
+
+	// The engine calls this callback synchronously on every input (and setCode),
+	// so latestValue always mirrors the textarea exactly. The wiki write stays
+	// debounced for performance; commitSave() performs the actual tiddler update.
+	this.instance = new uniEditor(this.domNode, (code) => {
+		self.latestValue = code;
+		if (self.saveTimeout) {
+			clearTimeout(self.saveTimeout);
+			self.saveTimeout = null;
+		}
+		if (code !== self._committedValue) {
+			self.saveTimeout = setTimeout(function() {
+				self.saveTimeout = null;
+				self.commitSave(self.latestValue);
+			}, 250);
+		}
+	}, this.handleKeydownEvent.bind(this), this.editopts);
+
+	//gurumed the following causes an indirect save -- should be sorted out
+	this.instance.setCode(this.editInfo.value);consolelog("rend " + this.editInfo.value)
+
+	// STRICT LOAD: Maintain a reliable global state of which root tiddler is currently being edited.
+	// We use this in ViewTemplate to completely exclude it from Dynaview's `<$reveal>` wrapper.
+	// This forces TiddlyWiki to destroy the tracking element, inherently un-observing it from IntersectionObserver.
+	var rootTiddler = this.getVariable("storyTiddler") || this.getVariable("stream-root-title") || this.editTitle;
+	this._activeRootTiddler = rootTiddler;
+	if (rootTiddler) {
+		this.wiki.addTiddler(new $tw.Tiddler({title: "$:/state/unieditor/focused-root", text: rootTiddler}));
+	}
+ 
+		this.addEventListeners([
+			{type: "tm-edit-text-operation", handler: "handleEditTextOperationMessage"}
+		]);
+
+	// --- FLOATING PREVIEW TOGGLE ---
+	// Insert into domNode (outer wrapper) rather than .unieditor to avoid
+	// the overflow:hidden and z-index stacking issues from upstream CSS.
+	this.domNode.style.position = "relative";
+	
+	var previewBtn = this.document.createElement("button");
+	previewBtn.className = "uni-preview-toggle";
+	previewBtn.setAttribute("title", "Toggle Preview");
+
+		var updatePreviewIcon = function() {
+			var isPreview = self.wiki.getTiddlerText("$:/state/showeditpreview", "no") === "yes";
+			var iconTitle = isPreview
+				? "$:/core/images/preview-open"
+				: "$:/core/images/preview-closed";
+			previewBtn.innerHTML = self.wiki.renderTiddler("text/html", iconTitle);
+		};
+		updatePreviewIcon();
+		this._updatePreviewIcon = updatePreviewIcon;
+
+		previewBtn.addEventListener("click", function(e) {
+			e.preventDefault();
+			e.stopPropagation();
+			var current = self.wiki.getTiddlerText("$:/state/showeditpreview", "no");
+			self.wiki.setText("$:/state/showeditpreview", "text", null,
+				current === "yes" ? "no" : "yes");
+			updatePreviewIcon();
+		});
+
+		this.domNode.appendChild(previewBtn);
+	// --- END FLOATING PREVIEW TOGGLE ---
+
+	// --- COMPTEXT INTEGRATION ---
+	// After the uniEditor instance is created, find the textarea and attach CompText
+	var textarea = this.domNode.querySelector('textarea');
+	if (textarea) {
+		// Enable native spellcheck
+		textarea.setAttribute("spellcheck", "true");
+
+		// Streams Caret Positioning
+		var shouldFocus = self.getAttribute("focus") === "yes";
+		var caretState = self.wiki.getTiddlerText("$:/state/sq/streams/caret-position");
+		if (caretState !== undefined && caretState !== null && caretState !== "") {
+			var caretPos = parseInt(caretState, 10);
+			if (!isNaN(caretPos)) {
+				requestAnimationFrame(function() {
+					textarea.focus();
+					textarea.setSelectionRange(caretPos, caretPos);
+				});
+			}
+			self.wiki.deleteTiddler("$:/state/sq/streams/caret-position");
+		} else if (shouldFocus) {
+			requestAnimationFrame(function() {
+				textarea.focus();
+				var len = textarea.value.length;
+				textarea.setSelectionRange(len, len);
+			});
+		}
+		
+		if (isStreams) {
+			var twoLineHeight = 46; // fallback
+			try {
+				var oldVal = textarea.value;
+				var oldStart = textarea.selectionStart;
+				var oldEnd = textarea.selectionEnd;
+				textarea.value = 'A\nB';
+				textarea.style.height = '1px';
+				twoLineHeight = textarea.scrollHeight;
+				textarea.value = oldVal;
+				textarea.setSelectionRange(oldStart, oldEnd);
+			} catch(e) {}
+
+			var fixHeight = function() {
+				var currentHeight = textarea.style.height;
+				textarea.style.height = '1px';
+				var sh = Math.max(textarea.scrollHeight, twoLineHeight);
+				if (sh > 0) {
+					textarea.style.height = sh + 'px';
+					var wrappers = self.domNode.querySelectorAll('.unieditor, .unieditor > div, .unieditor canvas, .unieditor__textarea');
+					for (var i = 0; i < wrappers.length; i++) {
+						wrappers[i].style.height = sh + 'px';
+					}
+				} else {
+					textarea.style.height = currentHeight;
+				}
+			};
+
+			var heightObserver = new MutationObserver(function(mutations) {
+				heightObserver.disconnect();
+				fixHeight();
+				heightObserver.observe(self.domNode, { attributes: true, attributeFilter: ['style'], subtree: true });
+			});
+			self._heightObserver = heightObserver;
+			
+			heightObserver.observe(self.domNode, { attributes: true, attributeFilter: ['style'], subtree: true });
+			
+			textarea.addEventListener("input", function() {
+				heightObserver.disconnect();
+				fixHeight();
+				heightObserver.observe(self.domNode, { attributes: true, attributeFilter: ['style'], subtree: true });
+			});
+			
+			// FIX: Intercept paste to pre-expand the textarea height before text is inserted,
+			// preventing immediate deletion/crashing caused by layout thrashing on massive pastes.
+			textarea.addEventListener("paste", function(e) {
+				var pastedText = (e.clipboardData || window.clipboardData).getData('text');
+				if (!pastedText) return;
+				
+				e.preventDefault();
+				e.stopImmediatePropagation();
+				
+				var start = textarea.selectionStart;
+				var end = textarea.selectionEnd;
+				var currentVal = textarea.value;
+				var newVal = currentVal.substring(0, start) + pastedText + currentVal.substring(end);
+				
+				heightObserver.disconnect();
+				
+				// 1. Measure new height using a clone BEFORE setting value
+				var clone = document.createElement("textarea");
+				clone.style.width = textarea.clientWidth + "px";
+				clone.style.position = "absolute";
+				clone.style.visibility = "hidden";
+				clone.style.height = "1px";
+				clone.style.font = window.getComputedStyle(textarea).font;
+				clone.style.lineHeight = window.getComputedStyle(textarea).lineHeight;
+				clone.style.padding = window.getComputedStyle(textarea).padding;
+				clone.style.boxSizing = window.getComputedStyle(textarea).boxSizing;
+				clone.style.whiteSpace = window.getComputedStyle(textarea).whiteSpace;
+				clone.style.wordWrap = window.getComputedStyle(textarea).wordWrap;
+				clone.value = newVal;
+				document.body.appendChild(clone);
+				var sh = Math.max(clone.scrollHeight, twoLineHeight);
+				document.body.removeChild(clone);
+				
+				// 2. Expand wrappers FIRST
+				if (sh > 0) {
+					textarea.style.height = sh + 'px';
+					var wrappers = self.domNode.querySelectorAll('.unieditor, .unieditor > div, .unieditor canvas, .unieditor__textarea');
+					for (var i = 0; i < wrappers.length; i++) {
+						wrappers[i].style.height = sh + 'px';
+					}
+				}
+				
+				// 3. Set the text
+				textarea.value = newVal;
+				
+				// 4. Restore cursor
+				var newCursor = start + pastedText.length;
+				textarea.setSelectionRange(newCursor, newCursor);
+				
+				// 5. Reconnect observer
+				heightObserver.observe(self.domNode, { attributes: true, attributeFilter: ['style'], subtree: true });
+				
+				// 6. Trigger save pipeline
+				var inputEvent = new Event("input", { bubbles: true, cancelable: true });
+				textarea.dispatchEvent(inputEvent);
+			}, true);
+			
+			requestAnimationFrame(fixHeight);
+		}
+
+		// Blur: commit any pending edits immediately.
+		// Enter/Tab interception now lives in handleBeforeKeydown (invoked by the
+		// engine's own keydown handler), so there is no capture-phase listener
+		// and no synthetic event cloning in this file.
+		textarea.addEventListener("blur", function() {
+			self.flushSave();
+		});
+
+		if (CompletionLib && CompletionLib.Completion) {
+			var configText = this.wiki.getTiddlerText("$:/plugins/snowgoon88/edit-comptext/config");
+			var config = {};
+			if (configText) {
+				try { config = JSON.parse(configText); } catch (e) { }
+			}
+
+			// Initialize CompText with document.body as sibling for absolute
+			// viewport-positioned popup, same pattern as the overtype widget.
+			this.completionInstance = new CompletionLib.Completion(
+				this, textarea, config, document.body, 0, 0
+			);
+
+		} // end if CompletionLib
+	} // end if textarea
+	// --- END COMPTEXT INTEGRATION ---
+};
+	uniEditorWidget.prototype.handleEditTextOperationMessage = function(event) {
+		var operation;
+		
+		if (event.param ==="historyRedo" ||event.param ==="historyUndo") {
+			this.instance.doAction(event.param)
+			return
+		}	
+			
+		if (event.param ==="replace-selection"){
+			//gurumed set last replace - used when used presses crtl-g -when it is implemented
+			this.lastSearch = event.paramObject.find
+			this.lastReplace = event.paramObject.text
+			// make highlight
+			this.createHighLightOP(event.paramObject.find,false);
+
+		}
+		if (event.param ==="replace-all"){
+			// make highlight
+			this.createHighLightOP(event.paramObject.find,false);
+			let content= this.domNode.querySelector('textarea').value;
+			this.instance.setCode(content.replaceAll( event.paramObject.find, event.paramObject.text));
+			return
+		}
+
+		// Prepare information about the operation
+		operation =this.createTextOperation();
+		// Invoke the handler for the selected operation
+		var handler = this.editorOperations[event.param];
+		if(handler) {
+			handler.call(this,event,operation);
+		}	
+		if(operation.replacement !== null) {
+			var newText = operation.text.substring(0,operation.cutStart) + operation.replacement + operation.text.substring(operation.cutEnd);
+		}else var newText = operation.text;
+		// Execute the operation via the engine
+		//var newText = this.engine.executeTextOperation(operation);
+		consolelog('oper '+operation)
+		this.instance.setCode(newText)
+	}; 
+	uniEditorWidget.prototype.createHighLightOP = function(searchTerm,next) {
+		
+		function calculateSelectedTextPosition(textarea) {
+		  const selectionStart = textarea.selectionStart;
+
+		  if (selectionStart === textarea.selectionEnd) return; // No selection, so exit
+
+		  // Assume each character has a width of 0.5em
+		  const characterWidth = 0.5; // in em units
+
+		  // so charsPerLine = widthOfTextarea / charWidthInPx
+		  const charsPerLine = Math.floor(textarea.clientWidth / (characterWidth * parseFloat(getComputedStyle(textarea).fontSize)));
+
+		  // calc xy of selected text relative to start of textarea
+		  const textUpToSelection = textarea.value.substring(0, selectionStart);
+
+		  // Initialize line and column counters
+		  let line = 0;
+		  let column = 0;
+
+		  // Calculate line and column based on text up to selection in chars
+		  for (let i = 0; i < textUpToSelection.length; i++) {
+			if (textUpToSelection[i] === '\n') {
+			  line++;
+			  column = 0; // Reset column for the new line
+			} else if (column >= charsPerLine) {
+			  //rapped line
+			  line++;
+			  column = 0;
+			} else {
+			  column++;
+			}
+		  }
+
+		  const coordY = line * parseFloat(getComputedStyle(textarea).lineHeight); // lineHeight in pixels
+		  return Math.round(coordY);
+
+		}//end of calculateSelectedTextPosition
+
+
+	  const textarea = this.domNode.querySelector('textarea');
+	  const text = textarea.value;
+	  if (!searchTerm) return; // Do nothing if the search term is empty
+	  let start = 0;
+	  if (next) start = textarea.selectionEnd||0
+	  const index = text.toLowerCase().indexOf(searchTerm.toLowerCase(),start);
+
+	  if (index !== -1) {
+		// Highlight the search term by selecting the range
+		textarea.focus();
+		textarea.selectionStart = index;
+		textarea.selectionEnd = index + searchTerm.length;
+    // Scroll to the selected text
+		const lineHeight = parseFloat(window.getComputedStyle(textarea).lineHeight);
+		const linesAbove = text.slice(0, index).split("\n").length - 1;
+		textarea.scrollTop = calculateSelectedTextPosition(textarea)//linesAbove * lineHeight;
+	  } 
+	
+	}
+	uniEditorWidget.prototype.createTextOperation = function(begin,end) {
+	var textarea = this.domNode.querySelector('textarea');
+	var operation = {
+		text: textarea.value,
+		selStart: begin||textarea.selectionStart,
+		selEnd: end||textarea.selectionEnd,
+		cutStart: null,
+		cutEnd: null,
+		replacement: null,
+		newSelStart: null,
+		newSelEnd: null
+	};
+	operation.selection = operation.text.substring(operation.selStart,operation.selEnd);
+	return operation;
+};
+//uniEditorWidget.prototype.destroy = function(){}
+
+// from tiddlywiki factory.js
+uniEditorWidget.prototype.handleKeydownEvent = function(event) {
+	// Check for a keyboard shortcut
+	if(this.toolbarNode) {
+		//crtl-g handled gurumed - probably not needed
+		//if (event.ctrlKey && event.key === "g") {
+		//	event.preventDefault();
+		//	this.createHighLightOP(this.lastSearch,true);
+		//	return true
+		//}
+		var shortcutElements = this.toolbarNode.querySelectorAll("[data-tw-keyboard-shortcut]");
+		for(var index=0; index<shortcutElements.length; index++) {
+			var el = shortcutElements[index],
+				shortcutData = el.getAttribute("data-tw-keyboard-shortcut"),
+				keyInfoArray = $tw.keyboardManager.parseKeyDescriptors(shortcutData,{
+					wiki: this.wiki
+				});
+			if($tw.keyboardManager.checkKeyDescriptors(event,keyInfoArray)) {
+				var clickEvent = this.document.createEvent("Events");
+				clickEvent.initEvent("click",true,false);
+				el.dispatchEvent(clickEvent);
+				event.preventDefault();
+				event.stopPropagation();
+				return true;
+			}
+		}
+	}
+	// Otherwise, process the keydown normally
+	return false;
+};
+/*
+Get the tiddler being edited and current value
+*/
+uniEditorWidget.prototype.getEditInfo = function() {
+	// Get the edit value
+	var self = this,
+		value,
+		type,
+		update;
+		
+		// Get the current tiddler and the field name
+		var tiddler = this.wiki.getTiddler(this.editTitle);
+		if(tiddler) {
+			// If we've got a tiddler, the value to display is the field string value
+			value = tiddler.getFieldString(this.editField);
+			type = tiddler.getFieldString("type")||self.getAttribute("type")||'';
+		} else {
+			// Otherwise, we need to construct a default value for the editor
+			value = '';
+			type = self.getAttribute("type")||'';
+		}
+
+		update = function(value) {
+			var tiddler = self.wiki.getTiddler(self.editTitle),
+				updateFields = {
+					title: self.editTitle
+				};
+			updateFields[self.editField] = value;
+            self._committedValue = value;
+			self.wiki.addTiddler(new $tw.Tiddler(self.wiki.getCreationFields(),tiddler,updateFields,self.wiki.getModificationFields()));
+		};consolelog("type is "+type)
+	if (type in this.mappings) type = this.mappings[type]||type
+	return {value: value, update: update, type: type};
+};
+
+
+uniEditorWidget.prototype.execute = function() {
+	// Get our parameters
+	this.editTitle = this.getAttribute("tiddler",this.getVariable("currentTiddler"));
+	this.editField = this.getAttribute("field","text");
+	this.editIndex = this.getAttribute("index");
+	this.editClass = this.getAttribute("class");
+	// Get the editor element tag and type
+	var tag,type;
+	if(this.editField === "text") {
+		tag = "textarea";
+	} else {
+		tag = "input";
+		var fieldModule = $tw.Tiddler.fieldModules[this.editField];
+		if(fieldModule && fieldModule.editTag) {
+			tag = fieldModule.editTag;
+		}
+		if(fieldModule && fieldModule.editType) {
+			type = fieldModule.editType;
+		}
+		type = type || "text";
+	}
+
+	this.editopts=$tw.wiki.getTiddlerData("$:/plugins/bj/unieditor/edoptions.json");
+	this.mappings=$tw.wiki.getTiddlerData("$:/plugins/bj/unieditor/mappings.json");
+	// Ensure markdown types map to 'md' for highlighting
+	if (this.mappings) {
+		if (!this.mappings["text/x-markdown"]) this.mappings["text/x-markdown"] = "md";
+		if (!this.mappings["text/markdown"]) this.mappings["text/markdown"] = "md";
+	}
+ this.makeChildWidgets();
+};
+
+/*
+Selectively refreshes the widget if needed. Returns true if the widget or any of its children needed re-rendering
+*/
+
+uniEditorWidget.prototype.refresh = function(changedTiddlers) {
+	var changedAttributes = this.computeAttributes();
+	// Completely rerender if any of our attributes have changed
+	if(changedAttributes.tiddler || changedAttributes.field || changedAttributes.index) {
+		this.refreshSelf();
+		return true;
+	}
+	if(!this.passThru && changedTiddlers[this.editTitle]) {
+		// Rerender only when the edited field changed to a value other than
+        // the one we last committed. Our own saves and non-text field changes
+        // (e.g. Streams reorders) skip the rerender; external text changes
+        // (e.g. a Streams node split) re-sync the editor from the tiddler.
+        var changedTiddler = this.wiki.getTiddler(this.editTitle);
+        var changedValue = changedTiddler ? changedTiddler.getFieldString(this.editField) : "";
+        if(changedValue === this._committedValue) {
+            return false;
+        } else {
+            this.refreshSelf();
+            return true;
+        }
+	}
+	
+	if(changedTiddlers["$:/plugins/bj/unieditor/edoptions.json"]||changedTiddlers[Heighttid]||changedTiddlers[modetid]) {
+		this.refreshSelf()
+            return true
+	}
+	return this.refreshChildren(changedTiddlers);
+
+};
+
+uniEditorWidget.prototype.commitSave = function(text) {
+	var editInfo = this.getEditInfo();
+	if(text !== editInfo.value) {
+		editInfo.update(text);
+	}
+};
+
+uniEditorWidget.prototype.flushSave = function() {
+	if (this.saveTimeout) {
+		clearTimeout(this.saveTimeout);
+		this.saveTimeout = null;
+	}
+	// Only commit when the latest value differs from what we last wrote, so a
+	// stale editor never overwrites an external tiddler change (Streams split/indent).
+	if (this.latestValue !== undefined && this.latestValue !== null && this.latestValue !== this._committedValue) {
+		this.commitSave(this.latestValue);
+	}
+};
+
+// Called by CompText after it programmatically sets textarea.value.
+uniEditorWidget.prototype.saveChanges = function(text) {
+	// Keep the canvas overlay and latestValue in sync with the completion.
+	if (this.instance && this.instance.textLayer && typeof this.instance.textLayer.updateEditor === "function") {
+		this.instance.textLayer.updateEditor(text);
+	}
+	this.commitSave(text);
+};
+
+uniEditorWidget.prototype.handleBeforeKeydown = function(e) {
+	var textarea = this.domNode ? this.domNode.querySelector('textarea') : null;
+	if (!textarea) {
+		return false;
+	}
+	if (e.key === "PageUp") {
+		e.preventDefault();
+		textarea.setSelectionRange(0, 0);
+		textarea.scrollTop = 0;
+		return true;
+	}
+	if (e.key === "PageDown") {
+		e.preventDefault();
+		var len = textarea.value.length;
+		textarea.setSelectionRange(len, len);
+		textarea.scrollTop = textarea.scrollHeight;
+		return true;
+	}
+	if (e.key === "'") {
+		// Prevent uniEditor's double-quote auto-close feature
+		e.preventDefault();
+		var start = textarea.selectionStart;
+		var end = textarea.selectionEnd;
+		var val = textarea.value;
+		textarea.value = val.substring(0, start) + "'" + val.substring(end);
+		textarea.selectionStart = textarea.selectionEnd = start + 1;
+		// Dispatch input event so the engine updates the canvas and save pipeline
+		var inputEvent = new Event("input", { bubbles: true, cancelable: true });
+		textarea.dispatchEvent(inputEvent);
+		return true;
+	}
+	if (e.key === "Enter" || e.key === "Tab") {
+		// Commit the latest typed value BEFORE Streams reads the tiddler
+		this.flushSave();
+		var isStreams = (this.editClass && this.editClass.indexOf("streams-editor") !== -1);
+		var isCompTextActive = this.completionInstance &&
+			(this.completionInstance._state === "PATTERN" || this.completionInstance._state === "SELECT");
+		if (isStreams && !isCompTextActive) {
+			if (e.key === "Enter" && !e.shiftKey) {
+				// Let the event bubble untouched to Streams' $keyboard-plus for node split
+				return true;
+			}
+			if (e.key === "Tab") {
+				// Let the event bubble untouched to Streams' $keyboard-plus for node indent
+				return true;
+			}
+		}
+	}
+	return false;
+};
+
+uniEditorWidget.prototype.removeChildDomNodes = function () {
+	// Disconnect height MutationObserver to prevent it from firing during
+	// DOM teardown/restructuring (e.g. when a Streams indent moves the node).
+	if (this._heightObserver) {
+		this._heightObserver.disconnect();
+		this._heightObserver = null;
+	}
+	if (this.saveTimeout) {
+		clearTimeout(this.saveTimeout);
+		this.saveTimeout = null;
+	}
+	
+	// Sync latestValue with the textarea (catches programmatic writes such as
+	// CompText completions), then flush unsaved typing on teardown. The flush
+	// only commits when latestValue diverges from what we last committed, so a
+	// stale editor never re-saves over an external tiddler change (e.g. a Streams
+	// node split).
+	if (this.domNode) {
+		var textarea = this.domNode.querySelector('textarea');
+		if (textarea && textarea.value !== undefined && textarea.value !== this.latestValue) {
+			this.latestValue = textarea.value;
+		}
+	}
+	this.flushSave();
+	
+	// RESTORE DYNAVIEW
+	if (this._activeRootTiddler) {
+		var currentRoot = this.wiki.getTiddlerText("$:/state/unieditor/focused-root");
+		if (currentRoot === this._activeRootTiddler) {
+			this.wiki.addTiddler(new $tw.Tiddler({title: "$:/state/unieditor/focused-root", text: ""}));
+		}
+	}
+	
+	Widget.prototype.removeChildDomNodes.call(this);
+};
+
+exports["edit-uni"] = uniEditorWidget;
+
+})();

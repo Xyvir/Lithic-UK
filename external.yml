@@ -39,7 +39,7 @@
 
 - name: unieditor
   url: https://unieditor.tiddlyhost.com/
-  type: plugins
+  type: disable
 
 - name: copy-code
   url: https://b-yp.github.io/tiddlywiki-plugins/

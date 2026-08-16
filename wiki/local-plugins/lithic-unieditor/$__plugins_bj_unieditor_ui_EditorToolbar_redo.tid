@@ -1,0 +1,9 @@
+title: $:/plugins/bj/unieditor/ui/EditorToolbar/redo
+caption: Redo
+condition: [<targetTiddler>!has[type]] [<targetTiddler>get[type]!prefix[image/]] [<targetTiddler>get[type]match[image/svg+xml]]
+description: redo
+icon: $:/core/images/right-arrow
+tags: $:/tags/EditorToolbar
+type: text/vnd.tiddlywiki
+
+<$action-sendmessage	$message="tm-edit-text-operation" 	$param="historyRedo"/>
