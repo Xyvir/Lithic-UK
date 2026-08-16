@@ -3,41 +3,41 @@ tags: $:/tags/Macro
 type: text/vnd.tiddlywiki
 
 \define date-tomorrow()
-{{{ [<now YYYY0MM0DD0hh0mm0ss0XXX>format:date[TIMESTAMP]add[86400000]format:timestamp[DDth MMM YYYY]] }}}
+{{{ [<now [UTC]YYYY0MM0DD0hh0mm0ss0XXX>format:date[TIMESTAMP]add[86400000]format:timestamp[DDth MMM YYYY]] }}}
 \end
 
 \define date-yesterday()
-{{{ [<now YYYY0MM0DD0hh0mm0ss0XXX>format:date[TIMESTAMP]subtract[86400000]format:timestamp[DDth MMM YYYY]] }}}
+{{{ [<now [UTC]YYYY0MM0DD0hh0mm0ss0XXX>format:date[TIMESTAMP]subtract[86400000]format:timestamp[DDth MMM YYYY]] }}}
 \end
 
 \define date-2daysaway()
-{{{ [<now YYYY0MM0DD0hh0mm0ss0XXX>format:date[TIMESTAMP]add[172800000]format:timestamp[DDth MMM YYYY]] }}}
+{{{ [<now [UTC]YYYY0MM0DD0hh0mm0ss0XXX>format:date[TIMESTAMP]add[172800000]format:timestamp[DDth MMM YYYY]] }}}
 \end
 
 \define date-3daysaway()
-{{{ [<now YYYY0MM0DD0hh0mm0ss0XXX>format:date[TIMESTAMP]add[259200000]format:timestamp[DDth MMM YYYY]] }}}
+{{{ [<now [UTC]YYYY0MM0DD0hh0mm0ss0XXX>format:date[TIMESTAMP]add[259200000]format:timestamp[DDth MMM YYYY]] }}}
 \end
 
 \define date-4daysaway()
-{{{ [<now YYYY0MM0DD0hh0mm0ss0XXX>format:date[TIMESTAMP]add[345600000]format:timestamp[DDth MMM YYYY]] }}}
+{{{ [<now [UTC]YYYY0MM0DD0hh0mm0ss0XXX>format:date[TIMESTAMP]add[345600000]format:timestamp[DDth MMM YYYY]] }}}
 \end
 
 \define date-5daysaway()
-{{{ [<now YYYY0MM0DD0hh0mm0ss0XXX>format:date[TIMESTAMP]add[43200000]format:timestamp[DDth MMM YYYY]] }}}
+{{{ [<now [UTC]YYYY0MM0DD0hh0mm0ss0XXX>format:date[TIMESTAMP]add[432000000]format:timestamp[DDth MMM YYYY]] }}}
 \end
 
 \define date-6daysaway()
-{{{ [<now YYYY0MM0DD0hh0mm0ss0XXX>format:date[TIMESTAMP]add[518400000]format:timestamp[DDth MMM YYYY]] }}}
+{{{ [<now [UTC]YYYY0MM0DD0hh0mm0ss0XXX>format:date[TIMESTAMP]add[518400000]format:timestamp[DDth MMM YYYY]] }}}
 \end
 
 \define date-nextweek()
-{{{ [<now YYYY0MM0DD0hh0mm0ss0XXX>format:date[TIMESTAMP]add[604800000]format:timestamp[DDth MMM YYYY]] }}}
+{{{ [<now [UTC]YYYY0MM0DD0hh0mm0ss0XXX>format:date[TIMESTAMP]add[604800000]format:timestamp[DDth MMM YYYY]] }}}
 \end
 
 \define date-lastweek()
-{{{ [<now YYYY0MM0DD0hh0mm0ss0XXX>format:date[TIMESTAMP]subtract[604800000]format:timestamp[DDth MMM YYYY]] }}}
+{{{ [<now [UTC]YYYY0MM0DD0hh0mm0ss0XXX>format:date[TIMESTAMP]subtract[604800000]format:timestamp[DDth MMM YYYY]] }}}
 \end
 
 \define date-nextmonth()
-{{{ [<now YYYY0MM0DD0hh0mm0ss0XXX>format:date[TIMESTAMP]add[2592000000]format:timestamp[DDth MMM YYYY]] }}}
+{{{ [<now [UTC]YYYY0MM0DD0hh0mm0ss0XXX>format:date[TIMESTAMP]add[2592000000]format:timestamp[DDth MMM YYYY]] }}}
 \end
