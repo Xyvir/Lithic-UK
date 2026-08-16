@@ -1,3 +1,4 @@
 title: $:/DefaultTiddlers
+description: Story river shown on load. Dogear tiddlers (ebook reading) appear first; when any exist, the top favorite and journal placeholder are skipped, otherwise the default home stream from $:/lithic/config/DefaultHomeStream is shown.
 
-[tag[Dogear]] [favorite-results[]] [<now YYYY0MM0DD0hh0mm0ss0XXX>format:date[TIMESTAMP]format:timestamp[DDth MMM YYYY]] [tag[Journal]!sort[created]]
+[tag[Dogear]] :else[subfilter{$:/lithic/config/DefaultHomeStream}] [tag[Journal]!sort[created]]

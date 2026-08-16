@@ -1,0 +1,4 @@
+title: $:/lithic/config/DefaultHomeStream
+description: Fallback story-river filter for $:/DefaultTiddlers, used only when no tiddler has the Dogear tag. Shows the top favorite (or its saved-filter results) above the current journal placeholder.
+
+[favorite-results[]] [<now YYYY0MM0DD0hh0mm0ss0XXX>format:date[TIMESTAMP]format:timestamp[DDth MMM YYYY]]
