@@ -604,6 +604,14 @@ uniEditorWidget.prototype.refresh = function(changedTiddlers) {
 };
 
 uniEditorWidget.prototype.commitSave = function(text) {
+	// Never resurrect a tiddler that no longer exists. Streams' structural
+	// actions (cancel-edit / merge-with-previous / delete-node) delete the node
+	// and then tear the editor down; the teardown/blur/debounced flush would
+	// otherwise re-create it with stale text and orphan it from its parent's
+	// stream-list. If the node is gone, drop the pending write.
+	if (!this.wiki.getTiddler(this.editTitle)) {
+		return;
+	}
 	var editInfo = this.getEditInfo();
 	if(text !== editInfo.value) {
 		editInfo.update(text);
@@ -662,12 +670,26 @@ uniEditorWidget.prototype.handleBeforeKeydown = function(e) {
 		textarea.dispatchEvent(inputEvent);
 		return true;
 	}
-	if (e.key === "Enter" || e.key === "Tab") {
-		// Commit the latest typed value BEFORE Streams reads the tiddler
+	var isStreams = (this.editClass && this.editClass.indexOf("streams-editor") !== -1);
+	var isCompTextActive = this.completionInstance &&
+		(this.completionInstance._state === "PATTERN" || this.completionInstance._state === "SELECT");
+
+	// Commit the latest typed value BEFORE Streams reads the tiddler. Streams'
+	// $keyboard-plus binds Backspace (merge-with-previous), Escape
+	// (cancel-edit), Delete (delete-node), Enter (split), Tab (indent) and
+	// alt/ctrl-arrows (promote/demote/focus). Without a synchronous flush, the
+	// tiddler's text can still be empty (debounce pending), so cancel-edit /
+	// merge-with-previous wrongly treat the node as empty, delete it, and the
+	// pending save then orphans it.
+	if (isStreams && (
+		e.key === "Escape" || e.key === "Backspace" || e.key === "Delete" ||
+		e.key === "Enter" || e.key === "Tab" ||
+		((e.altKey || e.ctrlKey) && (e.key === "ArrowUp" || e.key === "ArrowDown" || e.key === "r" || e.key === "R"))
+	)) {
 		this.flushSave();
-		var isStreams = (this.editClass && this.editClass.indexOf("streams-editor") !== -1);
-		var isCompTextActive = this.completionInstance &&
-			(this.completionInstance._state === "PATTERN" || this.completionInstance._state === "SELECT");
+	}
+
+	if (e.key === "Enter" || e.key === "Tab") {
 		if (isStreams && !isCompTextActive) {
 			if (e.key === "Enter" && !e.shiftKey) {
 				// Let the event bubble untouched to Streams' $keyboard-plus for node split
