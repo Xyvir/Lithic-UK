@@ -1,4 +1,4 @@
 title: $:/DefaultTiddlers
-description: Story river shown on load. Dogear tiddlers (ebook reading) appear first; when any exist, the top favorite and journal placeholder are skipped, otherwise the default home stream from $:/lithic/config/DefaultHomeStream is shown. Journal tiddlers whose raw-date is in the future are excluded from home.
+description: Story river shown on load. Dogear tiddlers (ebook reading) appear first; when any exist, the top favorite and journal placeholder are skipped, otherwise the default home stream from $:/lithic/config/DefaultHomeStream is shown. Journal tiddlers with a raw-date are sorted by it and any with a future raw-date are excluded from home; journals without raw-date (legacy) are sorted by created.
 
-[tag[Dogear]] :else[subfilter{$:/lithic/config/DefaultHomeStream}] [tag[Journal]!sort[created]] :filter[get[raw-date]else[00000000000000000]compare:string:lteq<now [UTC]YYYY0MM0DD0hh0mm0ss0XXX>]
+[tag[Dogear]] :else[subfilter{$:/lithic/config/DefaultHomeStream}] [tag[Journal]has[raw-date]!sort[raw-date]] :filter[get[raw-date]compare:string:lteq<now [UTC]YYYY0MM0DD0hh0mm0ss0XXX>] [tag[Journal]!has[raw-date]!sort[created]]

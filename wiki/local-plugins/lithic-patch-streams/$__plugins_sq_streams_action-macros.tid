@@ -2,6 +2,8 @@ title: $:/plugins/sq/streams/action-macros
 tags: $:/tags/Macro
 \whitespace trim
 
+\define journal-date-pattern() ^[0-9]{1,2}(st|nd|rd|th) [A-Za-z]+ [0-9]{4}$
+
 \define scaffold-missing-refs()
 <$list filter="[{!!parent}links[]first[]]" variable="parentTag">
     <$list filter="[<currentTiddler>links[]is[missing]]" variable="missingLink">
@@ -167,7 +169,7 @@ tags: $:/tags/Macro
 	</$list>
 	<$set name="parent-nodes" filter="[<parent>get[stream-list]]" select="0">
 	<$set name="next-node" filter="[enlist<parent-nodes>is[tiddler]$insertPosition$<currentTiddler>]" select="0">
-	<$vars datePattern="^[0-9]{1,2}(st|nd|rd|th) [A-Za-z]+ [0-9]{4}$">
+	<$vars datePattern=<<journal-date-pattern>>>
 	<$list filter="[<parent>is[missing]regexp<datePattern>]" variable="_NULL">
 		<$action-listops $tiddler=<<parent>> $tags="Journal"/> <$action-setfield $tiddler=<<parent>> raw-date=<<datecode "parent">> stream-type="default" stream-list=""/>
 	</$list>
@@ -214,7 +216,7 @@ tags: $:/tags/Macro
 		<$action-listops $tiddler=<<new-node>> $tags="[<parentTag>]"/>
 	</$list>
 	<$set name="first-child" filter="[<currentTiddler>get[stream-list]enlist-input[]is[tiddler]first[]]" select="0">
-	<$vars datePattern="^[0-9]{1,2}(st|nd|rd|th) [A-Za-z]+ [0-9]{4}$">
+	<$vars datePattern=<<journal-date-pattern>>>
 	<$list filter="[<currentTiddler>is[missing]regexp<datePattern>]" variable="_NULL">
 		<$action-listops $tiddler=<<currentTiddler>> $tags="Journal"/> <$action-setfield $tiddler=<<currentTiddler>> raw-date=<<datecode "currentTiddler">> stream-type="default" stream-list=""/>
 	</$list>
