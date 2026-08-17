@@ -7,7 +7,7 @@ title: $:/core/ui/Actions/new-journal
 <$wikify name="journalTitle" text="""<$macrocall $name="now" format=<<journalTitleTemplate>>/>""">
 
 <$list filter="[<journalTitle>!is[tiddler]]">
-<$action-createtiddler $basetitle=<<journalTitle>> tags=<<get-tags>> text=<<journalText>> type=<<journalType>> />
+<$action-createtiddler $basetitle=<<journalTitle>> tags=<<get-tags>> text=<<journalText>> type=<<journalType>> raw-date=<<datecode "journalTitle">> stream-type="default" stream-list=""/>
 </$list>
 
 <$action-navigate $to=<<journalTitle>>/>

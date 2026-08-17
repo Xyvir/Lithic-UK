@@ -1,0 +1,76 @@
+module-type: macro
+tags: 
+title: $:/lithic/macros/datecode
+type: application/javascript
+
+/*\
+title: $:/lithic/macros/datecode
+type: application/javascript
+module-type: macro
+
+Converts a journal title such as "17th Aug 2026" into its numeric TiddlyWiki
+datecode (YYYY0MM0DD0hh0mm0ss0XXX) at UTC midnight, e.g. "20260817000000000".
+
+Invoke with the *name* of the variable holding the title, e.g.:
+
+  <<datecode "parent">>
+
+Passing the variable name (rather than a <variable> reference) avoids the
+`>>` terminator collision that breaks `<<datecode <parent>>>`.
+\*/
+(function () {
+    "use strict";
+
+    var MONTHS = {
+        jan: 0, feb: 1, mar: 2, apr: 3, may: 4, jun: 5,
+        jul: 6, aug: 7, sep: 8, oct: 9, nov: 10, dec: 11
+    };
+
+    function pad(value, length) {
+        var s = String(value);
+        while (s.length < length) {
+            s = "0" + s;
+        }
+        return s;
+    }
+
+    exports.name = "datecode";
+    exports.params = [
+        { name: "varName" }
+    ];
+
+    exports.run = function (varName) {
+        var name = String(varName || "").trim() || "currentTiddler";
+        var title = "";
+        try {
+            if (this && this.parentWidget) {
+                title = this.parentWidget.getVariable(name, { defaultValue: "" });
+            }
+        } catch (e) {
+            return "";
+        }
+        title = String(title || "").trim();
+        if (!title) {
+            return "";
+        }
+        var parts = title.split(/\s+/);
+        if (parts.length < 3) {
+            return "";
+        }
+        var day = parseInt(parts[0], 10);
+        var month = MONTHS[String(parts[1]).toLowerCase().slice(0, 3)];
+        var year = parseInt(parts[2], 10);
+        if (isNaN(day) || isNaN(month) || isNaN(year)) {
+            return "";
+        }
+        var d = new Date(Date.UTC(year, month, day));
+        return pad(d.getUTCFullYear(), 4) +
+            pad(d.getUTCMonth() + 1, 2) +
+            pad(d.getUTCDate(), 2) +
+            pad(d.getUTCHours(), 2) +
+            pad(d.getUTCMinutes(), 2) +
+            pad(d.getUTCSeconds(), 2) +
+            pad(d.getUTCMilliseconds(), 3);
+    };
+
+})();

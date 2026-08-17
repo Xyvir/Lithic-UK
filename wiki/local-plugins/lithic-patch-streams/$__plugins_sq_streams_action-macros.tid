@@ -169,7 +169,7 @@ tags: $:/tags/Macro
 	<$set name="next-node" filter="[enlist<parent-nodes>is[tiddler]$insertPosition$<currentTiddler>]" select="0">
 	<$vars datePattern="^[0-9]{1,2}(st|nd|rd|th) [A-Za-z]+ [0-9]{4}$">
 	<$list filter="[<parent>is[missing]regexp<datePattern>]" variable="_NULL">
-		<$action-listops $tiddler=<<parent>> $tags="Journal"/>
+		<$action-listops $tiddler=<<parent>> $tags="Journal"/> <$action-setfield $tiddler=<<parent>> raw-date=<<datecode "parent">> stream-type="default" stream-list=""/>
 	</$list>
 	</$vars>
 	<$action-listops $tiddler=<<parent>> $field="stream-list" $subfilter="+[is[tiddler]] +[insertbefore:next-node<new-node>]"/>
@@ -216,7 +216,7 @@ tags: $:/tags/Macro
 	<$set name="first-child" filter="[<currentTiddler>get[stream-list]enlist-input[]is[tiddler]first[]]" select="0">
 	<$vars datePattern="^[0-9]{1,2}(st|nd|rd|th) [A-Za-z]+ [0-9]{4}$">
 	<$list filter="[<currentTiddler>is[missing]regexp<datePattern>]" variable="_NULL">
-		<$action-listops $tiddler=<<currentTiddler>> $tags="Journal"/>
+		<$action-listops $tiddler=<<currentTiddler>> $tags="Journal"/> <$action-setfield $tiddler=<<currentTiddler>> raw-date=<<datecode "currentTiddler">> stream-type="default" stream-list=""/>
 	</$list>
 	</$vars>
 	<$action-listops $tiddler=<<currentTiddler>> $field="stream-list" $subfilter="+[is[tiddler]] +[insertbefore:first-child<new-node>]"/>
