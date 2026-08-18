@@ -94,8 +94,8 @@ module-type: global
         if (tiddler || isUrgent) {
             return centre(strong + link);
         } else {
-            // Fallback for missing dates: style as normal text but keep link
-            return centre('<span class="calendar-date-fallback">' + link + '</span>');
+            // Fallback for missing dates: style as normal text but keep the today indicator
+            return centre(strong + '<span class="calendar-date-fallback">' + link + '</span>');
         }
     }
 
