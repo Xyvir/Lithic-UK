@@ -1,6 +1,6 @@
 title: $:/Lithic/ui/Buttons/copy-story-river
 tags: $:/tags/PageControls
-list-before: $:/core/ui/Buttons/control-panel
+list-after: $:/core/ui/Buttons/import
 caption: {{$:/core/images/copy-clipboard}} copy story river
 description: Copy Story River as Markdown
 

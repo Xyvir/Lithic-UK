@@ -17,13 +17,3 @@ title: $:/lithic/styles/mobile-tweaks.css
     }
 }
 
-/* === Hide Import Button on Desktop Page Controls === 
-   The import button is moved to the Actions sidebar on desktop.
-*/
-@media (min-width: {{$:/themes/tiddlywiki/vanilla/metrics/sidebarbreakpoint}}) {
-    .nc-topbar [class*="%24%3A%2Fcore%2Fui%2FButtons%2Fimport"],
-    .nc-bar [class*="%24%3A%2Fcore%2Fui%2FButtons%2Fimport"],
-    .tc-page-controls [class*="%24%3A%2Fcore%2Fui%2FButtons%2Fimport"] {
-        display: none !important;
-    }
-}
