@@ -1117,6 +1117,11 @@
         !window.location.hostname.endsWith('github.io') &&
         !window.__TAURI__);
 
+    // How the Ephemeral code-runner reaches the swarm:
+    //   'self-host'   -> relative /ephemeral/api/v1/* (the WebDAV backend proxies it)
+    //   'paper-light' -> discover a bastion from docs/swarm.json and POST over https
+    window.__EPHEMERAL_MODE__ = IS_WEBDAV ? 'self-host' : 'paper-light';
+
     /* IDB-KEYVAL & FILE MANAGER LOGIC */
     let idbKeyval = (function (exports) {
       'use strict';
@@ -1362,6 +1367,43 @@ Action widget to run Ephemeral code.
 
 var Widget = require("$:/core/modules/widgets/widget.js").widget;
 
+// Resolve where to POST a job:
+//   self-host   -> the same-origin /ephemeral/api/v1/run path
+//   paper-light -> the fastest/nearest bastion advertised in docs/swarm.json
+async function _resolveEphemeralEndpoint() {
+    var mode = (typeof window !== "undefined" && window.__EPHEMERAL_MODE__) || "self-host";
+    if (mode !== "paper-light") {
+        return "/ephemeral/api/v1/run";
+    }
+    var swarmUrls = [
+        "https://raw.githubusercontent.com/Xyvir/Ephemeral.exe/main/docs/swarm.json",
+        "https://xyvir.github.io/Ephemeral.exe/docs/swarm.json"
+    ];
+    var bastions = [];
+    for (var i = 0; i < swarmUrls.length && bastions.length === 0; i++) {
+        try {
+            var res = await fetch(swarmUrls[i]);
+            if (!res.ok) continue;
+            var data = await res.json();
+            bastions = (data.bastions || []).filter(function (b) {
+                return b && b.url && b.probe !== "failed";
+            });
+        } catch (e) {
+            // try the next mirror
+        }
+    }
+    if (!bastions.length) {
+        throw new Error("No bastion server found in swarm.json (paper-light mode)");
+    }
+    // Fastest/nearest first: lowest recorded probe latency wins.
+    bastions.sort(function (a, b) {
+        return (a.probe_ms || 999999999) - (b.probe_ms || 999999999);
+    });
+    var base = bastions[0].url;
+    while (base.charAt(base.length - 1) === "/") { base = base.slice(0, -1); }
+    return base + "/ephemeral/api/v1/run";
+}
+
 class ActionEphemeralWidget extends Widget {
     render(parent, nextSibling) {
         this.computeAttributes();
@@ -1400,7 +1442,8 @@ class ActionEphemeralWidget extends Widget {
             }
             const base64code = window.btoa(binary);
             
-            const response = await fetch('/ephemeral/api/v1/run', {
+            const endpoint = await _resolveEphemeralEndpoint();
+            const response = await fetch(endpoint, {
                 method: 'POST',
                 headers: {'Content-Type': 'application/json'},
                 body: JSON.stringify({ document_blob: base64code, timeout: 300 })
@@ -2291,6 +2334,17 @@ exports.startup = function() {
         if (isNewOrInjected) {
           window.pendingImports.push({ title: "$:/state/DisableAutoSaver", text: "yes" });
           isNewOrInjected = false; // Reset for the next engine mount
+        }
+
+        // --- EPHEMERAL INTEGRATION (local / file-access mode) ---
+        // The WebDAV path injects EPHEMERAL_INTEGRATION_JSON itself when it
+        // opens a read-write remote file. In local/file-access mode there is
+        // no backend, so inject it here — the widget resolves a bastion from
+        // swarm.json instead of the same-origin /ephemeral API path. Every
+        // replacePageContents call mounts a FRESH engine, so re-inject on
+        // each mount (mirrors the WebDAV branch, which pushes every open).
+        if (!IS_WEBDAV) {
+          window.pendingImports.push(...EPHEMERAL_INTEGRATION_JSON);
         }
 
         // --- INJECT PENDING IMPORTS ---
