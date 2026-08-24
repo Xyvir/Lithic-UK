@@ -690,7 +690,13 @@ uniEditorWidget.prototype.handleBeforeKeydown = function(e) {
 	}
 
 	if (e.key === "Enter" || e.key === "Tab") {
-		if (isStreams && !isCompTextActive) {
+		// When CompText completion is active, let it handle Enter exclusively
+		// so the unieditor engine's handleIndents does not insert a newline
+		// before CompText can intercept the key.
+		if (isCompTextActive) {
+			return true;
+		}
+		if (isStreams) {
 			if (e.key === "Enter" && !e.shiftKey) {
 				// Let the event bubble untouched to Streams' $keyboard-plus for node split
 				return true;
