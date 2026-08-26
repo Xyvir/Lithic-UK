@@ -56,7 +56,7 @@ ActionDispatchPaste.prototype.invokeAction = function(triggeringWidget,event) {
     var currentBoard = $tw.wiki.getTiddlerText(this.boardStateTiddler);
     if (!currentBoard) {
         // Fallback to the first whiteboard modified
-        var tiddlers = $tw.wiki.filterTiddlers("[all[shadows+tiddlers]field:type[application/tldr]!prefix[$:/temp]sort[modified]first[]]");
+        var tiddlers = $tw.wiki.filterTiddlers("[all[shadows+tiddlers]field:type[application/tldr]!prefix[$:/temp]!sort[modified]first[]]");
         if (tiddlers.length > 0) currentBoard = tiddlers[0];
     }
     

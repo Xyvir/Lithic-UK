@@ -16,7 +16,7 @@ tc-page-container tc-page-view-$(storyviewTitle)$ tc-language-$(languageTitle)$ 
 	tv-show-missing-links={{$:/config/MissingLinks}}
 	storyviewTitle={{$:/view}}
 	languageTitle={{{ [{$:/language}get[name]] }}}
-	currentBoard={{{ [[$:/state/Whiteboard/PageLayout/tiddler]get[text]] ~[all[shadows+tiddlers]field:type[application/tldr]!prefix[$:/temp]sort[modified]first[]] }}}>
+	currentBoard={{{ [[$:/state/Whiteboard/PageLayout/tiddler]get[text]] ~[all[shadows+tiddlers]field:type[application/tldr]!prefix[$:/temp]!sort[modified]first[]] }}}>
 
 <div class=<<containerClasses>>>
 
@@ -33,8 +33,8 @@ body { overflow-x: hidden; }
 	</$reveal>
 	<!-- default value, when first opened, select widget's state tiddler is empty, but default value filter gives a value, we show that tiddler -->
 	<$reveal state="$:/state/Whiteboard/PageLayout/tiddler" type="match" text="">
-		<$list filter='[all[shadows+tiddlers]field:type[application/tldr]sort[modified]first[]]'>
-			<$whiteboard tiddler={{{[all[shadows+tiddlers]field:type[application/tldr]sort[modified]first[]]}}} height="100vh" />
+		<$list filter='[all[shadows+tiddlers]field:type[application/tldr]!prefix[$:/temp]!sort[modified]first[]]'>
+			<$whiteboard tiddler={{{[all[shadows+tiddlers]field:type[application/tldr]!prefix[$:/temp]!sort[modified]first[]]}}} height="100vh" />
 		</$list>
 	</$reveal>
 	<!-- Floating Comptext UI -->
@@ -70,7 +70,7 @@ body { overflow-x: hidden; }
 		<$let
 			searchState="$:/state/Whiteboard/PageLayout/search"
 			dropdownState="$:/state/Whiteboard/PageLayout/dropdown"
-			currentBoard={{{ [[$:/state/Whiteboard/PageLayout/tiddler]get[text]] ~[all[shadows+tiddlers]field:type[application/tldr]!prefix[$:/temp]sort[modified]first[]] }}}
+			currentBoard={{{ [[$:/state/Whiteboard/PageLayout/tiddler]get[text]] ~[all[shadows+tiddlers]field:type[application/tldr]!prefix[$:/temp]!sort[modified]first[]] }}}
 		>
 			<$keyboard key="Escape" actions="<$action-deletetiddler $tiddler=<<dropdownState>>/><$action-setfield $tiddler=<<searchState>> text=''/>">
 				<style>
@@ -132,11 +132,11 @@ body { overflow-x: hidden; }
 	</$reveal>
 	<!-- default value, when first opened, select widget's state tiddler is empty, but default value filter gives a value, we show that tiddler -->
 	<$reveal state="$:/state/Whiteboard/PageLayout/tiddler" type="match" text="">
-		<$list filter='[all[shadows+tiddlers]field:type[application/tldr]!prefix[$:/temp]sort[modified]first[]]'>
+		<$list filter='[all[shadows+tiddlers]field:type[application/tldr]!prefix[$:/temp]!sort[modified]first[]]'>
 			<$button tooltip="Open In StoryView">
 				{{$:/core/images/home-button}}
 				<$action-setfield $tiddler="$:/layout" text="$:/core/ui/PageTemplate"/>
-				<$action-navigate $to={{{[all[shadows+tiddlers]field:type[application/tldr]!prefix[$:/temp]sort[modified]first[]]}}} />
+				<$action-navigate $to={{{[all[shadows+tiddlers]field:type[application/tldr]!prefix[$:/temp]!sort[modified]first[]]}}} />
 			</$button>
 		</$list>
 	</$reveal>
@@ -151,7 +151,7 @@ body { overflow-x: hidden; }
 	<span class="lithic-wb-save-btn">
 		<$button tooltip="Print Sequential Whiteboard" class="tc-btn-invisible">
 			{{$:/core/images/print-button}}
-			<$vars currentBoard={{{ [[$:/state/Whiteboard/PageLayout/tiddler]get[text]] ~[all[shadows+tiddlers]field:type[application/tldr]!prefix[$:/temp]sort[modified]first[]] }}}>
+			<$vars currentBoard={{{ [[$:/state/Whiteboard/PageLayout/tiddler]get[text]] ~[all[shadows+tiddlers]field:type[application/tldr]!prefix[$:/temp]!sort[modified]first[]] }}}>
 				<$vars wbHeight={{{ [<currentBoard>get[whiteboard-height]] ~[[540px]] }}}>
 					<$action-setfield $tiddler="$:/layout" text="" />
 					<$action-setfield $tiddler="$:/StoryList" list="" />
