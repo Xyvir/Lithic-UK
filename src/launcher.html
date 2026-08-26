@@ -1448,9 +1448,26 @@ class ActionEphemeralWidget extends Widget {
                 headers: {'Content-Type': 'application/json'},
                 body: JSON.stringify({ document_blob: base64code, timeout: 300 })
             });
-            
-            const data = await response.json();
-            
+
+            // Surface HTTP errors instead of silently swallowing them: the
+            // bastion answers 422 with {"detail": "..."} when a job cannot be
+            // run (e.g. orchestration-only bastion with no peer holding the
+            // required image warm). Before, the error body was parsed and
+            // discarded, so a failed run looked like it did nothing.
+            let data = null;
+            try {
+                data = await response.json();
+            } catch (parseErr) {
+                data = null; // non-JSON error body — fall through to status handling
+            }
+            if (!response.ok) {
+                const detail = (data && typeof data.detail === "string" && data.detail.trim())
+                    ? data.detail
+                    : ("HTTP " + response.status + ((data && data.error) ? " - " + data.error : ""));
+                throw new Error("Ephemeral API returned HTTP " + response.status + ": " + detail);
+            }
+            if (!data) data = {};
+
             if (data.stderr && data.stderr.trim()) {
                 console.warn("Ephemeral API Stderr:", data.stderr);
             }
