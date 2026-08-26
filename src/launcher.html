@@ -1434,7 +1434,15 @@ class ActionEphemeralWidget extends Widget {
         }
         
         try {
-            const markdownPayload = "\\\`\\\`\\\`" + this.language + "\\n" + this.code + "\\n\\\`\\\`\\\`";
+            // Ephemeral parses Markdown documents, so retain an explicit shebang
+            // exactly as supplied (it overrides the fence language), and otherwise
+            // wrap the code in a language-labelled triple-backtick block. This is
+            // the same contract used by the self-hosted/local API client.
+            const code = String(this.code).replace(/^\uFEFF/, "");
+            const hasShebang = /^\s*#!/.test(code);
+            const markdownPayload = hasShebang
+                ? code
+                : "\\\`\\\`\\\`" + this.language + "\\n" + code + "\\n\\\`\\\`\\\`";
             const utf8str = new TextEncoder().encode(markdownPayload);
             let binary = '';
             for (let i = 0; i < utf8str.byteLength; i++) {
