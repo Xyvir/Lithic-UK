@@ -217,6 +217,17 @@ type: text/css
         display: none !important;
     }
 
+    /* Hide the dashed/dotted 'locked' outline around locked whiteboard shapes.
+       tldraw renders locked shapes with a persistent indicator overlay
+       (div.tl-indicator.tl-locked) whose SVG stroke is dashed via
+       .tl-locked { stroke-dasharray: ... }, and a selected locked shape also
+       gets a dashed selection box (.tl-bounds-center.tl-dashed). */
+    .tl-indicator.tl-locked,
+    .tl-locked,
+    .tl-bounds-center.tl-dashed {
+        display: none !important;
+    }
+
     /* =======================================================
        9. CENTER IMAGES
        (Centers images and image containers instead of left-aligning)
