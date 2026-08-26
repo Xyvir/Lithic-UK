@@ -14,8 +14,13 @@ tags: $:/tags/Stylesheet
 }
 
 /* --- Headers --- */
+/* Fake bold: -webkit-text-stroke thickens glyphs without changing their
+   advance widths, so the canvas wraps exactly like the invisible textarea.
+   Real font-weight: bold can use a wider bold face (e.g. proportional or
+   fallback fonts) and shift wrap points, desyncing the caret from the
+   visible text. */
 .unieditor .md-h {
-	font-weight: bold;
+	-webkit-text-stroke: 0.5px currentColor;
 }
 .unieditor .md-h1 { color: <<colour code-foreground>>; }
 .unieditor .md-h2 { color: <<colour code-foreground>>; }
@@ -26,11 +31,13 @@ tags: $:/tags/Stylesheet
 
 /* --- Bold --- */
 .unieditor .md-strong {
-	font-weight: bold;
+	-webkit-text-stroke: 0.5px currentColor;
 	color: <<colour code-foreground>>;
 }
 
 /* --- Italic --- */
+/* Note: kept as real italic -- italic faces of the monospace editor font keep
+   the same advance widths as regular, so they do not shift wrap points. */
 .unieditor .md-em {
 	font-style: italic;
 	color: <<colour sidebar-controls-foreground-hover>>;
@@ -125,5 +132,5 @@ tags: $:/tags/Stylesheet
 /* --- Pragma lines (\define, \procedure, etc.) --- */
 .unieditor .md-tw-pragma {
 	color: <<colour dropzone-background>>;
-	font-weight: bold;
+	-webkit-text-stroke: 0.5px currentColor;
 }

@@ -120,6 +120,24 @@ tags: $:/tags/Stylesheet
 	font-family: inherit !important;
 }
 
+/* highlight.js theme inside the editor canvas: neutralize real bold so glyph
+   advance widths stay identical to the invisible textarea. Real bold faces
+   are wider and shift canvas wrap points, desyncing the caret from the
+   visible text. Use fake bold via text-stroke (italic faces of the monospace
+   editor font keep their advance widths, so comments stay real italic). */
+.unieditor .hljs-keyword,
+.unieditor .hljs-selector-tag,
+.unieditor .hljs-addition,
+.unieditor .hljs-title,
+.unieditor .hljs-section,
+.unieditor .hljs-name,
+.unieditor .hljs-selector-id,
+.unieditor .hljs-selector-class,
+.unieditor .hljs-strong {
+	font-weight: normal !important;
+	-webkit-text-stroke: 0.5px currentColor;
+}
+
 
 /* --- CSS Hack for Line Numbers --- */
 .streams-unieditor-wrapper {
