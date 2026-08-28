@@ -1,4 +1,4 @@
-import { build } from 'vite';
+import { spawn } from 'node:child_process';
 import { readFile, writeFile, rm } from 'node:fs/promises';
 import { resolve } from 'node:path';
 
@@ -9,7 +9,19 @@ const generatedJs = resolve(outputDir, 'pre-launcher.js');
 const generatedCss = resolve(outputDir, 'pre-launcher.css');
 const destination = resolve(outputDir, 'pre-launcher.html');
 
-await build({ root, configFile: resolve(root, 'vite.config.ts') });
+await new Promise((resolveBuild, rejectBuild) => {
+  const command = process.platform === 'win32' ? 'npx.cmd' : 'npx';
+  const child = spawn(command, ['vite', 'build', '--config', 'vite.config.ts'], {
+    cwd: root,
+    stdio: 'inherit',
+    shell: false
+  });
+  child.on('error', rejectBuild);
+  child.on('exit', (code) => {
+    if (code === 0) resolveBuild();
+    else rejectBuild(new Error(`Vite exited with code ${code}`));
+  });
+});
 
 let html = await readFile(generatedHtml, 'utf8');
 const js = await readFile(generatedJs, 'utf8');
