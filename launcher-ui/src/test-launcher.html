@@ -1,0 +1,19 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Lithic Launcher Test Harness</title>
+  </head>
+  <body>
+    <main>
+      <h1>Lithic launcher test harness</h1>
+      <p id="status">Harness loaded.</p>
+    </main>
+    <script type="module">
+      const params = new URLSearchParams(location.search);
+      const mode = params.get('mode') || 'auto';
+      document.querySelector('#status').textContent = `Harness loaded (mode: ${mode}).`;
+    </script>
+  </body>
+</html>

@@ -21,6 +21,9 @@ jobs:
       - name: Install repository dependencies
         run: npm install
 
+      - name: Test modular launcher logic
+        run: npm test
+
       - name: Build modular launcher
         run: npm run build:pre-launcher
 
