@@ -7,7 +7,8 @@
     "tauri": "tauri",
     "mirror": "node scripts/mirror.js",
     "update-external": "node scripts/mirror.js",
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "build:pre-launcher": "npm --prefix launcher-ui install --no-package-lock && node scripts/build-pre-launcher.mjs"
   },
   "author": "Tyler Mills",
   "license": "ISC",
