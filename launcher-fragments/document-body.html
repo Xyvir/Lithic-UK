@@ -1,0 +1,289 @@
+  <div class="container">
+    <h1>
+      <img src="/mstile-150x150.png" alt="L" style="background:#333; padding:2px;"
+        onerror="this.outerHTML='<span class=\'fallback-icon\'>L</span>'">
+      <div style="flex-grow: 1; display: flex; align-items: center;">Lithic - Launcher</div>
+      <a id="intro-link" href="/intro.html"
+        style="text-decoration: none; color: var(--text-color); font-size: 1.2rem; opacity: 0.7; transition: opacity 0.2s; display: flex; align-items: center; justify-content: center; width: 30px; height: 30px; border-radius: 50%; border: 2px solid var(--border-color); margin-left: 10px;"
+        onmouseover="this.style.opacity='1'; this.style.borderColor='var(--accent-color)'; this.style.color='var(--accent-color)'"
+        onmouseout="this.style.opacity='0.7'; this.style.borderColor='var(--border-color)'; this.style.color='var(--text-color)'"
+        onclick="openIntro(event)" title="View Introduction">?</a>
+      <button id="github-sync-btn" onclick="openGithubSyncModal()" title="GitHub Sync Settings">
+        <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2"
+          stroke-linecap="round" stroke-linejoin="round">
+          <path d="M18 10h-1.26A8 8 0 1 0 9 20h9a5 5 0 0 0 0-10z"></path>
+        </svg>
+      </button>
+    </h1>
+
+    <div class="section dual-buttons">
+      <button id="btn-new-lith" type="button" onclick="openNewBlankLith()">New Blank Lith</button>
+    </div>
+
+    <div class="section" style="display: flex; gap: 10px;">
+      <button id="btn-mount" type="button" onclick="openFile()" style="flex-grow: 1;">Mount a Lith (or HTML) from
+        Disk</button>
+      <button id="btn-bookmark-trigger" type="button" onclick="openBookmarkModal()" title="Bookmark a Remote Instance"
+        style="flex-shrink: 0; width: 48px; padding: 0; display: flex; align-items: center; justify-content: center; margin-top: 0;">
+        <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2"
+          stroke-linecap="round" stroke-linejoin="round" style="color: var(--accent-color)">
+          <path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z"></path>
+        </svg>
+      </button>
+    </div>
+
+    <div id="recent-files"></div>
+
+    <a id="github-link" href="https://github.com/Xyvir/Lithic" target="_blank">View on GitHub</a>
+  </div>
+
+  <button id="install-pwa">Install App</button>
+
+  <script>
+    let deferredPrompt;
+    const installBtn = document.getElementById('install-pwa');
+
+    window.addEventListener('beforeinstallprompt', (e) => {
+      // Don't show install prompt in Tauri
+      if (window.__TAURI__ || window.__TAURI_INTERNALS__) return;
+
+      e.preventDefault();
+      deferredPrompt = e;
+      installBtn.style.display = 'block';
+    });
+
+    installBtn.addEventListener('click', async () => {
+      installBtn.style.display = 'none';
+      if (deferredPrompt) {
+        deferredPrompt.prompt();
+        const { outcome } = await deferredPrompt.userChoice;
+        deferredPrompt = null;
+      }
+    });
+
+    window.addEventListener('appinstalled', () => {
+      installBtn.style.display = 'none';
+      deferredPrompt = null;
+    });
+  </script>
+
+  <!-- PENDING IMPORTS OVERLAY -->
+  <div id="pending-imports-window">
+    <div id="pending-imports-header">
+      <span>To Be Imported</span>
+      <button style="width: auto; padding: 4px 8px; font-size: 0.8rem; margin: 0;"
+        onclick="window.clearPendingImports()">Cancel</button>
+    </div>
+    <div id="pending-imports-body">
+      <ul id="pending-imports-list"></ul>
+    </div>
+  </div>
+
+  <div id="debug-log"></div>
+
+  <!-- LOADING OVERLAY -->
+  <div id="loading-overlay">
+    <div class="spinner"></div>
+  </div>
+
+
+  <!-- EMOJI ICON PICKER MODAL -->
+  <div id="emoji-picker-modal" class="modal-overlay">
+    <div class="modal-content" style="max-width:460px; text-align:left;">
+      <button class="close-modal-btn" onclick="document.getElementById('emoji-picker-modal').style.display='none';"
+        title="Close">&times;</button>
+      <h2 style="margin-bottom:12px; color:var(--text-color); display:flex; align-items:center; gap:10px;">
+        <span id="emoji-preview-display" style="font-size:1.3em; line-height:1;">&#127912;</span> Icon Picker
+      </h2>
+      <div class="emoji-picker-scroll" id="emoji-picker-scroll"></div>
+      <div id="emoji-save-status" class="emoji-save-status"></div>
+      <div class="modal-buttons" style="margin-top:14px; flex-direction:row; flex-wrap:wrap; gap:8px;">
+        <button onclick="confirmEmojiIcon()"
+          style="flex:1; min-width:120px; background:rgba(138,180,248,0.12); border:1px solid rgba(138,180,248,0.3); color:var(--accent-color); font-weight:600;">Apply
+          &amp; Save</button>
+        <button onclick="restoreDefaultIcon()"
+          style="flex:1; min-width:120px; background:transparent; border:1px dashed var(--border-color); opacity:0.65;">&#8617;
+          Restore</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- OFFLINE READ-ONLY CONFIRM MODAL -->
+  <div id="offline-readonly-confirm-modal" class="modal-overlay">
+    <div class="modal-content">
+      <h2 style="color:#ffb74d;">&#128218; Read-Only Mode</h2>
+      <p>You are about to open <strong id="offline-readonly-filename"></strong> from your local cache.</p>
+      <p style="font-size:0.88rem; opacity:0.75; line-height:1.6;">Since the server is offline, <strong>any changes you
+          make will only be saved as a local HTML download</strong> and will need to be manually merged back to the
+        server the next time you are online.</p>
+      <div class="modal-buttons">
+        <button id="offline-readonly-confirm-btn"
+          style="background:rgba(255,183,77,0.15); border:1px solid rgba(255,183,77,0.4); color:#ffb74d;">Open
+          Read-Only</button>
+        <button onclick="document.getElementById('offline-readonly-confirm-modal').style.display='none';"
+          style="background:transparent; border:1px solid var(--border-color); opacity:0.7;">Cancel</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- COLLISION MODAL -->
+  <div id="collision-modal" class="modal-overlay">
+    <div class="modal-content">
+      <h2 id="collision-title">Active Session Detected</h2>
+      <p id="collision-message">Another user is currently editing this file. Opening it may lead to data loss as Lithic
+        does not support collaboration (last-write-wins).</p>
+      <div class="modal-buttons">
+        <button id="collision-btn-readonly"
+          style="background: var(--button-bg); border: 1px solid var(--border-color);">Open Read-Only</button>
+        <button id="collision-btn-ignore" style="background: #e53935; color: white; border: none;">Ignore and Open
+          (Overwrite Risk)</button>
+        <button
+          onclick="document.getElementById('collision-modal').style.display='none'; if(document.getElementById('loading-overlay'))document.getElementById('loading-overlay').style.display='none';"
+          style="background: transparent; border: 1px solid var(--border-color); opacity: 0.7;">Cancel</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- NAME COLLISION MODAL -->
+  <div id="name-collision-modal" class="modal-overlay">
+    <div class="modal-content">
+      <h2 style="color:var(--accent-color)">Lith name already in use</h2>
+      <p>Please pick a unique name for your new lith.</p>
+      <div class="modal-buttons">
+        <button onclick="document.getElementById('name-collision-modal').style.display='none';"
+          style="background: var(--button-bg); border: 1px solid var(--border-color);">Close</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- BOOKMARK MODAL -->
+  <div id="bookmark-modal" class="modal-overlay">
+    <div class="modal-content">
+      <h2
+        style="color:var(--text-color); margin-bottom: 12px; display:flex; align-items:center; justify-content:center; gap:8px;">
+        <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="2"
+          stroke-linecap="round" stroke-linejoin="round" style="color: var(--accent-color)">
+          <path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z"></path>
+        </svg>
+        Bookmark Remote Instance
+      </h2>
+      <p style="font-size:0.9rem; opacity:0.8; margin-bottom: 15px;">Enter the URL or FQDN of your public self-hosted
+        Lithic instance (e.g., <code>personal.lithic.uk</code>).</p>
+      <input type="text" id="bookmark-url-input" placeholder="https://..."
+        style="width: 100%; background: var(--button-bg); color: var(--text-color); border: 1px solid var(--border-color); padding: 12px; border-radius: 6px; font-family: inherit; outline: none; margin-bottom: 20px;">
+      <div class="modal-buttons" style="flex-direction: row; gap: 10px;">
+        <button onclick="saveBookmark()"
+          style="flex: 1; background: rgba(138, 180, 248, 0.1); border: 1px solid var(--accent-color); color: var(--accent-color);">Save
+          Bookmark</button>
+        <button onclick="document.getElementById('bookmark-modal').style.display='none';"
+          style="flex: 1; background: transparent; border: 1px solid var(--border-color); opacity: 0.7;">Cancel</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- GLOBAL LOADING OVERLAY -->
+  <div id="global-loading-overlay" class="loading-overlay">
+    <div class="spinner"></div>
+    <div id="global-loading-text" style="color:var(--accent-color); font-weight:600; font-size:0.9rem;">Processing...
+    </div>
+  </div>
+
+  <!-- GITHUB SYNC MODAL -->
+  <div id="github-sync-modal" class="modal-overlay">
+    <div class="modal-content github-modal-content">
+      <button class="close-modal-btn"
+        onclick="resetAuthUI(); document.getElementById('github-sync-modal').style.display='none';"
+        title="Close">&times;</button>
+      <h2 style="color:var(--text-color); display:flex; align-items:center; gap:10px;">
+        <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="2">
+          <path d="M18 10h-1.26A8 8 0 1 0 9 20h9a5 5 0 0 0 0-10z"></path>
+        </svg>
+        GitHub Sync
+      </h2>
+
+      <div id="github-state-disconnected">
+        <div class="modal-buttons">
+          <button id="btn-github-connect" onclick="initiateGithubAuth()">Connect to GitHub</button>
+        </div>
+      </div>
+
+      <div id="github-state-installing" style="display:none;">
+        <p style="font-size:0.95rem; margin-bottom:15px; line-height:1.4;">
+          Step 1: Install the Lithic Sync app on your GitHub account to enable access.
+        </p>
+        <div
+          style="background:rgba(255,255,255,0.03); border:1px solid var(--border-color); padding:15px; border-radius:8px; text-align:center;">
+          <a href="https://github.com/apps/lithic-backup" target="_blank" onclick="onGithubInstallClick()"
+            style="display:inline-block; background:var(--accent-color); color:#000; padding:10px 20px; border-radius:6px; font-weight:600; text-decoration:none;">
+            Install Lithic Sync
+          </a>
+          <div id="github-install-check" style="display:none; color:#4caf50; margin-left:10px; font-size:1.2rem;">✓
+          </div>
+        </div>
+        <div class="modal-buttons" style="margin-top:20px; flex-direction:column; gap:10px;">
+          <button id="btn-github-proceed-to-auth" onclick="generateDeviceCode()" disabled style="width:100%;">Wait for
+            Installation...</button>
+          <button onclick="generateDeviceCode()"
+            style="background:transparent; border:none; font-size:0.75rem; opacity:0.5; cursor:pointer; text-decoration:underline;">I've
+            already installed the app</button>
+          <button id="btn-github-disconnect-nested" onclick="disconnectGithub()"
+            style="display:none; background:transparent; border:1px solid var(--border-color); color:#f44336; width:100%; margin-top:10px;">Disconnect</button>
+        </div>
+      </div>
+
+      <div id="github-state-connecting" style="display:none;">
+        <p style="font-size:0.9rem; opacity:0.8;">1. Open <a href="https://github.com/login/device" target="_blank"
+            style="color:var(--accent-color)">github.com/login/device</a></p>
+        <p style="font-size:0.9rem; opacity:0.8;">2. Enter the code below:</p>
+        <div id="github-user-code" class="user-code-display">---- ----</div>
+        <p style="font-size:0.8rem; opacity:0.6; text-align:center;">Waiting for authorization...</p>
+      </div>
+
+      <div id="github-state-selecting" style="display:none;">
+        <button id="btn-github-create-new" onclick="createGithubRepo()"
+          style="width:100%; background:rgba(138, 180, 248, 0.1); border:1px dashed var(--accent-color); color:var(--accent-color); padding:12px; border-radius:6px; cursor:pointer; font-weight:600;">
+          + Create lithic-sync-xxxx and sync
+        </button>
+
+        <div style="margin-top:20px;">
+          <label style="font-size:0.75rem; opacity:0.5; text-transform:uppercase; letter-spacing:0.05em;">Found Existing
+            Sync Repos</label>
+          <div id="github-discovery-list" class="discovery-group">
+            <!-- Populated via JS -->
+          </div>
+        </div>
+
+        <div id="github-custom-search-wrapper"
+          style="display:none; margin-top:15px; border-top:1px solid rgba(255,255,255,0.05); padding-top:15px;">
+          <div class="field">
+            <div class="search-wrapper">
+              <input type="text" id="github-repo-search" class="search-input-gh"
+                placeholder="Type custom repository name..." autocomplete="off">
+              <div id="github-search-results" class="search-results"></div>
+            </div>
+          </div>
+        </div>
+
+        <div class="modal-buttons" style="margin-top:20px;">
+          <button onclick="finalizeGithubSetup()" id="btn-github-finalize">Start Sync</button>
+        </div>
+      </div>
+
+      <div id="github-state-connected" style="display:none;">
+        <div class="field">
+          <label>Connected Repository</label>
+          <div id="github-active-repo" style="font-weight:600; font-size:1.1rem;">-</div>
+          <div class="sync-status-pill">
+            <span style="width:8px; height:8px; background:#4caf50; border-radius:50%;"></span>
+            Active Sync
+          </div>
+        </div>
+        <p style="font-size:0.85rem; opacity:0.7;">Last successful sync: <span id="github-last-sync">Never</span></p>
+
+        <div class="modal-buttons" style="margin-top:30px; flex-direction:column; gap:10px;">
+          <button onclick="initiateGithubAuth()"
+            style="background:var(--button-bg); border:1px solid var(--border-color); font-size:0.9rem; width:100%;">Change</button>
+        </div>
+      </div>
+    </div>
+  </div>
