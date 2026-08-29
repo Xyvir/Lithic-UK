@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { resolveMode } from './mode.js';
+import { resolveMode } from './mode.ts';
 
 function location(url: string): Location {
   return new URL(url) as unknown as Location;

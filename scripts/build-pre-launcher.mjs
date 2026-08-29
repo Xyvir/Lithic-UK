@@ -3,15 +3,16 @@ import { readFile, writeFile, rm } from 'node:fs/promises';
 import { resolve } from 'node:path';
 
 const root = resolve('launcher-ui');
+const viteBin = resolve(root, 'node_modules/vite/bin/vite.js');
 const outputDir = resolve('src');
 const generatedHtml = resolve(outputDir, 'index.html');
 const generatedJs = resolve(outputDir, 'pre-launcher.js');
 const generatedCss = resolve(outputDir, 'pre-launcher.css');
 const destination = resolve(outputDir, 'pre-launcher.html');
+const previewEngine = resolve(outputDir, 'pre-launcher-engine.html');
 
 await new Promise((resolveBuild, rejectBuild) => {
-  const command = process.platform === 'win32' ? 'npx.cmd' : 'npx';
-  const child = spawn(command, ['vite', 'build', '--config', 'vite.config.ts'], {
+  const child = spawn(process.execPath, [viteBin, 'build', '--config', 'vite.config.ts'], {
     cwd: root,
     stdio: 'inherit',
     shell: false
@@ -34,9 +35,14 @@ try {
 
 html = html
   .replace(/<link rel="stylesheet"[^>]*>/g, css ? `<style>${css}</style>` : '')
-  .replace(/<script type="module"[^>]*><\/script>/g, `<script>${js}</script>`)
-  .replace(/<script type="module"[^>]*src="[^"]+"><\/script>/g, `<script>${js}</script>`);
+  .replace(/<script type="module"[^>]*src="[^"]+"><\/script>/g, () => `<script type="module">${js}</script>`)
+  .replace(/<script type="module"[^>]*><\/script>/g, () => `<script type="module">${js}</script>`);
 
 await writeFile(destination, html);
+// The single-file launcher fetches the legacy engine after the user chooses
+// "New Blank Lith". Keep a preview-only sibling with the same contents so
+// local HTML previews have the deployment-relative engine available too.
+const engine = await readFile(resolve(outputDir, 'lithic.html'), 'utf8');
+await writeFile(previewEngine, engine);
 await Promise.all([rm(generatedHtml, { force: true }), rm(generatedJs, { force: true }), rm(generatedCss, { force: true })]);
 console.log(`Wrote ${destination}`);
