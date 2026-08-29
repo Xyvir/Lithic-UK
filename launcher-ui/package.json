@@ -6,7 +6,7 @@
     "build": "vite build",
     "dev": "vite dev",
     "check": "svelte-check --tsconfig ./tsconfig.json",
-    "test": "node --experimental-strip-types --experimental-specifier-resolution=node --test src/**/*.test.ts"
+    "test": "node --experimental-strip-types --experimental-specifier-resolution=node --test src/*.test.ts"
   },
   "devDependencies": {
     "@sveltejs/vite-plugin-svelte": "^5.0.0",
