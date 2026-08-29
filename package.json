@@ -9,7 +9,9 @@
     "update-external": "node scripts/mirror.js",
     "test": "npm --prefix launcher-ui install --no-package-lock && npm --prefix launcher-ui test",
     "build:pre-launcher": "npm --prefix launcher-ui install --no-package-lock && node scripts/build-pre-launcher.mjs",
-    "test:pre-launcher": "node scripts/pre-launcher-smoke.mjs"
+    "test:pre-launcher": "node scripts/pre-launcher-smoke.mjs",
+    "test:puppeteer": "node scripts/test-puppeteer-launcher.mjs",
+    "test:puppeteer:headed": "HEADED=1 node scripts/test-puppeteer-launcher.mjs"
   },
   "author": "Tyler Mills",
   "license": "ISC",
@@ -18,6 +20,7 @@
     "js-yaml": "^4.1.0",
     "react": "^18.2.0",
     "react-dom": "^18.2.0",
-    "tiddlywiki": "^5.3.3"
+    "tiddlywiki": "^5.3.3",
+    "puppeteer": "^24.0.0"
   }
 }

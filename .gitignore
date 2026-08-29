@@ -7,3 +7,28 @@ wiki/external/
 
 # Local-only convenience exports for meatspace testing (regenerable via scripts/make-rollup.py)
 /rollups/
+
+# Launcher UI dependencies and build output
+/launcher-ui/node_modules/
+/launcher-ui/dist/
+/launcher-ui/.vite/
+
+# Tauri build output
+/src-tauri/target/
+
+# Generated single-file launcher intermediates
+/src/index.html
+/src/pre-launcher.js
+/src/pre-launcher.css
+/src/pre-launcher-engine.html
+/src/pre-launcher.html
+/src/launcher-fragments-assembled.html
+
+# Root dependency install
+/node_modules/
+
+# Local preview and browser-test artifacts
+/.launcher-preview.log
+/scratch/test-profile-*/
+/scratch/chrome-test-profile/
+/scratch/test-saver-headless.html

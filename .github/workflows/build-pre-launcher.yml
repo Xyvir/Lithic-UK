@@ -2,6 +2,12 @@ name: Build Modular Launcher (Preview)
 
 on:
   workflow_dispatch:
+    inputs:
+      virtual-headed:
+        description: 'Run Puppeteer with a virtual headed display (Xvfb)'
+        required: false
+        default: false
+        type: boolean
 
 permissions:
   contents: write
@@ -27,13 +33,15 @@ jobs:
       - name: Build modular launcher
         run: npm run build:pre-launcher
 
-      - name: Commit preview artifact
-        run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add src/pre-launcher.html
-          git diff --cached --quiet || git commit -m "Build modular launcher preview"
-          git push
+      - name: Install Puppeteer browser
+        run: npx puppeteer browsers install chrome
+
+      - name: Run Puppeteer launcher smoke test
+        run: npm run test:puppeteer
+
+      - name: Run virtual-headed Puppeteer smoke test
+        if: ${{ inputs.virtual-headed == true }}
+        run: xvfb-run -a npm run test:puppeteer:headed
 
       - name: Upload preview artifact
         uses: actions/upload-artifact@v4
