@@ -8,7 +8,8 @@
     "mirror": "node scripts/mirror.js",
     "update-external": "node scripts/mirror.js",
     "test": "npm --prefix launcher-ui install --no-package-lock && npm --prefix launcher-ui test",
-    "build:pre-launcher": "npm --prefix launcher-ui install --no-package-lock && node scripts/build-pre-launcher.mjs"
+    "build:pre-launcher": "npm --prefix launcher-ui install --no-package-lock && node scripts/build-pre-launcher.mjs",
+    "test:pre-launcher": "node scripts/pre-launcher-smoke.mjs"
   },
   "author": "Tyler Mills",
   "license": "ISC",

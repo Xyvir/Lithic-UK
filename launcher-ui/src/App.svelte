@@ -3,6 +3,7 @@
   import type { LauncherMode } from './mode';
   import { createFileBridge } from './file-bridge';
   import { bootLegacyWiki } from './legacy-launcher-runtime';
+  import { getRecentFiles, addRecentFile, removeRecentFile, clearAllRecentFiles, idb, type RecentEntry } from './storage';
 
   export let mode: LauncherMode;
   const files = createFileBridge();
@@ -14,29 +15,59 @@
   let busy = false;
   let showHelp = false;
   let showRecent = false;
-  let recentFiles: Array<{ name: string; path?: string; text?: string }> = [];
+  let recentFiles: Array<RecentEntry | { name: string; path?: string; text?: string; handle?: any }> = [];
   let search = '';
   let mountError = '';
 
-  $: filteredRecent = recentFiles.filter((file) => file.name.toLowerCase().includes(search.toLowerCase()));
+  function getEntryName(entry: RecentEntry | { name?: string; handle?: any }): string {
+    if (entry.handle && entry.handle.name) return entry.handle.name;
+    return (entry as any).name || 'untitled.lith';
+  }
 
-  function loadRecent() {
-    try { recentFiles = JSON.parse(localStorage.getItem(RECENT_KEY) ?? '[]'); } catch { recentFiles = []; }
+  $: filteredRecent = recentFiles.filter((file) => getEntryName(file).toLowerCase().includes(search.toLowerCase()));
+
+  async function loadRecent() {
+    try {
+      const idbList = await getRecentFiles();
+      if (idbList && idbList.length > 0) {
+        recentFiles = idbList;
+      } else {
+        const ls = JSON.parse(localStorage.getItem(RECENT_KEY) ?? '[]');
+        recentFiles = ls;
+      }
+    } catch {
+      recentFiles = [];
+    }
   }
-  function remember(file: { name: string; path?: string; text?: string }) {
-    recentFiles = [file, ...recentFiles.filter((item) => item.path !== file.path && item.name !== file.name)].slice(0, 20);
-    localStorage.setItem(RECENT_KEY, JSON.stringify(recentFiles));
+
+  async function remember(file: { name: string; path?: string; text?: string; handle?: any }) {
+    if (file.handle) {
+      recentFiles = await addRecentFile(file.handle, file.path ?? null);
+    } else {
+      const name = file.name;
+      recentFiles = [file, ...recentFiles.filter((item) => getEntryName(item) !== name)].slice(0, 20);
+      localStorage.setItem(RECENT_KEY, JSON.stringify(recentFiles.map(({ name, path, text }) => ({ name, path, text }))));
+    }
   }
+
   function normalizeLithName(name: string): string {
-    const withoutKnownExtension = name.replace(/\.(?:html?|lith)$/i, '');
+    const withoutKnownExtension = name.replace(/\.(?:html?|lith|json)$/i, '');
     return `${withoutKnownExtension || 'untitled'}.lith`;
   }
-  async function mountWiki(contents: string, name: string, path?: string) {
+
+  async function mountWiki(contents: string, name: string, path?: string, handle?: any) {
     mountError = '';
     const safeName = normalizeLithName(name);
     const handoff = { name: safeName, path, text: contents };
-    remember(handoff);
+    await remember({ ...handoff, handle });
     sessionStorage.setItem('lithic-launcher-file', JSON.stringify(handoff));
+    if (typeof window !== 'undefined') {
+      if (handle) {
+        (window as any).__LITHIC_FILE_HANDLE__ = handle;
+      } else {
+        delete (window as any).__LITHIC_FILE_HANDLE__;
+      }
+    }
     await bootLegacyWiki(handoff);
   }
 
@@ -51,29 +82,69 @@
       busy = false;
     }
   }
+
   async function mountFromDisk() {
     busy = true; status = 'Opening…';
     try {
       const result = await files.open();
       if (!result) { status = ''; return; }
-      lithText = result.text; fileName = result.name; filePath = result.path; remember(result); await mountWiki(result.text, result.name, result.path); status = `Mounted ${result.name}`;
+      lithText = result.text; fileName = result.name; filePath = result.path;
+      await mountWiki(result.text, result.name, result.path, result.handle);
+      status = `Mounted ${result.name}`;
     } catch (error) { status = `Open failed: ${error instanceof Error ? error.message : String(error)}`; }
     finally { busy = false; }
   }
-  async function openRecent(file: { name: string; path?: string; text?: string }) {
-    if (file.text !== undefined) {
-      lithText = file.text;
-      fileName = file.name;
-      filePath = file.path;
-      status = `Mounted ${file.name}`;
-      await mountWiki(file.text, file.name, file.path);
+
+  async function openRecent(recent: RecentEntry | { name?: string; path?: string; text?: string; handle?: any }) {
+    busy = true;
+    status = 'Opening recent Lith…';
+    try {
+      const handle = (recent as any).handle;
+      if (handle) {
+        if (handle.queryPermission) {
+          const options = { mode: 'read' };
+          if ((await handle.queryPermission(options)) !== 'granted') {
+            await handle.requestPermission(options);
+          }
+        }
+        const file = await handle.getFile();
+        const text = await file.text();
+        await mountWiki(text, file.name, (recent as any).tauriPath ?? undefined, handle);
+        status = `Mounted ${file.name}`;
+        return;
+      }
+      if ((recent as any).text !== undefined) {
+        lithText = (recent as any).text;
+        fileName = (recent as any).name || 'untitled.lith';
+        filePath = (recent as any).path;
+        status = `Mounted ${fileName}`;
+        await mountWiki(lithText, fileName, filePath);
+      }
+    } catch (error) {
+      status = `Open failed: ${error instanceof Error ? error.message : String(error)}`;
+    } finally {
+      busy = false;
+      showRecent = false;
     }
-    showRecent = false;
   }
-  function clearRecent() { recentFiles = []; localStorage.removeItem(RECENT_KEY); }
-  function removeRecent(file: { name: string; path?: string; text?: string }) {
-    recentFiles = recentFiles.filter((item) => item !== file);
-    localStorage.setItem(RECENT_KEY, JSON.stringify(recentFiles));
+
+  async function clearRecent() {
+    await clearAllRecentFiles();
+    recentFiles = [];
+    localStorage.removeItem(RECENT_KEY);
+  }
+
+  async function removeRecent(file: RecentEntry | { name?: string; handle?: any }) {
+    if ((file as any).handle) {
+      recentFiles = await removeRecentFile((file as any).handle);
+      const name = (file as any).handle.name;
+      await idb.del('search_cache_' + name);
+      await idb.del('search_cache_bk1_' + name);
+      await idb.del('search_cache_bk2_' + name);
+    } else {
+      recentFiles = recentFiles.filter((item) => item !== file);
+      localStorage.setItem(RECENT_KEY, JSON.stringify(recentFiles.map((f: any) => ({ name: f.name, path: f.path, text: f.text }))));
+    }
   }
 
   onMount(() => { loadRecent(); });
@@ -84,7 +155,11 @@
 <main class="container" data-mode={mode}>
   <header class="heading">
     <div class="brand-icon" aria-hidden="true"><span>◒</span></div>
-    <h1>Lithic - Launcher</h1>
+    <div class="heading-copy">
+      <h1>Lithic - Launcher</h1>
+      {#if status}<div class="status-line" role="status">{status}<span class="activity-dots" aria-hidden="true"><i></i><i></i><i></i></span></div>{/if}
+      {#if mountError}<div class="status-line error" role="alert">{mountError}</div>{/if}
+    </div>
     <button class="help-button" aria-label="Help" on:click={() => showHelp = !showHelp}>?</button>
   </header>
   {#if showHelp}<div class="help-panel">Create a blank <code>.lith</code> or mount one from disk. Saved files appear in Recent Liths.</div>{/if}
@@ -94,17 +169,20 @@
   </section>
   {#if recentFiles.length > 0 || showRecent}
     <section class="recent-section" aria-label="Recent Liths">
-      <div class="recent-heading"><h2>Recent Liths</h2><button class="recent-refresh" aria-label="Close recent liths" on:click={() => showRecent = false}>×</button></div>
-      <input class="recent-search" placeholder="Search recent liths…" bind:value={search} />
+      <input class="recent-search" aria-label="Search recent Liths" placeholder="Search recent liths…" bind:value={search} />
       <div class="recent-list">
         {#if filteredRecent.length === 0}<p class="empty">No matching Liths.</p>{/if}
-        {#each filteredRecent as file}<div class="recent-row"><button class="recent-name" on:click={() => openRecent(file)}>{file.name}</button><button class="remove-recent" aria-label={`Remove ${file.name}`} on:click={() => removeRecent(file)}>×</button></div>{/each}
+        {#each filteredRecent as file}
+          <div class="recent-row">
+            <button class="recent-name" on:click={() => openRecent(file)}>
+              {getEntryName(file)}
+            </button>
+            <button class="remove-recent" aria-label={`Remove ${getEntryName(file)}`} on:click={() => removeRecent(file)}>×</button>
+          </div>
+        {/each}
       </div>
       <button class="reset-cache" on:click={clearRecent}>Clear All Recent Files</button>
     </section>
   {/if}
-  {#if status}<div class="status" role="status">{status}</div>{/if}
-  {#if mountError}<div class="status error" role="alert">{mountError}</div>{/if}
-  <footer><a class="github-link" href="https://github.com/Lithic-UK/Lithic" target="_blank" rel="noreferrer">View on GitHub</a><button class="install-button" on:click={() => alert('Install is available from the browser menu.')} hidden={mode === 'tauri'}>Install App</button></footer>
+  <footer><a class="github-link" href="https://github.com/Lithic-UK/Lithic" target="_blank" rel="noreferrer">Github</a><button class="install-button" on:click={() => alert('Install is available from the browser menu.')} hidden={mode === 'tauri'}>Install</button></footer>
 </main>
-

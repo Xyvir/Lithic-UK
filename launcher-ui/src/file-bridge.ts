@@ -1,5 +1,5 @@
 export interface FileBridge {
-  open(): Promise<{ name: string; path?: string; text: string } | null>;
+  open(): Promise<{ name: string; path?: string; text: string; handle?: unknown } | null>;
   save(text: string, suggestedName: string, path?: string): Promise<{ name: string; path?: string }>;
   loadUrl(url: string): Promise<string>;
 }
@@ -21,6 +21,23 @@ function browserBridge(): FileBridge {
   return {
     loadUrl: fetchText,
     async save(text, suggestedName) {
+      if (typeof window !== 'undefined' && (window as any).showSaveFilePicker) {
+        try {
+          const handle = await (window as any).showSaveFilePicker({
+            suggestedName: suggestedName.toLowerCase().endsWith('.lith') ? suggestedName : `${suggestedName}.lith`,
+            types: [{ description: 'Lithic Monolith', accept: { 'application/x-lith': ['.lith'] } }]
+          });
+          const writable = await handle.createWritable();
+          await writable.write(text);
+          await writable.close();
+          return { name: handle.name };
+        } catch (err: any) {
+          if (err && typeof err === 'object' && err.name === 'AbortError') {
+            return { name: suggestedName };
+          }
+          // Fall back to blob anchor download below
+        }
+      }
       const blob = new Blob([text], { type: 'application/x-lith' });
       const url = URL.createObjectURL(blob);
       const anchor = document.createElement('a');
@@ -31,6 +48,26 @@ function browserBridge(): FileBridge {
       return { name: anchor.download };
     },
     async open() {
+      if (typeof window !== 'undefined' && (window as any).showOpenFilePicker) {
+        try {
+          const openOptions = {
+            types: [
+              { description: 'Lithic Monolith', accept: { 'application/x-lith': ['.lith'] } },
+              { description: 'Lithic JSON Backups', accept: { 'application/json': ['.json'] } },
+              { description: 'Lithic HTML Files', accept: { 'text/html': ['.html', '.htm'] } }
+            ]
+          };
+          const [fileHandle] = await (window as any).showOpenFilePicker(openOptions);
+          const file = await fileHandle.getFile();
+          const text = await file.text();
+          return { name: file.name, text, handle: fileHandle };
+        } catch (err: any) {
+          if (err && typeof err === 'object' && err.name === 'AbortError') {
+            return null;
+          }
+          // Fall back to standard file input
+        }
+      }
       return new Promise((resolve, reject) => {
         const input = document.createElement('input');
         input.type = 'file';

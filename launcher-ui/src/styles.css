@@ -1,5 +1,7 @@
+@import url('https://fonts.googleapis.com/css2?family=Vollkorn:wght@400;600&display=swap');
+
 :root {
-  font-family: 'Vollkorn', Georgia, serif;
+  font-family: 'Vollkorn', serif;
   color: #e7e1e9;
   background: #181818;
   font-synthesis: none;
@@ -11,31 +13,36 @@ body { overflow: hidden; background: #181818; }
 
 .container {
   position: relative;
-  width: min(100% - 30px, 766px);
+  display: flex;
+  flex-direction: column;
+  width: min(100% - 30px, 600px);
   height: 100%;
   min-height: 430px;
   margin: 0 auto;
-  padding: 15px 20px;
-  border-left: 1px solid #00e51b;
-  border-right: 1px solid #00e51b;
+  padding: 15px;
   background: #181818;
 }
 
 .heading {
   display: flex;
   align-items: center;
-  gap: 18px;
-  height: 68px;
+  gap: 0;
+  min-height: 58px;
   border-bottom: 1px solid #414141;
 }
+.heading-copy { flex: 1; min-width: 0; }
+.heading-copy h1 { margin: 0; }
 
 h1, h2, h3, button, input, textarea, select { font-family: 'Vollkorn', Georgia, serif; }
-h1 { margin: 0; color: #f4edf5; font-size: 2rem; font-weight: 600; }
+h1 { flex: none; min-width: 0; margin: 0; color: #f4edf5; font-size: 1.8rem; font-weight: 600; line-height: 1.2; }
 .brand-icon {
-  display: grid;
-  place-items: center;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 52px;
   width: 52px;
   height: 52px;
+  margin-right: 15px;
   border: 3px solid #444;
   border-radius: 6px;
   background: #f4f4f4;
@@ -61,26 +68,26 @@ h1 { margin: 0; color: #f4edf5; font-size: 2rem; font-weight: 600; }
 }
 .help-button:hover { border-color: #666; background: #242424; }
 
-.launcher-actions { margin-top: 20px; }
+.launcher-actions { flex: 0 0 auto; margin-top: 0; }
 .action-card {
   display: flex;
-  gap: 12px;
-  margin-bottom: 16px;
-  padding: 15px;
+  gap: 10px;
+  margin-bottom: 0.8rem;
+  padding: 12px;
   border: 1px solid #414141;
-  border-radius: 10px;
+  border-radius: 8px;
   background: #252525;
   box-shadow: 0 4px 6px rgb(0 0 0 / 30%);
 }
 .action-button {
   flex: 1;
-  min-height: 60px;
-  padding: 12px;
+  min-height: 0;
+  padding: 12px 10px;
   border: 1px solid #454545;
   border-radius: 7px;
   background: #333;
   color: #eee;
-  font: 1.05rem 'Vollkorn', Georgia, serif;
+  font: 1rem 'Vollkorn', serif;
   cursor: pointer;
 }
 .action-button:hover:not(:disabled) { background: #3d3d3d; border-color: #5c5c5c; }
@@ -88,8 +95,9 @@ h1 { margin: 0; color: #f4edf5; font-size: 2rem; font-weight: 600; }
 .bookmark-button {
   display: grid;
   place-items: center;
-  width: 60px;
-  min-height: 60px;
+  flex: 0 0 48px;
+  width: 48px;
+  min-height: 0;
   border: 1px solid #454545;
   border-radius: 7px;
   background: #333;
@@ -100,36 +108,67 @@ h1 { margin: 0; color: #f4edf5; font-size: 2rem; font-weight: 600; }
 .bookmark-button:hover { background: #3d3d3d; }
 
 .recent-section {
-  margin-top: 8px;
-  padding: 15px;
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  margin-top: 0;
+  padding: 10px 12px;
   border: 1px solid #414141;
-  border-radius: 10px;
+  border-radius: 8px;
   background: #252525;
   box-shadow: 0 4px 6px rgb(0 0 0 / 30%);
 }
-.recent-heading { display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px; }
-.recent-heading h2 { margin: 0; font-size: 1.2rem; font-weight: 600; }
-.recent-refresh { border: 0; background: transparent; color: #999; font-size: 1.4rem; cursor: pointer; }
-.recent-section .recent-search { margin-bottom: 4px; }
+.recent-section .recent-search {  margin-bottom: 0; }
 
-.help-panel, .status {
-  margin-top: 12px;
-  padding: 9px 12px;
-  border: 1px solid #414141;
-  border-radius: 6px;
-  background: #242424;
-  color: #aaa;
-  font-size: 0.85rem;
+.status-line {
+  min-height: 1.2em;
+  color: #999;
+  font-size: 0.78rem;
+  line-height: 1.2;
 }
-.status.error { color: #ff8888; border-color: #754444; }
+.status-line.error { color: #ff8888; }
+.activity-dots { display: inline-flex; gap: 2px; margin-left: 3px; vertical-align: baseline; }
+.activity-dots i {
+  display: inline-block;
+  width: 3px;
+  height: 3px;
+  border-radius: 50%;
+  background: currentColor;
+  animation: status-wave 0.9s ease-in-out infinite;
+}
+.activity-dots i:nth-child(2) { animation-delay: 0.12s; }
+.activity-dots i:nth-child(3) { animation-delay: 0.24s; }
+@keyframes status-wave {
+  0%, 60%, 100% { transform: translateY(0); opacity: 0.45; }
+  30% { transform: translateY(-3px); opacity: 1; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .activity-dots i { animation: none; }
+}
+
 code { color: #8ab4f8; }
-footer { position: fixed; right: 22px; bottom: 20px; left: 22px; display: flex; justify-content: space-between; align-items: center; }
+footer {
+  position: fixed;
+  right: max(22px, calc(50vw - 400px));
+  bottom: 20px;
+  left: max(22px, calc(50vw - 400px));
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  pointer-events: none;
+}
+footer > * { pointer-events: auto; }
+.github-link, .install-button { flex: 0 1 auto; min-width: 0; white-space: nowrap; }
 .modal-overlay { position: fixed; inset: 0; display: grid; place-items: center; padding: 20px; background: rgb(0 0 0 / 72%); z-index: 10; }
 .recent-modal { position: relative; width: min(100%, 700px); max-height: 80vh; padding: 20px; border: 1px solid #454545; border-radius: 10px; background: #252525; box-shadow: 0 12px 40px #000; }
 .recent-modal h2 { margin: 0 0 14px; font-size: 1.5rem; }
 .modal-close { position: absolute; top: 8px; right: 10px; padding: 0 8px; border: 0; background: transparent; color: #ff5555; font-size: 1.8rem; cursor: pointer; }
-.recent-search { width: 100%; padding: 12px; border: 1px solid #454545; border-radius: 7px; background: #333; color: #eee; font: inherit; }
-.recent-list { max-height: 42vh; margin: 12px 0; overflow-y: auto; }
+.recent-search { width: 100%;  padding: 12px 10px;
+  border: 1px solid #454545; border-radius: 7px; background: #333; color: #eee; font: inherit; }
+.recent-list { flex: 1 1 auto; min-height: 0; max-height: none; margin: 5px 0; overflow-y: auto; padding-right: 5px; padding-bottom: 60px; }
 .recent-row { display: flex; gap: 10px; margin-bottom: 6px; }
 .recent-name { flex: 1; padding: 12px 15px; border: 1px solid #454545; border-radius: 7px; background: #333; color: #eee; text-align: left; cursor: pointer; }
 .remove-recent { width: 42px; border: 1px solid #454545; border-radius: 7px; background: #333; color: #ff5555; font-size: 1.4rem; cursor: pointer; }
@@ -137,6 +176,20 @@ footer { position: fixed; right: 22px; bottom: 20px; left: 22px; display: flex; 
 .reset-cache { width: 100%; padding: 11px; border: 1px dashed #454545; border-radius: 7px; background: transparent; color: #ddd; cursor: pointer; }
 .github-link, .install-button { padding: 10px 15px; border: 1px solid #494949; border-radius: 7px; background: #333; color: #ddd; font: 0.85rem 'Vollkorn', Georgia, serif; text-decoration: none; }
 .install-button { border: 0; background: #8ab4f8; color: #121212; font-size: 1rem; font-weight: 600; cursor: pointer; }
+
+/*
+ * On wide windows each control fits in the side margin of the 600px launcher
+ * column, so the Recent panel can use the full height. On narrower windows the
+ * footer must sit over the launcher column; reserve a bottom band to keep it
+ * from covering the clear-recent control.
+ */
+@media (max-width: 799px) {
+  .container { padding-bottom: 76px; }
+  footer {
+    right: 22px;
+    left: 22px;
+  }
+}
 
 @media (max-width: 600px) {
   h1 { font-size: 1.45rem; }
