@@ -1,0 +1,130 @@
+title: $:/Lithic/Patches/Whiteboard/WriteBehind.js
+type: application/javascript
+module-type: startup
+
+/*\
+title: $:/Lithic/Patches/Whiteboard/WriteBehind.js
+type: application/javascript
+module-type: startup
+
+Write-behind buffer for whiteboard (application/tldr) tiddlers.
+
+The linonetwo/tw-whiteboard widget writes the entire board JSON back to the
+wiki store on every (500ms-debounced) stroke and dispatches tm-auto-save-wiki,
+which serializes the ENTIRE wiki store whenever autosave is enabled. As the
+wiki grows, every stroke pays O(wiki size) in serialization cost.
+
+This patch decouples the board's working memory from the store, following the
+same model as the native "edit tiddler" dialog: the whiteboard's state is
+transient and is only written back to the tiddler (and thus to the wiki file
+on save) when the user actually saves the wiki or closes the board.
+
+1. Text writes to application/tldr tiddlers are buffered in memory instead of
+   hitting the store, so strokes fire no change events and never dirty the wiki.
+2. The buffer is flushed BEFORE any real wiki save (tm-save-wiki /
+   tm-auto-save-wiki) by hooking the root widget's dispatchEvent, so the
+   serializer always includes the latest board state.
+3. The buffer is flushed on pagehide/beforeunload as a crash safety net (this
+   also covers the board's final unmount write when the app closes).
+
+Trade-offs (strict mode):
+- Until the wiki is saved, other consumers of the board tiddler (<$wb-image>
+   widgets, the comptext paste bridge, other open boards) see the last saved
+   state, not live strokes. Use the whiteboard layout's Save button to commit.
+- A hard crash before a save loses strokes made since the last save.
+\*/
+(function(){
+"use strict";
+
+exports.name = "lithic-whiteboard-write-behind";
+exports.platforms = ["browser"];
+exports.after = ["startup"];
+exports.synchronous = true;
+
+exports.startup = function() {
+	if(typeof window === "undefined" || typeof $tw === "undefined") {
+		return;
+	}
+
+	var buffer = {};
+	var originalSetText = $tw.wiki.setText.bind($tw.wiki);
+
+	function isWhiteboard(title) {
+		var tiddler = $tw.wiki.getTiddler(title);
+		return !!(tiddler && tiddler.fields.type === "application/tldr");
+	}
+
+	function flushBuffer() {
+		var titles = Object.keys(buffer);
+		if(titles.length === 0) {
+			return;
+		}
+		var pending = buffer;
+		buffer = {};
+		for(var i = 0; i < titles.length; i++) {
+			var title = titles[i];
+			if(!$tw.wiki.tiddlerExists(title)) {
+				continue; // board was deleted before the flush
+			}
+			try {
+				originalSetText(title, undefined, undefined, pending[title]);
+			} catch(e) {
+				console.error("[Lithic] Whiteboard write-behind flush failed for " + title, e);
+			}
+		}
+	}
+
+	// 1. Buffer text writes to whiteboard tiddlers; everything else passes through.
+	$tw.wiki.setText = function() {
+		var title = arguments[0],
+			field = arguments[1],
+			value = arguments[3];
+		if(typeof value !== "string" || !isWhiteboard(title)) {
+			return originalSetText.apply(null, arguments);
+		}
+		// Text writes to a whiteboard are buffered (the heavy per-stroke path).
+		if(!field || field === "text") {
+			buffer[title] = value;
+			return;
+		}
+		// The widget re-writes `type` on every save; if it is already the same
+		// value, skip it entirely so the per-stroke write cannot stamp a new
+		// `modified` timestamp (which would fire a change event and dirty the wiki).
+		if(field === "type" && $tw.wiki.getTiddler(title).fields.type === value) {
+			return;
+		}
+		return originalSetText.apply(null, arguments);
+	};
+
+	// 2. Flush before any real wiki save so the serializer sees the latest board.
+	function installSaveHook() {
+		if(!$tw.rootWidget || $tw.rootWidget.__lithicWriteBehindHooked) {
+			return;
+		}
+		$tw.rootWidget.__lithicWriteBehindHooked = true;
+		var originalDispatch = $tw.rootWidget.dispatchEvent;
+		$tw.rootWidget.dispatchEvent = function(event) {
+			if(event && (event.type === "tm-save-wiki" || event.type === "tm-auto-save-wiki")) {
+				flushBuffer();
+			}
+			return originalDispatch.call(this, event);
+		};
+	}
+	installSaveHook();
+	if(!$tw.rootWidget) {
+		var tries = 0;
+		var hookTimer = setInterval(function() {
+			tries++;
+			installSaveHook();
+			if($tw.rootWidget || tries > 100) {
+				clearInterval(hookTimer);
+			}
+		}, 50);
+	}
+
+	// 3. Crash safety net: flush on page teardown.
+	window.addEventListener("pagehide", flushBuffer);
+	window.addEventListener("beforeunload", flushBuffer);
+};
+
+})();
