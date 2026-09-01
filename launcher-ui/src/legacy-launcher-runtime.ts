@@ -221,10 +221,10 @@ function injectSaverBootstrap(html: string): string {
     var handle = root.__LITHIC_FILE_HANDLE__ || undefined;
     var pending;
 
-    // The launcher mounts the engine via a blob: URL, so window globals set
-    // on the launcher page do not survive navigation. Recover the file handle
-    // from the IndexedDB recent-files list (keyed by the active handoff name)
-    // before falling back to the Save As picker.
+    // The engine boots in place via document.open/write/close, which keeps the
+    // same window, so launcher globals survive. Recover the file handle from
+    // the IndexedDB recent-files list (keyed by the active handoff name) as a
+    // fallback before falling back to the Save As picker.
     function resolveStoredHandle() {
       if (handle) return Promise.resolve(handle);
       try {
@@ -308,10 +308,11 @@ function injectSaverBootstrap(html: string): string {
 }
 
 /**
- * The launcher mounts the engine via a blob: URL, which creates a fresh
- * window — launcher-page globals do not survive the navigation. Inject the
- * ones the mounted engine needs (e.g. __EPHEMERAL_MODE__ for the Ephemeral
- * widget) as a synchronous script before the boot scripts run.
+ * The engine boots in place via document.open/write/close, which preserves
+ * the launcher window and its globals. Injecting the ones the mounted engine
+ * needs (e.g. __EPHEMERAL_MODE__ for the Ephemeral widget) is kept as a
+ * belt-and-suspenders measure so the engine boots correctly even if the
+ * boot path later changes to a fresh navigation.
  */
 function injectEngineGlobals(html: string, globals: Record<string, string>): string {
   const entries = Object.entries(globals)
@@ -370,10 +371,13 @@ export async function bootLegacyWiki(
   const html = buildEngineHtml(engine, handoff, extraTiddlers, engineGlobals);
 
   sessionStorage.setItem('lithic-active-file', JSON.stringify(handoff));
-  // Use location.replace() so the blob: URL is not added to browser history
-  // (prevents the Back button from revisiting an invalid blob URL).
-  const blob = new Blob([html], { type: 'text/html' });
-  location.replace(URL.createObjectURL(blob));
+  // Boot the engine into the current document so the launcher URL stays in
+  // the address bar — a plain refresh / "return to launcher" lands back on
+  // the launcher UI. This mirrors the legacy launcher.html boot path, which
+  // uses the same document.open/write/close mechanism from a module script.
+  document.open();
+  document.write(html);
+  document.close();
 }
 
 /**
@@ -382,8 +386,11 @@ export async function bootLegacyWiki(
  * as-is rather than injected into a fresh engine.
  */
 export function bootLegacyHtml(html: string): void {
-  const blob = new Blob([html], { type: 'text/html' });
-  location.replace(URL.createObjectURL(blob));
+  // Same in-place boot as bootLegacyWiki: the mounted HTML replaces the
+  // launcher document, keeping the real launcher URL in the address bar.
+  document.open();
+  document.write(html);
+  document.close();
 }
 
 export function readHandoff(): LauncherHandoff | null {

@@ -57,19 +57,19 @@ test('buildEngineHtml injects engine globals into the mounted document', () => {
   assert.match(html, /window\["__LITHIC_LAUNCHER_MODE__"\] = "webapp";/);
 });
 
-test('injected saver recovers the file handle from IndexedDB after blob navigation', () => {
+test('injected saver recovers the file handle from IndexedDB as a fallback', () => {
   const html = buildEngineHtml(ENGINE_STUB, { name: 'notes.lith', text: '' });
   assert.match(html, /resolveStoredHandle/);
   assert.match(html, /lithic-active-file/);
 });
 
-test('bootLegacyWiki navigates via Blob URL instead of document.write to avoid module-context white screen', async () => {
+test('bootLegacyWiki boots the engine in place so the launcher URL stays in the address bar', async () => {
   // Minimal engine stub — just needs to be valid HTML so injectTiddlers and
   // injectSaverBootstrap can run without throwing.
   const engineStub = '<html><head></head><body><script class="tiddlywiki-tiddler-store" type="application/json">[]</script></body></html>';
 
-  let navigatedTo: string | undefined;
-  let docWriteCalled = false;
+  let written = '';
+  let blobNavigated = false;
 
   // Patch globals required by bootLegacyWiki in a Node environment.
   const globalAny = globalThis as any;
@@ -83,7 +83,7 @@ test('bootLegacyWiki navigates via Blob URL instead of document.write to avoid m
 
   const locationMock = {
     href: 'file:///src/pre-launcher.html',
-    replace(url: string) { navigatedTo = url; }
+    replace(url: string) { blobNavigated = true; }
   };
   globalAny.location = locationMock;
   // fetchEngine() reads window.location.href — Node has no global `window`, so
@@ -96,8 +96,8 @@ test('bootLegacyWiki navigates via Blob URL instead of document.write to avoid m
   globalAny.sessionStorage = { setItem: () => {}, getItem: () => null, removeItem: () => {} };
   globalAny.fetch = async () => { throw new Error('network unavailable'); };
   globalAny.document = {
-    open() { docWriteCalled = true; },
-    write() { docWriteCalled = true; },
+    open() {},
+    write(html: string) { written += html; },
     close() {}
   };
   // Patch only the static method, leaving the URL constructor intact.
@@ -106,8 +106,13 @@ test('bootLegacyWiki navigates via Blob URL instead of document.write to avoid m
   try {
     await bootLegacyWiki({ name: 'test.lith', text: '' });
 
-    assert.ok(navigatedTo?.startsWith('blob:'), `Expected Blob URL navigation, got: ${navigatedTo}`);
-    assert.equal(docWriteCalled, false, 'document.write() must NOT be called from a module script context — it causes a blank white page in Chrome/Edge');
+    // The engine is written into the current document (document.open/write/
+    // close), matching the legacy launcher.html boot path. That keeps the
+    // real launcher URL in the address bar so refresh returns to the launcher
+    // UI instead of an ephemeral blob: URL.
+    assert.equal(blobNavigated, false, 'boot must not navigate to a blob: URL');
+    assert.ok(written.includes('tiddlywiki-tiddler-store'), 'engine should be written into the current document');
+    assert.ok(written.includes('$:/state/DisableAutoSaver'), 'handoff tiddlers should be injected before boot');
   } finally {
     // Restore all patched globals.
     if (savedLocation !== undefined) globalAny.location = savedLocation; else delete globalAny.location;

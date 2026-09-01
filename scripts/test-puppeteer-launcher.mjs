@@ -62,7 +62,7 @@ try {
       marginTop: getComputedStyle(document.querySelector('.recent-list')).marginTop,
       paddingRight: getComputedStyle(document.querySelector('.recent-list')).paddingRight
     } : null,
-    mountBookmark: document.querySelector('.mount-card .bookmark-button')?.getBoundingClientRect().toJSON(),
+    mountBookmark: document.querySelector('.action-pair .bookmark-button')?.getBoundingClientRect().toJSON(),
     recentRows: [...document.querySelectorAll('.recent-row')].map(row => ({
       gap: getComputedStyle(row).gap,
       border: getComputedStyle(row).borderWidth,

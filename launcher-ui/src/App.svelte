@@ -7,6 +7,9 @@
   import { readBookmarks, saveBookmark, removeBookmark, verifyInstanceUrl, normalizeInstanceUrl } from './bookmarks';
   import { searchCachedWikis } from './cache-search';
   import { serializeJsonToLith } from './lithic-format';
+  // Inlined as a base64 data URL (assetsInlineLimit: Infinity) so the brand
+  // mark survives when pre-launcher.html is bundled into the Tauri app.
+  import mstile150 from './mstile-150x150.png';
   import {
     parsePayloadText,
     tagRootDogear,
@@ -202,10 +205,10 @@
     sessionStorage.setItem('lithic-launcher-file', JSON.stringify(handoff));
     // Local mode always injects the Ephemeral integration on every mount,
     // then drains whatever the user queued via drop / share URL / intro.
-    // The engine is mounted via a blob: URL, so launcher globals must be
-    // re-injected into the fresh document (the Ephemeral widget reads
-    // __EPHEMERAL_MODE__ to pick paper-light bastion discovery vs the
-    // same-origin self-host API).
+    // The engine boots in place (document.open/write/close), keeping the
+    // launcher URL in the address bar and preserving window globals; the
+    // globals are also injected defensively so the Ephemeral widget
+    // (__EPHEMERAL_MODE__) works regardless of the boot path.
     await bootLegacyWiki(handoff, [...pendingImports, ...ephemeralIntegrationTiddlers()], {
       __EPHEMERAL_MODE__: mode === 'self-host' ? 'self-host' : 'paper-light',
       __LITHIC_LAUNCHER_MODE__: mode
@@ -510,7 +513,9 @@
 
 <main class="container" data-mode={mode}>
   <header class="heading">
-    <div class="brand-icon" aria-hidden="true"><span>◒</span></div>
+    <span class="brand-icon-wrap">
+      <img class="brand-icon" src={mstile150} alt="Lithic" />
+    </span>
     <div class="heading-copy">
       <h1>Lithic - Launcher</h1>
       {#if status}<div class="status-line" role="status"><span class="status-label">{status.replace(/[…\.\s]+$/, '')}</span><span class="activity-dots" aria-hidden="true"><i></i><i></i><i></i></span></div>{/if}

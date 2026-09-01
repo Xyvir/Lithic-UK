@@ -37,24 +37,23 @@ body { overflow: hidden; background: #181818; }
 
 h1, h2, h3, button, input, textarea, select { font-family: 'Vollkorn', Georgia, serif; }
 h1 { flex: none; min-width: 0; margin: 0; color: #f4edf5; font-size: 1.8rem; font-weight: 600; line-height: 1.2; }
-.brand-icon {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
+.brand-icon-wrap {
+  display: block;
   flex: 0 0 52px;
   width: 52px;
   height: 52px;
   margin-right: 15px;
+}
+.brand-icon {
+  display: block;
+  width: 52px;
+  height: 52px;
   border: 3px solid #444;
   border-radius: 6px;
   background: #f4f4f4;
-  color: #171717;
-  font-family: Georgia, serif;
-  font-size: 2.5rem;
-  line-height: 1;
+  object-fit: contain;
   overflow: hidden;
 }
-.brand-icon span { transform: rotate(-18deg); }
 .help-button {
   display: grid;
   place-items: center;
