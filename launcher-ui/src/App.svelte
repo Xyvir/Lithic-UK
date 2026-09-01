@@ -4,6 +4,9 @@
   import { createFileBridge } from './file-bridge';
   import { bootLegacyWiki } from './legacy-launcher-runtime';
   import { getRecentFiles, addRecentFile, removeRecentFile, clearAllRecentFiles, idb, type RecentEntry } from './storage';
+  import { readBookmarks, saveBookmark, removeBookmark } from './bookmarks';
+  import { searchCachedWikis } from './cache-search';
+  import { serializeJsonToLith } from './lithic-format';
 
   export let mode: LauncherMode;
   const files = createFileBridge();
@@ -18,13 +21,123 @@
   let recentFiles: Array<RecentEntry | { name: string; path?: string; text?: string; handle?: any }> = [];
   let search = '';
   let mountError = '';
+  let bookmarks: string[] = [];
+  let showBookmarkModal = false;
+  let bookmarkInput = '';
+  let bookmarkError = '';
+  let bookmarkInputElement: HTMLInputElement;
+  type CacheSearchEntry = { name: string; text: string; sizeBytes: number };
+  type CacheSearchMatch = { preview: string; title?: string };
+
+  function formatCacheSize(bytes: number): string {
+    if (bytes <= 0) return '0 MB';
+    const megabytes = bytes / (1024 * 1024);
+    if (megabytes < 0.01) return '<0.01 MB';
+    return `${megabytes.toFixed(2).replace(/\.?(0+)$/, '')} MB`;
+  }
+  let cachedEntries: Record<string, CacheSearchEntry> = {};
+  let cacheSearchMatches: Record<string, CacheSearchMatch> = {};
+  let cacheSearchRequest = 0;
+
+  function positionCachePreview(node: HTMLElement) {
+    let frame = 0;
+    const list = node.closest('.recent-list');
+
+    const update = () => {
+      frame = 0;
+      if (window.matchMedia('(max-width: 950px)').matches) {
+        node.style.display = 'none';
+        return;
+      }
+
+      const row = node.closest('.recent-row');
+      const listRect = list?.getBoundingClientRect();
+      const rowRect = row?.getBoundingClientRect();
+      if (!rowRect || !listRect || rowRect.bottom < listRect.top || rowRect.top > listRect.bottom) {
+        node.style.opacity = '0';
+        return;
+      }
+
+      const containerRect = document.querySelector('.container')?.getBoundingClientRect();
+      if (!containerRect) return;
+      node.style.display = 'block';
+      node.style.maxWidth = `${Math.min(430, Math.max(120, window.innerWidth - containerRect.right - 20))}px`;
+      node.style.left = `${containerRect.right + 10}px`;
+      node.style.top = `${rowRect.top + rowRect.height / 2}px`;
+      node.style.transform = 'translateY(-50%)';
+      node.style.opacity = '1';
+    };
+
+    const schedule = () => {
+      if (!frame) frame = requestAnimationFrame(update);
+    };
+
+    schedule();
+    window.addEventListener('resize', schedule);
+    list?.addEventListener('scroll', schedule, { passive: true });
+    return {
+      destroy() {
+        if (frame) cancelAnimationFrame(frame);
+        window.removeEventListener('resize', schedule);
+        list?.removeEventListener('scroll', schedule);
+      }
+    };
+  }
 
   function getEntryName(entry: RecentEntry | { name?: string; handle?: any }): string {
     if (entry.handle && entry.handle.name) return entry.handle.name;
     return (entry as any).name || 'untitled.lith';
   }
 
-  $: filteredRecent = recentFiles.filter((file) => getEntryName(file).toLowerCase().includes(search.toLowerCase()));
+  function deselectRecentSearch(event: KeyboardEvent) {
+    if (event.key !== 'Escape') return;
+    event.preventDefault();
+    (event.currentTarget as HTMLInputElement).blur();
+  }
+
+  $: filteredRecent = recentFiles.filter((file) => {
+    const name = getEntryName(file);
+    return name.toLowerCase().includes(search.toLowerCase()) || Boolean(cacheSearchMatches[name]?.preview);
+  });
+
+  $: filteredCached = Object.values(cachedEntries).filter((entry) => {
+    const isRecent = recentFiles.some((file) => getEntryName(file) === entry.name);
+    const query = search.trim().toLowerCase();
+    if (!query) return false;
+    const nameMatches = entry.name.toLowerCase().includes(query);
+    return !isRecent && (nameMatches || Boolean(cacheSearchMatches[entry.name]?.preview));
+  });
+
+  async function updateCacheMatches(query: string) {
+    const request = ++cacheSearchRequest;
+    const entries: Record<string, CacheSearchEntry> = {};
+    try {
+      const keys = await idb.keys();
+      const cacheKeys = keys.filter((key): key is string =>
+        typeof key === 'string' && key.startsWith('search_cache_') && !key.startsWith('search_cache_bk')
+      );
+      await Promise.all(cacheKeys.map(async (key) => {
+        try {
+          const cache = await idb.get<{ text?: string }>(key);
+          if (typeof cache?.text === 'string') {
+            const name = key.slice('search_cache_'.length);
+            entries[name] = { name, text: cache.text, sizeBytes: new Blob([cache.text]).size };
+          }
+        } catch { /* cached search is best effort */ }
+      }));
+    } catch { /* IndexedDB may be unavailable */ }
+
+    if (request !== cacheSearchRequest) return;
+    cachedEntries = entries;
+    const matches = searchCachedWikis(Object.values(entries), query);
+    const next: Record<string, CacheSearchMatch> = {};
+    for (const [name, result] of Object.entries(matches)) {
+      next[name] = { preview: result.preview, title: result.title };
+    }
+    cacheSearchMatches = next;
+  }
+
+  $: void updateCacheMatches(search);
 
   async function loadRecent() {
     try {
@@ -128,9 +241,60 @@
     }
   }
 
+  function openBookmarkModal() {
+    bookmarkInput = '';
+    bookmarkError = '';
+    showBookmarkModal = true;
+    setTimeout(() => bookmarkInputElement?.focus(), 0);
+  }
+
+  function closeBookmarkModal() {
+    showBookmarkModal = false;
+    bookmarkError = '';
+  }
+
+  function addInstanceBookmark() {
+    try {
+      bookmarks = saveBookmark(bookmarkInput);
+      closeBookmarkModal();
+      status = 'Self-hosted instance bookmarked';
+    } catch (error) {
+      bookmarkError = error instanceof Error ? error.message : String(error);
+    }
+  }
+
+  function openInstance(url: string) {
+    window.location.href = url;
+  }
+
+  function removeInstanceBookmark(url: string) {
+    bookmarks = removeBookmark(url);
+  }
+
+  async function downloadCachedFile(name: string) {
+    try {
+      const cache = await idb.get<{ text?: string }>('search_cache_' + name);
+      if (!cache?.text) return;
+      const text = cache.text.trim().startsWith('[') ? serializeJsonToLith(cache.text) : cache.text;
+      const blob = new Blob([text], { type: 'application/x-lith' });
+      const url = URL.createObjectURL(blob);
+      const anchor = document.createElement('a');
+      anchor.href = url;
+      anchor.download = name.replace(/\.(?:html?|lith|json)$/i, '') + '_recovered.lith';
+      document.body.appendChild(anchor);
+      anchor.click();
+      anchor.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 0);
+    } catch (error) {
+      mountError = error instanceof Error ? error.message : String(error);
+    }
+  }
+
   async function clearRecent() {
     await clearAllRecentFiles();
     recentFiles = [];
+    cachedEntries = {};
+    cacheSearchMatches = {};
     localStorage.removeItem(RECENT_KEY);
   }
 
@@ -141,13 +305,25 @@
       await idb.del('search_cache_' + name);
       await idb.del('search_cache_bk1_' + name);
       await idb.del('search_cache_bk2_' + name);
+      delete cachedEntries[name];
+      delete cacheSearchMatches[name];
+      cachedEntries = cachedEntries;
+      cacheSearchMatches = cacheSearchMatches;
     } else {
       recentFiles = recentFiles.filter((item) => item !== file);
       localStorage.setItem(RECENT_KEY, JSON.stringify(recentFiles.map((f: any) => ({ name: f.name, path: f.path, text: f.text }))));
     }
   }
 
-  onMount(() => { loadRecent(); });
+  onMount(() => {
+    loadRecent();
+    bookmarks = readBookmarks();
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') closeBookmarkModal();
+    };
+    window.addEventListener('keydown', closeOnEscape);
+    return () => window.removeEventListener('keydown', closeOnEscape);
+  });
 </script>
 
 <svelte:head><title>Lithic - Launcher</title></svelte:head>
@@ -157,27 +333,76 @@
     <div class="brand-icon" aria-hidden="true"><span>◒</span></div>
     <div class="heading-copy">
       <h1>Lithic - Launcher</h1>
-      {#if status}<div class="status-line" role="status">{status}<span class="activity-dots" aria-hidden="true"><i></i><i></i><i></i></span></div>{/if}
+      {#if status}<div class="status-line" role="status"><span class="status-label">{status.replace(/[…\.\s]+$/, '')}</span><span class="activity-dots" aria-hidden="true"><i></i><i></i><i></i></span></div>{/if}
       {#if mountError}<div class="status-line error" role="alert">{mountError}</div>{/if}
     </div>
     <button class="help-button" aria-label="Help" on:click={() => showHelp = !showHelp}>?</button>
   </header>
-  {#if showHelp}<div class="help-panel">Create a blank <code>.lith</code> or mount one from disk. Saved files appear in Recent Liths.</div>{/if}
+  {#if showHelp}
+    <div class="modal-overlay" role="presentation" on:click={(event) => event.currentTarget === event.target && (showHelp = false)}>
+      <div class="launcher-modal" role="dialog" aria-modal="true" aria-labelledby="help-title">
+        <button class="modal-close" aria-label="Close help" on:click={() => showHelp = false}>×</button>
+        <h2 id="help-title">Using Lithic</h2>
+        <p><strong>New Blank Lith</strong> creates a local <code>.lith</code> file. The first save opens the native Save As dialog and keeps the selected file for future saves.</p>
+        <p><strong>Mount a Lith (or HTML) from Disk</strong> opens an existing local file. Lithic files are portable text monoliths; HTML files are imported into the wiki.</p>
+        <p>Recent files and self-hosted instance addresses are stored locally in this browser. This launcher does not bookmark arbitrary web pages.</p>
+        <button class="modal-action" on:click={() => showHelp = false}>Close</button>
+      </div>
+    </div>
+  {/if}
+  {#if showBookmarkModal}
+    <div class="modal-overlay" role="presentation" on:click={(event) => event.currentTarget === event.target && closeBookmarkModal()}>
+      <div class="launcher-modal" role="dialog" aria-modal="true" aria-labelledby="bookmark-title">
+        <button class="modal-close" aria-label="Close bookmark dialog" on:click={closeBookmarkModal}>×</button>
+        <h2 id="bookmark-title">Bookmark Remote Instance</h2>
+        <p>Save the address of a self-hosted Lithic instance for quick access from this launcher.</p>
+        <input bind:this={bookmarkInputElement} bind:value={bookmarkInput} aria-label="Self-hosted instance URL" placeholder="https://..." on:keydown={(event) => event.key === 'Enter' && addInstanceBookmark()} />
+        {#if bookmarkError}<p class="status-line error" role="alert">{bookmarkError}</p>{/if}
+        <div class="modal-actions"><button class="modal-action" on:click={addInstanceBookmark}>Save Bookmark</button><button class="modal-action secondary" on:click={closeBookmarkModal}>Cancel</button></div>      </div>
+    </div>
+  {/if}
+
   <section class="launcher-actions" aria-label="Launcher actions">
     <div class="action-card"><button class="action-button" on:click={blankLith} disabled={busy}>New Blank Lith</button></div>
-    <div class="action-card mount-card"><button class="action-button" on:click={mountFromDisk} disabled={busy}>Mount a Lith (or HTML) from Disk</button><button class="bookmark-button" aria-label="Bookmark a remote instance" title="Bookmark a Remote Instance" on:click={() => alert('Remote bookmarks will be available when sync is configured.')}><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 3.5A2.5 2.5 0 0 1 8.5 1h7A2.5 2.5 0 0 1 18 3.5V22l-6-4-6 4z" /></svg></button></div>
+    <div class="action-card mount-card"><button class="action-button" on:click={mountFromDisk} disabled={busy}>Mount a Lith (or HTML) from Disk</button><button class="bookmark-button" aria-label="Bookmark a self-hosted instance" title="Bookmark a Remote Instance" on:click={openBookmarkModal}><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 3.5A2.5 2.5 0 0 1 8.5 1h7A2.5 2.5 0 0 1 18 3.5V22l-6-4-6 4z" /></svg></button></div>
   </section>
-  {#if recentFiles.length > 0 || showRecent}
+  {#if bookmarks.length > 0 || recentFiles.length > 0 || Object.keys(cachedEntries).length > 0 || showRecent}
     <section class="recent-section" aria-label="Recent Liths">
-      <input class="recent-search" aria-label="Search recent Liths" placeholder="Search recent liths…" bind:value={search} />
+      <div class="recent-search-wrap">
+        <svg class="recent-search-icon" viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="7.5"></circle><path d="m16.5 16.5 4 4"></path></svg>
+        <input class="recent-search" aria-label="Search recent Liths" placeholder="Search recent liths…" bind:value={search} on:keydown={deselectRecentSearch} />
+        {#if search}<button class="recent-search-clear" type="button" aria-label="Clear recent Lith search" on:click={() => search = ''}>×</button>{/if}
+      </div>
       <div class="recent-list">
-        {#if filteredRecent.length === 0}<p class="empty">No matching Liths.</p>{/if}
+        {#each bookmarks.filter((url) => url.toLowerCase().includes(search.toLowerCase())) as url}
+          <div class="recent-row bookmark-row">
+            <button class="recent-name" on:click={() => openInstance(url)}>{url.replace(/^https?:\/\//, '')}</button>
+            <button class="recent-icon-button remove-recent" type="button" aria-label={`Remove bookmark ${url}`} on:click={() => removeInstanceBookmark(url)}><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m7 7 10 10M17 7 7 17"></path></svg></button>
+          </div>
+        {/each}
+        {#if filteredRecent.length === 0 && filteredCached.length === 0 && bookmarks.filter((url) => url.toLowerCase().includes(search.toLowerCase())).length === 0}<p class="empty">No matching Liths.</p>{/if}
         {#each filteredRecent as file}
+          {@const name = getEntryName(file)}
           <div class="recent-row">
-            <button class="recent-name" on:click={() => openRecent(file)}>
-              {getEntryName(file)}
+            <button class="recent-name" on:click={() => openRecent(file)}>{name}{#if cachedEntries[name]}<span class="cached-size">{formatCacheSize(cachedEntries[name].sizeBytes)}</span>{/if}</button>
+            <button class="recent-icon-button cache-history-button" type="button" disabled={!cachedEntries[name]} aria-label={`Download cached history for ${name}`} title={cachedEntries[name] ? 'Download cached history' : 'No cached history available'} on:click={() => downloadCachedFile(name)}>
+              <svg class="history-download-icon" viewBox="56 108 33 36" aria-hidden="true"><path class="history-icon-shape" d="m 73.595508,109.76746 c -7.198235,0 -13.103617,5.58342 -13.647229,12.64471 h -0.0072 V 138.2696 H 58.61606 l 2.32389,4.02559 2.324405,-4.02559 h -1.323433 v -15.85123 c 0.530186,-5.97937 5.534806,-10.65103 11.654586,-10.65103 6.474618,0 11.703161,5.22855 11.703161,11.70316 0,6.47462 -5.228543,11.70161 -11.703161,11.70161 -2.644513,0 -5.080809,-0.87232 -7.037814,-2.34508 v 2.39572 c 2.058162,1.23707 4.46633,1.94924 7.037814,1.94924 7.555498,0 13.703556,-6.14599 13.703556,-13.70149 0,-7.5555 -6.148058,-13.70304 -13.703556,-13.70304 z m -2.108915,7.49825 v 8.05016 h 7.125663 v -1.59836 h -5.527311 v -6.4518 z"></path></svg>
             </button>
-            <button class="remove-recent" aria-label={`Remove ${getEntryName(file)}`} on:click={() => removeRecent(file)}>×</button>
+            {#if cacheSearchMatches[name]?.preview}
+              <div use:positionCachePreview class="cache-preview" aria-label="Cached text match">{@html cacheSearchMatches[name].preview}</div>
+            {/if}
+            <button class="recent-icon-button remove-recent" type="button" aria-label={`Remove ${name}`} on:click={() => removeRecent(file)}><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m7 7 10 10M17 7 7 17"></path></svg></button>
+          </div>
+        {/each}
+        {#each filteredCached as entry}
+          <div class="recent-row cached-only-row">
+            <div class="recent-name cached-result" role="note">{entry.name}<span class="cached-size">{formatCacheSize(entry.sizeBytes)}</span><span class="cached-label">Cached locally</span></div>
+            <button class="recent-icon-button cache-history-button" type="button" aria-label={`Download cached history for ${entry.name}`} title="Download cached history" on:click={() => downloadCachedFile(entry.name)}>
+              <svg class="history-download-icon" viewBox="56 108 33 36" aria-hidden="true"><path class="history-icon-shape" d="m 73.595508,109.76746 c -7.198235,0 -13.103617,5.58342 -13.647229,12.64471 h -0.0072 V 138.2696 H 58.61606 l 2.32389,4.02559 2.324405,-4.02559 h -1.323433 v -15.85123 c 0.530186,-5.97937 5.534806,-10.65103 11.654586,-10.65103 6.474618,0 11.703161,5.22855 11.703161,11.70316 0,6.47462 -5.228543,11.70161 -11.703161,11.70161 -2.644513,0 -5.080809,-0.87232 -7.037814,-2.34508 v 2.39572 c 2.058162,1.23707 4.46633,1.94924 7.037814,1.94924 7.555498,0 13.703556,-6.14599 13.703556,-13.70149 0,-7.5555 -6.148058,-13.70304 -13.703556,-13.70304 z m -2.108915,7.49825 v 8.05016 h 7.125663 v -1.59836 h -5.527311 v -6.4518 z"></path></svg>
+            </button>
+            {#if cacheSearchMatches[entry.name]?.preview}
+              <div use:positionCachePreview class="cache-preview" aria-label="Cached text match">{@html cacheSearchMatches[entry.name].preview}</div>
+            {/if}
           </div>
         {/each}
       </div>

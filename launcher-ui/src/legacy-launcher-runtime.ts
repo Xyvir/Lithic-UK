@@ -5,10 +5,12 @@ export type LauncherHandoff = {
   name: string;
   path?: string;
   text: string;
+  /** Pre-parsed tiddlers to inject (used when the payload was already parsed by the UI). */
+  payloadTiddlers?: Array<Record<string, string>>;
 };
 
 const HANDOFF_KEY = 'lithic-launcher-file';
-const ONLINE_ENGINE_URL = 'https://raw.githubusercontent.com/Xyvir/Lithic-UK/refs/heads/main/src/lithic.html';
+const ONLINE_ENGINE_URL = 'https://lithic.uk/src/lithic.html';
 const CACHED_ENGINE_KEY = 'cachedOnlineCoreEngine';
 
 export function resolveEngineCandidates(href: string): string[] {
@@ -278,7 +280,7 @@ function injectSaverBootstrap(html: string): string {
 
 export async function bootLegacyWiki(handoff: LauncherHandoff): Promise<void> {
   const engine = await fetchEngine();
-  const imported = handoff.text ? parseLithToJSON(handoff.text) : [];
+  const imported = handoff.text ? parseLithToJSON(handoff.text) : (handoff.payloadTiddlers ?? []);
   const today = getTodayTitle();
   if (!imported.some((tiddler) => tiddler.title === today)) {
     imported.push({ created: getTwTime(), modified: getTwTime(), tags: 'Journal', title: today, type: '' });
@@ -291,9 +293,10 @@ export async function bootLegacyWiki(handoff: LauncherHandoff): Promise<void> {
   const html = injectSaverBootstrap(injectTiddlers(engine, imported));
 
   sessionStorage.setItem('lithic-active-file', JSON.stringify(handoff));
-  document.open();
-  document.write(html);
-  document.close();
+  // Use location.replace() so the blob: URL is not added to browser history
+  // (prevents the Back button from revisiting an invalid blob URL).
+  const blob = new Blob([html], { type: 'text/html' });
+  location.replace(URL.createObjectURL(blob));
 }
 
 export function readHandoff(): LauncherHandoff | null {
