@@ -25,19 +25,6 @@ export function resolveEngineCandidates(href: string): string[] {
   ];
 }
 
-export function getTodayTitle(): string {
-  const months = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
-  const date = new Date();
-  const day = date.getDate();
-  const suffix = day % 10 === 1 && day !== 11 ? 'st' : day % 10 === 2 && day !== 12 ? 'nd' : day % 10 === 3 && day !== 13 ? 'rd' : 'th';
-  return `${day}${suffix} ${months[date.getMonth()]} ${date.getFullYear()}`;
-}
-
-function getTwTime(): string {
-  const date = new Date();
-  return `${date.getUTCFullYear()}${String(date.getUTCMonth() + 1).padStart(2, '0')}${String(date.getUTCDate()).padStart(2, '0')}${String(date.getUTCHours()).padStart(2, '0')}${String(date.getUTCMinutes()).padStart(2, '0')}${String(date.getUTCSeconds()).padStart(2, '0')}${String(date.getUTCMilliseconds()).padStart(3, '0')}`;
-}
-
 async function fetchEngine(): Promise<string> {
   const candidates = resolveEngineCandidates(window.location.href).map((href) => new URL(href));
 
@@ -346,13 +333,9 @@ export function buildEngineHtml(
   // integration, etc.) so later entries win on title conflicts — mirrors the
   // legacy launcher, which appends window.pendingImports after the store.
   const tiddlers = [...imported, ...extraTiddlers];
-  const today = getTodayTitle();
-  // Only push a blank journal tiddler if one with the same title isn't
-  // already queued (e.g. from a ?json= share URL payload). Otherwise the
-  // blank entry overwrites the payload's fields during TiddlyWiki boot.
-  if (!tiddlers.some((tiddler) => tiddler.title === today)) {
-    tiddlers.push({ created: getTwTime(), modified: getTwTime(), tags: 'Journal', title: today, type: '' });
-  }
+  // The engine's journal stub creates the today entry at boot, so blank
+  // liths no longer need a pre-hydrated journal tiddler here. Saver and
+  // plugin-library defaults are still injected before the store.
   tiddlers.push({ title: '$:/state/DisableAutoSaver', text: 'yes' });
   tiddlers.push({ title: '$:/config/OfficialPluginLibrary', text: 'yes' });
 

@@ -42,6 +42,9 @@
   let bookmarkInput = '';
   let bookmarkError = '';
   let bookmarkInputElement: HTMLInputElement;
+  let showNewLithModal = false;
+  let newLithName = '';
+  let newLithInputElement: HTMLInputElement;
   type CacheSearchEntry = { name: string; text: string; sizeBytes: number };
   type CacheSearchMatch = { preview: string; title?: string };
 
@@ -184,7 +187,7 @@
     return `${withoutKnownExtension || 'untitled'}.lith`;
   }
 
-  async function mountWiki(contents: string, name: string, path?: string, handle?: any) {
+  async function mountWiki(contents: string, name: string, path?: string, handle?: any, extraTiddlers: Array<Record<string, string>> = []) {
     mountError = '';
     const isHtmlMonolith = /\.(?:html?|htm)$/i.test(name);
     const safeName = normalizeLithName(name);
@@ -209,7 +212,7 @@
     // launcher URL in the address bar and preserving window globals; the
     // globals are also injected defensively so the Ephemeral widget
     // (__EPHEMERAL_MODE__) works regardless of the boot path.
-    await bootLegacyWiki(handoff, [...pendingImports, ...ephemeralIntegrationTiddlers()], {
+    await bootLegacyWiki(handoff, [...pendingImports, ...ephemeralIntegrationTiddlers(), ...extraTiddlers], {
       __EPHEMERAL_MODE__: mode === 'self-host' ? 'self-host' : 'paper-light',
       __LITHIC_LAUNCHER_MODE__: mode
     });
@@ -221,6 +224,34 @@
     status = 'Loading blank Lith…';
     try {
       await mountWiki('', 'new.lith');
+    } catch (error) {
+      mountError = error instanceof Error ? error.message : String(error);
+      status = 'Unable to load the local wiki';
+      busy = false;
+    }
+  }
+
+  function openNewLithModal() {
+    newLithName = '';
+    showNewLithModal = true;
+    setTimeout(() => newLithInputElement?.focus(), 0);
+  }
+
+  function closeNewLithModal() {
+    showNewLithModal = false;
+  }
+
+  // New Blank Lith prompts for a name (unifying local mode with the legacy
+  // self-host / WebDAV flow), then hydrates $:/SiteTitle with the filename
+  // (sans extension) as the blank-lith placeholder.
+  async function createBlankLith() {
+    const safeName = normalizeLithName(newLithName);
+    const siteTitle = safeName.replace(/\.lith$/i, '');
+    showNewLithModal = false;
+    busy = true;
+    status = 'Loading blank Lith…';
+    try {
+      await mountWiki('', safeName, undefined, undefined, [{ title: '$:/SiteTitle', text: siteTitle }]);
     } catch (error) {
       mountError = error instanceof Error ? error.message : String(error);
       status = 'Unable to load the local wiki';
@@ -547,10 +578,21 @@
         <div class="modal-actions"><button class="modal-action" on:click={addInstanceBookmark}>Save Bookmark</button><button class="modal-action secondary" on:click={closeBookmarkModal}>Cancel</button></div>      </div>
     </div>
   {/if}
+  {#if showNewLithModal}
+    <div class="modal-overlay" role="presentation" on:click={(event) => event.currentTarget === event.target && closeNewLithModal()}>
+      <div class="launcher-modal" role="dialog" aria-modal="true" aria-labelledby="new-lith-title">
+        <button class="modal-close" aria-label="Close new lith dialog" on:click={closeNewLithModal}>×</button>
+        <h2 id="new-lith-title">New Blank Lith</h2>
+        <p>Name the new blank lith; the name appears as the wiki title until you rename it.</p>
+        <input bind:this={newLithInputElement} bind:value={newLithName} aria-label="Lith file name" placeholder="untitled" on:keydown={(event) => event.key === 'Enter' && createBlankLith()} />
+        <div class="modal-actions"><button class="modal-action" on:click={createBlankLith}>Create</button><button class="modal-action secondary" on:click={closeNewLithModal}>Cancel</button></div>
+      </div>
+    </div>
+  {/if}
 
   <section class="launcher-actions" aria-label="Launcher actions">
     <div class="action-card action-pair">
-      <button class="action-button" on:click={blankLith} disabled={busy}>New Blank Lith</button>
+      <button class="action-button" on:click={openNewLithModal} disabled={busy}>New Blank Lith</button>
       <button class="action-button mount-button" on:click={mountFromDisk} disabled={busy}>Mount a Lith</button>
       <button class="bookmark-button" aria-label="Bookmark a self-hosted instance" title="Bookmark a Remote Instance" on:click={openBookmarkModal}><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 21V5a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v16l-6-4z" /></svg></button>
     </div>

@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { resolveEngineCandidates, bootLegacyWiki, buildEngineHtml, getTodayTitle } from './legacy-launcher-runtime.ts';
+import { resolveEngineCandidates, bootLegacyWiki, buildEngineHtml } from './legacy-launcher-runtime.ts';
 
 test('resolves lithic.html as a sibling for file URLs', () => {
   assert.deepEqual(resolveEngineCandidates('file:///C:/Lithic/src/pre-launcher.html'), [
@@ -40,12 +40,17 @@ test('buildEngineHtml injects handoff tiddlers then pending imports', () => {
   assert.equal(dup[dup.length - 1].text, 'pending wins');
 });
 
-test('buildEngineHtml does not duplicate the today journal from a payload', () => {
-  const today = getTodayTitle();
-  const html = buildEngineHtml(ENGINE_STUB, { name: 'x.lith', text: '' }, [{ title: today, tags: 'Journal', text: 'payload body' }]);
-  const matches = readStore(html).filter((tiddler) => tiddler.title === today);
-  assert.equal(matches.length, 1);
-  assert.equal(matches[0].text, 'payload body');
+test('buildEngineHtml injects a $:/SiteTitle placeholder before boot', () => {
+  const html = buildEngineHtml(ENGINE_STUB, { name: 'x.lith', text: '' }, [{ title: '$:/SiteTitle', text: 'My Notes' }]);
+  const siteTitle = readStore(html).filter((tiddler) => tiddler.title === '$:/SiteTitle');
+  assert.ok(siteTitle.length >= 1, 'SiteTitle should be present in the injected store');
+  assert.equal(siteTitle[siteTitle.length - 1].text, 'My Notes', 'the blank-lith filename placeholder should win');
+});
+
+test('buildEngineHtml no longer pre-hydrates the today journal', () => {
+  const html = buildEngineHtml(ENGINE_STUB, { name: 'x.lith', text: '' });
+  const titles = readStore(html).map((tiddler) => tiddler.title);
+  assert.ok(!titles.some((title) => title.includes('Journal')), 'today journal is created by the engine stub, not the launcher');
 });
 
 test('buildEngineHtml injects engine globals into the mounted document', () => {
