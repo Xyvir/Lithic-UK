@@ -28,6 +28,8 @@ body { overflow: hidden; background: #181818; }
   align-items: center;
   gap: 0;
   min-height: 58px;
+  margin-bottom: 12px;
+  padding-bottom: 10px;
   border-bottom: 1px solid #414141;
 }
 .heading-copy { flex: 1; min-width: 0; }
@@ -68,7 +70,8 @@ h1 { flex: none; min-width: 0; margin: 0; color: #f4edf5; font-size: 1.8rem; fon
 }
 .help-button:hover { border-color: #666; background: #242424; }
 
-.launcher-actions { flex: 0 0 auto; margin-top: 0; }
+.launcher-actions { flex: 0 0 auto; margin-top: 16px; }
+.action-card:first-child { margin-top: 0; }
 .action-card {
   display: flex;
   gap: 10px;
@@ -80,7 +83,9 @@ h1 { flex: none; min-width: 0; margin: 0; color: #f4edf5; font-size: 1.8rem; fon
   box-shadow: 0 4px 6px rgb(0 0 0 / 30%);
 }
 .action-button {
-  flex: 1;
+  flex: 1 1 auto;
+  min-width: max-content;
+  white-space: nowrap;
   min-height: 0;
   height: 60px;
   padding: 12px 10px;
@@ -92,6 +97,19 @@ h1 { flex: none; min-width: 0; margin: 0; color: #f4edf5; font-size: 1.8rem; fon
   cursor: pointer;
 }
 .action-button:hover:not(:disabled) { background: #3d3d3d; border-color: #5c5c5c; }
+.action-pair { align-items: stretch; }
+.action-pair .action-button { min-width: max-content; }
+.action-pair .mount-button { flex: 1 1 auto; }
+.action-pair .bookmark-button {
+  align-self: stretch;
+  min-height: 60px;
+  margin: 0;
+  padding: 0;
+  border: 1px solid #454545;
+  border-radius: 7px;
+  background: #333;
+}
+.action-pair .bookmark-button svg { width: 20px; height: 24px; overflow: visible; }
 .action-button:disabled { cursor: wait; opacity: 0.55; }
 .bookmark-button {
   display: grid;
@@ -106,7 +124,7 @@ h1 { flex: none; min-width: 0; margin: 0; color: #f4edf5; font-size: 1.8rem; fon
   color: #8ab4f8;
   cursor: pointer;
 }
-.bookmark-button svg { width: 25px; height: 25px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linejoin: round; }
+.bookmark-button svg { width: 22px; height: 24px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linejoin: round; overflow: visible; }
 .bookmark-button:hover { background: #3d3d3d; }
 .mount-card { gap: 0; }
 .mount-card .action-button { border-right: 0; border-radius: 7px 0 0 7px; }
@@ -309,6 +327,13 @@ footer > * { pointer-events: auto; }
   h1 { font-size: 1.45rem; }
   .container { width: 100%; border: 0; }
   .action-button { font-size: 0.95rem; }
+  .action-pair { flex-wrap: nowrap; }
+  .action-pair .action-button { flex: 1 1 auto; }
+  .action-pair .bookmark-button { flex: 0 0 48px; }
+}
+
+@media (max-width: 440px) {
+  .action-pair .bookmark-button { display: none; }
 }
 
 /* --- PENDING IMPORTS WINDOW (legacy parity) --- */

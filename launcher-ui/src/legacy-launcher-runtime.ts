@@ -221,6 +221,32 @@ function injectSaverBootstrap(html: string): string {
     var handle = root.__LITHIC_FILE_HANDLE__ || undefined;
     var pending;
 
+    // The launcher mounts the engine via a blob: URL, so window globals set
+    // on the launcher page do not survive navigation. Recover the file handle
+    // from the IndexedDB recent-files list (keyed by the active handoff name)
+    // before falling back to the Save As picker.
+    function resolveStoredHandle() {
+      if (handle) return Promise.resolve(handle);
+      try {
+        var handoff = JSON.parse(sessionStorage.getItem('lithic-active-file') || 'null');
+        var fileName = handoff && handoff.name;
+        if (!fileName) return Promise.resolve(null);
+        return idbKeyval.get('recentFiles').then(function(raw) {
+          var list = (raw || []).map(function(f) { return (f && (f.handle || f.name)) ? f : { handle: f, name: f ? f.name : '', tauriPath: null }; });
+          for (var i = 0; i < list.length; i++) {
+            if (list[i].handle && list[i].handle.name === fileName) {
+              handle = list[i].handle;
+              root.__LITHIC_FILE_HANDLE__ = handle;
+              return handle;
+            }
+          }
+          return null;
+        }).catch(function() { return null; });
+      } catch (e) {
+        return Promise.resolve(null);
+      }
+    }
+
     var save = function(_text, _method, callback) {
       var tw = root.$tw;
       var saveOptions = {
@@ -230,7 +256,10 @@ function injectSaverBootstrap(html: string): string {
 
       var select = handle
         ? Promise.resolve(handle)
-        : (pending || (pending = (root.showSaveFilePicker ? root.showSaveFilePicker(saveOptions) : Promise.reject(new Error('Native file picker not available')))));
+        : (pending || (pending = resolveStoredHandle().then(function(stored) {
+            if (stored) return stored;
+            return root.showSaveFilePicker ? root.showSaveFilePicker(saveOptions) : Promise.reject(new Error('Native file picker not available'));
+          })));
 
       select.then(function(selected) {
         handle = selected;
@@ -279,6 +308,28 @@ function injectSaverBootstrap(html: string): string {
 }
 
 /**
+ * The launcher mounts the engine via a blob: URL, which creates a fresh
+ * window — launcher-page globals do not survive the navigation. Inject the
+ * ones the mounted engine needs (e.g. __EPHEMERAL_MODE__ for the Ephemeral
+ * widget) as a synchronous script before the boot scripts run.
+ */
+function injectEngineGlobals(html: string, globals: Record<string, string>): string {
+  const entries = Object.entries(globals)
+    .filter(([, value]) => value !== undefined && value !== null)
+    .map(([key, value]) => `window[${JSON.stringify(key)}] = ${JSON.stringify(value)};`)
+    .join('\n');
+  if (!entries) return html;
+  const script = `<script>\n${entries}\n</script>`;
+
+  const bootScript = /<script[^>]+(?:src=["'][^"']*boot[^"']*["']|data-tiddler-title=["']\$:\/boot\/)/i;
+  if (bootScript.test(html)) {
+    const tag = html.match(bootScript)?.[0] ?? '';
+    return html.replace(tag, `${script}\n${tag}`);
+  }
+  return html.replace(/<\/head>/i, `${script}\n</head>`);
+}
+
+/**
  * Build the bootable engine HTML for a handoff plus any pending imports.
  * Pure helper so the injection order and journal/saver defaults are unit
  * testable without a browser.
@@ -286,7 +337,8 @@ function injectSaverBootstrap(html: string): string {
 export function buildEngineHtml(
   engineHtml: string,
   handoff: LauncherHandoff,
-  extraTiddlers: Array<Record<string, string>> = []
+  extraTiddlers: Array<Record<string, string>> = [],
+  engineGlobals: Record<string, string> = {}
 ): string {
   const imported = handoff.text ? parseLithToJSON(handoff.text) : (handoff.payloadTiddlers ?? []);
   // File tiddlers first, then queued pending imports (payload, Ephemeral
@@ -305,15 +357,17 @@ export function buildEngineHtml(
 
   // TiddlyWiki's boot script is usually present in lithic.html. Keep this
   // guard so a future engine build without an initial store still boots.
-  return injectSaverBootstrap(injectTiddlers(engineHtml, tiddlers));
+  let html = injectSaverBootstrap(injectTiddlers(engineHtml, tiddlers));
+  return injectEngineGlobals(html, engineGlobals);
 }
 
 export async function bootLegacyWiki(
   handoff: LauncherHandoff,
-  extraTiddlers: Array<Record<string, string>> = []
+  extraTiddlers: Array<Record<string, string>> = [],
+  engineGlobals: Record<string, string> = {}
 ): Promise<void> {
   const engine = await fetchEngine();
-  const html = buildEngineHtml(engine, handoff, extraTiddlers);
+  const html = buildEngineHtml(engine, handoff, extraTiddlers, engineGlobals);
 
   sessionStorage.setItem('lithic-active-file', JSON.stringify(handoff));
   // Use location.replace() so the blob: URL is not added to browser history

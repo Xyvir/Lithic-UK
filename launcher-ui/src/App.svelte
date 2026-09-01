@@ -202,7 +202,14 @@
     sessionStorage.setItem('lithic-launcher-file', JSON.stringify(handoff));
     // Local mode always injects the Ephemeral integration on every mount,
     // then drains whatever the user queued via drop / share URL / intro.
-    await bootLegacyWiki(handoff, [...pendingImports, ...ephemeralIntegrationTiddlers()]);
+    // The engine is mounted via a blob: URL, so launcher globals must be
+    // re-injected into the fresh document (the Ephemeral widget reads
+    // __EPHEMERAL_MODE__ to pick paper-light bastion discovery vs the
+    // same-origin self-host API).
+    await bootLegacyWiki(handoff, [...pendingImports, ...ephemeralIntegrationTiddlers()], {
+      __EPHEMERAL_MODE__: mode === 'self-host' ? 'self-host' : 'paper-light',
+      __LITHIC_LAUNCHER_MODE__: mode
+    });
     pendingImports = [];
   }
 
@@ -537,8 +544,11 @@
   {/if}
 
   <section class="launcher-actions" aria-label="Launcher actions">
-    <div class="action-card"><button class="action-button" on:click={blankLith} disabled={busy}>New Blank Lith</button></div>
-    <div class="action-card mount-card"><button class="action-button" on:click={mountFromDisk} disabled={busy}>Mount a Lith (or HTML) from Disk</button><button class="bookmark-button" aria-label="Bookmark a self-hosted instance" title="Bookmark a Remote Instance" on:click={openBookmarkModal}><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 3.5A2.5 2.5 0 0 1 8.5 1h7A2.5 2.5 0 0 1 18 3.5V22l-6-4-6 4z" /></svg></button></div>
+    <div class="action-card action-pair">
+      <button class="action-button" on:click={blankLith} disabled={busy}>New Blank Lith</button>
+      <button class="action-button mount-button" on:click={mountFromDisk} disabled={busy}>Mount a Lith</button>
+      <button class="bookmark-button" aria-label="Bookmark a self-hosted instance" title="Bookmark a Remote Instance" on:click={openBookmarkModal}><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 21V5a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v16l-6-4z" /></svg></button>
+    </div>
   </section>
   {#if bookmarks.length > 0 || recentFiles.length > 0 || Object.keys(cachedEntries).length > 0 || showRecent}
     <section class="recent-section" aria-label="Recent Liths">

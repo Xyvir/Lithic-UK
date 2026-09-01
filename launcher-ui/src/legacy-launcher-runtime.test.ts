@@ -48,6 +48,21 @@ test('buildEngineHtml does not duplicate the today journal from a payload', () =
   assert.equal(matches[0].text, 'payload body');
 });
 
+test('buildEngineHtml injects engine globals into the mounted document', () => {
+  const html = buildEngineHtml(ENGINE_STUB, { name: 'x.lith', text: '' }, [], {
+    __EPHEMERAL_MODE__: 'paper-light',
+    __LITHIC_LAUNCHER_MODE__: 'webapp'
+  });
+  assert.match(html, /window\["__EPHEMERAL_MODE__"\] = "paper-light";/);
+  assert.match(html, /window\["__LITHIC_LAUNCHER_MODE__"\] = "webapp";/);
+});
+
+test('injected saver recovers the file handle from IndexedDB after blob navigation', () => {
+  const html = buildEngineHtml(ENGINE_STUB, { name: 'notes.lith', text: '' });
+  assert.match(html, /resolveStoredHandle/);
+  assert.match(html, /lithic-active-file/);
+});
+
 test('bootLegacyWiki navigates via Blob URL instead of document.write to avoid module-context white screen', async () => {
   // Minimal engine stub — just needs to be valid HTML so injectTiddlers and
   // injectSaverBootstrap can run without throwing.
