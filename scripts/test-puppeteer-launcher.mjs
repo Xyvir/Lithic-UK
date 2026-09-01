@@ -15,9 +15,16 @@ const browser = await puppeteer.launch({
 try {
   const page = await browser.newPage();
   const errors = [];
-  page.on('pageerror', error => errors.push(error.message));
+  // Loading via file:// makes the PWA manifest/favicon lookups fail at the
+  // network layer (the legacy launcher behaves the same way on disk). Filter
+  // that resource noise while still failing on real JavaScript errors.
+  const isFileResourceNoise = (text) =>
+    text.includes('Failed to load resource: net::ERR_FAILED') ||
+    text.includes('Failed to load resource: net::ERR_FILE_NOT_FOUND') ||
+    (text.includes('Access to manifest at') && text.includes('CORS policy'));
+  page.on('pageerror', error => { if (!isFileResourceNoise(error.message)) errors.push(error.message); });
   page.on('console', message => {
-    if (message.type() === 'error') errors.push(message.text());
+    if (message.type() === 'error' && !isFileResourceNoise(message.text())) errors.push(message.text());
   });
 
   await page.goto(`file://${artifact}`, { waitUntil: 'domcontentloaded' });

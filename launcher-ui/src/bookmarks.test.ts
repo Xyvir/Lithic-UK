@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { normalizeInstanceUrl, saveBookmark, removeBookmark } from './bookmarks.ts';
+import { normalizeInstanceUrl, saveBookmark, removeBookmark, verifyInstanceUrl } from './bookmarks.ts';
 
 function storage() {
   const data = new Map<string, string>();
@@ -26,4 +26,21 @@ test('deduplicates and removes local instance bookmarks', () => {
   assert.deepEqual(saveBookmark('https://example.test/other', store), ['https://example.test']);
   assert.deepEqual(saveBookmark('https://second.test', store), ['https://second.test', 'https://example.test']);
   assert.deepEqual(removeBookmark('https://second.test', store), ['https://example.test']);
+});
+
+test('verifyInstanceUrl accepts a Lithic manifest', async () => {
+  const fetcher = async () => new Response(JSON.stringify({ name: 'Lithic' }), { status: 200 });
+  assert.deepEqual(await verifyInstanceUrl('https://example.test', fetcher), { verified: true });
+});
+
+test('verifyInstanceUrl rejects non-Lithic manifests and network failures', async () => {
+  const wrongManifest = async () => new Response(JSON.stringify({ name: 'Other' }), { status: 200 });
+  assert.deepEqual(await verifyInstanceUrl('https://example.test', wrongManifest), { verified: false });
+  const networkFailure = async () => { throw new Error('network'); };
+  assert.deepEqual(await verifyInstanceUrl('https://example.test', networkFailure), { verified: false });
+});
+
+test('verifyInstanceUrl flags protected instances for manual confirmation', async () => {
+  const protectedResponse = async () => new Response('', { status: 401 });
+  assert.deepEqual(await verifyInstanceUrl('https://example.test', protectedResponse), { verified: true, requiresManualConfirm: true });
 });

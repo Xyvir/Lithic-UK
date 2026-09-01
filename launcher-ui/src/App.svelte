@@ -2,11 +2,22 @@
   import { onMount } from 'svelte';
   import type { LauncherMode } from './mode';
   import { createFileBridge } from './file-bridge';
-  import { bootLegacyWiki } from './legacy-launcher-runtime';
+  import { bootLegacyWiki, bootLegacyHtml } from './legacy-launcher-runtime';
   import { getRecentFiles, addRecentFile, removeRecentFile, clearAllRecentFiles, idb, type RecentEntry } from './storage';
-  import { readBookmarks, saveBookmark, removeBookmark } from './bookmarks';
+  import { readBookmarks, saveBookmark, removeBookmark, verifyInstanceUrl, normalizeInstanceUrl } from './bookmarks';
   import { searchCachedWikis } from './cache-search';
   import { serializeJsonToLith } from './lithic-format';
+  import {
+    parsePayloadText,
+    tagRootDogear,
+    parseDroppedData,
+    decodePayloadParam,
+    fetchRemotePayload,
+    mergePendingImports,
+    ephemeralIntegrationTiddlers,
+    isPayloadShareUrl,
+    type PendingTiddler
+  } from './pending-imports';
 
   export let mode: LauncherMode;
   const files = createFileBridge();
@@ -16,7 +27,9 @@
   let filePath: string | undefined;
   let status = '';
   let busy = false;
-  let showHelp = false;
+  let pendingImports: PendingTiddler[] = [];
+  let introBusy = false;
+  let dragCounter = 0;
   let showRecent = false;
   let recentFiles: Array<RecentEntry | { name: string; path?: string; text?: string; handle?: any }> = [];
   let search = '';
@@ -170,10 +183,9 @@
 
   async function mountWiki(contents: string, name: string, path?: string, handle?: any) {
     mountError = '';
+    const isHtmlMonolith = /\.(?:html?|htm)$/i.test(name);
     const safeName = normalizeLithName(name);
-    const handoff = { name: safeName, path, text: contents };
-    await remember({ ...handoff, handle });
-    sessionStorage.setItem('lithic-launcher-file', JSON.stringify(handoff));
+    await remember({ name: isHtmlMonolith ? name : safeName, path, text: contents, handle });
     if (typeof window !== 'undefined') {
       if (handle) {
         (window as any).__LITHIC_FILE_HANDLE__ = handle;
@@ -181,7 +193,17 @@
         delete (window as any).__LITHIC_FILE_HANDLE__;
       }
     }
-    await bootLegacyWiki(handoff);
+    if (isHtmlMonolith) {
+      // HTML monoliths are complete wiki pages — serve them as-is.
+      await bootLegacyHtml(contents);
+      return;
+    }
+    const handoff = { name: safeName, path, text: contents };
+    sessionStorage.setItem('lithic-launcher-file', JSON.stringify(handoff));
+    // Local mode always injects the Ephemeral integration on every mount,
+    // then drains whatever the user queued via drop / share URL / intro.
+    await bootLegacyWiki(handoff, [...pendingImports, ...ephemeralIntegrationTiddlers()]);
+    pendingImports = [];
   }
 
   async function blankLith() {
@@ -241,6 +263,103 @@
     }
   }
 
+  async function openIntro() {
+    if (busy || introBusy) return;
+    introBusy = true;
+    try {
+      try {
+        const target = window.location.protocol === 'file:'
+          ? 'https://raw.githubusercontent.com/Xyvir/Lithic-UK/refs/heads/main/intro.lith'
+          : '/intro.lith';
+        const response = await fetch(target);
+        if (response.ok) {
+          const text = await response.text();
+          const parsed = parsePayloadText(text);
+          if (parsed.length > 0) {
+            pendingImports = tagRootDogear(parsed);
+            await blankLith();
+            return;
+          }
+        }
+      } catch {
+        // Fall through to the online introduction below.
+      }
+      if (navigator.onLine) {
+        window.open('https://lithic.uk/intro.html', '_blank');
+      } else {
+        mountError = 'Could not load introduction. You appear to be offline and the local intro file is missing.';
+      }
+    } finally {
+      introBusy = false;
+    }
+  }
+
+  async function handleDrop(event: DragEvent) {
+    const droppedText = event.dataTransfer?.getData('URL') || event.dataTransfer?.getData('text/plain') || '';
+    if (droppedText && isPayloadShareUrl(droppedText)) {
+      try {
+        const urlObj = new URL(droppedText);
+        const b64Json = urlObj.searchParams.get('json') ?? urlObj.searchParams.get('lith');
+        const remoteUrl = urlObj.searchParams.get('url');
+        let payload: PendingTiddler[] | null = null;
+        if (remoteUrl) payload = await fetchRemotePayload(remoteUrl);
+        else if (b64Json) payload = decodePayloadParam(b64Json);
+        if (payload && payload.length > 0) {
+          pendingImports = mergePendingImports(pendingImports, payload);
+          return;
+        }
+      } catch {
+        // Not a payload URL after all — treat as a file drop below.
+      }
+    }
+
+    const files = event.dataTransfer?.files;
+    if (!files || files.length === 0) return;
+    const file = files[0];
+    const lowerName = file.name.toLowerCase();
+    if (/\.(?:lith|json)$/.test(lowerName)) {
+      try {
+        const contents = await file.text();
+        const parsed = parseDroppedData(contents, lowerName.endsWith('.lith'));
+        if (parsed.length > 0) {
+          pendingImports = mergePendingImports(pendingImports, parsed);
+        }
+      } catch {
+        mountError = 'Dropped file is not valid data format.';
+      }
+    } else if (/\.(?:html?|htm)$/.test(lowerName)) {
+      try {
+        await mountWiki(await file.text(), file.name);
+      } catch (error) {
+        mountError = error instanceof Error ? error.message : String(error);
+      }
+    }
+  }
+
+  async function processUrlPayload() {
+    const params = new URLSearchParams(window.location.search);
+    const b64Json = params.get('json') ?? params.get('lith');
+    const remoteUrl = params.get('url');
+    if (!remoteUrl && !b64Json) return;
+    let payload: PendingTiddler[] | null = null;
+    try {
+      payload = remoteUrl ? await fetchRemotePayload(remoteUrl) : decodePayloadParam(b64Json!);
+    } catch {
+      payload = null;
+    }
+    if (payload && payload.length > 0) {
+      // Clear the query params to prevent a reload loop, then boot a fresh
+      // wiki with the shared payload queued for injection.
+      window.history.replaceState({}, document.title, window.location.pathname);
+      pendingImports = payload;
+      status = `${payload.length} shared tiddler${payload.length === 1 ? '' : 's'} ready to import`;
+      await blankLith();
+    } else {
+      mountError = 'Unable to load the shared payload';
+      status = '';
+    }
+  }
+
   function openBookmarkModal() {
     bookmarkInput = '';
     bookmarkError = '';
@@ -253,9 +372,24 @@
     bookmarkError = '';
   }
 
-  function addInstanceBookmark() {
+  async function addInstanceBookmark() {
+    let normalized: string;
     try {
-      bookmarks = saveBookmark(bookmarkInput);
+      normalized = normalizeInstanceUrl(bookmarkInput);
+    } catch (error) {
+      bookmarkError = error instanceof Error ? error.message : String(error);
+      return;
+    }
+    try {
+      const result = await verifyInstanceUrl(normalized);
+      if (!result.verified) {
+        bookmarkError = 'The provided URL could not be verified as a Lithic instance.';
+        return;
+      }
+      if (result.requiresManualConfirm && !window.confirm(`We couldn't verify the manifest (it appears to be protected by Basic Authentication or Forbidden).\n\nAre you sure you want to bookmark ${normalized}?`)) {
+        return;
+      }
+      bookmarks = saveBookmark(normalized);
       closeBookmarkModal();
       status = 'Self-hosted instance bookmarked';
     } catch (error) {
@@ -322,7 +456,46 @@
       if (event.key === 'Escape') closeBookmarkModal();
     };
     window.addEventListener('keydown', closeOnEscape);
-    return () => window.removeEventListener('keydown', closeOnEscape);
+
+    // --- Drag and drop (legacy parity) ---
+    const onDragOver = (event: DragEvent) => {
+      event.preventDefault();
+      if (event.dataTransfer) event.dataTransfer.dropEffect = 'copy';
+    };
+    const onDragEnter = (event: DragEvent) => {
+      event.preventDefault();
+      dragCounter++;
+      if (dragCounter === 1) document.body.classList.add('drag-over');
+    };
+    const onDragLeave = (event: DragEvent) => {
+      event.preventDefault();
+      dragCounter--;
+      if (dragCounter <= 0) {
+        dragCounter = 0;
+        document.body.classList.remove('drag-over');
+      }
+    };
+    const onDrop = (event: DragEvent) => {
+      event.preventDefault();
+      dragCounter = 0;
+      document.body.classList.remove('drag-over');
+      void handleDrop(event);
+    };
+    window.addEventListener('dragover', onDragOver);
+    window.addEventListener('dragenter', onDragEnter);
+    window.addEventListener('dragleave', onDragLeave);
+    window.addEventListener('drop', onDrop);
+
+    // --- URL payload injection (?json= / ?lith= / ?url=) ---
+    void processUrlPayload();
+
+    return () => {
+      window.removeEventListener('keydown', closeOnEscape);
+      window.removeEventListener('dragover', onDragOver);
+      window.removeEventListener('dragenter', onDragEnter);
+      window.removeEventListener('dragleave', onDragLeave);
+      window.removeEventListener('drop', onDrop);
+    };
   });
 </script>
 
@@ -336,18 +509,19 @@
       {#if status}<div class="status-line" role="status"><span class="status-label">{status.replace(/[…\.\s]+$/, '')}</span><span class="activity-dots" aria-hidden="true"><i></i><i></i><i></i></span></div>{/if}
       {#if mountError}<div class="status-line error" role="alert">{mountError}</div>{/if}
     </div>
-    <button class="help-button" aria-label="Help" on:click={() => showHelp = !showHelp}>?</button>
+    <button class="help-button" aria-label="View Introduction" title="View Introduction" on:click={openIntro}>{introBusy ? '…' : '?'}</button>
   </header>
-  {#if showHelp}
-    <div class="modal-overlay" role="presentation" on:click={(event) => event.currentTarget === event.target && (showHelp = false)}>
-      <div class="launcher-modal" role="dialog" aria-modal="true" aria-labelledby="help-title">
-        <button class="modal-close" aria-label="Close help" on:click={() => showHelp = false}>×</button>
-        <h2 id="help-title">Using Lithic</h2>
-        <p><strong>New Blank Lith</strong> creates a local <code>.lith</code> file. The first save opens the native Save As dialog and keeps the selected file for future saves.</p>
-        <p><strong>Mount a Lith (or HTML) from Disk</strong> opens an existing local file. Lithic files are portable text monoliths; HTML files are imported into the wiki.</p>
-        <p>Recent files and self-hosted instance addresses are stored locally in this browser. This launcher does not bookmark arbitrary web pages.</p>
-        <button class="modal-action" on:click={() => showHelp = false}>Close</button>
+  {#if pendingImports.length > 0}
+    <div class="pending-imports" role="status" aria-label="Pending imports">
+      <div class="pending-imports-header">
+        <span>Pending Imports</span>
+        <button type="button" aria-label="Clear pending imports" title="Clear pending imports" on:click={() => pendingImports = []}>✕</button>
       </div>
+      <ul>
+        {#each pendingImports as tiddler, index (tiddler.title ?? index)}
+          <li class={/^\d{14}-\d{3,4}$/.test(tiddler.title ?? '') || Boolean(tiddler['stream-type']) ? 'tiddler-list' : ''}>{tiddler.title || 'Untitled Payload'}</li>
+        {/each}
+      </ul>
     </div>
   {/if}
   {#if showBookmarkModal}

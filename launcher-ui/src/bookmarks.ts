@@ -31,3 +31,37 @@ export function removeBookmark(value: string, storage: Storage = localStorage): 
   storage.setItem(BOOKMARKS_KEY, JSON.stringify(result));
   return result;
 }
+
+export type InstanceVerification = {
+  verified: boolean;
+  /** 401/403 responses: the instance is protected, so the user confirms manually. */
+  requiresManualConfirm?: boolean;
+};
+
+/**
+ * Verify a self-hosted instance by fetching its manifest.json (legacy launcher
+ * parity). Aborts after 5s so an unreachable host fails fast instead of
+ * hanging the bookmark dialog.
+ */
+export async function verifyInstanceUrl(url: string, fetcher: typeof fetch = fetch): Promise<InstanceVerification> {
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 5000);
+  try {
+    const response = await fetcher(`${url}/manifest.json`, { method: 'GET', signal: controller.signal });
+    if (response.ok) {
+      const manifest = await response.json();
+      if (manifest && (manifest.name === 'Lithic' || manifest.short_name === 'Lithic')) {
+        return { verified: true };
+      }
+      return { verified: false };
+    }
+    if (response.status === 401 || response.status === 403) {
+      return { verified: true, requiresManualConfirm: true };
+    }
+    return { verified: false };
+  } catch {
+    return { verified: false };
+  } finally {
+    clearTimeout(timeoutId);
+  }
+}

@@ -25,7 +25,7 @@ export function resolveEngineCandidates(href: string): string[] {
   ];
 }
 
-function getTodayTitle(): string {
+export function getTodayTitle(): string {
   const months = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
   const date = new Date();
   const day = date.getDate();
@@ -278,23 +278,56 @@ function injectSaverBootstrap(html: string): string {
   return html.replace(/<\/head>/i, `${bootstrap}\n</head>`);
 }
 
-export async function bootLegacyWiki(handoff: LauncherHandoff): Promise<void> {
-  const engine = await fetchEngine();
+/**
+ * Build the bootable engine HTML for a handoff plus any pending imports.
+ * Pure helper so the injection order and journal/saver defaults are unit
+ * testable without a browser.
+ */
+export function buildEngineHtml(
+  engineHtml: string,
+  handoff: LauncherHandoff,
+  extraTiddlers: Array<Record<string, string>> = []
+): string {
   const imported = handoff.text ? parseLithToJSON(handoff.text) : (handoff.payloadTiddlers ?? []);
+  // File tiddlers first, then queued pending imports (payload, Ephemeral
+  // integration, etc.) so later entries win on title conflicts — mirrors the
+  // legacy launcher, which appends window.pendingImports after the store.
+  const tiddlers = [...imported, ...extraTiddlers];
   const today = getTodayTitle();
-  if (!imported.some((tiddler) => tiddler.title === today)) {
-    imported.push({ created: getTwTime(), modified: getTwTime(), tags: 'Journal', title: today, type: '' });
+  // Only push a blank journal tiddler if one with the same title isn't
+  // already queued (e.g. from a ?json= share URL payload). Otherwise the
+  // blank entry overwrites the payload's fields during TiddlyWiki boot.
+  if (!tiddlers.some((tiddler) => tiddler.title === today)) {
+    tiddlers.push({ created: getTwTime(), modified: getTwTime(), tags: 'Journal', title: today, type: '' });
   }
-  imported.push({ title: '$:/state/DisableAutoSaver', text: 'yes' });
-  imported.push({ title: '$:/config/OfficialPluginLibrary', text: 'yes' });
+  tiddlers.push({ title: '$:/state/DisableAutoSaver', text: 'yes' });
+  tiddlers.push({ title: '$:/config/OfficialPluginLibrary', text: 'yes' });
 
   // TiddlyWiki's boot script is usually present in lithic.html. Keep this
   // guard so a future engine build without an initial store still boots.
-  const html = injectSaverBootstrap(injectTiddlers(engine, imported));
+  return injectSaverBootstrap(injectTiddlers(engineHtml, tiddlers));
+}
+
+export async function bootLegacyWiki(
+  handoff: LauncherHandoff,
+  extraTiddlers: Array<Record<string, string>> = []
+): Promise<void> {
+  const engine = await fetchEngine();
+  const html = buildEngineHtml(engine, handoff, extraTiddlers);
 
   sessionStorage.setItem('lithic-active-file', JSON.stringify(handoff));
   // Use location.replace() so the blob: URL is not added to browser history
   // (prevents the Back button from revisiting an invalid blob URL).
+  const blob = new Blob([html], { type: 'text/html' });
+  location.replace(URL.createObjectURL(blob));
+}
+
+/**
+ * Mount a TiddlyWiki HTML monolith directly (legacy "Mount ... HTML from
+ * Disk" behavior): the file is itself a full wiki page, so it is served
+ * as-is rather than injected into a fresh engine.
+ */
+export function bootLegacyHtml(html: string): void {
   const blob = new Blob([html], { type: 'text/html' });
   location.replace(URL.createObjectURL(blob));
 }

@@ -310,3 +310,62 @@ footer > * { pointer-events: auto; }
   .container { width: 100%; border: 0; }
   .action-button { font-size: 0.95rem; }
 }
+
+/* --- PENDING IMPORTS WINDOW (legacy parity) --- */
+.pending-imports {
+  position: fixed;
+  top: 15px;
+  left: 15px;
+  z-index: 30;
+  width: min(250px, calc(100vw - 30px));
+  max-height: 50vh;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  border: 1px solid #454545;
+  border-radius: 8px;
+  background: #252525;
+  box-shadow: 0 10px 25px rgb(0 0 0 / 50%);
+}
+.pending-imports-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 10px 12px;
+  border-bottom: 1px solid #454545;
+  font-weight: 600;
+  font-size: 1rem;
+}
+.pending-imports-header button {
+  width: auto;
+  margin: 0;
+  padding: 2px 8px;
+  font-size: 0.9rem;
+  line-height: 1.4;
+}
+.pending-imports ul {
+  margin: 0;
+  padding: 12px 12px 12px 28px;
+  overflow-y: auto;
+  font-size: 0.9rem;
+}
+.pending-imports li {
+  margin-bottom: 4px;
+  color: #e7e1e9;
+}
+.pending-imports li.tiddler-list {
+  color: #888;
+  font-size: 0.8rem;
+}
+
+/* --- DRAG AND DROP HIGHLIGHT (legacy parity) --- */
+body.drag-over::after {
+  content: '';
+  position: fixed;
+  inset: 15px;
+  border: 3px dashed #8ab4f8;
+  border-radius: 12px;
+  background: rgb(138 180 248 / 70%);
+  z-index: 10000;
+  pointer-events: none;
+}

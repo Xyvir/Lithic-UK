@@ -3,16 +3,35 @@
 
 
 ## launcher.html modularization Project
-- [ ] Allow specifying 'modes' via http parameters so the launcher monolith html can be forced into specific modes to make unit tests easier; (all unit tests can be performed in 1 test environment this way, but with multiple test profiles/users)
+- [x] Allow specifying 'modes' via http parameters so the launcher monolith html can be forced into specific modes to make unit tests easier; (all unit tests can be performed in 1 test environment this way, but with multiple test profiles/users)
+    - (Done: `launcher-ui/src/mode.ts` honors `?mode=`, `?launcher-mode=`, `?launcher_mode=`)
 - [ ] Create unit tests for all lithic.html and launcher.html UI elements, logic and functions
+    - (In progress: 42 launcher-ui unit tests + puppeteer smoke + pre-launcher smoke)
     - [ ] this can also intercept bad manual builds and prevent them from pushing 'bad' releases.
 - [ ] Modularize launcher.html into separate javascript / html / css files
-    - [ ] begin modularizing launcher.html and test packaging into prelauncher.html
+    - [x] begin modularizing launcher.html and test packaging into prelauncher.html
+        - (Svelte launcher builds to `src/pre-launcher.html` via `scripts/build-pre-launcher.mjs`)
     - [ ] once all unit tests pass, update the build-wiki to package launcher.html into the build
     - [ ] archive original launcher.html and begin using new modularized build process moving forward.
 - [ ] Move "install app" button on mobile UI only to be next to the 'clear cache' button.
 - [ ] Add git history rollback UI/widget to online sync modal. (this should theoretically work for the local git instance even if not synced to github)
 - [ ] Make sure the custom.ico is actually saved to GitHub so restoring the GitHub will restore your disambiguation / icon
+
+### Launcher parity (Svelte `pre-launcher.html` vs legacy `launcher.html`) — webapp/local mode
+
+Tracked per-fragment in `launcher-ui/src/legacy-fragments.ts`; statuses are asserted by `fragment-parity.test.ts`.
+
+- [x] Modes via http params (`?mode=` etc.) and environment detection
+- [x] Local saver / Save As (File System Access API) + IndexedDB recent files + search cache + cached-history download
+- [x] Bookmarks with manifest.json verification of self-host instances
+- [x] Pending imports: drag-and-drop `.lith`/`.json`, dropped share URLs, `?json=`/`?lith=`/`?url=` payload injection, pending-imports window
+- [x] Intro payload link (fetches `intro.lith` → boots a fresh wiki; offline fallback opens `lithic.uk/intro.html`)
+- [x] Ephemeral code-runner integration injected on every local mount (`ephemeral-integration.ts`, byte-identical to legacy)
+- [x] HTML monolith mounting (`.html`/`.htm` opened directly as a complete wiki page)
+- [x] PWA head (manifest/favicon/theme-color) + `/offline-service-worker.js` registration + `__EPHEMERAL_MODE__` global
+- [ ] WebDAV / self-host mode (`runtime.webdav`, remote file listing, locks, GitHub sync modal, emoji picker) — deferred, next milestone
+- [ ] Tauri mode — deferred
+- [ ] `document.bootstrap` original-path rewrite — deployment glue, still extracted
 
 ## Post Modularization Todo
 - [ ] update pdf-to-whiteboard plugin to convert svgs into editable "native whiteboards" maintaining individual objects?

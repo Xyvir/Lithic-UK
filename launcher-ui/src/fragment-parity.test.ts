@@ -20,3 +20,12 @@ test('all legacy responsibilities have an explicit migration state', () => {
   assert.ok(launcherFragments.some((fragment) => fragment.id === 'runtime.webdav'));
   assert.ok(launcherFragments.some((fragment) => fragment.id === 'ui.pwa'));
 });
+
+test('webapp-mode parity fragments are migrated while WebDAV/Tauri remain pending', () => {
+  const byId = new Map(launcherFragments.map((fragment) => [fragment.id, fragment]));
+  assert.equal(byId.get('runtime.pending-imports')?.status, 'migrated');
+  assert.equal(byId.get('ui.pending-imports')?.status, 'migrated');
+  assert.equal(byId.get('ui.intro')?.status, 'migrated');
+  assert.equal(byId.get('runtime.webdav')?.status, 'pending');
+  assert.equal(byId.get('ui.emoji')?.status, 'pending');
+});
