@@ -1,0 +1,128 @@
+title: $:/Lithic/Patches/Whiteboard/LongPressRightClick.js
+type: application/javascript
+module-type: startup
+
+/*\
+title: $:/Lithic/Patches/Whiteboard/LongPressRightClick.js
+type: application/javascript
+module-type: startup
+
+Consume Android hold-touch-to-right-click (long-press) events inside the
+whiteboard, while preserving deliberate right-clicks.
+
+On Android / stylus devices, holding the stylus or finger still for a moment
+while drawing registers as a `contextmenu` event, which opens tldraw's own
+context menu mid-stroke. Debouncing or styles cannot help here, and we do NOT
+want to remove the right-click menu entirely: desktop mouse right-click must
+keep working, and the menu must stay available everywhere else in the wiki.
+
+How this patch works:
+
+1. tldraw's menu is opened by React's `onContextMenu` handler on the Radix
+   trigger wrapping the whole board (the board renders inside
+   `div.tw-whiteboard-tldraw-container`). React attaches its listeners at the
+   mount container, so a document-level CAPTURE listener runs first: calling
+   `preventDefault()` + `stopImmediatePropagation()` there prevents both the
+   browser's native long-press menu and tldraw's menu from ever opening.
+2. The patch only acts on `contextmenu` events whose target is inside the
+   whiteboard surface (`.tw-whiteboard-tldraw-container, .tl-container`).
+3. Touch/stylus derivation is detected two ways:
+   - `event.sourceCapabilities.firesTouchEvents` (Chrome/Android reports true
+     for touch- and stylus-generated events),
+   - else a capture-phase `pointerdown` tracker: any non-mouse pointer
+     (`touch`/`pen`/`stylus`) in the last 2s marks the gesture as touch-based.
+   Mouse pointerdowns (right-click) are never treated as touch.
+4. A hold time gate separates long-press from deliberate touch right-clicks:
+   Android fires its long-press `contextmenu` only after the hold timeout
+   (>~500ms after pointerdown), while a stylus barrel-button right-click fires
+   almost immediately. Events arriving <200ms after the pointerdown pass
+   through, so stylus-button and two-finger right-clicks still work.
+5. Targets that are inputs/textareas or `contentEditable` are passed through
+   unchanged, so long-press copy/paste while editing board text keeps the
+   native menu.
+
+Not a width/media-query fix: this listens on the event source (touch/stylus
+vs. mouse), so it works regardless of viewport size or device category.
+
+The wiki's own context menu (ahanniga `context-menu` plugin) already returns
+early for `.tw-whiteboard-layout-container`, so this patch is the only menu
+suppression the whiteboard needs.
+
+Diagnostics: every decision is recorded on `window.__lithicLongPressProbe`
+({suppressed, reason}) for testing and debugging.
+\*/
+(function(){
+"use strict";
+
+exports.name = "lithic-whiteboard-long-press-right-click";
+exports.platforms = ["browser"];
+exports.after = ["startup"];
+exports.synchronous = true;
+
+exports.startup = function() {
+	if(typeof window === "undefined" || typeof document === "undefined") {
+		return;
+	}
+
+	var SCOPE_SELECTOR = ".tw-whiteboard-tldraw-container, .tl-container";
+	// A touch/stylus contextmenu arriving this soon after pointerdown is a
+	// deliberate right-click (stylus barrel button, two-finger tap), not the
+	// Android long-press, which only fires after the hold timeout.
+	var LONG_PRESS_MIN_MS = 200;
+	// Touch gestures older than this no longer count as "the current gesture".
+	var TOUCH_GESTURE_WINDOW_MS = 2000;
+
+	var lastPointerDown = {type: "mouse", time: 0};
+
+	var probe = {suppressed: false, reason: ""};
+	window.__lithicLongPressProbe = probe;
+
+	// Track the most recent pointerdown of ANY kind (with its pointerType).
+	// Mouse right-clicks overwrite the entry, so a mouse click right after a
+	// touch gesture is never mistaken for it.
+	document.addEventListener("pointerdown", function(event) {
+		lastPointerDown = {type: event.pointerType || "mouse", time: Date.now()};
+	}, true);
+
+	function isEditable(target) {
+		return !!(target.closest && (target.closest("input, textarea") || target.isContentEditable));
+	}
+
+	document.addEventListener("contextmenu", function(event) {
+		var target = event.target;
+		// Only consume hold-touch right-clicks inside the whiteboard surface.
+		if(!target || !target.closest || !target.closest(SCOPE_SELECTOR)) {
+			probe.suppressed = false;
+			probe.reason = "outside-whiteboard";
+			return;
+		}
+		// Keep the native copy/paste menu while editing text on the board.
+		if(isEditable(target)) {
+			probe.suppressed = false;
+			probe.reason = "editable-target";
+			return;
+		}
+		// Touch/stylus-derived, or mouse/keyboard?
+		var capsFiresTouch = !!(event.sourceCapabilities && event.sourceCapabilities.firesTouchEvents === true);
+		var elapsed = Date.now() - lastPointerDown.time;
+		var sawRecentNonMouse = lastPointerDown.type !== "mouse" && elapsed < TOUCH_GESTURE_WINDOW_MS;
+		if(!capsFiresTouch && !sawRecentNonMouse) {
+			probe.suppressed = false;
+			probe.reason = "mouse-or-keyboard";
+			return;
+		}
+		// Too fast to be a long-press -> deliberate touch right-click.
+		if(elapsed < LONG_PRESS_MIN_MS) {
+			probe.suppressed = false;
+			probe.reason = "fast-touch-right-click";
+			return;
+		}
+		// Hold-touch-to-right-click inside the whiteboard: consume it.
+		event.preventDefault();
+		event.stopImmediatePropagation();
+		probe.suppressed = true;
+		probe.reason = "touch-long-press";
+	}, true);
+};
+
+})();
