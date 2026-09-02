@@ -78,9 +78,12 @@ function injectTiddlers(html: string, tiddlers: Array<Record<string, string>>): 
   return html.replace(/<\/body>/i, `${script}</body>`);
 }
 
-function injectSaverBootstrap(html: string): string {
+function injectSaverBootstrap(html: string, suggestedFileName?: string): string {
   const pluginsJson = JSON.stringify(DEFAULT_PLUGINS);
   const baseFilterStr = JSON.stringify(LITHIC_BASE_FILTER);
+  // The name chosen in the launcher prompt becomes the picker's suggested
+  // filename. Escape "<" so a hostile name cannot break out of the script tag.
+  const suggestedNameJson = JSON.stringify(suggestedFileName || 'new.lith').replace(/</g, '\\u003c');
 
   const bootstrap = `<script>(function(){
     var root = window;
@@ -237,7 +240,7 @@ function injectSaverBootstrap(html: string): string {
     var save = function(_text, _method, callback) {
       var tw = root.$tw;
       var saveOptions = {
-        suggestedName: 'new.lith',
+        suggestedName: ${suggestedNameJson},
         types: [{ description: 'Lithic Monolith', accept: { 'application/x-lith': ['.lith'] } }]
       };
 
@@ -341,7 +344,7 @@ export function buildEngineHtml(
 
   // TiddlyWiki's boot script is usually present in lithic.html. Keep this
   // guard so a future engine build without an initial store still boots.
-  let html = injectSaverBootstrap(injectTiddlers(engineHtml, tiddlers));
+  let html = injectSaverBootstrap(injectTiddlers(engineHtml, tiddlers), handoff.name);
   return injectEngineGlobals(html, engineGlobals);
 }
 

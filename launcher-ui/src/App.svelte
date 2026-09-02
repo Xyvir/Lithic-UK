@@ -44,6 +44,7 @@
   let bookmarkInputElement: HTMLInputElement;
   let showNewLithModal = false;
   let newLithName = '';
+  let newLithError = '';
   let newLithInputElement: HTMLInputElement;
   type CacheSearchEntry = { name: string; text: string; sizeBytes: number };
   type CacheSearchMatch = { preview: string; title?: string };
@@ -108,9 +109,11 @@
     return (entry as any).name || 'untitled.lith';
   }
 
+  // Esc clears the search (same as the × clear button) and drops focus.
   function deselectRecentSearch(event: KeyboardEvent) {
     if (event.key !== 'Escape') return;
     event.preventDefault();
+    search = '';
     (event.currentTarget as HTMLInputElement).blur();
   }
 
@@ -126,6 +129,11 @@
     const nameMatches = entry.name.toLowerCase().includes(query);
     return !isRecent && (nameMatches || Boolean(cacheSearchMatches[entry.name]?.preview));
   });
+
+  // The name that will actually be created (extension normalized), used to
+  // detect case-insensitive collisions with liths in the recent list.
+  $: newLithNormalized = normalizeLithName(newLithName);
+  $: newLithTaken = recentFiles.some((file) => getEntryName(file).toLowerCase() === newLithNormalized.toLowerCase());
 
   async function updateCacheMatches(query: string) {
     const request = ++cacheSearchRequest;
@@ -233,6 +241,7 @@
 
   function openNewLithModal() {
     newLithName = '';
+    newLithError = '';
     showNewLithModal = true;
     setTimeout(() => newLithInputElement?.focus(), 0);
   }
@@ -244,6 +253,16 @@
   // New Blank Lith prompts for a name (unifying local mode with the legacy
   // self-host / WebDAV flow), then hydrates $:/SiteTitle with the filename
   // (sans extension) as the blank-lith placeholder.
+  // Enter (on the input) and the inset checkmark both route through here so a
+  // collision with an existing recent lith blocks creation with a message.
+  function submitNewLith() {
+    if (newLithTaken) {
+      newLithError = 'Name already in use.';
+      return;
+    }
+    createBlankLith();
+  }
+
   async function createBlankLith() {
     const safeName = normalizeLithName(newLithName);
     const siteTitle = safeName.replace(/\.lith$/i, '');
@@ -578,21 +597,22 @@
         <div class="modal-actions"><button class="modal-action" on:click={addInstanceBookmark}>Save Bookmark</button><button class="modal-action secondary" on:click={closeBookmarkModal}>Cancel</button></div>      </div>
     </div>
   {/if}
-  {#if showNewLithModal}
-    <div class="modal-overlay" role="presentation" on:click={(event) => event.currentTarget === event.target && closeNewLithModal()}>
-      <div class="launcher-modal" role="dialog" aria-modal="true" aria-labelledby="new-lith-title">
-        <button class="modal-close" aria-label="Close new lith dialog" on:click={closeNewLithModal}>×</button>
-        <h2 id="new-lith-title">New Blank Lith</h2>
-        <p>Name the new blank lith; the name appears as the wiki title until you rename it.</p>
-        <input bind:this={newLithInputElement} bind:value={newLithName} aria-label="Lith file name" placeholder="untitled" on:keydown={(event) => event.key === 'Enter' && createBlankLith()} />
-        <div class="modal-actions"><button class="modal-action" on:click={createBlankLith}>Create</button><button class="modal-action secondary" on:click={closeNewLithModal}>Cancel</button></div>
-      </div>
-    </div>
-  {/if}
-
   <section class="launcher-actions" aria-label="Launcher actions">
     <div class="action-card action-pair">
-      <button class="action-button" on:click={openNewLithModal} disabled={busy}>New Blank Lith</button>
+      {#if showNewLithModal}
+        <div class="new-lith-inline" role="dialog" aria-label="Enter a title">
+          <div class="new-lith-row">
+            <div class="new-lith-field">
+              {#if newLithError}<span class="new-lith-error" role="alert">{newLithError}</span>{/if}
+              <input bind:this={newLithInputElement} bind:value={newLithName} aria-label="Lith file name" placeholder="Enter a title" spellcheck="false" on:keydown={(event) => { if (event.key === 'Enter') submitNewLith(); else if (event.key === 'Escape') closeNewLithModal(); }} on:input={() => (newLithError = '')} />
+              <button type="button" class="new-lith-check" class:invalid={newLithTaken} aria-label={newLithTaken ? 'Name already in use' : 'Create lith'} title={newLithTaken ? 'Name already in use' : 'Create lith'} on:click={submitNewLith}>{#if newLithTaken}<svg class="new-lith-warn" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3 2 20h20Z"/><path d="M12 10v4.5"/><path d="M12 17.3v.2"/></svg>{:else}✓{/if}</button>
+            </div>
+            <button type="button" class="recent-icon-button remove-recent new-lith-close" aria-label="Close new lith entry" title="Cancel" on:click={closeNewLithModal}><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m7 7 10 10M17 7 7 17"></path></svg></button>
+          </div>
+        </div>
+      {:else}
+        <button class="action-button" on:click={openNewLithModal} disabled={busy}>New Blank Lith</button>
+      {/if}
       <button class="action-button mount-button" on:click={mountFromDisk} disabled={busy}>Mount a Lith</button>
       <button class="bookmark-button" aria-label="Bookmark a self-hosted instance" title="Bookmark a Remote Instance" on:click={openBookmarkModal}><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 21V5a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v16l-6-4z" /></svg></button>
     </div>

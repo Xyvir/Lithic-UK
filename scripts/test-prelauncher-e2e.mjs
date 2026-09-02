@@ -40,29 +40,43 @@ window.showSaveFilePicker = async function(options) {
     if (btn && btn.textContent.includes('New Blank Lith')) {
       clearInterval(checkBtnTimer);
       btn.click();
+      // A timestamp keeps the name collision-free across runs (the recent
+      // liths list persists in the shared test profile's IndexedDB).
+      var typedName = 'E2E Blank ' + Date.now();
 
-      var checkTwTimer = setInterval(function() {
-        if (window.$tw && window.$tw.wiki && window.$tw.saverHandler && window.$tw.rootWidget) {
-          clearInterval(checkTwTimer);
-          
-          window.$tw.wiki.addTiddler(new window.$tw.Tiddler({
-            title: "E2E Journal Note",
-            text: "Testing full modular launcher save as flow",
-            tags: ["E2ETag"]
-          }));
+      var checkFormTimer = setInterval(function() {
+        var input = document.querySelector('input[aria-label="Lith file name"]');
+        if (input) {
+          clearInterval(checkFormTimer);
+          input.value = typedName;
+          input.dispatchEvent(new Event('input', { bubbles: true }));
+          input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }));
 
-          window.$tw.rootWidget.dispatchEvent({ type: "tm-save-wiki" });
+          var checkTwTimer = setInterval(function() {
+            if (window.$tw && window.$tw.wiki && window.$tw.saverHandler && window.$tw.rootWidget) {
+              clearInterval(checkTwTimer);
+              
+              window.$tw.wiki.addTiddler(new window.$tw.Tiddler({
+                title: "E2E Journal Note",
+                text: "Testing full modular launcher save as flow",
+                tags: ["E2ETag"]
+              }));
 
-          setTimeout(function() {
-            var out = document.createElement('pre');
-            out.id = 'e2e-out';
-            out.textContent = JSON.stringify({
-              hasCustomSaver: !!(window.$tw && window.$tw.customSaver),
-              savers: (window.$tw.saverHandler.savers || []).map(function(s){ return { name: s.info.name, priority: s.info.priority }; }),
-              logs: window.__E2E_SAVER_LOGS__
-            }, null, 2);
-            document.body.appendChild(out);
-          }, 1000);
+              window.$tw.rootWidget.dispatchEvent({ type: "tm-save-wiki" });
+
+              setTimeout(function() {
+                var out = document.createElement('pre');
+                out.id = 'e2e-out';
+                out.textContent = JSON.stringify({
+                  hasCustomSaver: !!(window.$tw && window.$tw.customSaver),
+                  savers: (window.$tw.saverHandler.savers || []).map(function(s){ return { name: s.info.name, priority: s.info.priority }; }),
+                  typedName: typedName,
+                  logs: window.__E2E_SAVER_LOGS__
+                }, null, 2);
+                document.body.appendChild(out);
+              }, 1000);
+            }
+          }, 100);
         }
       }, 100);
     }
@@ -101,7 +115,8 @@ try {
 
   assert.equal(parsed.logs.length, 3);
   assert.equal(parsed.logs[0].event, 'showSaveFilePicker');
-  assert.equal(parsed.logs[0].options.suggestedName, 'new.lith');
+  assert.equal(parsed.logs[0].options.suggestedName, parsed.typedName, 'the name from the launcher prompt reaches the save picker');
+  assert.match(parsed.logs[0].options.suggestedName, /\.lith$/);
   assert.deepEqual(parsed.logs[0].options.types[0].accept, { 'application/x-lith': ['.lith'] });
   assert.equal(parsed.logs[1].event, 'write');
   assert.match(parsed.logs[1].dataSnippet, /title: E2E Journal Note/);

@@ -72,6 +72,26 @@ test('opens one Lithic picker with .lith mimetype and reuses the selected handle
   assert.deepEqual(callbackErrors, [null, null]);
 });
 
+test('createLithSaver passes the suggested name through to the picker', async () => {
+  let seen: string | undefined;
+  const picker = async (options: { suggestedName: string; types: Array<{ description: string; accept: Record<string, string[]> }> }) => {
+    seen = options.suggestedName;
+    return {
+      name: options.suggestedName,
+      async createWritable() {
+        return { async write() {}, async close() {} };
+      }
+    };
+  };
+
+  const saver = createLithSaver({ picker, suggestedName: 'My Notes.lith' });
+  const callbackErrors: unknown[] = [];
+  saver('', '', (error) => callbackErrors.push(error));
+  await new Promise((resolve) => setTimeout(resolve, 10));
+  assert.equal(seen, 'My Notes.lith');
+  assert.deepEqual(callbackErrors, [null]);
+});
+
 test('uses initial handle directly when mounted from disk without prompting picker', async () => {
   let pickerCalls = 0;
   const writes: string[] = [];

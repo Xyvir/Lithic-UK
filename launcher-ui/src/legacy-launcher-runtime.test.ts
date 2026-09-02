@@ -68,6 +68,15 @@ test('injected saver recovers the file handle from IndexedDB as a fallback', () 
   assert.match(html, /lithic-active-file/);
 });
 
+test('injected saver suggests the handoff filename in the Save As picker', () => {
+  const html = buildEngineHtml(ENGINE_STUB, { name: 'my notes.lith', text: '' });
+  assert.match(html, /suggestedName: "my notes\.lith"/);
+  // Handoff names are embedded in a script tag, so hostile names must be
+  // escaped rather than breaking out of the injected bootstrap.
+  const hostile = buildEngineHtml(ENGINE_STUB, { name: '</script><script>alert(1)</script>', text: '' });
+  assert.ok(!hostile.includes('<\/script><script>alert(1)<\/script>'), 'script-breaking name is escaped');
+});
+
 test('bootLegacyWiki boots the engine in place so the launcher URL stays in the address bar', async () => {
   // Minimal engine stub — just needs to be valid HTML so injectTiddlers and
   // injectSaverBootstrap can run without throwing.

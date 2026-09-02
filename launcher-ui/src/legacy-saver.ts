@@ -74,6 +74,7 @@ export function createLithSaver(options?: {
   initialHandle?: LocalFileHandle;
   onFile?: (file: LocalFileHandle) => void;
   isJsonMode?: boolean;
+  suggestedName?: string;
 }) {
   let fileHandle: LocalFileHandle | undefined = options?.initialHandle;
   let pickerPromise: Promise<LocalFileHandle> | undefined;
@@ -92,7 +93,7 @@ export function createLithSaver(options?: {
       }
       const saveOptions = isJsonMode
         ? {
-            suggestedName: 'new.lith',
+            suggestedName: options?.suggestedName ?? 'new.lith',
             types: [{ description: 'Lithic Monolith', accept: { 'application/x-lith': ['.lith'] } }]
           }
         : {
@@ -159,6 +160,7 @@ export function installLegacyLithSaver(
   options?: {
     initialHandle?: LocalFileHandle;
     isJsonMode?: boolean;
+    suggestedName?: string;
   }
 ): void {
   const root = (targetWindow ?? (typeof window !== 'undefined' ? window : globalThis)) as any;
@@ -166,7 +168,8 @@ export function installLegacyLithSaver(
   root.$tw.customSaver = {
     save: createLithSaver({
       initialHandle: options?.initialHandle ?? root.__LITHIC_FILE_HANDLE__,
-      isJsonMode: options?.isJsonMode ?? true
+      isJsonMode: options?.isJsonMode ?? true,
+      ...(options?.suggestedName ? { suggestedName: options.suggestedName } : {})
     })
   };
 }
