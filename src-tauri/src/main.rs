@@ -6,7 +6,7 @@
 use std::fs;
 use std::path::PathBuf;
 use std::sync::Mutex;
-use tauri::api::dialog::FileDialogBuilder;
+use tauri::api::dialog::blocking::FileDialogBuilder;
 
 struct StartupFile(Mutex<Option<String>>);
 
@@ -45,11 +45,11 @@ fn read_lith_path(path: String) -> Result<LithFile, String> {
 }
 
 #[tauri::command]
-fn open_lith_file() -> Result<Option<LithFile>, String> {
+async fn open_lith_file() -> Result<Option<LithFile>, String> {
     let selected = FileDialogBuilder::new()
         .add_filter("Lithic files", &["lith"])
         .add_filter("All files", &["*"])
-        .blocking_pick_file();
+        .pick_file();
 
     let Some(path) = selected else { return Ok(None); };
     let text = fs::read_to_string(&path).map_err(|error| error.to_string())?;

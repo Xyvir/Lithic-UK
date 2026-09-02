@@ -87,7 +87,7 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git add src/lithic.html src/launcher.html manifest.json offline-service-worker.js
-          git diff --cached --quiet || git commit -m "Update src/lithic.html, src/launcher.html, and bump PWA to $NEW_VERSION (build-${{ steps.tag.outputs.date }})"
+          git diff --cached --quiet || git commit -m "Update src/lithic.html, src/launcher.html, and bump PWA to $NEW_VERSION (build-$(date +'%Y.%m.%d-%H%M'))"
           git push
 
       - name: Commit Built Wiki to repo root (non-prod)
