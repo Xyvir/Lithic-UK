@@ -1,0 +1,77 @@
+tags: $:/tags/Stylesheet
+title: $:/Lithic/Patches/Whiteboard/PageNavStyle
+type: text/css
+
+/* Prev/next page buttons beside the tldraw page-select dropdown,
+   mounted by $:/Lithic/Patches/Whiteboard/PageNav.js */
+
+.lithic-wb-page-prev,
+.lithic-wb-page-next {
+    display: inline-flex !important;
+    align-items: center;
+    justify-content: center;
+    width: 38px !important;
+    height: 30px !important;
+    margin: 0 2px !important;
+    padding: 0 !important;
+    box-sizing: border-box;
+    position: relative !important;
+    top: 5px !important;
+    border: 1px solid transparent;
+    border-radius: 4px !important;
+    background-color: transparent !important;
+    color: inherit;
+    cursor: pointer;
+}
+
+.lithic-wb-page-prev:hover:not(:disabled),
+.lithic-wb-page-next:hover:not(:disabled) {
+    background-color: rgba(127, 127, 127, 0.22) !important;
+}
+
+.lithic-wb-page-prev:active:not(:disabled),
+.lithic-wb-page-next:active:not(:disabled) {
+    background-color: rgba(127, 127, 127, 0.32) !important;
+}
+
+.lithic-wb-page-prev:disabled,
+.lithic-wb-page-next:disabled {
+    opacity: 0.35;
+    cursor: default;
+}
+
+/* Both glyphs are always in the DOM; :disabled picks which one shows. */
+.lithic-wb-page-prev .lithic-wb-glyph,
+.lithic-wb-page-next .lithic-wb-glyph {
+    display: inline-flex;
+    line-height: 0;
+}
+
+.lithic-wb-page-prev .lithic-wb-glyph-dot,
+.lithic-wb-page-next .lithic-wb-glyph-dot {
+    display: none;
+}
+
+.lithic-wb-page-prev:disabled .lithic-wb-glyph-chevron,
+.lithic-wb-page-next:disabled .lithic-wb-glyph-chevron {
+    display: none;
+}
+
+.lithic-wb-page-prev:disabled .lithic-wb-glyph-dot,
+.lithic-wb-page-next:disabled .lithic-wb-glyph-dot {
+    display: inline-flex;
+}
+
+.lithic-wb-page-prev .lithic-wb-glyph-chevron svg,
+.lithic-wb-page-next .lithic-wb-glyph-chevron svg {
+    display: block;
+    width: 18px;
+    height: 18px;
+}
+
+.lithic-wb-page-prev .lithic-wb-glyph-dot svg,
+.lithic-wb-page-next .lithic-wb-glyph-dot svg {
+    display: block;
+    width: 10px;
+    height: 10px;
+}

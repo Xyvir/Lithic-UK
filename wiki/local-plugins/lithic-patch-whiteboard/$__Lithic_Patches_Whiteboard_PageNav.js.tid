@@ -1,0 +1,262 @@
+title: $:/Lithic/Patches/Whiteboard/PageNav.js
+type: application/javascript
+module-type: startup
+
+/*\
+title: $:/Lithic/Patches/Whiteboard/PageNav.js
+type: application/javascript
+module-type: startup
+
+Adds prev/next page navigation buttons immediately to the right of the tldraw
+page-select dropdown (the #TD-Page trigger in the upper-left #TD-MenuPanel).
+This is pure whiteboard-internal navigation: the buttons drive the live
+TldrawApp via app.changePage() and know nothing about TiddlyWiki's own board
+selector in the top bar.
+
+The page dropdown in this build ships without flanking chevrons, so helpers
+are mounted next to it. Clicking calls changePage on the actual tldraw app
+instance, reached by walking the React fiber tree up from the trigger to the
+TldrawContext.Provider (whose memoizedProps.value IS the app).
+
+Both glyphs (chevron + bullet) are rendered into each button up front and the
+visible one is chosen with pure CSS via :disabled - navigating never mutates
+the button's DOM, so rapid/spam clicks can never be swallowed by the browser
+suppressing a click whose mousedown target was removed mid-press. The app is
+resolved fresh from the live trigger at click time (with a cached fallback),
+so transient React re-renders can't drop a click either.
+\*/
+(function () {
+    "use strict";
+
+    exports.name = "lithic-whiteboard-page-nav";
+    exports.platforms = ["browser"];
+    exports.after = ["startup"];
+    exports.synchronous = true;
+
+    var BUTTON_CLASS = "lithic-wb-page-nav-btn";
+    var SCAN_DEBOUNCE_MS = 25;
+
+    // Stroke-style left/right chevrons (Feather icon set, 24x24 viewBox) so
+    // the buttons read unambiguously as prev/next navigation.
+    var ICON_PREV = '<polyline points="15 18 9 12 15 6"/>';
+    var ICON_NEXT = '<polyline points="9 18 15 12 9 6"/>';
+
+    // Small bullet shown in place of the chevron when the button is disabled
+    // (no further page in that direction).
+    var DOT = '<circle cx="5" cy="5" r="3.5"/>';
+
+    function chevronSvg(direction) {
+        return '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" ' +
+            'stroke="currentColor" stroke-width="2.5" stroke-linecap="round" ' +
+            'stroke-linejoin="round" xmlns="http://www.w3.org/2000/svg">' +
+            (direction === "prev" ? ICON_PREV : ICON_NEXT) +
+            "</svg>";
+    }
+
+    function dotSvg() {
+        return '<svg width="10" height="10" viewBox="0 0 10 10" ' +
+            'fill="currentColor" xmlns="http://www.w3.org/2000/svg">' +
+            DOT +
+            "</svg>";
+    }
+
+    function directionOf(btn) {
+        return btn.classList.contains("lithic-wb-page-prev") ? "prev" : "next";
+    }
+
+    function makeButton(direction) {
+        var btn = document.createElement("button");
+        btn.type = "button";
+        btn.className = BUTTON_CLASS + " lithic-wb-page-" + direction;
+        btn.setAttribute("aria-label", direction === "prev" ? "Previous page" : "Next page");
+        btn.title = direction === "prev" ? "Previous page" : "Next page";
+        // Both glyphs are always present; CSS shows the chevron when enabled
+        // and the bullet when disabled (no DOM mutation while interacting).
+        btn.innerHTML =
+            '<span class="lithic-wb-glyph lithic-wb-glyph-chevron">' + chevronSvg(direction) + "</span>" +
+            '<span class="lithic-wb-glyph lithic-wb-glyph-dot">' + dotSvg() + "</span>";
+        return btn;
+    }
+
+    // Walk the React fiber tree up from a page dropdown trigger to find the
+    // live TldrawApp. The TldrawContext.Provider fiber's memoizedProps.value
+    // is the app instance itself.
+    function findAppFrom(trigger) {
+        if (!trigger) return null;
+        var key = null;
+        for (var prop in trigger) {
+            if (prop.indexOf("__reactFiber$") === 0 || prop.indexOf("__reactInternalInstance$") === 0) {
+                key = prop;
+                break;
+            }
+        }
+        if (!key) return null;
+        var fiber = trigger[key];
+        var guard = 0;
+        while (fiber && guard++ < 300) {
+            var props = fiber.memoizedProps;
+            if (props && props.value && typeof props.value === "object") {
+                var candidate = props.value;
+                if (typeof candidate.changePage === "function" &&
+                    candidate.document && candidate.document.pages && candidate.appState) {
+                    return candidate;
+                }
+            }
+            fiber = fiber.return;
+        }
+        return null;
+    }
+
+    // The page dropdown trigger can be replaced by tldraw re-renders; find the
+    // CURRENT trigger that lives in the same menu panel as the button.
+    function liveTrigger(btn) {
+        var panel = btn.closest ? (btn.closest("#TD-MenuPanel") || btn.closest(".tw-whiteboard-tldraw-container")) : null;
+        if (!panel) return null;
+        return panel.querySelector("#TD-Page") || null;
+    }
+
+    // Resolve the app for a button: prefer a fresh fiber walk from the live
+    // trigger; fall back to the last app cached on the button so a click is
+    // never dropped by a transient React state.
+    function resolveApp(btn, captured) {
+        var live = liveTrigger(btn) || captured;
+        var app = live ? findAppFrom(live) : null;
+        if (!app && live !== captured && captured) {
+            app = findAppFrom(captured);
+        }
+        if (app) {
+            btn._lithicApp = app;
+        } else {
+            app = btn._lithicApp || null;
+        }
+        return app;
+    }
+
+    function getSortedPages(app) {
+        var pages = app.document.pages || {};
+        return Object.keys(pages)
+            .map(function (id) { return pages[id]; })
+            .sort(function (a, b) { return (a.childIndex || 0) - (b.childIndex || 0); });
+    }
+
+    function getCurrentIndex(app) {
+        var pages = getSortedPages(app);
+        var currentId = app.appState.currentPageId;
+        for (var i = 0; i < pages.length; i++) {
+            if (pages[i].id === currentId) return i;
+        }
+        return -1;
+    }
+
+    function refreshDisabled(app, prevBtn, nextBtn) {
+        var idx = app ? getCurrentIndex(app) : -1;
+        var count = app ? getSortedPages(app).length : 0;
+        prevBtn.disabled = idx <= 0;
+        nextBtn.disabled = idx === -1 || idx >= count - 1;
+        // The glyph swap is pure CSS (:disabled), so nothing here mutates DOM.
+    }
+
+    function navigate(trigger, prevBtn, nextBtn, direction, event) {
+        if (event) {
+            event.preventDefault();
+            event.stopPropagation();
+        }
+        var app = resolveApp(nextBtn, trigger);
+        if (!app) return;
+        var pages = getSortedPages(app);
+        var idx = getCurrentIndex(app);
+        if (idx === -1) return;
+        var target = direction === "prev" ? idx - 1 : idx + 1;
+        if (target < 0 || target >= pages.length) return;
+        app.changePage(pages[target].id);
+        refreshDisabled(app, prevBtn, nextBtn);
+    }
+
+    function instrument(trigger) {
+        if (trigger.dataset.lithicPageNav === "1") return;
+
+        // Clear any stale page-nav buttons already in the panel (e.g. from a
+        // previous trigger instance) so there is never more than one pair.
+        var panel = trigger.parentElement;
+        if (panel) {
+            var stale = panel.querySelectorAll(".lithic-wb-page-prev, .lithic-wb-page-next");
+            for (var s = 0; s < stale.length; s++) {
+                stale[s].remove();
+            }
+        }
+
+        // The buttons go to the RIGHT of the page select dropdown, as
+        // siblings of the trigger inside the menu panel's flex row.
+        var prevBtn = makeButton("prev");
+        var nextBtn = makeButton("next");
+        trigger.insertAdjacentElement("afterend", prevBtn);
+        prevBtn.insertAdjacentElement("afterend", nextBtn);
+        trigger.dataset.lithicPageNav = "1";
+
+        // Keep tldraw (pointer handlers) and the radix dropdown trigger from
+        // ever seeing these interactions.
+        var stop = function (event) { event.stopPropagation(); };
+        prevBtn.addEventListener("pointerdown", stop, true);
+        nextBtn.addEventListener("pointerdown", stop, true);
+        prevBtn.addEventListener("mousedown", stop, true);
+        nextBtn.addEventListener("mousedown", stop, true);
+
+        prevBtn.addEventListener("click", function (event) {
+            navigate(trigger, prevBtn, nextBtn, "prev", event);
+        });
+        nextBtn.addEventListener("click", function (event) {
+            navigate(trigger, prevBtn, nextBtn, "next", event);
+        });
+
+        refreshDisabled(resolveApp(nextBtn, trigger), prevBtn, nextBtn);
+
+        // Recompute the disabled state whenever the current page name changes
+        // (dropdown selection, page create/delete, or the wiki-side board
+        // switcher loading a different board into this widget).
+        var labelObserver = new MutationObserver(function () {
+            refreshDisabled(resolveApp(nextBtn, trigger), prevBtn, nextBtn);
+        });
+        labelObserver.observe(trigger, { childList: true, subtree: true, characterData: true });
+    }
+
+    function scan() {
+        var containers = document.querySelectorAll(".tw-whiteboard-tldraw-container");
+        for (var i = 0; i < containers.length; i++) {
+            var trigger = containers[i].querySelector("#TD-Page");
+            if (!trigger) continue;
+            if (trigger.dataset.lithicPageNav !== "1") {
+                instrument(trigger);
+            }
+            var prev = trigger.nextElementSibling;
+            var next = prev ? prev.nextElementSibling : null;
+            if (prev && next &&
+                prev.classList && prev.classList.contains("lithic-wb-page-prev") &&
+                next.classList && next.classList.contains("lithic-wb-page-next")) {
+                var app = findAppFrom(trigger) || null;
+                if (app) {
+                    prev._lithicApp = app;
+                    next._lithicApp = app;
+                }
+                refreshDisabled(app, prev, next);
+            }
+        }
+    }
+
+    exports.startup = function () {
+        if (typeof window === "undefined" || typeof document === "undefined") return;
+
+        var scheduled = false;
+        var observer = new MutationObserver(function () {
+            if (scheduled) return;
+            scheduled = true;
+            setTimeout(function () {
+                scheduled = false;
+                scan();
+            }, SCAN_DEBOUNCE_MS);
+        });
+        observer.observe(document.body, { childList: true, subtree: true });
+
+        scan();
+    };
+
+})();
