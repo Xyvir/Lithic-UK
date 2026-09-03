@@ -374,7 +374,10 @@ function injectSaverBootstrap(html: string, suggestedFileName?: string, isHtmlMo
         var titles = Object.keys(changes);
         if (titles.length === 0) return;
         // Skip engine plumbing ($:/ state, plugins) — user content only.
-        var interesting = titles.filter(function(title) { return !/^\$:\//.test(title); });
+        // NOTE: no regex literal here. This whole bootstrap is one template
+        // literal, so backslash escapes get consumed at build time and would
+        // emit a script that fails to parse. indexOf needs no escapes.
+        var interesting = titles.filter(function(title) { return title.indexOf('$:/') !== 0; });
         if (interesting.length === 0) return;
         markDirty(interesting);
       });
