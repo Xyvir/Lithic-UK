@@ -113,3 +113,32 @@ export function mergePendingImports(existing: PendingTiddler[], incoming: Pendin
 export function isPayloadShareUrl(text: string): boolean {
   return text.includes('?json=') || text.includes('?lith=') || text.includes('?url=');
 }
+
+/**
+ * Build a pin payload from a search cache: the tiddler matching `title` gets
+ * the Dogear tag (which pins it to the top of the story river — the modern
+ * replacement for the deprecated $:/config/TiddlyTools/Pin mechanism). Only
+ * the pinned tiddler is returned — injecting it over the engine's store
+ * refreshes that one tiddler with its cached (last-saved) content plus the
+ * pin tag, and the next save persists the Dogear tag into the file.
+ * Returns null when the cache does not contain the tiddler.
+ */
+export function pinCachedTiddler(cacheText: string, title: string): PendingTiddler[] | null {
+  let tiddlers: PendingTiddler[];
+  try {
+    const parsed = JSON.parse(cacheText);
+    if (!Array.isArray(parsed)) return null;
+    tiddlers = parsed as PendingTiddler[];
+  } catch {
+    return null;
+  }
+
+  const match = tiddlers.find((tiddler) => tiddler.title === title);
+  if (!match) return null;
+  return tagRootDogear([{ ...match, tags: appendTag(match.tags, 'Dogear') }]);
+}
+
+function appendTag(tags: PendingTiddler['tags'], tag: string): string {
+  const existing = Array.isArray(tags) ? tags : typeof tags === 'string' ? tags.split(' ') : [];
+  return [...new Set([...existing, tag])].join(' ');
+}

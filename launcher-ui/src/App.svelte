@@ -3,7 +3,7 @@
   import type { LauncherMode } from './mode';
   import { createFileBridge } from './file-bridge';
   import { bootLegacyWiki, bootLegacyHtml } from './legacy-launcher-runtime';
-  import { getRecentFiles, addRecentFile, removeRecentFile, clearAllRecentFiles, idb, type RecentEntry } from './storage';
+  import { getRecentFiles, addRecentFile, removeRecentFile, clearAllRecentFiles, purgeOldestCachesIfNeeded, idb, getSearchCacheText, listWikiVersions, downloadWikiVersion, deleteWikiHistory, getDirtyState, clearDirtyState, listDirtyRecoveries, type RecentEntry } from './storage';
   import { readBookmarks, saveBookmark, removeBookmark, verifyInstanceUrl, normalizeInstanceUrl } from './bookmarks';
   import { searchCachedWikis } from './cache-search';
   import { serializeJsonToLith } from './lithic-format';
@@ -19,6 +19,7 @@
     mergePendingImports,
     ephemeralIntegrationTiddlers,
     isPayloadShareUrl,
+    pinCachedTiddler,
     type PendingTiddler
   } from './pending-imports';
 
@@ -58,6 +59,17 @@
   let cachedEntries: Record<string, CacheSearchEntry> = {};
   let cacheSearchMatches: Record<string, CacheSearchMatch> = {};
   let cacheSearchRequest = 0;
+  type HistoryEntry = { id: string; ts: number; sizeBytes: number; isBase?: boolean; lastModified: string };
+  let showHistoryModal = false;
+  let historyName = '';
+  let historyEntries: HistoryEntry[] = [];
+  let historyBusy = false;
+  let historyError = '';
+  type DirtyInfo = { name: string; ts: number; tiddlers: Array<Record<string, string>> };
+  let showDirtyModal = false;
+  let dirtyInfo: DirtyInfo | null = null;
+  let dirtyResolver: ((decision: 'merge' | 'discard' | 'later') => void) | null = null;
+  let dirtyEntries: Record<string, number> = {};
 
   function positionCachePreview(node: HTMLElement) {
     let frame = 0;
@@ -109,12 +121,25 @@
     return (entry as any).name || 'untitled.lith';
   }
 
-  // Esc clears the search (same as the × clear button) and drops focus.
-  function deselectRecentSearch(event: KeyboardEvent) {
-    if (event.key !== 'Escape') return;
+  // Esc deselects (blurs) the search while preserving the active query —
+  // non-destructive, per the Puppeteer regression spec. The × button remains
+  // the explicit clear. Enter opens the first visible result (recent or
+  // cached-only), mirroring the legacy handleSearchKeydown behavior.
+  async function handleSearchKeydown(event: KeyboardEvent) {
+    if (event.key === 'Escape') {
+      event.preventDefault();
+      (event.currentTarget as HTMLInputElement).blur();
+      return;
+    }
+    if (event.key !== 'Enter') return;
     event.preventDefault();
-    search = '';
-    (event.currentTarget as HTMLInputElement).blur();
+    const first = filteredRecent[0] ?? filteredCached[0];
+    if (!first) return;
+    if ('title' in first || filteredRecent.includes(first as any)) {
+      await openRecent(first as any);
+    } else {
+      await openCachedEntry(first as CacheSearchEntry);
+    }
   }
 
   $: filteredRecent = recentFiles.filter((file) => {
@@ -156,6 +181,7 @@
 
     if (request !== cacheSearchRequest) return;
     cachedEntries = entries;
+    void refreshDirtyBadges();
     const matches = searchCachedWikis(Object.values(entries), query);
     const next: Record<string, CacheSearchMatch> = {};
     for (const [name, result] of Object.entries(matches)) {
@@ -195,11 +221,67 @@
     return `${withoutKnownExtension || 'untitled'}.lith`;
   }
 
+  /**
+   * Transient-recovery gate: if this wiki has unsaved edits captured by the
+   * realtime dirty watcher, ask the user what to do before booting. Returns
+   * the decision ('later' means the caller should abort the mount).
+   */
+  async function prepareDirtyRecovery(safeName: string): Promise<'merge' | 'discard' | 'later'> {
+    const dirty = await getDirtyState(safeName);
+    if (!dirty) return 'merge'; // Nothing to recover; proceed.
+    const decision = await promptDirtyRecovery(safeName, dirty);
+    if (decision === 'merge') {
+      // Queued after the file's own tiddlers, so recovered edits win title
+      // conflicts but stay below engine plumbing.
+      pendingImports = mergePendingImports(pendingImports, dirty.tiddlers.map((tiddler) => ({ ...tiddler })));
+      await clearDirtyState(safeName);
+      status = `Recovering ${dirty.tiddlers.length} unsaved edit${dirty.tiddlers.length === 1 ? '' : 's'} for ${safeName}`;
+    } else if (decision === 'discard') {
+      await clearDirtyState(safeName);
+    }
+    return decision;
+  }
+
+  function promptDirtyRecovery(name: string, record: { ts: number; tiddlers: Array<Record<string, string>> }): Promise<'merge' | 'discard' | 'later'> {
+    dirtyInfo = { name, ts: record.ts, tiddlers: record.tiddlers };
+    showDirtyModal = true;
+    return new Promise((resolve) => {
+      dirtyResolver = resolve;
+    });
+  }
+
+  function resolveDirtyModal(decision: 'merge' | 'discard' | 'later') {
+    showDirtyModal = false;
+    const resolver = dirtyResolver;
+    dirtyResolver = null;
+    dirtyInfo = null;
+    resolver?.(decision);
+    void refreshDirtyBadges();
+  }
+
+  async function refreshDirtyBadges() {
+    try {
+      const names = [...recentFiles.map((file) => getEntryName(file)), ...Object.keys(cachedEntries)];
+      dirtyEntries = await listDirtyRecoveries(names);
+    } catch {
+      dirtyEntries = {};
+    }
+  }
+
   async function mountWiki(contents: string, name: string, path?: string, handle?: any, extraTiddlers: Array<Record<string, string>> = []) {
     mountError = '';
     const isHtmlMonolith = /\.(?:html?|htm)$/i.test(name);
     const safeName = normalizeLithName(name);
     await remember({ name: isHtmlMonolith ? name : safeName, path, text: contents, handle });
+    if (!isHtmlMonolith) {
+      // HTML monoliths bypass the lith cache chain entirely; lith wikis get
+      // the transient-recovery prompt before anything boots.
+      if ((await prepareDirtyRecovery(safeName)) === 'later') {
+        busy = false;
+        status = 'Unsaved edits kept for later';
+        return;
+      }
+    }
     if (typeof window !== 'undefined') {
       if (handle) {
         (window as any).__LITHIC_FILE_HANDLE__ = handle;
@@ -208,8 +290,9 @@
       }
     }
     if (isHtmlMonolith) {
-      // HTML monoliths are complete wiki pages — serve them as-is.
-      await bootLegacyHtml(contents);
+      // HTML monoliths are complete wiki pages — serve them as-is, with an
+      // HTML-mode Save As saver injected (legacy parity).
+      await bootLegacyHtml(contents, safeName);
       return;
     }
     const handoff = { name: safeName, path, text: contents };
@@ -465,22 +548,54 @@
     bookmarks = removeBookmark(url);
   }
 
-  async function downloadCachedFile(name: string) {
+  /**
+   * Open the per-wiki version history modal. The history icon no longer
+   * downloads a single cache blob — it lists every timestamped version
+   * (deltas materialized on demand) and lets the user download any of them
+   * as a non-destructive `<stem>_recover_<stamp>.lith` copy.
+   */
+  async function openHistoryModal(name: string) {
+    historyName = name;
+    historyEntries = [];
+    historyError = '';
+    showHistoryModal = true;
+    historyBusy = true;
     try {
-      const cache = await idb.get<{ text?: string }>('search_cache_' + name);
-      if (!cache?.text) return;
-      const text = cache.text.trim().startsWith('[') ? serializeJsonToLith(cache.text) : cache.text;
+      historyEntries = await listWikiVersions(name);
+      if (historyEntries.length === 0) historyError = 'No versioned history is available for this wiki yet.';
+    } catch (error) {
+      historyError = error instanceof Error ? error.message : String(error);
+    } finally {
+      historyBusy = false;
+    }
+  }
+
+  function closeHistoryModal() {
+    showHistoryModal = false;
+    historyError = '';
+  }
+
+  /** Download one materialized version; history is never modified. */
+  async function downloadHistoryVersion(id: string) {
+    try {
+      const version = await downloadWikiVersion(historyName, id);
+      if (!version) {
+        historyError = 'That version could not be materialized from the history chain.';
+        return;
+      }
+      const text = version.text.trim().startsWith('[') ? serializeJsonToLith(version.text) : version.text;
       const blob = new Blob([text], { type: 'application/x-lith' });
       const url = URL.createObjectURL(blob);
       const anchor = document.createElement('a');
       anchor.href = url;
-      anchor.download = name.replace(/\.(?:html?|lith|json)$/i, '') + '_recovered.lith';
+      anchor.download = version.fileName;
       document.body.appendChild(anchor);
       anchor.click();
       anchor.remove();
       setTimeout(() => URL.revokeObjectURL(url), 0);
+      status = `Recovered ${version.fileName}`;
     } catch (error) {
-      mountError = error instanceof Error ? error.message : String(error);
+      historyError = error instanceof Error ? error.message : String(error);
     }
   }
 
@@ -492,13 +607,88 @@
     localStorage.removeItem(RECENT_KEY);
   }
 
+  /** Latest live cache entry text for a file (empty when none). */
+  async function getCacheHistoryText(name: string): Promise<string> {
+    return getSearchCacheText(name);
+  }
+
+  /**
+   * Open a cached-only entry (a file with no live handle but with local
+   * history) as a read-only wiki, mirroring the legacy offline fallback.
+   */
+  async function openCachedEntry(entry: CacheSearchEntry) {
+    const cacheText = await getCacheHistoryText(entry.name);
+    if (!cacheText) return;
+    await mountCachedReadOnly(entry.name, cacheText);
+  }
+
+  /**
+   * Mount a wiki from its cached tiddler snapshot in read-only mode:
+   * hydrate SiteTitle from the file name and inject DisableAutoSaver.
+   */
+  async function mountCachedReadOnly(name: string, cacheText: string) {
+    let parsed: Array<Record<string, string>> = [];
+    try {
+      const json = JSON.parse(cacheText);
+      if (Array.isArray(json)) parsed = json as Array<Record<string, string>>;
+    } catch { /* mount with whatever parsed */ }
+    // Offer unsaved edits captured since the last real save; merged on top
+    // of the cache snapshot when accepted.
+    const dirty = await getDirtyState(name);
+    if (dirty) {
+      const decision = await promptDirtyRecovery(name, dirty);
+      if (decision === 'merge') {
+        parsed = [...parsed, ...dirty.tiddlers.map((tiddler) => ({ ...tiddler }))];
+        await clearDirtyState(name);
+        status = `Recovering ${dirty.tiddlers.length} unsaved edit${dirty.tiddlers.length === 1 ? '' : 's'} for ${name}`;
+      } else if (decision === 'discard') {
+        await clearDirtyState(name);
+      }
+      void refreshDirtyBadges();
+    }
+
+    const handoff = {
+      name,
+      text: '',
+      payloadTiddlers: parsed
+    };
+    await bootLegacyWiki(handoff, [
+      { title: '$:/state/DisableAutoSaver', text: 'yes' },
+      ...ephemeralIntegrationTiddlers()
+    ], {
+      __EPHEMERAL_MODE__: mode === 'self-host' ? 'self-host' : 'paper-light',
+      __LITHIC_LAUNCHER_MODE__: mode
+    });
+  }
+
+  /**
+   * Pin the tiddler matched by a cache preview to the top of the story river
+   * (Dogear tag) and open the file. The payload must be queued before the
+   * mount — after the engine boots the launcher component is torn down.
+   */
+  async function pinFromPreview(name: string) {
+    const match = cacheSearchMatches[name];
+    if (!match?.title) return;
+    const cacheText = await getCacheHistoryText(name);
+    if (!cacheText) return;
+    const payload = pinCachedTiddler(cacheText, match.title);
+    if (!payload) return;
+    pendingImports = mergePendingImports(pendingImports, payload);
+
+    const recent = recentFiles.find((file) => getEntryName(file) === name);
+    if (recent) {
+      await openRecent(recent);
+    } else {
+      await openCachedEntry({ name, text: cacheText, sizeBytes: new Blob([cacheText]).size });
+    }
+  }
+
   async function removeRecent(file: RecentEntry | { name?: string; handle?: any }) {
     if ((file as any).handle) {
       recentFiles = await removeRecentFile((file as any).handle);
       const name = (file as any).handle.name;
       await idb.del('search_cache_' + name);
-      await idb.del('search_cache_bk1_' + name);
-      await idb.del('search_cache_bk2_' + name);
+      await deleteWikiHistory(name);
       delete cachedEntries[name];
       delete cacheSearchMatches[name];
       cachedEntries = cachedEntries;
@@ -512,8 +702,13 @@
   onMount(() => {
     loadRecent();
     bookmarks = readBookmarks();
+    void purgeOldestCachesIfNeeded().catch(() => { /* best effort */ });
     const closeOnEscape = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') closeBookmarkModal();
+      if (event.key === 'Escape') {
+        if (showDirtyModal) resolveDirtyModal('later');
+        if (showHistoryModal) closeHistoryModal();
+        closeBookmarkModal();
+      }
     };
     window.addEventListener('keydown', closeOnEscape);
 
@@ -597,6 +792,57 @@
         <div class="modal-actions"><button class="modal-action" on:click={addInstanceBookmark}>Save Bookmark</button><button class="modal-action secondary" on:click={closeBookmarkModal}>Cancel</button></div>      </div>
     </div>
   {/if}
+  {#if showHistoryModal}
+    <div class="modal-overlay" role="presentation" on:click={(event) => event.currentTarget === event.target && closeHistoryModal()}>
+      <div class="launcher-modal history-modal" role="dialog" aria-modal="true" aria-labelledby="history-title">
+        <button class="modal-close" aria-label="Close version history dialog" on:click={closeHistoryModal}>×</button>
+        <h2 id="history-title">Version History</h2>
+        <p class="history-subtitle">{historyName}</p>
+        {#if historyBusy}
+          <p class="history-empty">Loading versions…</p>
+        {:else if historyEntries.length === 0}
+          <p class="history-empty">{historyError || 'No versioned history is available for this wiki yet.'}</p>
+        {:else}
+          <ul class="history-list">
+            {#each historyEntries as entry (entry.id)}
+              <li class="history-entry">
+                <div class="history-meta">
+                  <span class="history-time">{entry.lastModified}</span>
+                  <span class="history-size">{formatCacheSize(entry.sizeBytes)}</span>
+                  {#if entry.isBase}<span class="history-badge">snapshot</span>{:else}<span class="history-badge delta">delta</span>{/if}
+                </div>
+                <button class="history-download" type="button" on:click={() => downloadHistoryVersion(entry.id)}>Download copy</button>
+              </li>
+            {/each}
+          </ul>
+          {#if historyError}<p class="status-line error" role="alert">{historyError}</p>{/if}
+          <p class="history-note">Downloads are non-destructive copies — your history is never modified. Import a copy under a new name to inspect it.</p>
+        {/if}
+      </div>
+    </div>
+  {/if}
+  {#if showDirtyModal && dirtyInfo}
+    <div class="modal-overlay" role="presentation">
+      <div class="launcher-modal dirty-modal" role="dialog" aria-modal="true" aria-labelledby="dirty-title">
+        <h2 id="dirty-title">Unsaved edits found</h2>
+        <p>
+          {dirtyInfo.name} has {dirtyInfo.tiddlers.length} unsaved edit{dirtyInfo.tiddlers.length === 1 ? '' : 's'}
+          captured {new Date(dirtyInfo.ts).toLocaleString()} from a previous session that was never saved to disk.
+        </p>
+        <ul class="dirty-tiddler-list">
+          {#each dirtyInfo.tiddlers.slice(0, 8) as tiddler (tiddler.title)}
+            <li>{tiddler.title}</li>
+          {/each}
+          {#if dirtyInfo.tiddlers.length > 8}<li class="dirty-more">… and {dirtyInfo.tiddlers.length - 8} more</li>{/if}
+        </ul>
+        <div class="modal-actions">
+          <button class="modal-action" on:click={() => resolveDirtyModal('merge')}>Recover edits</button>
+          <button class="modal-action secondary" on:click={() => resolveDirtyModal('later')}>Decide later</button>
+          <button class="modal-action secondary" on:click={() => resolveDirtyModal('discard')}>Discard</button>
+        </div>
+      </div>
+    </div>
+  {/if}
   <section class="launcher-actions" aria-label="Launcher actions">
     <div class="action-card action-pair">
       {#if showNewLithModal}
@@ -621,7 +867,7 @@
     <section class="recent-section" aria-label="Recent Liths">
       <div class="recent-search-wrap">
         <svg class="recent-search-icon" viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="7.5"></circle><path d="m16.5 16.5 4 4"></path></svg>
-        <input class="recent-search" aria-label="Search recent Liths" placeholder="Search recent liths…" bind:value={search} on:keydown={deselectRecentSearch} />
+        <input class="recent-search" aria-label="Search recent Liths" placeholder="Search recent liths…" bind:value={search} on:keydown={handleSearchKeydown} />
         {#if search}<button class="recent-search-clear" type="button" aria-label="Clear recent Lith search" on:click={() => search = ''}>×</button>{/if}
       </div>
       <div class="recent-list">
@@ -635,24 +881,42 @@
         {#each filteredRecent as file}
           {@const name = getEntryName(file)}
           <div class="recent-row">
-            <button class="recent-name" on:click={() => openRecent(file)}>{name}{#if cachedEntries[name]}<span class="cached-size">{formatCacheSize(cachedEntries[name].sizeBytes)}</span>{/if}</button>
-            <button class="recent-icon-button cache-history-button" type="button" disabled={!cachedEntries[name]} aria-label={`Download cached history for ${name}`} title={cachedEntries[name] ? 'Download cached history' : 'No cached history available'} on:click={() => downloadCachedFile(name)}>
+            <button class="recent-name" on:click={() => openRecent(file)}>{name}{#if dirtyEntries[name]}<span class="dirty-badge" title={`Unsaved edits from ${new Date(dirtyEntries[name]).toLocaleString()}`}>unsaved edits</span>{/if}{#if cachedEntries[name]}<span class="cached-size">{formatCacheSize(cachedEntries[name].sizeBytes)}</span>{/if}</button>
+            <button class="recent-icon-button cache-history-button" type="button" disabled={!cachedEntries[name]} aria-label={`Show version history for ${name}`} title={cachedEntries[name] ? 'Show version history' : 'No cached history available'} on:click={() => openHistoryModal(name)}>
               <svg class="history-download-icon" viewBox="56 108 33 36" aria-hidden="true"><path class="history-icon-shape" d="m 73.595508,109.76746 c -7.198235,0 -13.103617,5.58342 -13.647229,12.64471 h -0.0072 V 138.2696 H 58.61606 l 2.32389,4.02559 2.324405,-4.02559 h -1.323433 v -15.85123 c 0.530186,-5.97937 5.534806,-10.65103 11.654586,-10.65103 6.474618,0 11.703161,5.22855 11.703161,11.70316 0,6.47462 -5.228543,11.70161 -11.703161,11.70161 -2.644513,0 -5.080809,-0.87232 -7.037814,-2.34508 v 2.39572 c 2.058162,1.23707 4.46633,1.94924 7.037814,1.94924 7.555498,0 13.703556,-6.14599 13.703556,-13.70149 0,-7.5555 -6.148058,-13.70304 -13.703556,-13.70304 z m -2.108915,7.49825 v 8.05016 h 7.125663 v -1.59836 h -5.527311 v -6.4518 z"></path></svg>
             </button>
             {#if cacheSearchMatches[name]?.preview}
-              <div use:positionCachePreview class="cache-preview" aria-label="Cached text match">{@html cacheSearchMatches[name].preview}</div>
+              <div
+                use:positionCachePreview
+                class="cache-preview"
+                role="button"
+                tabindex="0"
+                aria-label={cacheSearchMatches[name].title ? `Open ${name} and pin “${cacheSearchMatches[name].title}” to top` : `Open ${name}`}
+                title="Click to open and pin this tiddler to the top of the story river"
+                on:click={() => pinFromPreview(name)}
+                on:keydown={(event) => (event.key === 'Enter' || event.key === ' ') && pinFromPreview(name)}
+              >{@html cacheSearchMatches[name].preview}</div>
             {/if}
             <button class="recent-icon-button remove-recent" type="button" aria-label={`Remove ${name}`} on:click={() => removeRecent(file)}><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m7 7 10 10M17 7 7 17"></path></svg></button>
           </div>
         {/each}
         {#each filteredCached as entry}
           <div class="recent-row cached-only-row">
-            <div class="recent-name cached-result" role="note">{entry.name}<span class="cached-size">{formatCacheSize(entry.sizeBytes)}</span><span class="cached-label">Cached locally</span></div>
-            <button class="recent-icon-button cache-history-button" type="button" aria-label={`Download cached history for ${entry.name}`} title="Download cached history" on:click={() => downloadCachedFile(entry.name)}>
+            <div class="recent-name cached-result" role="note">{entry.name}{#if dirtyEntries[entry.name]}<span class="dirty-badge" title={`Unsaved edits from ${new Date(dirtyEntries[entry.name]).toLocaleString()}`}>unsaved edits</span>{/if}<span class="cached-size">{formatCacheSize(entry.sizeBytes)}</span><span class="cached-label">Cached locally</span></div>
+            <button class="recent-icon-button cache-history-button" type="button" aria-label={`Show version history for ${entry.name}`} title="Show version history" on:click={() => openHistoryModal(entry.name)}>
               <svg class="history-download-icon" viewBox="56 108 33 36" aria-hidden="true"><path class="history-icon-shape" d="m 73.595508,109.76746 c -7.198235,0 -13.103617,5.58342 -13.647229,12.64471 h -0.0072 V 138.2696 H 58.61606 l 2.32389,4.02559 2.324405,-4.02559 h -1.323433 v -15.85123 c 0.530186,-5.97937 5.534806,-10.65103 11.654586,-10.65103 6.474618,0 11.703161,5.22855 11.703161,11.70316 0,6.47462 -5.228543,11.70161 -11.703161,11.70161 -2.644513,0 -5.080809,-0.87232 -7.037814,-2.34508 v 2.39572 c 2.058162,1.23707 4.46633,1.94924 7.037814,1.94924 7.555498,0 13.703556,-6.14599 13.703556,-13.70149 0,-7.5555 -6.148058,-13.70304 -13.703556,-13.70304 z m -2.108915,7.49825 v 8.05016 h 7.125663 v -1.59836 h -5.527311 v -6.4518 z"></path></svg>
             </button>
             {#if cacheSearchMatches[entry.name]?.preview}
-              <div use:positionCachePreview class="cache-preview" aria-label="Cached text match">{@html cacheSearchMatches[entry.name].preview}</div>
+              <div
+                use:positionCachePreview
+                class="cache-preview"
+                role="button"
+                tabindex="0"
+                aria-label={cacheSearchMatches[entry.name].title ? `Open ${entry.name} and pin “${cacheSearchMatches[entry.name].title}” to top` : `Open ${entry.name}`}
+                title="Click to open and pin this tiddler to the top of the story river"
+                on:click={() => pinFromPreview(entry.name)}
+                on:keydown={(event) => (event.key === 'Enter' || event.key === ' ') && pinFromPreview(entry.name)}
+              >{@html cacheSearchMatches[entry.name].preview}</div>
             {/if}
           </div>
         {/each}

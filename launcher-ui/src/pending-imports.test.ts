@@ -7,7 +7,8 @@ import {
   tagRootDogear,
   mergePendingImports,
   isPayloadShareUrl,
-  ephemeralIntegrationTiddlers
+  ephemeralIntegrationTiddlers,
+  pinCachedTiddler
 } from './pending-imports.ts';
 
 test('parsePayloadText parses JSON arrays and lith monoliths', () => {
@@ -62,4 +63,32 @@ test('ephemeral integration tiddlers are present and uniquely titled', () => {
   const titles = tiddlers.map((t) => t.title);
   assert.equal(new Set(titles).size, titles.length);
   assert.ok(titles.some((title) => title.includes('action-ephemeral')));
+});
+
+const pinCache = JSON.stringify([
+  { title: 'First', text: 'alpha' },
+  { title: 'Target', text: 'match here', tags: 'Journal' },
+  { title: 'Last', text: 'omega' }
+]);
+
+test('pinCachedTiddler returns only the matching tiddler tagged Dogear', () => {
+  const payload = pinCachedTiddler(pinCache, 'Target');
+  assert.ok(payload);
+  assert.equal(payload!.length, 1);
+  assert.equal(payload![0].title, 'Target');
+  assert.equal(payload![0].text, 'match here');
+  assert.equal(payload![0].tags, 'Journal Dogear');
+});
+
+test('pinCachedTiddler avoids duplicate Dogear tags and preserves arrays', () => {
+  const cache = JSON.stringify([{ title: 'X', tags: ['A', 'Dogear'] }]);
+  const payload = pinCachedTiddler(cache, 'X');
+  assert.ok(payload);
+  assert.equal(payload![0].tags, 'A Dogear');
+});
+
+test('pinCachedTiddler returns null for unknown titles and invalid cache text', () => {
+  assert.equal(pinCachedTiddler(pinCache, 'Missing'), null);
+  assert.equal(pinCachedTiddler('not json at all', 'Target'), null);
+  assert.equal(pinCachedTiddler('{"title":"solo object"}', 'solo object'), null);
 });

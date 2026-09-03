@@ -364,10 +364,14 @@ footer > * { pointer-events: auto; }
   white-space: pre;
   overflow: hidden;
   pointer-events: auto;
+  cursor: pointer;
   z-index: 20;
   transition: opacity 0.2s, border-color 0.2s;
 }
-.cache-preview:hover { border-color: #8ab4f8; }
+
+.cache-preview:hover {
+  border-color: #8ab4f8;
+}
 .cache-preview mark { color: #ff9800; background: transparent; font-weight: 700; }
 .remove-recent { color: #ff5555; }
 .remove-recent:hover { color: #ff7777; }
@@ -464,4 +468,40 @@ body.drag-over::after {
   background: rgb(138 180 248 / 70%);
   z-index: 10000;
   pointer-events: none;
+}
+
+/* --- Version history modal --- */
+.history-modal { width: min(100%, 540px); }
+.history-subtitle { margin: -8px 0 14px; color: #999; font-size: 0.85em; word-break: break-all; }
+.history-empty { color: #999; }
+.history-list { list-style: none; margin: 0; padding: 0; max-height: 46vh; overflow: auto; }
+.history-entry {
+  display: flex; align-items: center; justify-content: space-between; gap: 12px;
+  padding: 9px 10px; border: 1px solid #3a3a3a; border-radius: 7px; margin-bottom: 8px; background: #2c2c2c;
+}
+.history-meta { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.history-time { color: #ddd; font-size: 0.86em; }
+.history-size { color: #888; font-size: 0.76em; }
+.history-badge {
+  align-self: flex-start; margin-top: 3px; padding: 0 6px; border-radius: 9px;
+  border: 1px solid #5a7fbf; color: #8ab4f8; font-size: 0.68em; text-transform: uppercase; letter-spacing: 0.04em;
+}
+.history-badge.delta { border-color: #6d6d6d; color: #aaa; }
+.history-download {
+  flex: none; padding: 7px 12px; border: 1px solid #8ab4f8; border-radius: 6px;
+  background: rgb(138 180 248 / 12%); color: #8ab4f8; font-size: 0.82em; cursor: pointer;
+}
+.history-download:hover { background: rgb(138 180 248 / 22%); }
+.history-note { margin-top: 14px; color: #888; font-size: 0.8em; line-height: 1.45; }
+
+/* --- Transient (dirty) recovery --- */
+.dirty-modal { width: min(100%, 480px); }
+.dirty-tiddler-list {
+  margin: 12px 0 0; padding: 8px 10px 8px 26px; border: 1px solid #3a3a3a; border-radius: 7px;
+  background: #2c2c2c; color: #ccc; font-size: 0.85em; max-height: 30vh; overflow: auto;
+}
+.dirty-tiddler-list .dirty-more { color: #888; list-style: none; margin-left: -14px; }
+.dirty-badge {
+  display: inline-block; margin-left: 0.75em; padding: 1px 7px; border-radius: 9px;
+  border: 1px solid #bf6d5a; color: #ff9d80; font-size: 0.7em; white-space: nowrap;
 }

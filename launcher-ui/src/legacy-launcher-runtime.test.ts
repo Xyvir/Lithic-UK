@@ -138,3 +138,17 @@ test('bootLegacyWiki boots the engine in place so the launcher URL stays in the 
     (URL as any).createObjectURL = savedCreateObjectURL;
   }
 });
+
+test('engine bootstrap arms the realtime dirty watcher for lith mode', () => {
+  const html = buildEngineHtml(ENGINE_STUB, { name: 'x.lith', text: '' });
+  assert.ok(html.includes('__LITHIC_ACTIVE_FILE_NAME__'), 'bootstrap exposes the active file name');
+  assert.ok(html.includes('__LITHIC_DIRTY_WATCHER_ARMED__'), 'bootstrap arms a single shared change listener');
+  assert.ok(html.includes("addEventListener('change'"), 'bootstrap listens for wiki change events');
+  assert.ok(html.includes('dirty_state_'), 'bootstrap persists dirty tiddlers to the dirty_state_ key');
+  assert.ok(html.includes('pagehide'), 'bootstrap flushes buffered drafts on pagehide');
+});
+
+test('engine bootstrap keeps the dirty watcher inert for HTML monolith mode', () => {
+  const html = buildEngineHtml(ENGINE_STUB, { name: 'x.html', text: '' }, [], {}, { isHtmlMode: true });
+  assert.ok(html.includes('__LITHIC_ACTIVE_FILE_NAME__ = "";'), 'HTML monoliths leave the active file key empty');
+});

@@ -6,9 +6,18 @@ export interface FileBridge {
 
 type TauriApi = { invoke: (command: string, args?: Record<string, unknown>) => Promise<unknown> };
 
+/**
+ * Resolve the Tauri invoke function across versions: Tauri v1 exposes
+ * window.__TAURI__.tauri.invoke (withGlobalTauri), while Tauri v2 exposes
+ * window.__TAURI__.invoke directly. The repo's Tauri app is currently v1.
+ */
 function tauriApi(): TauriApi | null {
-  const candidate = (globalThis as typeof globalThis & { __TAURI__?: { invoke?: TauriApi['invoke'] } }).__TAURI__;
-  return candidate?.invoke ? { invoke: candidate.invoke } : null;
+  const root = (globalThis as typeof globalThis & {
+    __TAURI__?: { invoke?: TauriApi['invoke']; tauri?: { invoke?: TauriApi['invoke'] } }
+  }).__TAURI__;
+  if (root?.invoke) return { invoke: root.invoke };
+  if (root?.tauri?.invoke) return { invoke: root.tauri.invoke };
+  return null;
 }
 
 async function fetchText(url: string): Promise<string> {

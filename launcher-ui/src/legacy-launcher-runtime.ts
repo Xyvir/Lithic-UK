@@ -1,4 +1,5 @@
 import { parseLithToJSON } from './lithic-format.ts';
+import { JSON_PATCH_RUNTIME } from './json-patch.ts';
 import { DEFAULT_PLUGINS, LITHIC_BASE_FILTER } from './legacy-saver.ts';
 
 export type LauncherHandoff = {
@@ -78,14 +79,26 @@ function injectTiddlers(html: string, tiddlers: Array<Record<string, string>>): 
   return html.replace(/<\/body>/i, `${script}</body>`);
 }
 
-function injectSaverBootstrap(html: string, suggestedFileName?: string): string {
+function injectSaverBootstrap(html: string, suggestedFileName?: string, isHtmlMode = false): string {
   const pluginsJson = JSON.stringify(DEFAULT_PLUGINS);
+  const jsonPatchRuntime = JSON_PATCH_RUNTIME;
   const baseFilterStr = JSON.stringify(LITHIC_BASE_FILTER);
   // The name chosen in the launcher prompt becomes the picker's suggested
   // filename. Escape "<" so a hostile name cannot break out of the script tag.
   const suggestedNameJson = JSON.stringify(suggestedFileName || 'new.lith').replace(/</g, '\\u003c');
+  // The active file name keys the transient dirty-state backup in IndexedDB.
+  // HTML monoliths bypass cache bookkeeping entirely, so they opt out by
+  // leaving the key empty (the watcher stays inert).
+  const activeFileNameJson = isHtmlMode ? '""' : JSON.stringify(suggestedFileName || 'new.lith').replace(/</g, '\\u003c');
+  const saveTypes = isHtmlMode
+    ? [{ description: 'Lithic HTML File', accept: { 'text/html': ['.html', '.htm'] } }]
+    : [{ description: 'Lithic Monolith', accept: { 'application/x-lith': ['.lith'] } }];
+  const saveTypesJson = JSON.stringify(saveTypes);
+  const htmlModeLiteral = isHtmlMode ? 'true' : 'false';
 
-  const bootstrap = `<script>(function(){
+  // The patch runtime is injected as its own script so the mounted wiki can
+  // record per-version history (window.__LITHIC_JSON_PATCH__) from the saver.
+  const bootstrap = `<script>${jsonPatchRuntime}</script>\n<script>(function(){
     var root = window;
     var defaultPlugins = ${pluginsJson};
     var pluginExclusions = defaultPlugins.map(function(p){ return '-[[$:/plugins/' + p + ']]'; }).join(' ');
@@ -162,16 +175,224 @@ function injectSaverBootstrap(html: string, suggestedFileName?: string): string 
       });
     }
 
+    var HISTORY_MAX_VERSIONS = 30;
+    // Defined by the JSON patch runtime script injected just before this one.
+    var JP = root.__LITHIC_JSON_PATCH__;
+
+    function hMeta(fileName) { return 'search_cache_meta_' + fileName; }
+    function hBase(fileName, id) { return 'search_cache_base_' + fileName + '_' + id; }
+    function hDelta(fileName, id) { return 'search_cache_delta_' + fileName + '_' + id; }
+
+    function versionId(ts, text, parentId) {
+      var hash = 5381;
+      var seed = (parentId || '') + '|' + text;
+      for (var i = 0; i < seed.length; i++) hash = ((hash << 5) + hash + seed.charCodeAt(i)) >>> 0;
+      return ts.toString(36) + '-' + hash.toString(36);
+    }
+
+    function replayFrom(fileName, ordered, fromIndex, map, parentId, targetIndex) {
+      if (fromIndex > targetIndex) return Promise.resolve({ map: map, reached: true });
+      var version = ordered[fromIndex];
+      return idbKeyval.get(hDelta(fileName, version.id)).then(function(delta) {
+        if (!delta || delta.parentId !== parentId) return { map: null, reached: false };
+        return replayFrom(fileName, ordered, fromIndex + 1, JP.applyTiddlerPatch(map, delta.ops), version.id, targetIndex);
+      });
+    }
+
+    function materializeVersion(fileName, meta, targetId) {
+      var ordered = meta.versions.slice().sort(function(a, b) { return a.ts - b.ts; });
+      var targetIndex = -1;
+      var baseIndex = -1;
+      for (var i = 0; i < ordered.length; i++) if (ordered[i].id === targetId) targetIndex = i;
+      if (targetIndex < 0) return Promise.resolve({ map: null, reached: false });
+      for (var j = targetIndex; j >= 0; j--) { if (ordered[j].isBase) { baseIndex = j; break; } }
+      if (baseIndex < 0) return Promise.resolve({ map: null, reached: false });
+      return idbKeyval.get(hBase(fileName, ordered[baseIndex].id)).then(function(base) {
+        var map = base ? JP.tiddlersToMap(base.text) : null;
+        if (!map) return { map: null, reached: false };
+        return replayFrom(fileName, ordered, baseIndex + 1, map, ordered[baseIndex].id, targetIndex);
+      });
+    }
+
+    function pruneHistory(fileName, meta) {
+      function step() {
+        if (meta.versions.length <= HISTORY_MAX_VERSIONS) return Promise.resolve();
+        var ordered = meta.versions.slice().sort(function(a, b) { return a.ts - b.ts; });
+        var oldest = ordered[0];
+        if (oldest.isBase && ordered.length > 1) {
+          // Re-base the successor so the oldest state can be shed without
+          // orphaning its deltas (nothing else in history is destroyed).
+          var second = ordered[1];
+          return materializeVersion(fileName, meta, second.id).then(function(result) {
+            if (!result.reached || !result.map) return;
+            var text = JP.mapToTiddlerArrayText(result.map);
+            return idbKeyval.set(hBase(fileName, second.id), { id: second.id, text: text }).then(function() {
+              return idbKeyval.del(hBase(fileName, oldest.id));
+            }).then(function() {
+              return idbKeyval.del(hDelta(fileName, second.id));
+            }).then(function() {
+              meta.versions = ordered.slice(1).map(function(v) {
+                return v.id === second.id
+                  ? { id: v.id, ts: v.ts, sizeBytes: text.length, isBase: true }
+                  : { id: v.id, ts: v.ts, sizeBytes: v.sizeBytes, isBase: v.isBase || false };
+              });
+              return step();
+            });
+          });
+        }
+        if (oldest.isBase) return Promise.resolve();
+        return idbKeyval.del(hDelta(fileName, oldest.id)).then(function() {
+          meta.versions = meta.versions.filter(function(v) { return v.id !== oldest.id; });
+          return step();
+        });
+      }
+      return step();
+    }
+
+    function saveVersionedCache(fileName, text, now) {
+      if (!JP) return Promise.resolve();
+      var metaKey = hMeta(fileName);
+      return idbKeyval.get(metaKey).then(function(meta) {
+        meta = meta || { headId: '', versions: [] };
+        var headPromise = meta.headId
+          ? materializeVersion(fileName, meta, meta.headId)
+          : Promise.resolve({ map: null, reached: false });
+        return headPromise.then(function(head) {
+          var nextMap = JP.tiddlersToMap(text);
+          if (!nextMap) return; // Not a tiddler array; keep only the flat cache.
+          var useBase = !head.reached || !head.map;
+          var ops = [];
+          if (!useBase) {
+            ops = JP.diffTiddlerMaps(head.map, nextMap);
+            useBase = JSON.stringify(ops).length > text.length / 2;
+          }
+          var id;
+          if (useBase) {
+            id = versionId(now, text, '');
+            return idbKeyval.set(hBase(fileName, id), { id: id, text: text }).then(function() {
+              meta.versions.push({ id: id, ts: now, sizeBytes: text.length, isBase: true });
+              meta.headId = id;
+              return pruneHistory(fileName, meta);
+            }).then(function() {
+              return idbKeyval.set(metaKey, meta);
+            });
+          }
+          id = versionId(now, text, meta.headId);
+          return idbKeyval.set(hDelta(fileName, id), { id: id, parentId: meta.headId, ts: now, ops: ops }).then(function() {
+            meta.versions.push({ id: id, ts: now, sizeBytes: JP.mapToTiddlerArrayText(nextMap).length, isBase: false });
+            meta.headId = id;
+            return pruneHistory(fileName, meta);
+          }).then(function() {
+            return idbKeyval.set(metaKey, meta);
+          });
+        });
+      });
+    }
+
     function saveSearchCache(fileName, text) {
       var now = Date.now();
       var latestKey = 'search_cache_' + fileName;
       return idbKeyval.set(latestKey, {
         text: text,
-        lastModified: new Date().toLocaleString(),
+        lastModified: new Date(now).toLocaleString(),
         backupTimestamp: now
+      }).then(function() {
+        return saveVersionedCache(fileName, text, now);
+      }).then(function() {
+        // A real save supersedes every buffered draft tiddler.
+        dirtyBuffer = {};
+        return idbKeyval.del('dirty_state_' + fileName);
       }).catch(function(err) {
         console.error('Failed to update search cache in IndexedDB:', err);
       });
+    }
+
+    /* ---
+     * Transient (dirty) backups: stream changed tiddlers into
+     * dirty_state_<fileName> in realtime so an unsaved tab that dies can
+     * still be recovered from the launcher. Cost model: serialization is
+     * bounded to the titles named by each change event (never a whole-wiki
+     * scan), writes are debounced at 2s (one PUT per burst, tiny payload),
+     * and the dirty key is deleted on every real save. Custom fields and
+     * the raw draft body are captured verbatim; it is strictly a recovery
+     * cache, never a save.
+     * --- */
+    var DIRTY_DEBOUNCE_MS = 2000;
+    var dirtyBuffer = {};
+    var dirtyTimer = null;
+
+    function markDirty(changedTitles) {
+      var tw = root.$tw;
+      if (!tw || !tw.wiki || !tw.wiki.getTiddler) return;
+      for (var i = 0; i < changedTitles.length; i++) {
+        var tiddler = tw.wiki.getTiddler(changedTitles[i]);
+        if (!tiddler || !tiddler.fields) continue;
+        var fields = { title: tiddler.fields.title };
+        for (var field in tiddler.fields) {
+          if (!Object.prototype.hasOwnProperty.call(tiddler.fields, field)) continue;
+          var value = tiddler.fields[field];
+          if (field === 'modified') continue; // Store-internal; noise for recovery.
+          fields[field] = typeof value === 'string' ? value : String(value);
+        }
+        dirtyBuffer[fields.title] = fields;
+      }
+      scheduleDirtyFlush();
+    }
+
+    function scheduleDirtyFlush() {
+      if (dirtyTimer) return;
+      dirtyTimer = setTimeout(flushDirty, DIRTY_DEBOUNCE_MS);
+    }
+
+    function flushDirty() {
+      dirtyTimer = null;
+      if (!root.__LITHIC_ACTIVE_FILE_NAME__) return;
+      var titles = Object.keys(dirtyBuffer);
+      if (titles.length === 0) return;
+      var payload = { ts: Date.now(), tiddlers: titles.map(function(title) { return dirtyBuffer[title]; }) };
+      idbKeyval.set('dirty_state_' + root.__LITHIC_ACTIVE_FILE_NAME__, payload).catch(function() { /* best effort */ });
+    }
+
+    // Draft deathbed flush: the user may close/refresh mid-debounce.
+    window.addEventListener('pagehide', flushDirty);
+    window.addEventListener('beforeunload', flushDirty);
+
+    /**
+     * Wire the change hook once the wiki has booted. The engine boots in
+     * place via document.write, so a re-mount of a different wiki reuses
+     * this window: a single shared listener (guarded by a root flag) is
+     * re-pointed at the newly active file rather than stacked, and the
+     * debounce buffer is reset so edits never bleed across wikis.
+     */
+    var armDirtyWatcher = function() {
+      var tw = root.$tw;
+      if (!tw || !tw.wiki || !tw.wiki.addEventListener) return false;
+      if (root.__LITHIC_DIRTY_WATCHER_ARMED__) return true;
+      root.__LITHIC_DIRTY_WATCHER_ARMED__ = true;
+      tw.wiki.addEventListener('change', function(changes) {
+        if (!changes) return;
+        var titles = Object.keys(changes);
+        if (titles.length === 0) return;
+        // Skip engine plumbing ($:/ state, plugins) — user content only.
+        var interesting = titles.filter(function(title) { return !/^\$:\//.test(title); });
+        if (interesting.length === 0) return;
+        markDirty(interesting);
+      });
+      return true;
+    };
+
+    // Reset cross-boot state for this mount, then wait for $tw.wiki.
+    root.__LITHIC_DIRTY_WATCHER_ARMED__ = false;
+    root.__LITHIC_ACTIVE_FILE_NAME__ = ${activeFileNameJson};
+    dirtyBuffer = {};
+    if (dirtyTimer) { clearTimeout(dirtyTimer); dirtyTimer = null; }
+
+    if (!armDirtyWatcher()) {
+      var armAttempts = 0;
+      var armPoll = setInterval(function() {
+        armAttempts += 1;
+        if (armDirtyWatcher() || armAttempts > 100) clearInterval(armPoll);
+      }, 100);
     }
 
     function serializeJsonToLith(jsonArrayText) {
@@ -241,7 +462,7 @@ function injectSaverBootstrap(html: string, suggestedFileName?: string): string 
       var tw = root.$tw;
       var saveOptions = {
         suggestedName: ${suggestedNameJson},
-        types: [{ description: 'Lithic Monolith', accept: { 'application/x-lith': ['.lith'] } }]
+        types: ${saveTypesJson}
       };
 
       var select = handle
@@ -256,6 +477,14 @@ function injectSaverBootstrap(html: string, suggestedFileName?: string): string 
         root.__LITHIC_FILE_HANDLE__ = selected;
         pending = null;
         return handle.createWritable().then(function(writable) {
+          if (${htmlModeLiteral}) {
+            // HTML monolith mode: write the payload TW hands us (its own
+            // serialized page) without search-cache bookkeeping, mirroring
+            // the legacy setTwCustomSaveAsSaver(false) path.
+            return writable.write(_text).then(function() {
+              return writable.close();
+            });
+          }
           var jsonText = (tw && tw.wiki && tw.wiki.getTiddlersAsJson) ? tw.wiki.getTiddlersAsJson(userTiddlerFilter) : '[]';
           var lithText = serializeJsonToLith(jsonText);
           return writable.write(lithText).then(function() {
@@ -329,7 +558,8 @@ export function buildEngineHtml(
   engineHtml: string,
   handoff: LauncherHandoff,
   extraTiddlers: Array<Record<string, string>> = [],
-  engineGlobals: Record<string, string> = {}
+  engineGlobals: Record<string, string> = {},
+  options: { isHtmlMode?: boolean } = {}
 ): string {
   const imported = handoff.text ? parseLithToJSON(handoff.text) : (handoff.payloadTiddlers ?? []);
   // File tiddlers first, then queued pending imports (payload, Ephemeral
@@ -344,17 +574,18 @@ export function buildEngineHtml(
 
   // TiddlyWiki's boot script is usually present in lithic.html. Keep this
   // guard so a future engine build without an initial store still boots.
-  let html = injectSaverBootstrap(injectTiddlers(engineHtml, tiddlers), handoff.name);
+  let html = injectSaverBootstrap(injectTiddlers(engineHtml, tiddlers), handoff.name, options.isHtmlMode === true);
   return injectEngineGlobals(html, engineGlobals);
 }
 
 export async function bootLegacyWiki(
   handoff: LauncherHandoff,
   extraTiddlers: Array<Record<string, string>> = [],
-  engineGlobals: Record<string, string> = {}
+  engineGlobals: Record<string, string> = {},
+  options: { isHtmlMode?: boolean } = {}
 ): Promise<void> {
   const engine = await fetchEngine();
-  const html = buildEngineHtml(engine, handoff, extraTiddlers, engineGlobals);
+  const html = buildEngineHtml(engine, handoff, extraTiddlers, engineGlobals, options);
 
   sessionStorage.setItem('lithic-active-file', JSON.stringify(handoff));
   // Boot the engine into the current document so the launcher URL stays in
@@ -371,11 +602,16 @@ export async function bootLegacyWiki(
  * Disk" behavior): the file is itself a full wiki page, so it is served
  * as-is rather than injected into a fresh engine.
  */
-export function bootLegacyHtml(html: string): void {
+export function bootLegacyHtml(html: string, suggestedFileName?: string): void {
+  // HTML monoliths keep their own tiddler store and are served as-is, but a
+  // raw-HTML Save As saver is injected so saves write the engine's serialized
+  // page back to a .html file instead of falling through to TiddlyWiki's
+  // built-in download behavior (legacy setTwCustomSaveAsSaver(false) parity).
+  const withSaver = suggestedFileName ? injectSaverBootstrap(html, suggestedFileName, true) : html;
   // Same in-place boot as bootLegacyWiki: the mounted HTML replaces the
   // launcher document, keeping the real launcher URL in the address bar.
   document.open();
-  document.write(html);
+  document.write(withSaver);
   document.close();
 }
 
