@@ -1,0 +1,20 @@
+tags: $:/tags/Stylesheet
+title: $:/Lithic/Patches/Whiteboard/PageMenuOverflow
+type: text/css
+
+/* Keep tldraw menus inside the viewport when they contain many items. The
+   stock bundle hardcodes max-height: 100vh on menu panels, which are anchored
+   below their trigger - so on the full-screen whiteboard layout a panel
+   extends past the bottom of the screen and the last item ("Create page")
+   can never be scrolled into view. Radix already computes the true available
+   space and exposes it as CSS vars; use those instead of the hardcoded 100vh.
+   The dropdown var covers the page select/zoom/style menus; the context-menu
+   var covers right-click menus (opened at the cursor). Both fall back to the
+   stock 100vh when absent, so nothing else is affected. */
+
+.tw-whiteboard-tldraw-container [role="menu"] {
+    max-height: var(
+        --radix-dropdown-menu-content-available-height,
+        var(--radix-context-menu-content-available-height, 100vh)
+    ) !important;
+}
