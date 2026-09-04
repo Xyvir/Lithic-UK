@@ -1,0 +1,344 @@
+title: $:/lithic/startup/standalone-transient-recovery.js
+type: application/javascript
+module-type: startup
+
+/*\
+title: $:/lithic/startup/standalone-transient-recovery.js
+type: application/javascript
+module-type: startup
+
+Slim transient recovery for standalone file:// Lithic HTML apps.
+
+This intentionally does not use the official BrowserStorage plugin: that plugin
+stores the whole wiki in localStorage. We keep only the latest changed user
+tiddlers (or deletion tombstones) for the current local HTML file, and only
+use them to offer a one-time downloaded recovery copy after a later launch.
+\*/
+(function(){
+"use strict";
+
+exports.name = "standalone-transient-recovery";
+exports.platforms = ["browser"];
+exports.after = ["startup"];
+exports.synchronous = true;
+
+var STORAGE_PREFIX = "lithic-standalone-dirty-v1:";
+var RECOVERY_MODAL = "$:/lithic/ui/StandaloneTransientRecovery";
+var PREVIEW_TITLE = "$:/temp/lithic/standalone-recovery-preview";
+var SAVE_DONE_NOTIFICATION = "$:/language/Notifications/Save/Done";
+var DEBOUNCE_MS = 1500;
+var PREVIEW_EXCERPT_CHARS = 120;
+var PREVIEW_MAX_TITLES = 3;
+
+exports.startup = function(){
+    if(typeof window === "undefined" || window.location.protocol !== "file:") {
+        return;
+    }
+
+    var storageKey = STORAGE_PREFIX + encodeURIComponent(
+        window.location.href.split("#")[0].split("?")[0]
+    );
+    var draft = {};
+    var flushTimer = null;
+    var activeRecord = null;
+    var replayingRecovery = false;
+    var filterText = $tw.wiki.getTiddlerText(
+        "$:/config/SaverFilter",
+        "[all[]] -[prefix[$:/state/]] -[prefix[$:/temp/]] -[prefix[$:/info/]] -[prefix[$:/HistoryList]] -[prefix[$:/StoryList]]"
+    );
+    var filterFn = null;
+    try {
+        filterFn = $tw.wiki.compileFilter(filterText);
+    } catch(e) {
+        // Fall back to the namespace check below if the configured filter is invalid.
+    }
+
+    function safeGet(){
+        try {
+            var raw = window.localStorage.getItem(storageKey);
+            if(!raw) return null;
+            var parsed = JSON.parse(raw);
+            if(!parsed || parsed.v !== 1 || !Array.isArray(parsed.items) || parsed.items.length === 0) {
+                return null;
+            }
+            return parsed;
+        } catch(e) {
+            return null;
+        }
+    }
+
+    function safeClear(){
+        try { window.localStorage.removeItem(storageKey); } catch(e) { /* best effort */ }
+    }
+
+    function cancelFlush(){
+        if(flushTimer) {
+            window.clearTimeout(flushTimer);
+            flushTimer = null;
+        }
+    }
+
+    function flush(){
+        flushTimer = null;
+        if(replayingRecovery) return;
+        var titles = Object.keys(draft);
+        if(titles.length === 0) return;
+        var items = titles.map(function(title){ return draft[title]; });
+        var record = {v: 1, ts: Date.now(), items: items};
+        try {
+            window.localStorage.setItem(storageKey, JSON.stringify(record));
+        } catch(e) {
+            // A single very large edited tiddler can still exceed browser
+            // storage. Never interfere with the wiki itself if that happens.
+            console.warn("Lithic transient recovery could not persist the draft:", e);
+        }
+    }
+
+    function scheduleFlush(){
+        if(replayingRecovery || flushTimer) return;
+        flushTimer = window.setTimeout(flush, DEBOUNCE_MS);
+    }
+
+    function isTrackedTitle(title, tiddler){
+        if(!title) return false;
+        if(!tiddler) {
+            // Filter functions cannot inspect a deleted tiddler, but normal
+            // user titles are safe deletion tombstones; skip engine spaces.
+            return title.indexOf("$:/") !== 0 && title !== "favicon.ico";
+        }
+        try {
+            // Evaluate the configured save filter ONCE against this title and
+            // check membership. The filter must decide, not raw prefixes:
+            // Lithic's SaverFilter starts with [all[]], so a naive
+            // iterator(tiddler,title) probe would match nearly anything.
+            return filterFn
+                ? filterFn.call($tw.wiki, $tw.wiki.makeTiddlerIterator([title])).indexOf(title) !== -1
+                : title.indexOf("$:/") !== 0 && title !== "favicon.ico";
+        } catch(e) {
+            return title.indexOf("$:/") !== 0 && title !== "favicon.ico";
+        }
+    }
+
+    function capture(changes){
+        if(replayingRecovery || !changes) return;
+        $tw.utils.each(changes, function(change, title){
+            if(!change || (!change.modified && !change.deleted)) return;
+            var tiddler = $tw.wiki.getTiddler(title);
+            if(!isTrackedTitle(title, tiddler)) return;
+            if(change.deleted || !tiddler) {
+                draft[title] = {t: title, d: 1};
+                return;
+            }
+            var fields = {title: title};
+            $tw.utils.each(tiddler.fields, function(value, field){
+                fields[field] = value;
+            });
+            draft[title] = {t: title, f: fields};
+        });
+        scheduleFlush();
+    }
+
+    function recordToDraft(record){
+        var result = {};
+        if(record && Array.isArray(record.items)) {
+            $tw.utils.each(record.items, function(item){
+                if(item && item.t) result[item.t] = item;
+            });
+        }
+        return result;
+    }
+
+    function recoveredFilename(){
+        var path = window.location.pathname || "";
+        var name = path.substring(path.lastIndexOf("/") + 1);
+        try { name = decodeURIComponent(name); } catch(e) { /* keep encoded name */ }
+        if(!name || !/\.html?$/i.test(name)) name = "lithic.html";
+        var stamp = new Date().toISOString().replace(/[-:]/g, "").replace(/\.\d{3}Z$/, "Z");
+        return name.replace(/\.html?$/i, "_recovered_" + stamp + ".html");
+    }
+
+    function firstExcerpt(record){
+        for(var i = 0; i < record.items.length; i++) {
+            var item = record.items[i];
+            if(item && !item.d && item.f && typeof item.f.text === "string" && item.f.text.replace(/\s+/g, "").length) {
+                return item.f.text;
+            }
+        }
+        return "";
+    }
+
+    // Build the small plaintext preview shown in the recovery modal: entry
+    // count, affected titles (deletions marked), and a short raw excerpt of
+    // the first captured tiddler so the user can sanity-check the journal
+    // before choosing Download or Discard.
+    function buildRecoveryPreview(record){
+        var items = record.items || [];
+        var titles = [];
+        var shown = 0;
+        var hidden = 0;
+        for(var i = 0; i < items.length; i++) {
+            var item = items[i];
+            if(!item || !item.t) continue;
+            if(shown < PREVIEW_MAX_TITLES) {
+                titles.push((item.d ? item.t + " (deleted)" : item.t));
+                shown++;
+            } else {
+                hidden++;
+            }
+        }
+        var lines = [items.length + (items.length === 1 ? " tiddler captured" : " tiddlers captured")];
+        if(titles.length) lines.push(titles.join("\n"));
+        if(hidden) lines.push("\u2026and " + hidden + " more");
+        var excerpt = firstExcerpt(record);
+        if(excerpt) {
+            excerpt = excerpt.replace(/\r\n/g, "\n").slice(0, PREVIEW_EXCERPT_CHARS);
+            lines.push("\u2014\u2014\u2014");
+            lines.push(excerpt + (excerpt.length >= PREVIEW_EXCERPT_CHARS ? "\u2026" : ""));
+        }
+        return lines.join("\n");
+    }
+
+    function showRecoveryPreview(record){
+        try {
+            $tw.wiki.addTiddler(new $tw.Tiddler({
+                title: PREVIEW_TITLE,
+                text: buildRecoveryPreview(record)
+            }));
+        } catch(e) {
+            // The preview is cosmetic; never let it block recovery itself.
+        }
+    }
+
+    function clearRecoveryPreview(){
+        try { $tw.wiki.deleteTiddler(PREVIEW_TITLE); } catch(e) { /* best effort */ }
+    }
+
+    function closeRecoveryModal(widget){
+        if(widget && widget.dispatchEvent) {
+            widget.dispatchEvent({type: "tm-close-tiddler"});
+        }
+    }
+
+    function removeRecoveryHandlers(){
+        // Handlers are one-shot by design: the prompt must not be re-usable
+        // after a decision, so stale modal widgets can never re-trigger a
+        // replay or a second discard of an already-cleared journal.
+        if(!$tw.rootWidget.__lithicTransientRecoveryDownload) return;
+        $tw.rootWidget.removeEventListener("tm-lithic-standalone-download-recovery",$tw.rootWidget.__lithicTransientRecoveryDownload);
+        $tw.rootWidget.removeEventListener("tm-lithic-standalone-discard-recovery",$tw.rootWidget.__lithicTransientRecoveryDiscard);
+        $tw.rootWidget.__lithicTransientRecoveryDownload = null;
+        $tw.rootWidget.__lithicTransientRecoveryDiscard = null;
+    }
+
+    function downloadRecovery(widget){
+        var record = activeRecord || safeGet();
+        if(!record) return;
+        replayingRecovery = true;
+        cancelFlush();
+        try {
+            for(var i = 0; i < record.items.length; i++) {
+                var item = record.items[i];
+                if(!item || !item.t) continue;
+                if(item.d) {
+                    $tw.wiki.deleteTiddler(item.t);
+                } else if(item.f) {
+                    $tw.wiki.addTiddler(new $tw.Tiddler($tw.utils.extend(
+                        {title: item.t},
+                        item.f
+                    )));
+                }
+            }
+        } finally {
+            replayingRecovery = false;
+        }
+        // Merge, don't clobber: any edits made in this session before the user
+        // clicked Download must survive alongside the replayed journal.
+        for(var key in draft) {
+            if($tw.utils.hop(draft, key)) record.items.push(draft[key]);
+        }
+        draft = recordToDraft(record);
+        safeClear();
+        clearRecoveryPreview();
+        // Keep the recovered state journaled (in draft, flushed on next edit
+        // or unload) until the normal saver confirms the new complete HTML
+        // copy was accepted for download.
+        activeRecord = null;
+        removeRecoveryHandlers();
+        closeRecoveryModal(widget);
+        window.setTimeout(function(){
+            $tw.rootWidget.dispatchEvent({
+                type: "tm-save-wiki",
+                param: "$:/core/save/all",
+                paramObject: {filename: recoveredFilename()}
+            });
+        }, 0);
+    }
+
+    function discardRecovery(widget){
+        cancelFlush();
+        safeClear();
+        clearRecoveryPreview();
+        activeRecord = null;
+        draft = {};
+        removeRecoveryHandlers();
+        closeRecoveryModal(widget);
+    }
+
+    $tw.wiki.addEventListener("change", capture);
+
+    // A successful ordinary standalone save means the transient journal is no
+    // longer needed. SaverHandler emits this notification after the saver has
+    // accepted the serialized HTML for download.
+    if($tw.notifier && typeof $tw.notifier.display === "function" && !$tw.notifier.__lithicTransientRecoveryHooked) {
+        var originalDisplay = $tw.notifier.display;
+        $tw.notifier.display = function(title){
+            if(title === SAVE_DONE_NOTIFICATION) {
+                cancelFlush();
+                safeClear();
+                draft = {};
+                activeRecord = null;
+            }
+            return originalDisplay.apply($tw.notifier, arguments);
+        };
+        $tw.notifier.__lithicTransientRecoveryHooked = true;
+    }
+
+    window.addEventListener("pagehide", flush);
+    window.addEventListener("beforeunload", flush);
+
+    activeRecord = safeGet();
+    if(activeRecord) {
+        window.setTimeout(function(){
+            if($tw.modal && $tw.wiki.getTiddler(RECOVERY_MODAL)) {
+                showRecoveryPreview(activeRecord);
+                $tw.modal.display(RECOVERY_MODAL, {
+                    variables: {
+                        recoveryCount: String(activeRecord.items.length),
+                        recoveryTime: new Date(activeRecord.ts).toLocaleString()
+                    }
+                });
+            }
+        }, 0);
+    }
+
+    // Message handlers are installed on the root widget so the modal tiddler
+    // stays a normal exportable tiddler and the behavior remains local to this
+    // startup module. Both handlers are one-shot: removeRecoveryHandlers()
+    // unbinds them after the first decision. The guard flag only prevents
+    // double-installation within a single boot (e.g. double startup invoke).
+    if(!$tw.rootWidget.__lithicTransientRecoveryHandlers) {
+        $tw.rootWidget.__lithicTransientRecoveryHandlers = true;
+        $tw.rootWidget.__lithicTransientRecoveryDownload = function(event){
+            downloadRecovery(event.widget);
+            return false;
+        };
+        $tw.rootWidget.__lithicTransientRecoveryDiscard = function(event){
+            discardRecovery(event.widget);
+            return false;
+        };
+        $tw.rootWidget.addEventListener("tm-lithic-standalone-download-recovery",$tw.rootWidget.__lithicTransientRecoveryDownload);
+        $tw.rootWidget.addEventListener("tm-lithic-standalone-discard-recovery",$tw.rootWidget.__lithicTransientRecoveryDiscard);
+    }
+};
+
+})();

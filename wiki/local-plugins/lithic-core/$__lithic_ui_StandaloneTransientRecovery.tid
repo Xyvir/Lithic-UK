@@ -1,0 +1,38 @@
+title: $:/lithic/ui/StandaloneTransientRecovery
+class: tc-modal-centered
+mask-closable: no
+subtitle: Unsaved edits found
+
+<p>This standalone wiki has unsaved edits from an earlier session on this device.</p>
+<p>Download a new HTML copy to preserve those edits, or discard them and continue with the file as it was last saved.</p>
+
+<div class="standalone-recovery-actions">
+<$button class="tc-btn-big-green" message="tm-lithic-standalone-download-recovery">Download Copy &amp; Continue</$button>
+<$button class="tc-btn-invisible" message="tm-lithic-standalone-discard-recovery">Discard edits</$button>
+</div>
+
+<$reveal type="nomatch" state="$:/temp/lithic/standalone-recovery-preview" text="">
+<div class="standalone-recovery-preview">
+<pre><$view tiddler="$:/temp/lithic/standalone-recovery-preview" format="text"/></pre>
+</div>
+</$reveal>
+
+<style>
+/* TW's modal machinery always injects a footer with a generic "close"
+   button. That would offer a "decide later" escape hatch, which this
+   recovery prompt deliberately avoids: hide it so only the two explicit
+   actions above remain. */
+.tc-modal-wrapper .tc-modal-footer {
+	display: none;
+}
+.standalone-recovery-preview pre {
+	max-height: 8em;
+	overflow: auto;
+	background: rgba(128,128,128,0.12);
+	padding: 0.5em 0.75em;
+	border-radius: 4px;
+	font-size: 0.8em;
+	white-space: pre-wrap;
+	overflow-wrap: anywhere;
+}
+</style>
