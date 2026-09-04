@@ -157,19 +157,27 @@ exports.startup = function(){
         return name.replace(/\.html?$/i, "_recovered_" + stamp + ".html");
     }
 
-    function firstExcerpt(record){
+    function pickExcerpt(record){
+        // Prefer the largest captured tiddler: it is the most likely to carry
+        // recognizable content (the first entry may be a trivial one-word
+        // edit). Ties keep the earliest entry so the choice is stable.
+        var best = null;
+        var bestLen = -1;
         for(var i = 0; i < record.items.length; i++) {
             var item = record.items[i];
-            if(item && !item.d && item.f && typeof item.f.text === "string" && item.f.text.replace(/\s+/g, "").length) {
-                return item.f.text;
+            if(!item || item.d || !item.f || typeof item.f.text !== "string") continue;
+            if(!item.f.text.replace(/\s+/g, "").length) continue;
+            if(item.f.text.length > bestLen) {
+                best = item.f.text;
+                bestLen = item.f.text.length;
             }
         }
-        return "";
+        return best || "";
     }
 
     // Build the small plaintext preview shown in the recovery modal: entry
     // count, affected titles (deletions marked), and a short raw excerpt of
-    // the first captured tiddler so the user can sanity-check the journal
+    // the largest captured tiddler so the user can sanity-check the journal
     // before choosing Download or Discard.
     function buildRecoveryPreview(record){
         var items = record.items || [];
@@ -189,7 +197,7 @@ exports.startup = function(){
         var lines = [items.length + (items.length === 1 ? " tiddler captured" : " tiddlers captured")];
         if(titles.length) lines.push(titles.join("\n"));
         if(hidden) lines.push("\u2026and " + hidden + " more");
-        var excerpt = firstExcerpt(record);
+        var excerpt = pickExcerpt(record);
         if(excerpt) {
             excerpt = excerpt.replace(/\r\n/g, "\n").slice(0, PREVIEW_EXCERPT_CHARS);
             lines.push("\u2014\u2014\u2014");
