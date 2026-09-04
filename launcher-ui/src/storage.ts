@@ -1,4 +1,6 @@
 import { KeyvalWikiHistory, isHistoryKey, type VersionSummary, type DownloadableVersion } from './wiki-history.ts';
+import { parseLithToJSON } from './lithic-format.ts';
+import { tiddlersToMap } from './json-patch.ts';
 
 export interface RecentEntry {
   handle: FileSystemFileHandle;
@@ -235,6 +237,48 @@ export async function clearDirtyState(name: string, store: CacheStore = idb): Pr
     await store.del(dirtyKey(name));
   } catch {
     // Best effort.
+  }
+}
+
+/**
+ * Canonicalize a tiddler-array JSON string for content comparison. The Lithic
+ * serializer omits empty fields, so empty values are omitted here as well;
+ * titles and fields are sorted to make ordering irrelevant.
+ */
+function canonicalTiddlerText(text: string): string | null {
+  const map = tiddlersToMap(text);
+  if (!map) return null;
+  return JSON.stringify(Object.keys(map).sort().map((title) => {
+    const fields = map[title];
+    const normalized: Record<string, unknown> = {};
+    for (const field of Object.keys(fields).sort()) {
+      if (fields[field] !== '' && fields[field] !== null && fields[field] !== undefined) {
+        normalized[field] = fields[field];
+      }
+    }
+    return normalized;
+  }));
+}
+
+/**
+ * Detect a file that changed outside this device since the latest local
+ * history save. No history is created here; the caller decides whether to
+ * quietly mark the next save as a SYNC snapshot.
+ */
+export async function isWikiDriftedFromHead(name: string, lithText: string, store: CacheStore = idb): Promise<boolean> {
+  try {
+    const history = new KeyvalWikiHistory(store);
+    const versions = await history.listVersions(name);
+    if (versions.length === 0) return false;
+    const head = await history.getVersion(name, versions[0].id);
+    if (!head) return true;
+    const fileText = JSON.stringify(parseLithToJSON(lithText));
+    const fileCanonical = canonicalTiddlerText(fileText);
+    const headCanonical = canonicalTiddlerText(head.text);
+    return fileCanonical === null || headCanonical === null || fileCanonical !== headCanonical;
+  } catch {
+    // A failed comparison should not block mounting or saving.
+    return false;
   }
 }
 

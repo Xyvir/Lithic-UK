@@ -3,7 +3,7 @@
   import type { LauncherMode } from './mode';
   import { createFileBridge } from './file-bridge';
   import { bootLegacyWiki, bootLegacyHtml } from './legacy-launcher-runtime';
-  import { getRecentFiles, addRecentFile, removeRecentFile, clearAllRecentFiles, purgeOldestCachesIfNeeded, idb, getSearchCacheText, listWikiVersions, downloadWikiVersion, deleteWikiHistory, getDirtyState, clearDirtyState, listDirtyRecoveries, type RecentEntry } from './storage';
+  import { getRecentFiles, addRecentFile, removeRecentFile, clearAllRecentFiles, purgeOldestCachesIfNeeded, idb, getSearchCacheText, listWikiVersions, downloadWikiVersion, deleteWikiHistory, getDirtyState, clearDirtyState, listDirtyRecoveries, isWikiDriftedFromHead, type RecentEntry } from './storage';
   import { readBookmarks, saveBookmark, removeBookmark, verifyInstanceUrl, normalizeInstanceUrl } from './bookmarks';
   import { searchCachedWikis } from './cache-search';
   import { serializeJsonToLith } from './lithic-format';
@@ -56,10 +56,23 @@
     if (megabytes < 0.01) return '<0.01 MB';
     return `${megabytes.toFixed(2).replace(/\.?(0+)$/, '')} MB`;
   }
+
+  /**
+   * Shorten a wiki file name for the version-history title while keeping its
+   * extension visible (a 30+ char stem reads as `Long…name.lith` rather than
+   * losing the `.lith`). The full name stays available via the title tooltip.
+   */
+  function clipFilename(name: string, limit = 20): string {
+    if (name.length <= limit) return name;
+    const ext = name.match(/\.(?:html?|lith|json)$/i)?.[0] ?? '';
+    const stemLimit = limit - ext.length;
+    if (stemLimit <= 3) return name.slice(0, limit - 1) + '…';
+    return name.slice(0, stemLimit - 1) + '…' + ext;
+  }
   let cachedEntries: Record<string, CacheSearchEntry> = {};
   let cacheSearchMatches: Record<string, CacheSearchMatch> = {};
   let cacheSearchRequest = 0;
-  type HistoryEntry = { id: string; ts: number; sizeBytes: number; isBase?: boolean; lastModified: string };
+  type HistoryEntry = { id: string; ts: number; sizeBytes: number; isBase?: boolean; external?: boolean; lastModified: string };
   let showHistoryModal = false;
   let historyName = '';
   let historyEntries: HistoryEntry[] = [];
@@ -204,6 +217,10 @@
     } catch {
       recentFiles = [];
     }
+    // Dirty-state rows are keyed off the recent list (plus caches), so refresh
+    // the unsaved-edit indicator once recents are known — a blank lith edited
+    // but never saved has no cache, so the cache path alone never sees it.
+    void refreshDirtyBadges();
   }
 
   async function remember(file: { name: string; path?: string; text?: string; handle?: any }) {
@@ -273,9 +290,11 @@
     const isHtmlMonolith = /\.(?:html?|htm)$/i.test(name);
     const safeName = normalizeLithName(name);
     await remember({ name: isHtmlMonolith ? name : safeName, path, text: contents, handle });
+    const driftedFromHead = !isHtmlMonolith && await isWikiDriftedFromHead(safeName, contents);
     if (!isHtmlMonolith) {
       // HTML monoliths bypass the lith cache chain entirely; lith wikis get
-      // the transient-recovery prompt before anything boots.
+      // the transient-recovery prompt before anything boots. Drift is detected
+      // quietly here and becomes a SYNC marker on the next successful save.
       if ((await prepareDirtyRecovery(safeName)) === 'later') {
         busy = false;
         status = 'Unsaved edits kept for later';
@@ -306,7 +325,7 @@
     await bootLegacyWiki(handoff, [...pendingImports, ...ephemeralIntegrationTiddlers(), ...extraTiddlers], {
       __EPHEMERAL_MODE__: mode === 'self-host' ? 'self-host' : 'paper-light',
       __LITHIC_LAUNCHER_MODE__: mode
-    });
+    }, { driftedFromHead });
     pendingImports = [];
   }
 
@@ -796,8 +815,7 @@
     <div class="modal-overlay" role="presentation" on:click={(event) => event.currentTarget === event.target && closeHistoryModal()}>
       <div class="launcher-modal history-modal" role="dialog" aria-modal="true" aria-labelledby="history-title">
         <button class="modal-close" aria-label="Close version history dialog" on:click={closeHistoryModal}>×</button>
-        <h2 id="history-title">Version History</h2>
-        <p class="history-subtitle">{historyName}</p>
+        <h2 id="history-title" title={historyName}>{clipFilename(historyName)} Version History</h2>
         {#if historyBusy}
           <p class="history-empty">Loading versions…</p>
         {:else if historyEntries.length === 0}
@@ -806,17 +824,17 @@
           <ul class="history-list">
             {#each historyEntries as entry (entry.id)}
               <li class="history-entry">
-                <div class="history-meta">
-                  <span class="history-time">{entry.lastModified}</span>
-                  <span class="history-size">{formatCacheSize(entry.sizeBytes)}</span>
-                  {#if entry.isBase}<span class="history-badge">snapshot</span>{:else}<span class="history-badge delta">delta</span>{/if}
-                </div>
-                <button class="history-download" type="button" on:click={() => downloadHistoryVersion(entry.id)}>Download copy</button>
+                {#if entry.isBase && entry.external}<span class="history-badge sync" title="This full copy was created after the file changed outside this device.">sync</span>{:else if entry.isBase}<span class="history-badge" title="This version is a complete copy of the wiki at this time.">full</span>{:else}<span class="history-badge delta" title="This version stores only the edits made since the previous save — it rebuilds into a complete copy when you download it.">step</span>{/if}
+                <span class="history-time">{entry.lastModified}</span>
+                <span class="history-size">{formatCacheSize(entry.sizeBytes)}</span>
+                <button class="recent-icon-button history-download-button" type="button" aria-label={`Download a copy of the version from ${entry.lastModified}`} title="Download a non-destructive copy of this version" on:click={() => downloadHistoryVersion(entry.id)}>
+                  <svg class="history-download-icon" viewBox="56 108 33 36" aria-hidden="true"><path class="history-icon-shape" d="m 73.595508,109.76746 c -7.198235,0 -13.103617,5.58342 -13.647229,12.64471 h -0.0072 V 138.2696 H 58.61606 l 2.32389,4.02559 2.324405,-4.02559 h -1.323433 v -15.85123 c 0.530186,-5.97937 5.534806,-10.65103 11.654586,-10.65103 6.474618,0 11.703161,5.22855 11.703161,11.70316 0,6.47462 -5.228543,11.70161 -11.703161,11.70161 -2.644513,0 -5.080809,-0.87232 -7.037814,-2.34508 v 2.39572 c 2.058162,1.23707 4.46633,1.94924 7.037814,1.94924 7.555498,0 13.703556,-6.14599 13.703556,-13.70149 0,-7.5555 -6.148058,-13.70304 -13.703556,-13.70304 z m -2.108915,7.49825 v 8.05016 h 7.125663 v -1.59836 h -5.527311 v -6.4518 z"></path></svg>
+                </button>
               </li>
             {/each}
           </ul>
           {#if historyError}<p class="status-line error" role="alert">{historyError}</p>{/if}
-          <p class="history-note">Downloads are non-destructive copies — your history is never modified. Import a copy under a new name to inspect it.</p>
+          <p class="history-note">Every download is a complete, working copy of the wiki as it was at that moment — your history is never modified. Import a copy under a new name to inspect it.</p>
         {/if}
       </div>
     </div>
@@ -881,8 +899,8 @@
         {#each filteredRecent as file}
           {@const name = getEntryName(file)}
           <div class="recent-row">
-            <button class="recent-name" on:click={() => openRecent(file)}>{name}{#if dirtyEntries[name]}<span class="dirty-badge" title={`Unsaved edits from ${new Date(dirtyEntries[name]).toLocaleString()}`}>unsaved edits</span>{/if}{#if cachedEntries[name]}<span class="cached-size">{formatCacheSize(cachedEntries[name].sizeBytes)}</span>{/if}</button>
-            <button class="recent-icon-button cache-history-button" type="button" disabled={!cachedEntries[name]} aria-label={`Show version history for ${name}`} title={cachedEntries[name] ? 'Show version history' : 'No cached history available'} on:click={() => openHistoryModal(name)}>
+            <button class="recent-name" on:click={() => openRecent(file)}>{name}{#if cachedEntries[name]}<span class="cached-size">{formatCacheSize(cachedEntries[name].sizeBytes)}</span>{/if}</button>
+            <button class="recent-icon-button cache-history-button" class:dirty={dirtyEntries[name]} type="button" disabled={!cachedEntries[name]} aria-label={dirtyEntries[name] ? `${name} has unsaved edits; open to recover` : `Show version history for ${name}`} title={dirtyEntries[name] ? `Unsaved edits from ${new Date(dirtyEntries[name]).toLocaleString()}; click the name to open and recover` : (cachedEntries[name] ? 'Show version history' : 'No cached history available')} on:click={() => openHistoryModal(name)}>
               <svg class="history-download-icon" viewBox="56 108 33 36" aria-hidden="true"><path class="history-icon-shape" d="m 73.595508,109.76746 c -7.198235,0 -13.103617,5.58342 -13.647229,12.64471 h -0.0072 V 138.2696 H 58.61606 l 2.32389,4.02559 2.324405,-4.02559 h -1.323433 v -15.85123 c 0.530186,-5.97937 5.534806,-10.65103 11.654586,-10.65103 6.474618,0 11.703161,5.22855 11.703161,11.70316 0,6.47462 -5.228543,11.70161 -11.703161,11.70161 -2.644513,0 -5.080809,-0.87232 -7.037814,-2.34508 v 2.39572 c 2.058162,1.23707 4.46633,1.94924 7.037814,1.94924 7.555498,0 13.703556,-6.14599 13.703556,-13.70149 0,-7.5555 -6.148058,-13.70304 -13.703556,-13.70304 z m -2.108915,7.49825 v 8.05016 h 7.125663 v -1.59836 h -5.527311 v -6.4518 z"></path></svg>
             </button>
             {#if cacheSearchMatches[name]?.preview}
@@ -902,8 +920,8 @@
         {/each}
         {#each filteredCached as entry}
           <div class="recent-row cached-only-row">
-            <div class="recent-name cached-result" role="note">{entry.name}{#if dirtyEntries[entry.name]}<span class="dirty-badge" title={`Unsaved edits from ${new Date(dirtyEntries[entry.name]).toLocaleString()}`}>unsaved edits</span>{/if}<span class="cached-size">{formatCacheSize(entry.sizeBytes)}</span><span class="cached-label">Cached locally</span></div>
-            <button class="recent-icon-button cache-history-button" type="button" aria-label={`Show version history for ${entry.name}`} title="Show version history" on:click={() => openHistoryModal(entry.name)}>
+            <div class="recent-name cached-result" role="note">{entry.name}<span class="cached-size">{formatCacheSize(entry.sizeBytes)}</span><span class="cached-label">Cached locally</span></div>
+            <button class="recent-icon-button cache-history-button" class:dirty={dirtyEntries[entry.name]} type="button" aria-label={`Show version history for ${entry.name}`} title={dirtyEntries[entry.name] ? `Unsaved edits from ${new Date(dirtyEntries[entry.name]).toLocaleString()}; click the name to open and recover` : 'Show version history'} on:click={() => openHistoryModal(entry.name)}>
               <svg class="history-download-icon" viewBox="56 108 33 36" aria-hidden="true"><path class="history-icon-shape" d="m 73.595508,109.76746 c -7.198235,0 -13.103617,5.58342 -13.647229,12.64471 h -0.0072 V 138.2696 H 58.61606 l 2.32389,4.02559 2.324405,-4.02559 h -1.323433 v -15.85123 c 0.530186,-5.97937 5.534806,-10.65103 11.654586,-10.65103 6.474618,0 11.703161,5.22855 11.703161,11.70316 0,6.47462 -5.228543,11.70161 -11.703161,11.70161 -2.644513,0 -5.080809,-0.87232 -7.037814,-2.34508 v 2.39572 c 2.058162,1.23707 4.46633,1.94924 7.037814,1.94924 7.555498,0 13.703556,-6.14599 13.703556,-13.70149 0,-7.5555 -6.148058,-13.70304 -13.703556,-13.70304 z m -2.108915,7.49825 v 8.05016 h 7.125663 v -1.59836 h -5.527311 v -6.4518 z"></path></svg>
             </button>
             {#if cacheSearchMatches[entry.name]?.preview}

@@ -36,6 +36,12 @@ export interface VersionMeta {
   sizeBytes: number;
   /** True when this version is a full-text base snapshot (a chain root). */
   isBase?: boolean;
+  /**
+   * True when this base snapshot was forced because the file on disk had
+   * drifted from the locally-saved chain HEAD (edited or synced elsewhere),
+   * so the next save anchored a fresh full copy instead of a stale delta.
+   */
+  external?: boolean;
 }
 
 export interface WikiHistoryMeta {
@@ -55,9 +61,16 @@ export interface DownloadableVersion {
   text: string;
 }
 
+export type SaveVersionOptions = {
+  /** Record this save as a full base snapshot regardless of diff size. */
+  forceBase?: boolean;
+  /** Tag the snapshot as external (file drifted from the chain HEAD). */
+  external?: boolean;
+};
+
 export interface WikiHistoryStore {
   listVersions(name: string): Promise<VersionSummary[]>;
-  saveVersion(name: string, tiddlerJsonText: string, now?: number): Promise<void>;
+  saveVersion(name: string, tiddlerJsonText: string, now?: number, options?: SaveVersionOptions): Promise<void>;
   getVersion(name: string, id: string): Promise<DownloadableVersion | null>;
   deleteHistory(name: string): Promise<void>;
 }
@@ -124,7 +137,7 @@ export class KeyvalWikiHistory implements WikiHistoryStore {
       return meta.versions
         .map((version) => ({
           ...version,
-          lastModified: toIso(version.ts).replace('T', ' ').replace('Z', ' UTC')
+          lastModified: toIso(version.ts).replace('T', ' ').replace(/\.\d{3}Z$/, 'Z').replace('Z', ' UTC')
         }))
         .sort((a, b) => b.ts - a.ts);
     } catch {
@@ -132,7 +145,12 @@ export class KeyvalWikiHistory implements WikiHistoryStore {
     }
   }
 
-  async saveVersion(name: string, tiddlerJsonText: string, now: number = Date.now()): Promise<void> {
+  async saveVersion(
+    name: string,
+    tiddlerJsonText: string,
+    now: number = Date.now(),
+    options: SaveVersionOptions = {}
+  ): Promise<void> {
     const nextMap = tiddlersToMap(tiddlerJsonText);
     if (!nextMap) return;
 
@@ -140,14 +158,21 @@ export class KeyvalWikiHistory implements WikiHistoryStore {
     const head = meta.headId ? await this.materializeVersion(name, meta, meta.headId) : null;
     const ops: JsonPatchOp[] = head?.map ? diffTiddlerMaps(head.map, nextMap) : [];
 
+    // A drifted mount forces a full base even for a small diff, so the chain
+    // re-anchors at the externally-changed content instead of recording a
+    // delta against a stale parent.
+    const forceBase = options.forceBase === true;
+
     let id: string;
-    if (!head?.map || bytesOf(JSON.stringify(ops)) > bytesOf(tiddlerJsonText) / 2) {
-      // First version for this wiki, or the delta stopped paying for itself
-      // (more than half the size of a full snapshot): start a new base
-      // segment — prior history stays intact and materializable.
+    if (!head?.map || forceBase || bytesOf(JSON.stringify(ops)) > bytesOf(tiddlerJsonText) / 2) {
+      // First version for this wiki, the delta stopped paying for itself
+      // (more than half the size of a full snapshot), or the file drifted:
+      // start a new base segment — prior history stays intact/materializable.
       id = versionId(now, tiddlerJsonText);
       await this.store.set(baseKey(name, id), { id, text: tiddlerJsonText });
-      meta.versions.push({ id, ts: now, sizeBytes: bytesOf(tiddlerJsonText), isBase: true });
+      const entry: VersionMeta = { id, ts: now, sizeBytes: bytesOf(tiddlerJsonText), isBase: true };
+      if (options.external) entry.external = true;
+      meta.versions.push(entry);
     } else {
       id = versionId(now, tiddlerJsonText, meta.headId);
       await this.store.set(deltaKey(name, id), { id, parentId: meta.headId, ts: now, ops });

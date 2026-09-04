@@ -161,6 +161,25 @@ test('huge rewrite (>50% changed) starts a new base but keeps prior history', as
   assert.equal(JSON.parse(old!.text).find((t: any) => t.title === 'Journal').text.includes('20260101'), true);
 });
 
+test('forced external saves create a full SYNC-marked version', async () => {
+  const { store } = history();
+  await store.saveVersion('a.lith', wikiA, nextTs());
+  await store.saveVersion('a.lith', wikiB, nextTs(), { forceBase: true, external: true });
+  const versions = await store.listVersions('a.lith');
+  assert.equal(versions[0].isBase, true);
+  assert.equal(versions[0].external, true);
+  assert.equal(await store.getVersion('a.lith', versions[0].id) !== null, true);
+});
+
+test('forced base without external marker remains an ordinary full version', async () => {
+  const { store } = history();
+  await store.saveVersion('a.lith', wikiA, nextTs());
+  await store.saveVersion('a.lith', wikiB, nextTs(), { forceBase: true });
+  const versions = await store.listVersions('a.lith');
+  assert.equal(versions[0].isBase, true);
+  assert.equal(versions[0].external, undefined);
+});
+
 test('identical content still records a version (timestamps differ)', async () => {
   const { store } = history();
   await store.saveVersion('a.lith', wikiA, nextTs());

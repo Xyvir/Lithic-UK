@@ -472,26 +472,24 @@ body.drag-over::after {
 
 /* --- Version history modal --- */
 .history-modal { width: min(100%, 540px); }
-.history-subtitle { margin: -8px 0 14px; color: #999; font-size: 0.85em; word-break: break-all; }
+.history-modal h2 { margin-bottom: 12px; padding-right: 30px; overflow-wrap: anywhere; }
 .history-empty { color: #999; }
 .history-list { list-style: none; margin: 0; padding: 0; max-height: 46vh; overflow: auto; }
 .history-entry {
-  display: flex; align-items: center; justify-content: space-between; gap: 12px;
-  padding: 9px 10px; border: 1px solid #3a3a3a; border-radius: 7px; margin-bottom: 8px; background: #2c2c2c;
+  display: flex; align-items: center; gap: 10px;
+  padding: 8px 10px; border: 1px solid #3a3a3a; border-radius: 7px; margin-bottom: 8px; background: #2c2c2c;
 }
-.history-meta { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
-.history-time { color: #ddd; font-size: 0.86em; }
-.history-size { color: #888; font-size: 0.76em; }
 .history-badge {
-  align-self: flex-start; margin-top: 3px; padding: 0 6px; border-radius: 9px;
-  border: 1px solid #5a7fbf; color: #8ab4f8; font-size: 0.68em; text-transform: uppercase; letter-spacing: 0.04em;
+  flex: none; padding: 1px 6px; border-radius: 9px;
+  border: 1px solid #5a7fbf; color: #8ab4f8; font-size: 0.66em; text-transform: uppercase; letter-spacing: 0.04em;
+  white-space: nowrap;
 }
 .history-badge.delta { border-color: #6d6d6d; color: #aaa; }
-.history-download {
-  flex: none; padding: 7px 12px; border: 1px solid #8ab4f8; border-radius: 6px;
-  background: rgb(138 180 248 / 12%); color: #8ab4f8; font-size: 0.82em; cursor: pointer;
-}
-.history-download:hover { background: rgb(138 180 248 / 22%); }
+.history-badge.sync { border-color: #5a9a78; color: #8de0ad; }
+.history-time { flex: 1; min-width: 0; color: #ddd; font-size: 0.84em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.history-size { flex: none; color: #888; font-size: 0.76em; white-space: nowrap; }
+.history-download-button { flex: 0 0 32px; color: #8ab4f8; border-radius: 6px; }
+.history-download-button:hover { background: rgb(138 180 248 / 16%); color: #8ab4f8; }
 .history-note { margin-top: 14px; color: #888; font-size: 0.8em; line-height: 1.45; }
 
 /* --- Transient (dirty) recovery --- */
@@ -501,7 +499,8 @@ body.drag-over::after {
   background: #2c2c2c; color: #ccc; font-size: 0.85em; max-height: 30vh; overflow: auto;
 }
 .dirty-tiddler-list .dirty-more { color: #888; list-style: none; margin-left: -14px; }
-.dirty-badge {
-  display: inline-block; margin-left: 0.75em; padding: 1px 7px; border-radius: 9px;
-  border: 1px solid #bf6d5a; color: #ff9d80; font-size: 0.7em; white-space: nowrap;
-}
+/* Unsaved edits are signaled by a red history/download icon instead of an
+   inline text badge (hover shows the capture timestamp via the title). */
+.cache-history-button.dirty,
+.cache-history-button.dirty:hover { color: #ff9d80; }
+.cache-history-button.dirty:disabled { opacity: 1; }

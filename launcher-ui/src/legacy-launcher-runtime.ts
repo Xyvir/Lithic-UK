@@ -79,7 +79,7 @@ function injectTiddlers(html: string, tiddlers: Array<Record<string, string>>): 
   return html.replace(/<\/body>/i, `${script}</body>`);
 }
 
-function injectSaverBootstrap(html: string, suggestedFileName?: string, isHtmlMode = false): string {
+function injectSaverBootstrap(html: string, suggestedFileName?: string, isHtmlMode = false, driftedFromHead = false): string {
   const pluginsJson = JSON.stringify(DEFAULT_PLUGINS);
   const jsonPatchRuntime = JSON_PATCH_RUNTIME;
   const baseFilterStr = JSON.stringify(LITHIC_BASE_FILTER);
@@ -95,6 +95,7 @@ function injectSaverBootstrap(html: string, suggestedFileName?: string, isHtmlMo
     : [{ description: 'Lithic Monolith', accept: { 'application/x-lith': ['.lith'] } }];
   const saveTypesJson = JSON.stringify(saveTypes);
   const htmlModeLiteral = isHtmlMode ? 'true' : 'false';
+  const driftedFromHeadLiteral = driftedFromHead ? 'true' : 'false';
 
   // The patch runtime is injected as its own script so the mounted wiki can
   // record per-version history (window.__LITHIC_JSON_PATCH__) from the saver.
@@ -233,8 +234,8 @@ function injectSaverBootstrap(html: string, suggestedFileName?: string, isHtmlMo
             }).then(function() {
               meta.versions = ordered.slice(1).map(function(v) {
                 return v.id === second.id
-                  ? { id: v.id, ts: v.ts, sizeBytes: text.length, isBase: true }
-                  : { id: v.id, ts: v.ts, sizeBytes: v.sizeBytes, isBase: v.isBase || false };
+                  ? { id: v.id, ts: v.ts, sizeBytes: text.length, isBase: true, external: v.external || false }
+                  : { id: v.id, ts: v.ts, sizeBytes: v.sizeBytes, isBase: v.isBase || false, external: v.external || false };
               });
               return step();
             });
@@ -249,7 +250,7 @@ function injectSaverBootstrap(html: string, suggestedFileName?: string, isHtmlMo
       return step();
     }
 
-    function saveVersionedCache(fileName, text, now) {
+    function saveVersionedCache(fileName, text, now, options) {
       if (!JP) return Promise.resolve();
       var metaKey = hMeta(fileName);
       return idbKeyval.get(metaKey).then(function(meta) {
@@ -260,7 +261,7 @@ function injectSaverBootstrap(html: string, suggestedFileName?: string, isHtmlMo
         return headPromise.then(function(head) {
           var nextMap = JP.tiddlersToMap(text);
           if (!nextMap) return; // Not a tiddler array; keep only the flat cache.
-          var useBase = !head.reached || !head.map;
+          var useBase = !head.reached || !head.map || (options && options.forceBase === true);
           var ops = [];
           if (!useBase) {
             ops = JP.diffTiddlerMaps(head.map, nextMap);
@@ -270,7 +271,9 @@ function injectSaverBootstrap(html: string, suggestedFileName?: string, isHtmlMo
           if (useBase) {
             id = versionId(now, text, '');
             return idbKeyval.set(hBase(fileName, id), { id: id, text: text }).then(function() {
-              meta.versions.push({ id: id, ts: now, sizeBytes: text.length, isBase: true });
+              var entry = { id: id, ts: now, sizeBytes: text.length, isBase: true };
+              if (options && options.external === true) entry.external = true;
+              meta.versions.push(entry);
               meta.headId = id;
               return pruneHistory(fileName, meta);
             }).then(function() {
@@ -289,16 +292,25 @@ function injectSaverBootstrap(html: string, suggestedFileName?: string, isHtmlMo
       });
     }
 
+    var driftedFromHead = ${driftedFromHeadLiteral};
+
     function saveSearchCache(fileName, text) {
       var now = Date.now();
+      var saveWasDrifted = driftedFromHead;
       var latestKey = 'search_cache_' + fileName;
       return idbKeyval.set(latestKey, {
         text: text,
         lastModified: new Date(now).toLocaleString(),
         backupTimestamp: now
       }).then(function() {
-        return saveVersionedCache(fileName, text, now);
+        return saveVersionedCache(fileName, text, now, {
+          forceBase: saveWasDrifted,
+          external: saveWasDrifted
+        });
       }).then(function() {
+        // Only the first successful save after a drifted mount gets the SYNC
+        // marker; later saves return to the normal full/step heuristic.
+        driftedFromHead = false;
         // A real save supersedes every buffered draft tiddler.
         dirtyBuffer = {};
         return idbKeyval.del('dirty_state_' + fileName);
@@ -562,7 +574,7 @@ export function buildEngineHtml(
   handoff: LauncherHandoff,
   extraTiddlers: Array<Record<string, string>> = [],
   engineGlobals: Record<string, string> = {},
-  options: { isHtmlMode?: boolean } = {}
+  options: { isHtmlMode?: boolean; driftedFromHead?: boolean } = {}
 ): string {
   const imported = handoff.text ? parseLithToJSON(handoff.text) : (handoff.payloadTiddlers ?? []);
   // File tiddlers first, then queued pending imports (payload, Ephemeral
@@ -577,7 +589,12 @@ export function buildEngineHtml(
 
   // TiddlyWiki's boot script is usually present in lithic.html. Keep this
   // guard so a future engine build without an initial store still boots.
-  let html = injectSaverBootstrap(injectTiddlers(engineHtml, tiddlers), handoff.name, options.isHtmlMode === true);
+  let html = injectSaverBootstrap(
+    injectTiddlers(engineHtml, tiddlers),
+    handoff.name,
+    options.isHtmlMode === true,
+    options.driftedFromHead === true
+  );
   return injectEngineGlobals(html, engineGlobals);
 }
 
@@ -585,7 +602,7 @@ export async function bootLegacyWiki(
   handoff: LauncherHandoff,
   extraTiddlers: Array<Record<string, string>> = [],
   engineGlobals: Record<string, string> = {},
-  options: { isHtmlMode?: boolean } = {}
+  options: { isHtmlMode?: boolean; driftedFromHead?: boolean } = {}
 ): Promise<void> {
   const engine = await fetchEngine();
   const html = buildEngineHtml(engine, handoff, extraTiddlers, engineGlobals, options);

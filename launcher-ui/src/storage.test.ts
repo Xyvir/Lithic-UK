@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { KeyvalStore, addRecentFile, getRecentFiles, removeRecentFile, clearAllRecentFiles, saveSearchCache, purgeOldestCachesIfNeeded, type CacheStore } from './storage.ts';
+import { KeyvalStore, addRecentFile, getRecentFiles, removeRecentFile, clearAllRecentFiles, saveSearchCache, purgeOldestCachesIfNeeded, isWikiDriftedFromHead, type CacheStore } from './storage.ts';
+import { KeyvalWikiHistory } from './wiki-history.ts';
 
 // In Node environment without native indexedDB, we mock indexedDB or test logic
 test('KeyvalStore handles fallback when indexedDB is undefined', async () => {
@@ -153,6 +154,17 @@ test('dirty state round-trips and validates the record shape', async () => {
   assert.equal(await getDirtyState('c.lith', store), null);
   await clearDirtyState('a.lith', store);
   assert.equal(await getDirtyState('a.lith', store), null);
+});
+
+test('drift detection compares the opened Lith against the local history HEAD', async () => {
+  const store = new MemoryIdb();
+  const history = new KeyvalWikiHistory(store);
+  const saved = JSON.stringify([{ title: 'Note', text: 'saved' }]);
+  await history.saveVersion('a.lith', saved, 1);
+
+  assert.equal(await isWikiDriftedFromHead('a.lith', `title: Note\n\nsaved`, store), false);
+  assert.equal(await isWikiDriftedFromHead('a.lith', `title: Note\n\nchanged`, store), true);
+  assert.equal(await isWikiDriftedFromHead('missing.lith', `title: Note\n\nsaved`, store), false);
 });
 
 test('listDirtyRecoveries reports only wikis with unsaved edits', async () => {

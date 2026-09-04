@@ -62,6 +62,13 @@ test('buildEngineHtml injects engine globals into the mounted document', () => {
   assert.match(html, /window\["__LITHIC_LAUNCHER_MODE__"\] = "webapp";/);
 });
 
+test('drifted boot arms a one-shot external full snapshot', () => {
+  const html = buildEngineHtml(ENGINE_STUB, { name: 'notes.lith', text: '' }, [], {}, { driftedFromHead: true });
+  assert.ok(html.includes('var driftedFromHead = true;'));
+  assert.ok(html.includes('forceBase: saveWasDrifted'));
+  assert.ok(html.includes('external: saveWasDrifted'));
+});
+
 test('injected saver recovers the file handle from IndexedDB as a fallback', () => {
   const html = buildEngineHtml(ENGINE_STUB, { name: 'notes.lith', text: '' });
   assert.match(html, /resolveStoredHandle/);
