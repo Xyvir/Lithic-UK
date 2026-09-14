@@ -221,7 +221,9 @@ if (fs.existsSync(LOCAL_PLUGINS_DIR)) {
     const localPlugins = fs.readdirSync(LOCAL_PLUGINS_DIR, { withFileTypes: true });
 
     localPlugins.forEach(dirent => {
-        if (dirent.isDirectory()) {
+        // 'archive' holds retired local plugins for reference only — it must NEVER
+        // be merged into wiki/external or it will leak back into builds.
+        if (dirent.isDirectory() && dirent.name !== 'archive') {
             const pluginName = dirent.name;
             const sourcePath = path.join(LOCAL_PLUGINS_DIR, pluginName);
             const targetPath = path.join(EXTERNAL_DIR, pluginName);
@@ -235,6 +237,26 @@ if (fs.existsSync(LOCAL_PLUGINS_DIR)) {
                 errorFromLog(`❌ Failed to copy local plugin ${pluginName}: ${e.message}`);
             }
         }
+    });
+}
+
+// --- PRUNE STALE MERGE-CACHE ENTRIES ---
+// wiki/external is a MERGE CACHE, not a source location. Anything not re-derived
+// from external.yml + wiki/local-plugins (e.g. retired plugins, leftover archive/
+// copies) must not survive into flatten, or retired content leaks into builds.
+if (fs.existsSync(EXTERNAL_DIR)) {
+    const keep = new Set(sources.filter(s => s.type !== 'disable').map(s => s.name));
+    if (fs.existsSync(LOCAL_PLUGINS_DIR)) {
+        fs.readdirSync(LOCAL_PLUGINS_DIR, { withFileTypes: true }).forEach(d => {
+            if (d.isDirectory() && d.name !== 'archive') keep.add(d.name);
+        });
+    }
+    fs.readdirSync(EXTERNAL_DIR, { withFileTypes: true }).forEach(dirent => {
+        if (keep.has(dirent.name)) return;
+        if (dirent.name === '.gitkeep') return; // tracked placeholder, not stale content
+        const stalePath = path.join(EXTERNAL_DIR, dirent.name);
+        log(`🧨 Pruning stale external entry: ${dirent.name}`);
+        fs.rmSync(stalePath, { recursive: true, force: true });
     });
 }
 

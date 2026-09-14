@@ -1,5 +1,15 @@
-wiki/plugins/external/calendar/tiddlers/TagListDemo.tid
 wiki/external/
+
+# Ephemeral build staging — regenerated every CI build from external.yml +
+# local-plugins via scripts/mirror.js + scripts/flatten-plugins.js. Never edit
+# or commit content here; edit the sources instead (see agents.md directory map).
+wiki/plugins/
+wiki/themes/
+wiki/tiddlers/
+wiki/tiddlywiki.info
+wiki/output/
+wiki/mirror.log
+wiki/flatten-manifest.log
 /scratch/
 
 # Local per-machine agent instructions (see .freebuff/local/agents.local.md)

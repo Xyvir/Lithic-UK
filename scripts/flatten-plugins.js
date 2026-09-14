@@ -9,9 +9,20 @@ if (!fs.existsSync(EXTERNAL_DIR)) {
     process.exit(1);
 }
 
-if (!fs.existsSync(TARGET_PLUGINS_DIR)) {
-    fs.mkdirSync(TARGET_PLUGINS_DIR, { recursive: true });
-}
+// staging dirs are fully derived from the current build config; stale entries from
+// retired sources must not survive between runs. Preserve tracked .gitkeep placeholders.
+const STAGING_DIRS = [TARGET_PLUGINS_DIR, path.join(__dirname, '../wiki/themes')];
+STAGING_DIRS.forEach(dir => {
+    const keepFile = path.join(dir, '.gitkeep');
+    let keepContent = null;
+    if (fs.existsSync(keepFile)) keepContent = fs.readFileSync(keepFile);
+    if (fs.existsSync(dir)) {
+        fs.rmSync(dir, { recursive: true, force: true });
+        console.log(`Cleared stale staging: ${dir}`);
+    }
+    fs.mkdirSync(dir, { recursive: true });
+    if (keepContent !== null) fs.writeFileSync(keepFile, keepContent);
+});
 
 function findPluginInfoFiles(dir, fileList = []) {
     const files = fs.readdirSync(dir);
@@ -21,6 +32,10 @@ function findPluginInfoFiles(dir, fileList = []) {
         const stat = fs.statSync(filePath);
 
         if (stat.isDirectory()) {
+            if (file === 'archive') {
+                console.log(`Skipping archive directory: ${filePath}`);
+                return fileList; // Retired plugins must not leak into staging
+            }
             findPluginInfoFiles(filePath, fileList);
         } else if (file === 'plugin.info') {
             fileList.push(filePath);
