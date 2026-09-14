@@ -37,6 +37,7 @@
         "xyvir/lithic-pdf-to-whiteboard",
         "xyvir/lithic-patch-appear",
         "orange/mermaid-tw5",
+        "xyvir/lithic-patch-mermaid",
         "byper/advanced-search",
         "xyvir/tw-jspython"
     ],
