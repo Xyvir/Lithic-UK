@@ -31,10 +31,10 @@ jobs:
       tag_name: ${{ steps.tag.outputs.date }}
     steps:
       - name: Checkout Code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Setup Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v5
         with:
           node-version: '20'
 
@@ -62,7 +62,7 @@ jobs:
         env:
           TIDDLYWIKI_PLUGIN_PATH: '${{ github.workspace }}/wiki:${{ github.workspace }}/wiki/plugins'
           TIDDLYWIKI_THEME_PATH: '${{ github.workspace }}/wiki/themes'
-        run: npx tiddlywiki wiki --build index 2>&1 | tee wiki/tiddlywiki.log
+        run: set -o pipefail && npx tiddlywiki wiki --build index 2>&1 | tee wiki/tiddlywiki.log
 
       - name: Rename Output
         run: mv wiki/output/index.html wiki/output/lith.html
@@ -110,7 +110,7 @@ jobs:
 
       - name: Upload Built Wiki Artifact
         if: ${{ inputs.create_release == true && inputs.build_config == 'prod' }}
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v5
         with:
           name: built-wiki
           path: wiki/output/lith.html
@@ -118,7 +118,7 @@ jobs:
 
       - name: Create Release
         if: ${{ inputs.create_release == true && inputs.build_config == 'prod' }}
-        uses: softprops/action-gh-release@v1
+        uses: softprops/action-gh-release@v3
         with:
           tag_name: build-${{ steps.tag.outputs.date }}
           name: Build ${{ steps.tag.outputs.date }}
@@ -131,14 +131,14 @@ jobs:
 
       - name: Upload Build Artifacts (Dry Run)
         if: ${{ inputs.create_release == false }}
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v5
         with:
           name: build-artifacts-dry-run
           path: wiki/output/lith.html
 
       - name: Upload Debug Logs
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v5
         with:
           name: debug-logs
           path: |

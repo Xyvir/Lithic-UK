@@ -19,7 +19,7 @@ jobs:
         backend: [caddy, lighttpd]
     steps:
       - name: Checkout Code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Test LXC Installer with Ephemeral
         env:
