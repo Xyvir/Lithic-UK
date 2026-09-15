@@ -3,72 +3,72 @@
     "url": "https://postkevone.github.io/tiddlystudy/index.html",
     "etag": "6173fca5-2e8160",
     "lastModified": "Sat, 23 Oct 2021 12:14:29 GMT",
-    "updatedAt": "2026-09-04T15:28:23.270Z"
+    "updatedAt": "2026-09-15T13:53:31.118Z"
   },
   "whiteboard-legacy": {
     "url": "https://github.com/tiddly-gittly/tiddlywiki-whiteboard/releases/download/v0.3.5/plugins.zip",
     "etag": "0x8DB5E8483CE6CE7",
     "lastModified": "Sat, 27 May 2023 07:32:24 GMT",
-    "updatedAt": "2026-09-04T15:28:24.864Z"
+    "updatedAt": "2026-09-15T13:53:32.221Z"
   },
   "comptext": {
     "url": "https://snowgoon88.github.io/TW5-extendedit/",
     "etag": "608ea2b3-25d517",
     "lastModified": "Sun, 02 May 2021 13:01:39 GMT",
-    "updatedAt": "2026-09-04T15:28:28.710Z"
+    "updatedAt": "2026-09-15T13:53:36.496Z"
   },
   "relink": {
     "url": "https://flibbles.github.io/tw5-relink/",
     "etag": "6a95c90e-241ee1",
     "lastModified": "Mon, 31 Aug 2026 18:33:50 GMT",
-    "updatedAt": "2026-09-04T15:28:34.551Z"
+    "updatedAt": "2026-09-15T13:53:42.569Z"
   },
   "streams": {
     "url": "https://saqimtiaz.github.io/streams/",
     "etag": "63ee3bea-32d978",
     "lastModified": "Thu, 16 Feb 2023 14:21:30 GMT",
-    "updatedAt": "2026-09-04T15:28:39.619Z"
+    "updatedAt": "2026-09-15T13:53:48.101Z"
   },
   "aliases": {
     "url": "https://mklauber.github.io/tw5-plugins/",
     "etag": "66745778-41a5e3",
     "lastModified": "Thu, 20 Jun 2024 16:23:20 GMT",
-    "updatedAt": "2026-09-04T15:28:46.441Z"
+    "updatedAt": "2026-09-15T13:53:55.366Z"
   },
   "notebook-mobile": {
     "url": "https://saqimtiaz.github.io/sq-tw/notebook.html",
     "etag": "6aa10999-2a7762",
     "lastModified": "Wed, 09 Sep 2026 07:24:09 GMT",
-    "updatedAt": "2026-09-14T20:01:23.819Z"
+    "updatedAt": "2026-09-15T13:53:59.441Z"
   },
   "sidebar-resize": {
     "url": "https://tiddlywiki-starter-kit.vercel.app/",
     "etag": "1cd5a0c54f61ab0ca3e93cac1b5f03ee",
-    "lastModified": "Fri, 04 Sep 2026 15:28:50 GMT",
-    "updatedAt": "2026-09-04T15:29:10.784Z"
+    "lastModified": "Thu, 10 Sep 2026 03:51:42 GMT",
+    "updatedAt": "2026-09-15T13:54:23.347Z"
   },
   "calendar": {
     "url": "https://bjtools.tiddlyspot.com/",
     "etag": "5yGetd9/uKeDcU4xNc66Ng==",
     "lastModified": null,
-    "updatedAt": "2026-09-04T15:29:16.003Z"
+    "updatedAt": "2026-09-15T13:54:28.439Z"
   },
   "quickview": {
     "url": "https://raw.githubusercontent.com/kookma/TW-PluginLibrary/main/docs/library/recipes/library/tiddlers/%2524%253A%252Fplugins%252Fkookma%252Fquickview.json",
     "etag": "d43e642b4f54b15dbe87dc89c64f5cd6941b6f193b14be1e1cd486508b2866f4",
     "lastModified": null,
-    "updatedAt": "2026-09-04T15:29:16.480Z"
+    "updatedAt": "2026-09-15T14:02:28.240Z"
   },
   "mermaid-tw5": {
     "url": "https://xyvir.github.io/tiny-mermaid11-tw5/",
     "etag": "6a63a6d3-4f0c3b",
     "lastModified": "Fri, 24 Jul 2026 17:54:27 GMT",
-    "updatedAt": "2026-09-04T15:29:20.425Z"
+    "updatedAt": "2026-09-15T13:54:33.847Z"
   },
   "advanced-search": {
     "url": "https://b-yp.github.io/tiddlywiki-plugins/",
     "etag": "6a068243-2cdd3d",
     "lastModified": "Fri, 15 May 2026 02:17:39 GMT",
-    "updatedAt": "2026-09-04T15:29:24.258Z"
+    "updatedAt": "2026-09-15T13:54:37.645Z"
   }
 }

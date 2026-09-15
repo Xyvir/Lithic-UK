@@ -7,17 +7,28 @@ title: $:/plugins/orange/mermaid-tw5/wrapper.js
 type: application/javascript
 module-type: widget
 author: Nathaniel Jones 2017-05-26
-modified: E Furlan 2022-05-08; Lithic 2026-09-14 (re-applied D3 pan/zoom from xyvir/lithic-patch-mermaid)
+modified: E Furlan 2022-05-08; Lithic 2026-09-14 (re-applied D3 pan/zoom from xyvir/lithic-patch-mermaid); Lithic 2026-09-15 (style gating; soft-fail when parent plugin missing)
 */
 (function() {
     // jslint node: true, browser: true
     // global $tw: false
     'use strict';
 
-    var Rocklib = require('$:/plugins/orange/mermaid-tw5/widget-tools.js').rocklib,
-        Widget = require('$:/core/modules/widgets/widget.js').widget,
-        rocklib = new Rocklib(),
-        mermaidModule = null,
+    // Soft dependency: if the parent mermaid-tw5 plugin (or the wiki core) is
+    // missing, bail at load time with a warning instead of crashing the whole
+    // TiddlyWiki boot. A hard throw during module registration aborts every
+    // module loaded after this one (seen in CI as 'Error executing boot
+    // module' + a completely empty build output).
+    var Rocklib, Widget, rocklib;
+    try {
+        Rocklib = require('$:/plugins/orange/mermaid-tw5/widget-tools.js').rocklib;
+        Widget = require('$:/core/modules/widgets/widget.js').widget;
+        rocklib = new Rocklib();
+    } catch (bootDepErr) {
+        console.warn('[lithic-patch-mermaid] $:/plugins/orange/mermaid-tw5 not available; mermaid patch disabled.');
+        return;
+    }
+    var mermaidModule = null,
         mermaidAPI = null,
         d3 = null,
         isZoomEnabled = false;
@@ -83,8 +94,21 @@ modified: E Furlan 2022-05-08; Lithic 2026-09-14 (re-applied D3 pan/zoom from xy
                 !node.firstChild || typeof node.firstChild.setAttribute !== 'function') {
                 return;
             }
-            var id = Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 7);
-            node.firstChild.setAttribute('id', id);
+            // Keep Mermaid's own svg id: Mermaid 11 scopes its entire internal
+            // stylesheet under that id (#id .node rect {...}). Re-assigning a
+            // random id orphans the stylesheet and silently strips all
+            // %%{init}%%-declared colors (masked for years by the old !important
+            // default CSS, which painted every node regardless).
+            var svgEl = (node.firstChild && node.firstChild.tagName &&
+                node.firstChild.tagName.toLowerCase() === 'svg')
+                ? node.firstChild
+                : node.querySelector('svg');
+            if (!svgEl) return;
+            var id = svgEl.getAttribute('id');
+            if (!id) {
+                id = Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 7);
+                svgEl.setAttribute('id', id);
+            }
             var svg = d3.select('#' + id);
             svg.html('<g>' + svg.html() + '</g>');
             var inner = svg.select('g');
@@ -149,6 +173,21 @@ modified: E Furlan 2022-05-08; Lithic 2026-09-14 (re-applied D3 pan/zoom from xy
         return Object.keys(init).length > 0 ? init : null;
     }
 
+    // Style gating: a diagram that carries its own styling must keep it.
+    // Mermaid applies flowchart colors through its internal stylesheet, which
+    // loses to the plugin's palette-default CSS (element rules with
+    // !important). So when the author declares styling - a %%{init}/%%{config}
+    // directive, style/classDef/linkStyle statements, or per-widget theme
+    // attributes - we tag the container `mm-user` and the default CSS opts
+    // out (see $:/plugins/orange/mermaid-tw5/styles). Over-detection is safe:
+    // worst case a diagram just gets Mermaid's own rendering.
+    function hasSelfStyling(body) {
+        if (!body) return false;
+        if (/%%\s*\{\s*(init|config)\s*:/i.test(body)) return true;
+        if (/^\s*(style|classDef|linkStyle)\s+\S/m.test(body)) return true;
+        return false;
+    }
+
     var MermaidWidget = function(parseTreeNode, options) {
         this.initialise(parseTreeNode, options);
     };
@@ -163,6 +202,11 @@ modified: E Furlan 2022-05-08; Lithic 2026-09-14 (re-applied D3 pan/zoom from xy
             rawBody = rocklib.getScriptBody(this, 'text') || '',
             scriptBody = (typeof rawBody === 'string' ? rawBody : String(rawBody)).trim(),
             divNode = rocklib.getCanvas(this, tag);
+        // Marker consumed by the default-theming CSS: rules are scoped to
+        // div.mm-themed so they only ever affect diagrams this wrapper drew.
+        if (divNode && divNode.classList) {
+            divNode.classList.add('mm-themed');
+        }
         var _insertSVG = function(svgCode, bindFunctions) {
             divNode.innerHTML = svgCode;
             if (bindFunctions) {
@@ -198,7 +242,12 @@ modified: E Furlan 2022-05-08; Lithic 2026-09-14 (re-applied D3 pan/zoom from xy
                     mermaidModule = loadedLib;
                 }
                 mermaidAPI = (mermaidModule && mermaidModule.mermaidAPI) ? mermaidModule.mermaidAPI : mermaidModule;
-                d3 = require('$:/plugins/orange/mermaid-tw5/d3.v6.min.js');
+                try {
+                    d3 = require('$:/plugins/orange/mermaid-tw5/d3.v6.min.js');
+                } catch (d3Err) {
+                    console.warn('[mermaid-tw5] d3 unavailable; zoom disabled.');
+                    d3 = null;
+                }
                 if (mermaidAPI && typeof mermaidAPI.initialize === 'function') {
                     mermaidAPI.initialize(buildSiteConfig());  // D-05: once per page load
                 }
@@ -220,6 +269,10 @@ modified: E Furlan 2022-05-08; Lithic 2026-09-14 (re-applied D3 pan/zoom from xy
                 scriptBody = '%%{init: ' + JSON.stringify(perWidgetInit) + '}%%\n' + scriptBody;
             }
 
+            // Self-styled diagrams (explicit directive/statements/attributes)
+            // render with Mermaid's own colors; palette defaults stand down.
+            var selfStyled = !!perWidgetInit || hasSelfStyling(scriptBody);
+
             var renderDiagram = function() {
                 var svgId = divNode.id + '_svg';
                 
@@ -237,6 +290,9 @@ modified: E Furlan 2022-05-08; Lithic 2026-09-14 (re-applied D3 pan/zoom from xy
                     scriptBody: scriptBody,
                     onSuccess: function(res) {
                         _insertSVG(res.svg, res.bindFunctions);
+                        if (selfStyled && divNode.classList) {
+                            divNode.classList.add('mm-user');
+                        }
                         hookupZoom(divNode);
                     },
                     onError: function(ex) {

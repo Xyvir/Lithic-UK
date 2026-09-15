@@ -69,6 +69,11 @@ const pluginInfos = findPluginInfoFiles(EXTERNAL_DIR);
 
 console.log(`Found ${pluginInfos.length} plugin.info files.`);
 
+if (pluginInfos.length === 0) {
+    console.error('FATAL: no plugin.info files found under wiki/external — the mirror step produced no plugins. Failing the build so an empty wiki never ships. Check wiki/mirror.log / external.yml / external-lock.json.');
+    process.exit(1);
+}
+
 pluginInfos.forEach(infoPath => {
     try {
         const content = fs.readFileSync(infoPath, 'utf8');

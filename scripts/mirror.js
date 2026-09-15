@@ -85,10 +85,32 @@ sources.forEach(source => {
     const remoteInfo = getRemoteInfo(source.url);
     const lockEntry = lockData[source.name];
 
+    // The lockfile caches the REMOTE revision (etag/last-modified), not the
+    // local artifacts: wiki/external and wiki/tiddlers are gitignored merge
+    // caches. A fresh checkout has an empty cache, so "lockfile matches" alone
+    // must NEVER skip a download — CI would build from zero plugins (seen in
+    // CI: every external plugin 'Cannot find', empty build output).
+    // Fresh = remote revision matches lockfile AND the local artifact exists
+    // and is non-empty.
+    const isJsonPluginSource = source.type === 'json-plugin';
+    const localArtifact = isJsonPluginSource
+        ? path.join(TIDDLERS_DIR, `${source.name}.json`)
+        : targetDir;
+    let hasLocalArtifact = false;
+    if (fs.existsSync(localArtifact)) {
+        const st = fs.statSync(localArtifact);
+        hasLocalArtifact = st.isDirectory()
+            ? fs.readdirSync(localArtifact).length > 0
+            : st.size > 0;
+    }
+
     let isFresh = false;
-    if (lockEntry && remoteInfo) {
+    if (hasLocalArtifact && lockEntry && remoteInfo) {
         if (remoteInfo.etag && remoteInfo.etag === lockEntry.etag) isFresh = true;
         else if (remoteInfo.lastModified && remoteInfo.lastModified === lockEntry.lastModified) isFresh = true;
+    }
+    if (lockEntry && remoteInfo && !hasLocalArtifact) {
+        log(`📥 Local cache empty (fresh checkout?) — re-fetching despite lockfile match.`);
     }
 
     if (!isFresh || source.force) {

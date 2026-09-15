@@ -1,0 +1,84 @@
+tags: $:/tags/Stylesheet
+title: $:/plugins/orange/mermaid-tw5/styles
+type: text/vnd.tiddlywiki
+
+\rules only filteredtranscludeinline transcludeinline macrodef macrocallinline
+
+/* Palette-default theming for Mermaid diagrams, gated so it can never
+   override an author's declared styling.
+
+   The wrapper tags every diagram container `mm-themed`, and additionally
+   `mm-user` when the diagram carries its own styling (a %%{init}/%%{config}
+   directive, style/classDef/linkStyle statements, or per-widget theme
+   attributes). Mermaid applies flowchart colors via its internal stylesheet
+   or presentation attributes -- both lose to element rules with !important.
+   So every color rule below is scoped to `div.mm-themed:not(.mm-user)`:
+   diagrams that declare their own colors keep Mermaid's rendering untouched;
+   diagrams without any declared styling keep the sane palette defaults. */
+
+/* -- Hide stray Mermaid error SVGs (applies regardless of gating) -- */
+svg[aria-roledescription="error"],
+svg.error-icon,
+svg:has(.error-icon) {
+    display: none !important;
+}
+
+/* -- Node fills & borders (gated) -- */
+div.mm-themed:not(.mm-user) .node rect,
+div.mm-themed:not(.mm-user) .node polygon,
+div.mm-themed:not(.mm-user) .node circle,
+div.mm-themed:not(.mm-user) .node ellipse,
+div.mm-themed:not(.mm-user) .node path {
+    fill: <<colour muted-foreground>> !important;
+    stroke: <<colour primary>> !important;
+    stroke-width: 1.5px !important;
+}
+
+/* -- Node text (inside filled nodes) -- */
+div.mm-themed:not(.mm-user) .node .label,
+div.mm-themed:not(.mm-user) .node text,
+div.mm-themed:not(.mm-user) .node tspan,
+div.mm-themed:not(.mm-user) .node foreignObject div,
+div.mm-themed:not(.mm-user) .node foreignObject span {
+    fill: <<colour tiddler-background>> !important;
+    color: <<colour tiddler-background>> !important;
+}
+
+/* -- Edge lines -- */
+div.mm-themed:not(.mm-user) .edgePath .path,
+div.mm-themed:not(.mm-user) .edge-path path,
+div.mm-themed:not(.mm-user) .flowchart-link,
+div.mm-themed:not(.mm-user) path.path,
+div.mm-themed:not(.mm-user) .link,
+div.mm-themed:not(.mm-user) g.edgePaths path {
+    stroke: <<colour foreground>> !important;
+    stroke-width: 1.5px !important;
+}
+
+/* -- Arrowhead markers -- */
+div.mm-themed:not(.mm-user) marker path {
+    fill: <<colour foreground>> !important;
+    stroke: <<colour foreground>> !important;
+}
+
+/* -- Edge labels -- */
+div.mm-themed:not(.mm-user) .edgeLabel,
+div.mm-themed:not(.mm-user) .edgeLabel text,
+div.mm-themed:not(.mm-user) .edgeLabel tspan,
+div.mm-themed:not(.mm-user) .edgeLabel foreignObject div,
+div.mm-themed:not(.mm-user) .edgeLabel foreignObject span,
+div.mm-themed:not(.mm-user) .label text,
+div.mm-themed:not(.mm-user) .label tspan {
+    fill: <<colour foreground>> !important;
+    color: <<colour foreground>> !important;
+}
+
+/* -- Subgraph / cluster -- */
+div.mm-themed:not(.mm-user) .cluster rect {
+    fill: <<colour page-background>> !important;
+    stroke: <<colour muted-foreground>> !important;
+}
+div.mm-themed:not(.mm-user) .cluster text,
+div.mm-themed:not(.mm-user) .cluster tspan {
+    fill: <<colour foreground>> !important;
+}
