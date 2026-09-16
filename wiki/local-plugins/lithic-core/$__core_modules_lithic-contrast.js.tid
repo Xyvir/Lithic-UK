@@ -1,0 +1,226 @@
+title: $:/plugins/xyvir/lithic-core/contrast.js
+type: application/javascript
+module-type: library
+
+/*
+Lithic contrast library -- palette-responsive derived colors.
+
+Pure color math (WCAG relative luminance / contrast ratio). No DOM, no
+wiki dependency in the primitives. `resolvePalette` reads the LIVE
+TiddlyWiki palette through the same chain the `<<colour>>` macro uses
+(active palette -> $:/palettes/Vanilla -> $:/config/DefaultColourMappings),
+and `derive` turns it into a role map guaranteed to hit contrast targets:
+
+  foreground        >= 5:1 vs surface          (body text)
+  foreground-muted  >= 3.5:1 vs surface        (secondary text)
+  node-bg           fixed lift off surface     (cards, diagrams)
+  node-fg           >= 4.5:1 vs node-bg        (text on cards)
+  node-border       >= 3:1 vs node-bg          (accent border)
+  line              >= 4.5:1 vs surface        (rules, connectors)
+  cluster-bg/-border, note-bg/-fg/-border      (grouping, callouts)
+  accent            >= 3:1 vs surface          (primary, locked)
+  accent-fg         >= 4.5:1 vs accent
+  scale-1..8        categorical accents spun off primary
+  dark              "1" on dark palettes, "0" on light
+
+Consume it either as CSS custom properties (--lithic-c-*, published by the
+lithic-contrast startup module) or by requiring this module directly:
+
+  var lib = require("$:/plugins/xyvir/lithic-core/contrast.js");
+  var roles = lib.deriveForWiki($tw.wiki);   // flat map, CSS-ready
+
+Derived from the validated "Contrast-locked" Mermaid theme (Lithic 2026-09).
+*/
+(function() {
+    "use strict";
+
+    // ---------- color primitives ----------
+    function hexToRgb(c) {
+        c = String(c).trim();
+        if (c[0] === "#") {
+            if (c.length === 4) return [parseInt(c[1] + c[1], 16), parseInt(c[2] + c[2], 16), parseInt(c[3] + c[3], 16)];
+            if (c.length >= 7) return [parseInt(c.slice(1, 3), 16), parseInt(c.slice(3, 5), 16), parseInt(c.slice(5, 7), 16)];
+        }
+        var m = c.match(/^rgba?\(([^)]+)\)$/);
+        if (m) {
+            var v = m[1].split(",");
+            return [+v[0], +v[1], +v[2]];
+        }
+        return null;
+    }
+    function pad2(s) { s = "0" + s; return s.length > 2 ? s.slice(s.length - 2) : s; }
+    function toHex(rgb) {
+        function h(v) { return pad2(Math.max(0, Math.min(255, Math.round(v))).toString(16)); }
+        return "#" + h(rgb[0]) + h(rgb[1]) + h(rgb[2]);
+    }
+    function relLum(rgb) {
+        function f(v) { v /= 255; return v <= 0.03928 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4); }
+        return 0.2126 * f(rgb[0]) + 0.7152 * f(rgb[1]) + 0.0722 * f(rgb[2]);
+    }
+    function contrast(a, b) {
+        var L1 = relLum(a), L2 = relLum(b);
+        return (Math.max(L1, L2) + 0.05) / (Math.min(L1, L2) + 0.05);
+    }
+    function mix(a, b, t) {
+        return [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t, a[2] + (b[2] - a[2]) * t];
+    }
+    // push `color` away from `bgc` until contrast >= target (keeps hue, bounded).
+    // Direction is auto-detected by comparing the two extreme endpoints
+    // (pure white vs pure black) -- contrast is U-shaped along the mix, so
+    // mid-luminance backgrounds must be probed at their extremes, not the
+    // midpoint. E.g. text on a mid blue: black hits 6:1 while white stalls at 3.3.
+    function lumAdjust(color, bgc, target) {
+        var c = color.slice();
+        var dir = contrast([255, 255, 255], bgc) >= contrast([0, 0, 0], bgc) ? 1 : -1;
+        for (var i = 0; i < 40; i++) {
+            if (contrast(c, bgc) >= target) return c;
+            c = dir > 0 ? mix(c, [255, 255, 255], 0.07) : mix(c, [0, 0, 0], 0.07);
+        }
+        return c;
+    }
+    function rgb2hsl(rgb) {
+        var r = rgb[0] / 255, g = rgb[1] / 255, b = rgb[2] / 255;
+        var mx = Math.max(r, g, b), mn = Math.min(r, g, b), h, s, l = (mx + mn) / 2;
+        if (mx === mn) { h = s = 0; } else {
+            var d = mx - mn;
+            s = l > 0.5 ? d / (2 - mx - mn) : d / (mx + mn);
+            h = mx === r ? (g - b) / d + (g < b ? 6 : 0) : mx === g ? (b - r) / d + 2 : (r - g) / d + 4;
+            h /= 6;
+        }
+        return [h, s, l];
+    }
+    function hsl2rgb(hsl) {
+        var h = hsl[0], s = hsl[1], l = hsl[2], r, g, b;
+        if (s === 0) { r = g = b = l; } else {
+            function q(v) { return v < 0.5 ? v * (1 + s) : v + s - v * s; }
+            var p = 2 * l - q(l);
+            function f(t) {
+                if (t < 0) t += 1; if (t > 1) t -= 1;
+                if (t < 1 / 6) return p + (q(l) - p) * 6 * t;
+                if (t < 1 / 2) return q(l);
+                if (t < 2 / 3) return p + (q(l) - p) * (2 / 3 - t) * 6;
+                return p;
+            }
+            r = f(h + 1 / 3); g = f(h); b = f(h - 1 / 3);
+        }
+        return [r * 255, g * 255, b * 255];
+    }
+    // n-step categorical scale spun around the seed hue
+    function scaleFrom(seed, darkBg, n) {
+        var hsl = rgb2hsl(seed), out = [];
+        for (var i = 0; i < n; i++) {
+            var l = darkBg ? 0.34 + (i / (n - 1)) * 0.42 : 0.70 - (i / (n - 1)) * 0.42;
+            out.push(mix(hsl2rgb([hsl[0], Math.max(hsl[1], 0.55), l]), darkBg ? [255, 255, 255] : [0, 0, 0], 0.06));
+        }
+        return out;
+    }
+
+    // ---------- wiki palette resolution (<<colour>> chain) ----------
+    function isColor(v) {
+        return typeof v === "string" && v.indexOf("<<") === -1 && hexToRgb(v) !== null;
+    }
+    function resolvePalette(wiki) {
+        // Palette tiddlers are dictionary-type tiddlers: their colour entries
+        // live in the parsed text, exposed via getTiddlerData (which also
+        // returns .fields for field-based palettes). This mirrors exactly how
+        // the <<colour>> macro reads palettes. Palettes may also reference
+        // their own colours (`tiddler-background: <<colour background>>`),
+        // so intra-palette transclusions resolve recursively.
+        var paletteData = null;
+        function paletteField(name) {
+            if (!paletteData) {
+                var ptitle = wiki.getTiddlerText("$:/palette");
+                paletteData = (ptitle && wiki.getTiddlerData) ? (wiki.getTiddlerData(ptitle, null) || {}) : {};
+            }
+            return paletteData ? paletteData[name] : undefined;
+        }
+        function vanillaField(name) {
+            if (!wiki.getTiddlerData) return undefined;
+            var van = wiki.getTiddlerData("$:/palettes/Vanilla", null);
+            return van ? van[name] : undefined;
+        }
+        function pick(name, fb, depth) {
+            depth = depth || 0;
+            var v = paletteField(name);
+            if (!isColor(v)) {
+                v = vanillaField(name);
+            }
+            if (!isColor(v)) {
+                var d = wiki.getTiddler("$:/config/DefaultColourMappings/" + name);
+                v = d && d.fields && d.fields.text;
+            }
+            if (isColor(v)) return hexToRgb(v);
+            // `<<colour other>>` -> recurse into the same chain (bounded)
+            var m = typeof v === "string" && v.match(/^<<colour\s+([^>]+?)\s*>>$/);
+            if (m && depth < 5) {
+                return pick(m[1], fb, depth + 1);
+            }
+            return fb;
+        }
+        var bg = pick("tiddler-background", pick("page-background", [255, 255, 255]));
+        return {
+            bg: bg,
+            pageBg: pick("page-background", bg),
+            fg: pick("foreground", [32, 32, 32]),
+            primary: pick("primary", [96, 96, 200]),
+            muted: pick("muted-foreground", [120, 120, 120]),
+            border: pick("table-border", pick("tiddler-border", [180, 180, 180]))
+        };
+    }
+
+    // ---------- generic derivation (the Contrast-locked role map) ----------
+    function derive(p) {
+        var dark = relLum(p.bg) < 0.2;
+        var W = dark ? [255, 255, 255] : [0, 0, 0];
+        var txt = lumAdjust(p.fg, p.bg, 5);
+        var txtMuted = lumAdjust(p.muted, p.bg, 3.5);
+        var node = mix(p.bg, W, dark ? 0.12 : 0.08);
+        var nodeTxt = lumAdjust(txt, node, 4.5);
+        var nodeB = lumAdjust(dark ? mix(p.primary, W, 0.5) : mix(p.primary, [0, 0, 0], 0.35), node, 3);
+        var line = lumAdjust(p.fg, p.bg, 4.5);
+        var cluster = mix(p.bg, W, dark ? 0.06 : 0.05);
+        var clusterB = lumAdjust(p.border, p.bg, 2.5);
+        var clusterFg = lumAdjust(txt, cluster, 4.5);
+        var note = mix(p.bg, p.primary, dark ? 0.15 : 0.10);
+        var noteTxt = lumAdjust(txt, note, 4.5);
+        var noteB = lumAdjust(note, p.bg, 2.5);
+        var accent = lumAdjust(p.primary, p.bg, 3);
+        var accentFg = lumAdjust(dark ? [17, 17, 17] : [255, 255, 255], accent, 4.5);
+        var scale = scaleFrom(p.primary, dark, 8);
+        var out = {
+            "surface": toHex(p.bg),
+            "page": toHex(p.pageBg),
+            "foreground": toHex(txt),
+            "foreground-muted": toHex(txtMuted),
+            "node-bg": toHex(node),
+            "node-fg": toHex(nodeTxt),
+            "node-border": toHex(nodeB),
+            "line": toHex(line),
+            "cluster-bg": toHex(cluster),
+            "cluster-border": toHex(clusterB),
+            "cluster-fg": toHex(clusterFg),
+            "note-bg": toHex(note),
+            "note-fg": toHex(noteTxt),
+            "note-border": toHex(noteB),
+            "accent": toHex(accent),
+            "accent-fg": toHex(accentFg),
+            "dark": dark ? "1" : "0"
+        };
+        for (var i = 0; i < 8; i++) out["scale-" + (i + 1)] = toHex(scale[i]);
+        return out;
+    }
+    function deriveForWiki(wiki) {
+        return derive(resolvePalette(wiki));
+    }
+
+    exports.hexToRgb = hexToRgb;
+    exports.toHex = toHex;
+    exports.relLum = relLum;
+    exports.contrast = contrast;
+    exports.mix = mix;
+    exports.lumAdjust = lumAdjust;
+    exports.scaleFrom = scaleFrom;
+    exports.resolvePalette = resolvePalette;
+    exports.derive = derive;
+    exports.deriveForWiki = deriveForWiki;
+})();

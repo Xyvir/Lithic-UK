@@ -1,0 +1,64 @@
+title: $:/plugins/xyvir/lithic-core/contrast-publisher.js
+type: application/javascript
+module-type: startup
+
+/*
+Lithic contrast variables -- publishes derived colors as CSS custom
+properties on document.documentElement and keeps them live.
+
+For every derived role X (see $:/plugins/xyvir/lithic-core/contrast.js)
+this publishes `--lithic-c-X` (hex value) plus two numeric helpers:
+`--lithic-c-X-rgb` ("r,g,b", for rgba() composition) and
+`--lithic-c-X-alpha-12/25` (pre-faded hex tints for hover rings etc.).
+`--lithic-c-dark` is "1" on dark palettes, "0" on light.
+
+Recomputation triggers: palette switch ($:/palette / $:/config/ThemeTracker/
+Palette changes) and palette tiddler edits (via $:/tags/Palette listeners).
+Consume from any stylesheet:
+
+  .my-widget { color: var(--lithic-c-foreground); }
+  .my-accent { border-color: var(--lithic-c-accent); }
+*/
+(function() {
+    "use strict";
+    exports.name = "lithic-contrast";
+    exports.platforms = ["browser"];
+    exports.synchronous = true;
+    exports.after = ["startup"];
+    exports.startup = function() {
+        var lib = require("$:/plugins/xyvir/lithic-core/contrast.js");
+
+        function hexToRgbTriple(hex) {
+            var rgb = lib.hexToRgb(hex);
+            return rgb ? rgb.map(function(v) { return Math.round(v); }).join(",") : null;
+        }
+        function apply() {
+            var roles = lib.deriveForWiki($tw.wiki);
+            var style = document.documentElement.style;
+            Object.keys(roles).forEach(function(k) {
+                var v = roles[k];
+                if (k === "dark") { style.setProperty("--lithic-c-dark", v); return; }
+                if (typeof v !== "string" || v.charAt(0) !== "#") return;
+                style.setProperty("--lithic-c-" + k, v);
+                var trip = hexToRgbTriple(v);
+                if (trip) {
+                    style.setProperty("--lithic-c-" + k + "-rgb", trip);
+                    style.setProperty("--lithic-c-" + k + "-alpha-12", v + "1F");
+                    style.setProperty("--lithic-c-" + k + "-alpha-25", v + "40");
+                }
+            });
+        }
+        apply();
+
+        // live updates
+        $tw.wiki.addEventListener("change", function(changes) {
+            var keys = Object.keys(changes);
+            var dirty = keys.some(function(t) {
+                return t === "$:/palette" ||
+                    t.indexOf("$:/palettes/") === 0 ||
+                    t.indexOf("$:/config/DefaultColourMappings/") === 0;
+            });
+            if (dirty) apply();
+        });
+    };
+})();

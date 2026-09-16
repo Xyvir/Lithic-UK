@@ -10,11 +10,19 @@ type: text/vnd.tiddlywiki
    The wrapper tags every diagram container `mm-themed`, and additionally
    `mm-user` when the diagram carries its own styling (a %%{init}/%%{config}
    directive, style/classDef/linkStyle statements, or per-widget theme
-   attributes). Mermaid applies flowchart colors via its internal stylesheet
+   attributes) -- then Mermaid's own rendering is authoritative and these
+   defaults stand down. Mermaid applies flowchart colors via its internal stylesheet
    or presentation attributes -- both lose to element rules with !important.
    So every color rule below is scoped to `div.mm-themed:not(.mm-user)`:
    diagrams that declare their own colors keep Mermaid's rendering untouched;
-   diagrams without any declared styling keep the sane palette defaults. */
+   diagrams without any declared styling keep the sane palette defaults.
+
+   All colors come from the shared lithic-core contrast variables
+   (--lithic-c-*, computed with WCAG-contrast math from the live palette
+   by $:/plugins/xyvir/lithic-core/contrast-publisher.js and re-published
+   on palette switch). Each var() carries a <<colour>> fallback so the
+   sheet still renders sane values before startup / without the core
+   plugin. */
 
 /* -- Hide stray Mermaid error SVGs (applies regardless of gating) -- */
 svg[aria-roledescription="error"],
@@ -23,25 +31,29 @@ svg:has(.error-icon) {
     display: none !important;
 }
 
-/* -- Node fills & borders (gated) -- */
+/* -- Node fills & borders (gated) --
+   fill = muted-foreground (subtle lift off the page), border = primary
+   (the palette accent -- the "Contrast-locked" signature). */
 div.mm-themed:not(.mm-user) .node rect,
 div.mm-themed:not(.mm-user) .node polygon,
 div.mm-themed:not(.mm-user) .node circle,
 div.mm-themed:not(.mm-user) .node ellipse,
 div.mm-themed:not(.mm-user) .node path {
-    fill: <<colour muted-foreground>> !important;
-    stroke: <<colour primary>> !important;
+    fill: var(--lithic-c-node-bg, <<colour muted-foreground>>) !important;
+    stroke: var(--lithic-c-node-border, <<colour primary>>) !important;
     stroke-width: 1.5px !important;
 }
 
-/* -- Node text (inside filled nodes) -- */
+/* -- Node text (inside filled nodes) --
+   foreground over the muted-foreground fill: readable on light AND dark
+   palettes, and the palette author only ever picks sensible fg shades. */
 div.mm-themed:not(.mm-user) .node .label,
 div.mm-themed:not(.mm-user) .node text,
 div.mm-themed:not(.mm-user) .node tspan,
 div.mm-themed:not(.mm-user) .node foreignObject div,
 div.mm-themed:not(.mm-user) .node foreignObject span {
-    fill: <<colour tiddler-background>> !important;
-    color: <<colour tiddler-background>> !important;
+    fill: var(--lithic-c-node-fg, <<colour foreground>>) !important;
+    color: var(--lithic-c-node-fg, <<colour foreground>>) !important;
 }
 
 /* -- Edge lines -- */
@@ -51,14 +63,14 @@ div.mm-themed:not(.mm-user) .flowchart-link,
 div.mm-themed:not(.mm-user) path.path,
 div.mm-themed:not(.mm-user) .link,
 div.mm-themed:not(.mm-user) g.edgePaths path {
-    stroke: <<colour foreground>> !important;
+    stroke: var(--lithic-c-line, <<colour foreground>>) !important;
     stroke-width: 1.5px !important;
 }
 
 /* -- Arrowhead markers -- */
 div.mm-themed:not(.mm-user) marker path {
-    fill: <<colour foreground>> !important;
-    stroke: <<colour foreground>> !important;
+    fill: var(--lithic-c-line, <<colour foreground>>) !important;
+    stroke: var(--lithic-c-line, <<colour foreground>>) !important;
 }
 
 /* -- Edge labels -- */
@@ -69,16 +81,63 @@ div.mm-themed:not(.mm-user) .edgeLabel foreignObject div,
 div.mm-themed:not(.mm-user) .edgeLabel foreignObject span,
 div.mm-themed:not(.mm-user) .label text,
 div.mm-themed:not(.mm-user) .label tspan {
-    fill: <<colour foreground>> !important;
-    color: <<colour foreground>> !important;
+    fill: var(--lithic-c-node-fg, <<colour foreground>>) !important;
+    color: var(--lithic-c-node-fg, <<colour foreground>>) !important;
 }
 
 /* -- Subgraph / cluster -- */
 div.mm-themed:not(.mm-user) .cluster rect {
-    fill: <<colour page-background>> !important;
-    stroke: <<colour muted-foreground>> !important;
+    fill: var(--lithic-c-cluster-bg, <<colour page-background>>) !important;
+    stroke: var(--lithic-c-cluster-border, <<colour muted-foreground>>) !important;
 }
 div.mm-themed:not(.mm-user) .cluster text,
 div.mm-themed:not(.mm-user) .cluster tspan {
-    fill: <<colour foreground>> !important;
+    fill: var(--lithic-c-cluster-fg, <<colour foreground>>) !important;
+}
+
+/* =========================================================
+   PRINT: greyscale for all mermaid diagrams
+
+   Diagrams should never print palette colors: baseline diagrams
+   get print-grey variable overrides (black lines/text, light-ink
+   fills, white diagram background) via the same --lithic-c-* vars
+   they consume on screen -- redefining the vars on the container
+   re-themes every rule above with zero selector duplication.
+   Self-styled diagrams (mm-user, pies, git graphs) carry inline
+   colors the vars can't reach, so the whole container is passed
+   through a CSS grayscale filter instead. Ink usage stays sane
+   even when printing from a dark palette.
+   ========================================================= */
+@media print {
+    /* -- baseline diagrams: print-grey variable overrides -- */
+    div.mm-themed:not(.mm-user) {
+        --lithic-c-surface: #ffffff;
+        --lithic-c-page: #ffffff;
+        --lithic-c-foreground: #000000;
+        --lithic-c-foreground-muted: #444444;
+        --lithic-c-node-bg: #f2f2f2;
+        --lithic-c-node-fg: #000000;
+        --lithic-c-node-border: #000000;
+        --lithic-c-line: #000000;
+        --lithic-c-cluster-bg: #ffffff;
+        --lithic-c-cluster-border: #666666;
+        --lithic-c-cluster-fg: #000000;
+        --lithic-c-note-bg: #fafafa;
+        --lithic-c-note-fg: #000000;
+        --lithic-c-note-border: #666666;
+        --lithic-c-accent: #000000;
+        --lithic-c-accent-fg: #ffffff;
+        background: #ffffff !important;
+    }
+
+    /* -- all diagrams: monochrome + make the greys actually print --
+       (print-color-adjust exact overrides the browser's default
+       background-suppression so the fills/underlines carry ink;
+       the fork's $:/lithic/styles/printstyle.css already sets this
+       for svg, repeated here so this sheet is self-contained) */
+    div.mm-themed {
+        filter: grayscale(1) !important;
+        -webkit-print-color-adjust: exact !important;
+        print-color-adjust: exact !important;
+    }
 }

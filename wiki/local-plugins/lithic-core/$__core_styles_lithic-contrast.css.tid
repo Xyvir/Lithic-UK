@@ -1,0 +1,40 @@
+title: $:/plugins/xyvir/lithic-core/lithic-contrast.css
+tags: $:/tags/Stylesheet
+type: text/css
+
+/*
+Lithic contrast variables -- static fallback values.
+
+The startup module `$:/plugins/xyvir/lithic-core/contrast-publisher.js`
+recomputes these from the live palette at boot (WCAG-contrast-checked,
+palette-responsive). This sheet only exists so `var(--lithic-c-*)`
+resolves before startup / in non-JS contexts. Do not edit here -- edit
+the publisher.
+*/
+:root {
+    --lithic-c-surface: <<colour tiddler-background>>;
+    --lithic-c-page: <<colour page-background>>;
+    --lithic-c-foreground: <<colour foreground>>;
+    --lithic-c-foreground-muted: <<colour muted-foreground>>;
+    --lithic-c-node-bg: <<colour muted-foreground>>;
+    --lithic-c-node-fg: <<colour foreground>>;
+    --lithic-c-node-border: <<colour primary>>;
+    --lithic-c-line: <<colour foreground>>;
+    --lithic-c-cluster-bg: <<colour page-background>>;
+    --lithic-c-cluster-border: <<colour table-border>>;
+    --lithic-c-cluster-fg: <<colour foreground>>;
+    --lithic-c-note-bg: <<colour muted-foreground>>;
+    --lithic-c-note-fg: <<colour foreground>>;
+    --lithic-c-note-border: <<colour table-border>>;
+    --lithic-c-accent: <<colour primary>>;
+    --lithic-c-accent-fg: <<colour tiddler-background>>;
+    --lithic-c-scale-1: <<colour primary>>;
+    --lithic-c-scale-2: <<colour primary>>;
+    --lithic-c-scale-3: <<colour primary>>;
+    --lithic-c-scale-4: <<colour primary>>;
+    --lithic-c-scale-5: <<colour primary>>;
+    --lithic-c-scale-6: <<colour primary>>;
+    --lithic-c-scale-7: <<colour primary>>;
+    --lithic-c-scale-8: <<colour primary>>;
+    --lithic-c-dark: 0;
+}
