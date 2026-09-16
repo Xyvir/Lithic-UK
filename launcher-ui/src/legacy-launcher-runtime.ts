@@ -177,7 +177,12 @@ function injectSaverBootstrap(
           } catch (_) { return false; }
         })).then(function(inList) {
           var existingIndex = inList.indexOf(true);
-          var newEntry = { handle: fileHandle, name: fileHandle.name, tauriPath: null };
+          // Tauri pseudo-handles (no getFile) must not enter the recents
+          // store: record their disk path so the launcher re-opens via the
+          // Rust read command, not the File System Access API.
+          var newEntry = fileHandle.__lithicTauriPath__
+            ? { handle: null, name: fileHandle.name, tauriPath: fileHandle.__lithicTauriPath__ }
+            : { handle: fileHandle, name: fileHandle.name, tauriPath: null };
           if (existingIndex !== -1) {
             var moved = recentFiles.splice(existingIndex, 1)[0];
             recentFiles.unshift(moved);

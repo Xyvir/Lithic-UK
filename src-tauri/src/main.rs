@@ -44,15 +44,29 @@ fn read_lith_path(path: String) -> Result<LithFile, String> {
     })
 }
 
+/// Default dialog starting point: the installed bundle folder when the app
+/// has been installed (Documents\Lithic), else the exe's own folder so
+/// thumb-drive bundles start where the liths live.
+fn dialog_start_dir() -> Option<PathBuf> {
+    install_target()
+        .filter(|path| path.is_file())
+        .and_then(|path| path.parent().map(|parent| parent.to_path_buf()))
+        .or_else(exe_dir)
+}
+
+// Dialog commands are sync (not async): tauri v1 runs sync commands on the
+// main thread where the native dialog is modal-safe; async commands run on
+// the async runtime and the modal can misbehave.
 #[tauri::command]
-async fn open_lith_file() -> Result<Option<LithFile>, String> {
-    let selected = FileDialogBuilder::new()
+fn open_lith_file() -> Result<Option<LithFile>, String> {
+    let mut dialog = FileDialogBuilder::new()
         .add_filter("Lithic files", &["lith"])
         .add_filter("Text & data files", &["md", "txt", "tid", "json", "html", "htm"])
-        .add_filter("All files", &["*"])
-        .pick_file();
-
-    let Some(path) = selected else { return Ok(None); };
+        .add_filter("All files", &["*"]);
+    if let Some(dir) = dialog_start_dir() {
+        dialog = dialog.set_directory(dir);
+    }
+    let Some(path) = dialog.pick_file() else { return Ok(None); };
     let text = fs::read_to_string(&path).map_err(|error| error.to_string())?;
     Ok(Some(LithFile {
         name: path.file_name().unwrap_or_default().to_string_lossy().into_owned(),
@@ -62,16 +76,19 @@ async fn open_lith_file() -> Result<Option<LithFile>, String> {
 }
 
 #[tauri::command]
-async fn save_lith_file(
+fn save_lith_file(
     text: String,
     suggested_name: String,
     path: Option<String>,
 ) -> Result<SavedLithFile, String> {
     let selected = path.map(PathBuf::from).or_else(|| {
-        FileDialogBuilder::new()
+        let mut dialog = FileDialogBuilder::new()
             .set_file_name(&suggested_name)
-            .add_filter("Lithic files", &["lith"])
-            .save_file()
+            .add_filter("Lithic files", &["lith"]);
+        if let Some(dir) = dialog_start_dir() {
+            dialog = dialog.set_directory(dir);
+        }
+        dialog.save_file()
     });
 
     let Some(path) = selected else { return Err("Save cancelled".to_string()); };

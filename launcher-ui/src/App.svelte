@@ -551,6 +551,16 @@
     busy = true;
     status = 'Opening recent Lith…';
     try {
+      // Tauri: path-backed recents (sidecar merges, save-dialog entries, and
+      // legacy rows polluted with a Tauri pseudo-handle) all re-open through
+      // the disk — browser file handles don't exist there.
+      const tauriPath = (recent as any).tauriPath
+        ?? (recent as any).path
+        ?? (recent as any).handle?.__lithicTauriPath__;
+      if (mode === 'tauri' && tauriPath) {
+        await mountTauriPath(tauriPath);
+        return;
+      }
       const handle = (recent as any).handle;
       if (handle) {
         if (handle.queryPermission) {
