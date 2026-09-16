@@ -7,7 +7,7 @@ title: $:/plugins/orange/mermaid-tw5/wrapper.js
 type: application/javascript
 module-type: widget
 author: Nathaniel Jones 2017-05-26
-modified: E Furlan 2022-05-08; Lithic 2026-09-14 (re-applied D3 pan/zoom from xyvir/lithic-patch-mermaid); Lithic 2026-09-15 (style gating: self-styled diagrams opt out of palette default CSS; palette-responsiveness lives in the stylesheet via <<colour>>); Lithic 2026-09-16 (font-only init no longer flags mm-user; render gated on document.fonts.ready so label measure == label paint)
+modified: E Furlan 2022-05-08; Lithic 2026-09-14 (re-applied D3 pan/zoom from xyvir/lithic-patch-mermaid); Lithic 2026-09-15 (style gating: self-styled diagrams opt out of palette default CSS; palette-responsiveness lives in the stylesheet via <<colour>>); Lithic 2026-09-16 (font-only init no longer flags mm-user; render gated on document.fonts.ready so label measure == label paint; site-wide Vollkorn default via buildSiteConfig)
 */
 (function() {
     // jslint node: true, browser: true
@@ -31,7 +31,8 @@ modified: E Furlan 2022-05-08; Lithic 2026-09-14 (re-applied D3 pan/zoom from xy
     var mermaidModule = null,
         mermaidAPI = null,
         d3 = null,
-        isZoomEnabled = false;
+        isZoomEnabled = false,
+        siteFontFamily = 'Vollkorn'; // plain Vollkorn: digits inside this family now carry KaTeX-derived outlines (see $:/lithic/fonts/vollkorn + scripts/merge-vollkorn-digits.py); overridable via $:/plugins/orange/mermaid-tw5/config
 
     function escapeHtml(text) {
         if (text === null || text === undefined) {
@@ -148,6 +149,16 @@ modified: E Furlan 2022-05-08; Lithic 2026-09-14 (re-applied D3 pan/zoom from xy
             securityLevel: 'loose',
             suppressErrorRendering: true,
             deterministicIds: true,
+            // Site-wide label typeface: Vollkorn is embedded locally in
+            // $:/lithic/fonts/vollkorn. NOTE: mermaid 11 does NOT honor the
+            // fontFamily given to initialize() for flowchart label styling
+            // (field-probed: the internal stylesheet falls back to sans-serif);
+            // the effective delivery path is the per-widget %%{init}%%
+            // directive injected in buildPerWidgetInit. This entry still
+            // matters for diagram types that do read site config, and the
+            // $:/plugins/orange/mermaid-tw5/config data tiddler can override it.
+            fontFamily: 'Vollkorn',
+            altFontFamily: 'Vollkorn',
             flowchart: { useMaxWidth: true, htmlLabels: true }
         };
         var configTitle = '$:/plugins/orange/mermaid-tw5/config';
@@ -169,6 +180,15 @@ modified: E Furlan 2022-05-08; Lithic 2026-09-14 (re-applied D3 pan/zoom from xy
             if (options[k] !== undefined && options[k] !== '') {
                 init[k] = options[k];
             }
+        }
+        if (init.fontFamily === undefined) {
+            // Default every diagram to the site typeface through the PROVEN
+            // path: mermaid 11 ignores initialize()-time fontFamily for
+            // flowchart labels, but honors a per-widget %%{init}%% directive
+            // (this is exactly how the Pyramid sidebar pins Vollkorn).
+            // A font-only init is deliberately NOT self-styling (see the
+            // fontOnly exception below), so palette theming still applies.
+            init.fontFamily = siteFontFamily;
         }
         return Object.keys(init).length > 0 ? init : null;
     }
@@ -206,6 +226,9 @@ modified: E Furlan 2022-05-08; Lithic 2026-09-14 (re-applied D3 pan/zoom from xy
         // div.mm-themed so they only ever affect diagrams this wrapper drew.
         if (divNode && divNode.classList) {
             divNode.classList.add('mm-themed');
+            // Visible version stamp for meatspace debugging: which wrapper is
+            // actually running? Inspect a rendered diagram div for this attr.
+            divNode.setAttribute('data-mmwrapver', '2026-09-16.3');
         }
         var _insertSVG = function(svgCode, bindFunctions) {
             divNode.innerHTML = svgCode;
@@ -249,7 +272,9 @@ modified: E Furlan 2022-05-08; Lithic 2026-09-14 (re-applied D3 pan/zoom from xy
                     d3 = null;
                 }
                 if (mermaidAPI && typeof mermaidAPI.initialize === 'function') {
-                    mermaidAPI.initialize(buildSiteConfig());  // D-05: once per page load
+                    var siteConfig = buildSiteConfig();  // D-05: once per page load
+                    mermaidAPI.initialize(siteConfig);
+                    if (siteConfig.fontFamily) siteFontFamily = siteConfig.fontFamily;
                 }
             }
 
@@ -393,6 +418,20 @@ modified: E Furlan 2022-05-08; Lithic 2026-09-14 (re-applied D3 pan/zoom from xy
                             throw ex;
                         }
                     };
+                    // Request both faces in the stack so the numerals face
+                    // (digits-only unicode-range) is forced to load before the
+                    // offscreen measure probe runs -- otherwise the probe
+                    // measures digits in Vollkorn while paint uses the wider
+                    // KaTeX digits and labels clip.
+                    try {
+                        if (document.fonts.load) {
+                            var ff = (/^[\w\s,'-]+$/.test(siteFontFamily) && siteFontFamily) || '';
+                            if (ff) {
+                                document.fonts.load('16px ' + ff, '0123456789');
+                                document.fonts.load('16px ' + ff, 'R(s)');
+                            }
+                        }
+                    } catch (flErr) { /* font loading is best-effort */ }
                     document.fonts.ready.then(go, go);
                     // Belt and braces: never let a hung font block the diagram
                     setTimeout(go, 3000);

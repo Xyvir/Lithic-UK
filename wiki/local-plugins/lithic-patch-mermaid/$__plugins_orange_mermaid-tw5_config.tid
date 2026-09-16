@@ -1,0 +1,5 @@
+title: $:/plugins/orange/mermaid-tw5/config
+type: application/json
+tags: [[$:/tags/ControlPanel/Settings]]
+
+{"startOnLoad":false,"securityLevel":"loose","theme":"default","look":"classic","fontFamily":"Vollkorn","altFontFamily":"Vollkorn","flowchart":{"useMaxWidth":true,"htmlLabels":true}}

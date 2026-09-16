@@ -73,7 +73,14 @@ div.mm-themed:not(.mm-user) marker path {
     stroke: var(--lithic-c-line, <<colour foreground>>) !important;
 }
 
-/* -- Edge labels -- */
+/* -- Edge labels --
+   Text ink = node-fg. The little backing box mermaid draws behind edge
+   labels (a rect in svg-label mode, an inline background-color on the
+   span in html-label mode) must be themed TOO: mermaid's default
+   edgeLabelBackground is light grey, which read as light-ink-on-light on
+   dark palettes. Painting the box with node-bg keeps the "cut out of the
+   line" effect AND guarantees the ink's contrast pair -- node-fg is
+   WCAG-derived against exactly this fill (>=4.5:1) by contrast.js. */
 div.mm-themed:not(.mm-user) .edgeLabel,
 div.mm-themed:not(.mm-user) .edgeLabel text,
 div.mm-themed:not(.mm-user) .edgeLabel tspan,
@@ -83,6 +90,14 @@ div.mm-themed:not(.mm-user) .label text,
 div.mm-themed:not(.mm-user) .label tspan {
     fill: var(--lithic-c-node-fg, <<colour foreground>>) !important;
     color: var(--lithic-c-node-fg, <<colour foreground>>) !important;
+}
+div.mm-themed:not(.mm-user) .edgeLabel rect,
+div.mm-themed:not(.mm-user) .edgeLabel foreignObject div,
+div.mm-themed:not(.mm-user) .edgeLabel foreignObject span,
+div.mm-themed:not(.mm-user) .edgeLabel foreignObject p,
+div.mm-themed:not(.mm-user) .edgeLabel .labelBkg {
+    fill: var(--lithic-c-node-bg, <<colour muted-foreground>>) !important;
+    background-color: var(--lithic-c-node-bg, <<colour muted-foreground>>) !important;
 }
 
 /* -- Subgraph / cluster -- */

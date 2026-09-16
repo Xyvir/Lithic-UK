@@ -1,0 +1,15 @@
+title: $:/lithic/fonts/katex-numerals
+type: text/css
+tags: $:/tags/Stylesheet
+
+/*
+SUPERSEDED - kept only so older standalones that imported the previous
+(per-font-face) numerals experiment drop its leftover rules.
+
+This sheet used to register a separate "Mermaid Numerals" @font-face
+(digits-only unicode-range) plus a body::after warm-up hack. The numerals
+now live INSIDE the Vollkorn family itself: $:/lithic/fonts/vollkorn ships
+a merged font (Vollkorn outlines + KaTeX-digit outlines, see
+scripts/merge-vollkorn-digits.py), so digits render with the LaTeX look
+everywhere with no extra face, no unicode-range, and no warm-up needed.
+*/
