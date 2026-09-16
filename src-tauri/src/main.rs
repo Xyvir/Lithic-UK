@@ -468,8 +468,6 @@ fn write_recents_sidecar(paths: Vec<String>) -> Result<(), String> {
     let Some(dir) = exe_dir() else { return Ok(()); };
     let mut lines = vec![
         "# Lithic recent files (portable). One path per line, most recent first.".to_string(),
-        "# Relative paths resolve from this file's folder on any machine;".to_string(),
-        "# absolute paths only work on the machine that added them.".to_string(),
     ];
     for path in paths.into_iter().take(20) {
         let target = PathBuf::from(&path);
