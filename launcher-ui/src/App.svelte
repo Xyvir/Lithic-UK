@@ -1,7 +1,8 @@
 <script lang="ts">
   import { onMount } from 'svelte';
   import type { LauncherMode } from './mode';
-  import { createFileBridge } from './file-bridge';
+  import { createFileBridge, tauriInvoke } from './file-bridge';
+  import { isScratchFileName, resolveScratchKind, type ScratchKind } from './scratch-editor';
   import { bootLegacyWiki, bootLegacyHtml } from './legacy-launcher-runtime';
   import { getRecentFiles, addRecentFile, removeRecentFile, clearAllRecentFiles, purgeOldestCachesIfNeeded, idb, getSearchCacheText, listWikiVersions, downloadWikiVersion, deleteWikiHistory, getDirtyState, clearDirtyState, listDirtyRecoveries, isWikiDriftedFromHead, type RecentEntry } from './storage';
   import { readBookmarks, saveBookmark, removeBookmark, verifyInstanceUrl, normalizeInstanceUrl } from './bookmarks';
@@ -47,6 +48,69 @@
   let newLithName = '';
   let newLithError = '';
   let newLithInputElement: HTMLInputElement;
+
+  // Desktop install: copies the app executable to a stable per-user location
+  // and registers Windows "Open with" entries for the editor file types.
+  let installBusy = false;
+  let installStatus = '';
+
+  // GitHub sync (Tauri): mirror the self-host workflow — point the folder
+  // containing the active file at a GitHub repo and auto-commit each save.
+  let showGitSyncModal = false;
+  let gitRepoInput = '';
+  let gitTokenInput = '';
+  let gitSyncBusy = false;
+  let gitSyncMessage = '';
+  let gitSyncError = '';
+  let gitSyncInputElement: HTMLInputElement;
+
+  function openGitSyncModal() {
+    gitSyncMessage = '';
+    gitSyncError = '';
+    showGitSyncModal = true;
+    setTimeout(() => gitSyncInputElement?.focus(), 0);
+  }
+
+  function closeGitSyncModal() {
+    showGitSyncModal = false;
+  }
+
+  function gitSyncTargetPath(): string | null {
+    if (filePath) return filePath;
+    const withPath = recentFiles.find((item) => Boolean((item as any).path));
+    return withPath ? ((withPath as any).path as string) : null;
+  }
+
+  async function connectGitSync() {
+    const target = gitSyncTargetPath();
+    if (!target || gitSyncBusy) return;
+    gitSyncBusy = true;
+    gitSyncError = '';
+    gitSyncMessage = '';
+    try {
+      const result = await tauriInvoke<string>('git_sync_setup', { path: target, repo: gitRepoInput, token: gitTokenInput });
+      gitSyncMessage = result || 'Synced';
+      gitTokenInput = '';
+    } catch (error) {
+      gitSyncError = error instanceof Error ? error.message : String(error);
+    } finally {
+      gitSyncBusy = false;
+    }
+  }
+
+  async function installMonolith() {
+    if (installBusy) return;
+    installBusy = true;
+    installStatus = '';
+    try {
+      const target = await tauriInvoke<string>('install_monolith');
+      installStatus = target;
+    } catch (error) {
+      installStatus = `Install failed: ${error instanceof Error ? error.message : String(error)}`;
+    } finally {
+      installBusy = false;
+    }
+  }
   type CacheSearchEntry = { name: string; text: string; sizeBytes: number };
   type CacheSearchMatch = { preview: string; title?: string };
 
@@ -288,13 +352,19 @@
   async function mountWiki(contents: string, name: string, path?: string, handle?: any, extraTiddlers: Array<Record<string, string>> = []) {
     mountError = '';
     const isHtmlMonolith = /\.(?:html?|htm)$/i.test(name);
-    const safeName = normalizeLithName(name);
+    // A .json file holding a top-level tiddler array is a wiki backup and
+    // mounts as a lith; other .json files are verbatim scratch documents.
+    const isJsonBackup = /\.json$/i.test(name) && contents.trim().startsWith('[');
+    const isScratch = isScratchFileName(name) && !isJsonBackup;
+    const safeName = isScratch ? name : normalizeLithName(name);
     await remember({ name: isHtmlMonolith ? name : safeName, path, text: contents, handle });
-    const driftedFromHead = !isHtmlMonolith && await isWikiDriftedFromHead(safeName, contents);
-    if (!isHtmlMonolith) {
+    const driftedFromHead = !isHtmlMonolith && !isScratch && await isWikiDriftedFromHead(safeName, contents);
+    if (!isHtmlMonolith && !isScratch) {
       // HTML monoliths bypass the lith cache chain entirely; lith wikis get
       // the transient-recovery prompt before anything boots. Drift is detected
       // quietly here and becomes a SYNC marker on the next successful save.
+      // Scratch documents keep their original file name and skip the lith
+      // cache chain — they save in place to the original file, not a .lith.
       if ((await prepareDirtyRecovery(safeName)) === 'later') {
         busy = false;
         status = 'Unsaved edits kept for later';
@@ -316,6 +386,8 @@
     }
     const handoff = { name: safeName, path, text: contents };
     sessionStorage.setItem('lithic-launcher-file', JSON.stringify(handoff));
+    const scratchKind: ScratchKind | null = resolveScratchKind(safeName);
+    const scratchMode = isScratch && scratchKind ? scratchKind : undefined;
     // Local mode always injects the Ephemeral integration on every mount,
     // then drains whatever the user queued via drop / share URL / intro.
     // The engine boots in place (document.open/write/close), keeping the
@@ -325,7 +397,7 @@
     await bootLegacyWiki(handoff, [...pendingImports, ...ephemeralIntegrationTiddlers(), ...extraTiddlers], {
       __EPHEMERAL_MODE__: mode === 'self-host' ? 'self-host' : 'paper-light',
       __LITHIC_LAUNCHER_MODE__: mode
-    }, { driftedFromHead });
+    }, { driftedFromHead, scratchMode });
     pendingImports = [];
   }
 
@@ -416,12 +488,48 @@
         filePath = (recent as any).path;
         status = `Mounted ${fileName}`;
         await mountWiki(lithText, fileName, filePath);
+      } else if ((recent as any).path && mode === 'tauri') {
+        // Tauri recents opened through the save dialog carry only a disk
+        // path (no cached text) — read fresh from disk so in-place edits
+        // made outside the app are picked up.
+        await mountTauriPath((recent as any).path);
+        return;
       }
     } catch (error) {
       status = `Open failed: ${error instanceof Error ? error.message : String(error)}`;
     } finally {
       busy = false;
       showRecent = false;
+    }
+  }
+
+  /**
+   * Open a file by absolute disk path — the Tauri startup-file handoff
+   * (CLI arg or "Open with" association) and the recents list both land
+   * here. Reads through the Rust bridge, then mounts as lith or scratch.
+   */
+  async function openTauriPath(path: string) {
+    if (busy) return;
+    busy = true;
+    status = 'Opening…';
+    try {
+      await mountTauriPath(path);
+    } finally {
+      busy = false;
+    }
+  }
+
+  /** Shared body of openTauriPath; callable while a mount is already in flight. */
+  async function mountTauriPath(path: string) {
+    try {
+      const result = await tauriInvoke<{ name: string; path: string; text: string }>('read_lith_path', { path });
+      lithText = result.text;
+      fileName = result.name;
+      filePath = result.path;
+      await mountWiki(result.text, result.name, result.path);
+      status = `Mounted ${result.name}`;
+    } catch (error) {
+      status = `Open failed: ${error instanceof Error ? error.message : String(error)}`;
     }
   }
 
@@ -727,6 +835,7 @@
         if (showDirtyModal) resolveDirtyModal('later');
         if (showHistoryModal) closeHistoryModal();
         closeBookmarkModal();
+        closeGitSyncModal();
       }
     };
     window.addEventListener('keydown', closeOnEscape);
@@ -763,6 +872,13 @@
     // --- URL payload injection (?json= / ?lith= / ?url=) ---
     void processUrlPayload();
 
+    // --- Tauri startup file (CLI arg / "Open with" association) ---
+    if (mode === 'tauri') {
+      void tauriInvoke<string | null>('get_startup_file')
+        .then((startupPath) => { if (startupPath) void openTauriPath(startupPath); })
+        .catch(() => { /* command missing or no startup file; stay on launcher */ });
+    }
+
     return () => {
       window.removeEventListener('keydown', closeOnEscape);
       window.removeEventListener('dragover', onDragOver);
@@ -798,6 +914,21 @@
           <li class={/^\d{14}-\d{3,4}$/.test(tiddler.title ?? '') || Boolean(tiddler['stream-type']) ? 'tiddler-list' : ''}>{tiddler.title || 'Untitled Payload'}</li>
         {/each}
       </ul>
+    </div>
+  {/if}
+  {#if showGitSyncModal}
+    <div class="modal-overlay" role="presentation" on:click={(event) => event.currentTarget === event.target && closeGitSyncModal()}>
+      <div class="launcher-modal" role="dialog" aria-modal="true" aria-labelledby="gitsync-title">
+        <button class="modal-close" aria-label="Close GitHub sync dialog" on:click={closeGitSyncModal}>×</button>
+        <h2 id="gitsync-title">Sync to GitHub</h2>
+        <p>Backs up the folder containing the active file to a GitHub repository — the same workflow self-host uses. Requires a fine-grained or classic token with push access.</p>
+        {#if !gitSyncTargetPath()}<p class="status-line error" role="alert">Open a file from disk first — the sync targets its folder.</p>{/if}
+        <input bind:this={gitSyncInputElement} bind:value={gitRepoInput} aria-label="GitHub repository (owner/name)" placeholder="owner/repository" on:keydown={(event) => event.key === 'Enter' && connectGitSync()} />
+        <input bind:value={gitTokenInput} type="password" aria-label="GitHub token" placeholder="GitHub token (not stored; used for the remote)" on:keydown={(event) => event.key === 'Enter' && connectGitSync()} />
+        {#if gitSyncError}<p class="status-line error" role="alert">{gitSyncError}</p>{/if}
+        {#if gitSyncMessage}<p class="status-line" role="status">{gitSyncMessage}</p>{/if}
+        <div class="modal-actions"><button class="modal-action" disabled={!gitSyncTargetPath() || gitSyncBusy} on:click={connectGitSync}>{gitSyncBusy ? 'Connecting…' : 'Connect & Push'}</button><button class="modal-action secondary" on:click={closeGitSyncModal}>Cancel</button></div>
+      </div>
     </div>
   {/if}
   {#if showBookmarkModal}
@@ -942,5 +1073,5 @@
       <button class="reset-cache" on:click={clearRecent}>Clear All Recent Files</button>
     </section>
   {/if}
-  <footer><a class="github-link" href="https://github.com/Lithic-UK/Lithic" target="_blank" rel="noreferrer">Github</a><button class="install-button" on:click={() => alert('Install is available from the browser menu.')} hidden={mode === 'tauri'}>Install</button></footer>
+  <footer><a class="github-link" href="https://github.com/Lithic-UK/Lithic" target="_blank" rel="noreferrer">Github</a>{#if mode === 'tauri'}<button class="install-button" on:click={installMonolith} disabled={installBusy} title={installStatus || 'Copy this app to a stable per-user location and register file associations'}>{installBusy ? 'Installing…' : installStatus && !installStatus.startsWith('Install failed') ? 'Installed ✓' : 'Install'}</button><button class="github-link" on:click={openGitSyncModal} title="Sync the active file's folder to a GitHub repository">GitHub Sync…</button>{:else}<button class="install-button" on:click={() => alert('Install is available from the browser menu.')}>Install</button>{/if}</footer>
 </main>

@@ -1,6 +1,12 @@
 import { parseLithToJSON } from './lithic-format.ts';
+import { isScratchFileName, resolveScratchKind, parseScratchSource } from './scratch-editor.ts';
 import { JSON_PATCH_RUNTIME } from './json-patch.ts';
 import { DEFAULT_PLUGINS, LITHIC_BASE_FILTER } from './legacy-saver.ts';
+import { SCRATCH_SERIALIZE_RUNTIME } from './scratch-wiki.ts';
+import { TID_SERIALIZE_RUNTIME } from './tid-serialize-runtime.ts';
+
+/** Scratch save behavior for the mounted engine's injected saver. */
+export type ScratchMode = 'off' | 'text' | 'tid' | 'json';
 
 export type LauncherHandoff = {
   name: string;
@@ -79,7 +85,13 @@ function injectTiddlers(html: string, tiddlers: Array<Record<string, string>>): 
   return html.replace(/<\/body>/i, `${script}</body>`);
 }
 
-function injectSaverBootstrap(html: string, suggestedFileName?: string, isHtmlMode = false, driftedFromHead = false): string {
+function injectSaverBootstrap(
+  html: string,
+  suggestedFileName?: string,
+  isHtmlMode = false,
+  driftedFromHead = false,
+  scratchMode: ScratchMode = 'off'
+): string {
   const pluginsJson = JSON.stringify(DEFAULT_PLUGINS);
   const jsonPatchRuntime = JSON_PATCH_RUNTIME;
   const baseFilterStr = JSON.stringify(LITHIC_BASE_FILTER);
@@ -96,10 +108,17 @@ function injectSaverBootstrap(html: string, suggestedFileName?: string, isHtmlMo
   const saveTypesJson = JSON.stringify(saveTypes);
   const htmlModeLiteral = isHtmlMode ? 'true' : 'false';
   const driftedFromHeadLiteral = driftedFromHead ? 'true' : 'false';
+  const scratchModeJson = JSON.stringify(scratchMode);
 
   // The patch runtime is injected as its own script so the mounted wiki can
   // record per-version history (window.__LITHIC_JSON_PATCH__) from the saver.
-  const bootstrap = `<script>${jsonPatchRuntime}</script>\n<script>(function(){
+  // Scratch mode additionally injects the flat-text serializers (ES5 strings
+  // mirroring scratch-wiki.ts) used by the in-place fancy-editor save path.
+  const scratchRuntimes = scratchMode === 'off'
+    ? ''
+    : `<script>${SCRATCH_SERIALIZE_RUNTIME}</script>\n<script>${TID_SERIALIZE_RUNTIME}</script>\n`;
+
+  const bootstrap = `${scratchRuntimes}<script>${jsonPatchRuntime}</script>\n<script>(function(){
     var root = window;
     var defaultPlugins = ${pluginsJson};
     var pluginExclusions = defaultPlugins.map(function(p){ return '-[[$:/plugins/' + p + ']]'; }).join(' ');
@@ -447,6 +466,29 @@ function injectSaverBootstrap(html: string, suggestedFileName?: string, isHtmlMo
     var handle = root.__LITHIC_FILE_HANDLE__ || undefined;
     var pending;
 
+    // Tauri v1's WebView2 lacks the File System Access API, so in-place saves
+    // go through the Rust commands instead: write_text_path overwrites an
+    // existing file, save_lith_file shows the native dialog for new ones.
+    var tauriInvoke = (function() {
+      var tauri = root.__TAURI__;
+      return (tauri && (tauri.invoke || (tauri.tauri && tauri.tauri.invoke))) || null;
+    })();
+
+    // Pseudo-writable mirroring FileSystemWritableFileStream for the Tauri
+    // bridge: write() performs the Rust write, close() is a no-op, so both
+    // save branches (lith and scratch) share one code shape.
+    root.__LITHIC_WRITE_FILE__ = function(fileHandle) {
+      var tauriPath = fileHandle && fileHandle.__lithicTauriPath__;
+      if (!tauriInvoke || !tauriPath) return Promise.reject(new Error('No writable target'));
+      return {
+        write: function(text) { return tauriInvoke('write_text_path', { path: tauriPath, text: text }); },
+        close: function() { return Promise.resolve(); }
+      };
+    };
+    function tauriHandle(name, tauriPath) {
+      return { name: name, __lithicTauriPath__: tauriPath };
+    }
+
     // The engine boots in place via document.open/write/close, which keeps the
     // same window, so launcher globals survive. Recover the file handle from
     // the IndexedDB recent-files list (keyed by the active handoff name) as a
@@ -457,6 +499,13 @@ function injectSaverBootstrap(html: string, suggestedFileName?: string, isHtmlMo
         var handoff = JSON.parse(sessionStorage.getItem('lithic-active-file') || 'null');
         var fileName = handoff && handoff.name;
         if (!fileName) return Promise.resolve(null);
+        // Tauri: the handoff carries the absolute disk path of the opened
+        // file; save in place through the invoke bridge.
+        if (tauriInvoke && handoff.path) {
+          handle = tauriHandle(fileName, handoff.path);
+          root.__LITHIC_FILE_HANDLE__ = handle;
+          return Promise.resolve(handle);
+        }
         return idbKeyval.get('recentFiles').then(function(raw) {
           var list = (raw || []).map(function(f) { return (f && (f.handle || f.name)) ? f : { handle: f, name: f ? f.name : '', tauriPath: null }; });
           for (var i = 0; i < list.length; i++) {
@@ -473,6 +522,44 @@ function injectSaverBootstrap(html: string, suggestedFileName?: string, isHtmlMo
       }
     }
 
+    var scratchMode = ${scratchModeJson};
+
+    // Scratch (fancy text editor) save: serialize the wiki back to the
+    // original flat format — stream nodes for .md/.txt, a .tid document for
+    // .tid, verbatim body for .json — and write it to the same file.
+    function serializeScratchPayload() {
+      var twNow = root.$tw;
+      if (!twNow || !twNow.wiki || !twNow.wiki.getTiddler) return null;
+      var docTitle = root.__LITHIC_SCRATCH_ROOT__;
+      if (!docTitle) return null;
+      var docTiddler = twNow.wiki.getTiddler(docTitle);
+      if (!docTiddler || !docTiddler.fields) return null;
+      var fields = {};
+      for (var key in docTiddler.fields) {
+        if (!Object.prototype.hasOwnProperty.call(docTiddler.fields, key)) continue;
+        var value = docTiddler.fields[key];
+        fields[key] = typeof value === 'string' ? value : String(value);
+      }
+      if (scratchMode === 'tid') {
+        return root.__LITHIC_TID_SERIALIZE__ ? root.__LITHIC_TID_SERIALIZE__(fields) : null;
+      }
+      if (scratchMode === 'json') {
+        return typeof fields.text === 'string' ? fields.text : '';
+      }
+      if (!root.__LITHIC_SCRATCH_SERIALIZE__) return null;
+      return root.__LITHIC_SCRATCH_SERIALIZE__(docTitle, function(title) {
+        var t = twNow.wiki.getTiddler(title);
+        if (!t || !t.fields) return undefined;
+        var out = {};
+        for (var k in t.fields) {
+          if (!Object.prototype.hasOwnProperty.call(t.fields, k)) continue;
+          var v = t.fields[k];
+          out[k] = typeof v === 'string' ? v : String(v);
+        }
+        return out;
+      });
+    }
+
     var save = function(_text, _method, callback) {
       var tw = root.$tw;
       var saveOptions = {
@@ -484,6 +571,17 @@ function injectSaverBootstrap(html: string, suggestedFileName?: string, isHtmlMo
         ? Promise.resolve(handle)
         : (pending || (pending = resolveStoredHandle().then(function(stored) {
             if (stored) return stored;
+            if (tauriInvoke) {
+              // No path on record (new file): let Rust show the native save
+              // dialog, then keep writing in place to the chosen path.
+              return tauriInvoke('save_lith_file', { text: '', suggestedName: ${suggestedNameJson} }).then(function(saved) {
+                var savedPath = saved && (saved.path || saved.name);
+                if (!savedPath) throw new Error('Save cancelled');
+                handle = tauriHandle((saved && saved.name) || ${suggestedNameJson}, savedPath);
+                root.__LITHIC_FILE_HANDLE__ = handle;
+                return handle;
+              });
+            }
             return root.showSaveFilePicker ? root.showSaveFilePicker(saveOptions) : Promise.reject(new Error('Native file picker not available'));
           })));
 
@@ -491,7 +589,30 @@ function injectSaverBootstrap(html: string, suggestedFileName?: string, isHtmlMo
         handle = selected;
         root.__LITHIC_FILE_HANDLE__ = selected;
         pending = null;
-        return handle.createWritable().then(function(writable) {
+        // Scratch mode first: serialize the wiki back to the original flat
+        // text before touching the writable, so a serialization failure
+        // (or a missing runtime) leaves the file untouched.
+        if (scratchMode !== 'off') {
+          var payload = serializeScratchPayload();
+          if (typeof payload !== 'string') {
+            callback(new Error('Scratch serialization failed; file left unchanged.'));
+            return;
+          }
+          var writableP = handle.createWritable
+            ? handle.createWritable()
+            : root.__LITHIC_WRITE_FILE__(handle);
+          var writeP = Promise.resolve(writableP).then(function(writable) {
+            return writable.write(payload).then(function() { return writable.close(); });
+          });
+          return writeP.then(function() {
+            var jsonText = (tw && tw.wiki && tw.wiki.getTiddlersAsJson) ? tw.wiki.getTiddlersAsJson(userTiddlerFilter) : '[]';
+            return Promise.all([addRecent(handle), saveSearchCache(handle.name, jsonText)]);
+          });
+        }
+        var writableFactory = handle.createWritable
+          ? function() { return handle.createWritable(); }
+          : function() { return Promise.resolve(root.__LITHIC_WRITE_FILE__(handle)); };
+        return Promise.resolve(writableFactory()).then(function(writable) {
           if (${htmlModeLiteral}) {
             // HTML monolith mode: write the payload TW hands us (its own
             // serialized page) without search-cache bookkeeping, mirroring
@@ -514,6 +635,17 @@ function injectSaverBootstrap(html: string, suggestedFileName?: string, isHtmlMo
       }).then(function() {
         if (tw && tw.wiki && tw.wiki.deleteTiddler) {
           tw.wiki.deleteTiddler('$:/state/DisableAutoSaver');
+        }
+        // Git-synced file (Tauri): auto-commit the save best-effort — never
+        // blocks or fails the save itself, and Rust skips non-Lithic repos.
+        var savedPath = handle && handle.__lithicTauriPath__;
+        if (tauriInvoke && savedPath) {
+          try {
+            tauriInvoke('git_sync_commit', {
+              path: savedPath,
+              message: 'Save ' + (handle.name || 'file') + ' from Lithic'
+            }).catch(function() { /* sync is opportunistic */ });
+          } catch (e) { /* sync is opportunistic */ }
         }
         callback(null);
       }, function(error) {
@@ -565,6 +697,34 @@ function injectEngineGlobals(html: string, globals: Record<string, string>): str
 }
 
 /**
+ * The scratch mount's root tiddler title: the parsed plan's base — the file
+ * stem — matching parseScratchSource's injected root tiddler. Returns the
+ * name unchanged for non-scratch files.
+ */
+function scratchRootTitle(name: string): string {
+  if (!isScratchFileName(name)) return name;
+  return name.replace(/\.[^.]+$/, '').trim() || 'Scratch';
+}
+
+/**
+ * Parse a mounted file's payload into store tiddlers: scratch files
+ * (.md/.txt/.tid/.json) become their stream representation, JSON backups
+ * (a top-level array) and lith payloads parse as lith tiddlers.
+ */
+function parseHandoffImported(name: string, text: string): Array<Record<string, string>> {
+  const kind = resolveScratchKind(name);
+  if (kind === 'json') {
+    const trimmed = text.trim();
+    if (trimmed.startsWith('[')) return parseLithToJSON(text);
+  }
+  if (kind && text) {
+    const plan = { kind, base: scratchRootTitle(name) };
+    return parseScratchSource(text, plan);
+  }
+  return text ? parseLithToJSON(text) : [];
+}
+
+/**
  * Build the bootable engine HTML for a handoff plus any pending imports.
  * Pure helper so the injection order and journal/saver defaults are unit
  * testable without a browser.
@@ -574,9 +734,11 @@ export function buildEngineHtml(
   handoff: LauncherHandoff,
   extraTiddlers: Array<Record<string, string>> = [],
   engineGlobals: Record<string, string> = {},
-  options: { isHtmlMode?: boolean; driftedFromHead?: boolean } = {}
+  options: { isHtmlMode?: boolean; driftedFromHead?: boolean; scratchMode?: ScratchMode } = {}
 ): string {
-  const imported = handoff.text ? parseLithToJSON(handoff.text) : (handoff.payloadTiddlers ?? []);
+  const imported = handoff.text
+    ? parseHandoffImported(handoff.name, handoff.text)
+    : (handoff.payloadTiddlers ?? []);
   // File tiddlers first, then queued pending imports (payload, Ephemeral
   // integration, etc.) so later entries win on title conflicts — mirrors the
   // legacy launcher, which appends window.pendingImports after the store.
@@ -593,8 +755,16 @@ export function buildEngineHtml(
     injectTiddlers(engineHtml, tiddlers),
     handoff.name,
     options.isHtmlMode === true,
-    options.driftedFromHead === true
+    options.driftedFromHead === true,
+    options.scratchMode ?? 'off'
   );
+  if (options.scratchMode && options.scratchMode !== 'off') {
+    // The scratch saver serializes the stream rooted at the document title;
+    // publish it as an engine global so the injected saver can find it. The
+    // root title is the parsed plan's base (the file stem), matching the
+    // root tiddler injected by the scratch mount.
+    html = injectEngineGlobals(html, { __LITHIC_SCRATCH_ROOT__: scratchRootTitle(handoff.name) });
+  }
   return injectEngineGlobals(html, engineGlobals);
 }
 
@@ -602,7 +772,7 @@ export async function bootLegacyWiki(
   handoff: LauncherHandoff,
   extraTiddlers: Array<Record<string, string>> = [],
   engineGlobals: Record<string, string> = {},
-  options: { isHtmlMode?: boolean; driftedFromHead?: boolean } = {}
+  options: { isHtmlMode?: boolean; driftedFromHead?: boolean; scratchMode?: ScratchMode } = {}
 ): Promise<void> {
   const engine = await fetchEngine();
   const html = buildEngineHtml(engine, handoff, extraTiddlers, engineGlobals, options);

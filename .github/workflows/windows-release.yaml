@@ -53,7 +53,15 @@ jobs:
         uses: dtolnay/rust-toolchain@stable
 
       - name: Install Dependencies
-        run: npm install
+        run: |
+          npm install
+          npm --prefix launcher-ui install --no-package-lock
+
+      - name: Run Launcher UI Tests
+        run: npm --prefix launcher-ui test
+
+      - name: Build Pre-Launcher (Svelte Launcher Bundle)
+        run: node scripts/build-pre-launcher.mjs
 
       # --- DEBUG STEP ---
       - name: Debug - List Files & Tauri Info

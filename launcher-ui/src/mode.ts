@@ -1,6 +1,21 @@
 export const MODES = ['webapp', 'tauri', 'self-host'] as const;
 export type LauncherMode = (typeof MODES)[number];
 
+/**
+ * How the Ephemeral code-runner reaches an execution backend:
+ *   'self-host'  -> same-origin /ephemeral/api/v1/* (the WebDAV backend proxies it)
+ *   'local-tray' -> Tauri: probe a local Ephemeral tray/API server first,
+ *                   falling back to the paper-light public swarm
+ *   'paper-light'-> discover a bastion from docs/swarm.json and POST over https
+ */
+export type EphemeralMode = 'self-host' | 'local-tray' | 'paper-light';
+
+export function ephemeralModeFor(mode: LauncherMode): EphemeralMode {
+  if (mode === 'self-host') return 'self-host';
+  if (mode === 'tauri') return 'local-tray';
+  return 'paper-light';
+}
+
 const MODE_QUERY_KEYS = ['mode', 'launcher-mode', 'launcher_mode'];
 
 export function resolveMode(location: Location): LauncherMode {

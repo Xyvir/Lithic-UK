@@ -159,3 +159,21 @@ test('engine bootstrap keeps the dirty watcher inert for HTML monolith mode', ()
   const html = buildEngineHtml(ENGINE_STUB, { name: 'x.html', text: '' }, [], {}, { isHtmlMode: true });
   assert.ok(html.includes('__LITHIC_ACTIVE_FILE_NAME__ = "";'), 'HTML monoliths leave the active file key empty');
 });
+
+test('scratch mode injects the flat-text serializers and publishes the root title', () => {
+  const html = buildEngineHtml(ENGINE_STUB, { name: 'notes.txt', text: '' }, [], {}, { scratchMode: 'text' });
+  assert.match(html, /__LITHIC_SCRATCH_SERIALIZE__/);
+  assert.match(html, /__LITHIC_TID_SERIALIZE__/);
+  assert.match(html, /__LITHIC_SCRATCH_ROOT__/);
+  assert.match(html, /__LITHIC_SCRATCH_ROOT__"\] = "notes"/);
+  // The save path branches on the injected scratch mode flag.
+  assert.match(html, /var scratchMode = "text"/);
+});
+
+test('non-scratch boots keep the scratch saver out of the document', () => {
+  const html = buildEngineHtml(ENGINE_STUB, { name: 'wiki.lith', text: '' });
+  // The save function may *reference* the runtime global, but the defining
+  // runtime script itself must not be injected.
+  assert.ok(!html.includes('__LITHIC_SCRATCH_SERIALIZE__ = serialize'), 'no scratch runtime script for lith files');
+  assert.match(html, /var scratchMode = "off"/);
+});

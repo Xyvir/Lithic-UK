@@ -11,6 +11,16 @@ type TauriApi = { invoke: (command: string, args?: Record<string, unknown>) => P
  * window.__TAURI__.tauri.invoke (withGlobalTauri), while Tauri v2 exposes
  * window.__TAURI__.invoke directly. The repo's Tauri app is currently v1.
  */
+/**
+ * Exposed so UI surfaces (e.g. the desktop Install button) can invoke
+ * commands without duplicating the version-compat lookup.
+ */
+export function tauriInvoke<T = unknown>(command: string, args?: Record<string, unknown>): Promise<T> {
+  const api = tauriApi();
+  if (!api) return Promise.reject(new Error('Tauri API unavailable'));
+  return api.invoke(command, args) as Promise<T>;
+}
+
 function tauriApi(): TauriApi | null {
   const root = (globalThis as typeof globalThis & {
     __TAURI__?: { invoke?: TauriApi['invoke']; tauri?: { invoke?: TauriApi['invoke'] } }
