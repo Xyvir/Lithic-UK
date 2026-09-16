@@ -5,12 +5,12 @@ description: Displays a hierarchical pyramid of the active stream node
 
 \define traverse(node, parentId, depth)
 \whitespace trim
-<$let dq='"' quot="#quot;" lcb="{" rcb="}" lp="(" rp=")" nbsp="&nbsp;&nbsp;">
+<$let dq='"' quot="#quot;" lcb="{" rcb="}" lp="(" rp=")">
 <$list filter="[<__depth__>compare:number:gt[0]]" variable="ignore">
     <$list filter="[<__node__>get[stream-list]enlist-input[]]" variable="childNode" counter="nodeIndex">
         <$set name="currentId" value={{{ [<__parentId__>addsuffix[_]addsuffix<nodeIndex>] }}}>
         <$set name="nodeClass" value={{{ [<childNode>match<activeNode>then[activeStyle]else[childStyle]] }}}>
-        <$set name="safeText" value={{{ [<childNode>get[text]else<childNode>splitregexp[\r?\n]first[]search-replace::regexp[^#{1,6} *],[]search-replace:g<dq>,<quot>search-replace:g<lcb>,<lp>search-replace:g<rcb>,<rp>addsuffix<nbsp>] }}}>
+        <$set name="safeText" value={{{ [<childNode>get[text]else<childNode>splitregexp[\r?\n]first[]search-replace::regexp[^#{1,6} *],[]search-replace:g<dq>,<quot>search-replace:g<lcb>,<lp>search-replace:g<rcb>,<rp>] }}}>
 <$text text=<<nl>>/><<__parentId__>> <$text text="---" /> <<currentId>>["<<safeText>>"]:::<<nodeClass>>
             <$macrocall $name="traverse" node=<<childNode>> parentId=<<currentId>> depth={{{ [<__depth__>subtract[1]] }}} />
         </$set>
@@ -23,9 +23,9 @@ description: Displays a hierarchical pyramid of the active stream node
 
 \define build-pyramid-data(rootNode)
 \whitespace trim
-<$let nl={{{ [charcode[10]] }}} dq='"' quot="#quot;" lcb="{" rcb="}" lp="(" rp=")" nbsp="&nbsp;&nbsp;">
+<$let nl={{{ [charcode[10]] }}} dq='"' quot="#quot;" lcb="{" rcb="}" lp="(" rp=")">
 <$set name="parentClass" value={{{ [<__rootNode__>match<activeNode>then[activeStyle]else[parentStyle]] }}}>
-<$set name="safeParentText" value={{{ [<__rootNode__>get[text]else<__rootNode__>splitregexp[\r?\n]first[]search-replace::regexp[^#{1,6} *],[]search-replace:g<dq>,<quot>search-replace:g<lcb>,<lp>search-replace:g<rcb>,<rp>addsuffix<nbsp>] }}}>
+<$set name="safeParentText" value={{{ [<__rootNode__>get[text]else<__rootNode__>splitregexp[\r?\n]first[]search-replace::regexp[^#{1,6} *],[]search-replace:g<dq>,<quot>search-replace:g<lcb>,<lp>search-replace:g<rcb>,<rp>] }}}>
 graph TD
 <$text text=<<nl>>/><$text text=<<nl>>/>Parent["<<safeParentText>>"]:::<<parentClass>>
 <$macrocall $name="traverse" node=<<__rootNode__>> parentId="Parent" depth="4" />
@@ -39,8 +39,8 @@ graph TD
 <$set name="activeNode" value={{{ [prefix[$:/state/sq/streams/current-edit-tiddler]get[text]first[]] }}}>
     <$list filter="[<targetNode>has[stream-list]]" emptyMessage="*No child streams to display for this node.*">
         <$wikify name="pyramidData" text="<$macrocall $name='build-pyramid-data' rootNode=<<targetNode>> />">
-            <$let nl={{{ [charcode[10]] }}} fullChart={{{ [<pyramidData>addsuffix<nl>addsuffix[linkStyle default stroke:#d3d3d3,stroke-width:2px;]addsuffix<nl>addsuffix[classDef parentStyle fill:#444,stroke:#fff,stroke-width:2px,color:#fff,font-weight:normal;]addsuffix<nl>addsuffix[classDef childStyle fill:#666,stroke:#ccc,stroke-width:1px,color:#fff,font-weight:normal;]addsuffix<nl>addsuffix[classDef activeStyle fill:#aaa,stroke:#fff,stroke-width:2px,color:#111,font-weight:bold;]] }}}>
-                <$mermaid text=<<fullChart>> />
+            <$let nl={{{ [charcode[10]] }}} fullChart={{{ [<pyramidData>] }}}>
+                <$mermaid text=<<fullChart>> fontFamily="Vollkorn" />
                 <div style="display:flex; justify-content:flex-end; margin-top:4px;">
                    <$button message="tm-copy-to-clipboard" param=<<pyramidData>> tooltip="Copy mermaid code" class="tc-btn-invisible tc-btn-mini tc-tiddlylink">
                       copy

@@ -1,0 +1,41 @@
+title: $:/lithic/styles/pyramid.css
+tags: $:/tags/Stylesheet
+type: text/css
+
+/*
+Pyramid sidebar ($:/lithic/ui/SideBar/Pyramid): converts the active nodestream
+into a mermaid tree and marks the node mirroring the tiddler currently being
+edited with the `activeStyle` class (see the macro's `:::activeStyle` hints).
+The old hardcoded classDefs (fill:#444/#666/#aaa + grey linkStyle) were removed
+so the whole tree inherits the Contrast-locked mermaid defaults - including
+palette-derived arrowhead markers - and only the active node needs special
+handling here.
+
+Mermaid puts classDef classes on the g.node wrapper, and the default mermaid
+sheet paints nodes with !important too, so these selectors target g.activeStyle
+descendants to win the cascade on either shape.
+
+This sheet is text/css: TW's wikitext stylesheet parser rewrites the
+--lithic-c-* double hyphens into en-dashes inside text/vnd.tiddlywiki sheets.
+*/
+
+/* Active node fill/border = accent pair (accent-fg is derived >= 4.5:1 on accent) */
+div.mm-themed:not(.mm-user) g.activeStyle rect,
+div.mm-themed:not(.mm-user) g.activeStyle .basic.label-container,
+div.mm-themed:not(.mm-user) rect.activeStyle,
+div.mm-themed:not(.mm-user) .activeStyle rect {
+    fill: var(--lithic-c-accent) !important;
+    stroke: var(--lithic-c-accent-fg) !important;
+    stroke-width: 2px !important;
+}
+
+/* Active node label keeps the derived accent foreground in all label shapes */
+div.mm-themed:not(.mm-user) g.activeStyle text,
+div.mm-themed:not(.mm-user) g.activeStyle .label div span,
+div.mm-themed:not(.mm-user) g.activeStyle .label div p,
+div.mm-themed:not(.mm-user) g.activeStyle span.nodeLabel p,
+div.mm-themed:not(.mm-user) text.activeStyle {
+    fill: var(--lithic-c-accent-fg) !important;
+    color: var(--lithic-c-accent-fg) !important;
+    font-weight: bold !important;
+}

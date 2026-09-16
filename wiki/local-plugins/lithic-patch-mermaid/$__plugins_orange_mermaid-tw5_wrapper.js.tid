@@ -7,7 +7,7 @@ title: $:/plugins/orange/mermaid-tw5/wrapper.js
 type: application/javascript
 module-type: widget
 author: Nathaniel Jones 2017-05-26
-modified: E Furlan 2022-05-08; Lithic 2026-09-14 (re-applied D3 pan/zoom from xyvir/lithic-patch-mermaid); Lithic 2026-09-15 (style gating: self-styled diagrams opt out of palette default CSS; palette-responsiveness lives in the stylesheet via <<colour>>)
+modified: E Furlan 2022-05-08; Lithic 2026-09-14 (re-applied D3 pan/zoom from xyvir/lithic-patch-mermaid); Lithic 2026-09-15 (style gating: self-styled diagrams opt out of palette default CSS; palette-responsiveness lives in the stylesheet via <<colour>>); Lithic 2026-09-16 (font-only init no longer flags mm-user; render gated on document.fonts.ready so label measure == label paint)
 */
 (function() {
     // jslint node: true, browser: true
@@ -263,15 +263,26 @@ modified: E Furlan 2022-05-08; Lithic 2026-09-14 (re-applied D3 pan/zoom from xy
             // in widget attribute values. Normalize them back for Mermaid arrow syntax.
             scriptBody = scriptBody.replace(/\u2013/g, '--').replace(/\u2014/g, '---');
 
-            // D-02: inject per-widget non-secure config as %%{init}%% PREPENDED
+            // D-02: per-widget non-secure config injection
             var perWidgetInit = buildPerWidgetInit(options);
-            if (perWidgetInit) {
-                scriptBody = '%%{init: ' + JSON.stringify(perWidgetInit) + '}%%\n' + scriptBody;
-            }
 
             // Self-styled diagrams (explicit directive/statements/attributes)
             // render with Mermaid's own colors; palette defaults stand down.
-            var selfStyled = !!perWidgetInit || hasSelfStyling(scriptBody);
+            // Detect BODY self-styling BEFORE prepending our own %%{init}%%
+            // directive below -- otherwise the injected directive would always
+            // trip the %%{init}%% regex and every diagram would be mm-user.
+            // EXCEPTION: a fontFamily-only init just selects the label typeface
+            // (e.g. the Pyramid sidebar pins Vollkorn); it must NOT count as
+            // self-styling or the palette colors would silently stand down.
+            var fontOnly = perWidgetInit &&
+                Object.keys(perWidgetInit).length === 1 &&
+                Object.prototype.hasOwnProperty.call(perWidgetInit, 'fontFamily');
+            var selfStyled = (!!perWidgetInit && !fontOnly) || hasSelfStyling(scriptBody);
+
+            // D-02: inject per-widget non-secure config as %%{init}%% PREPENDED
+            if (perWidgetInit) {
+                scriptBody = '%%{init: ' + JSON.stringify(perWidgetInit) + '}%%\n' + scriptBody;
+            }
 
             var renderDiagram = function() {
                 var svgId = divNode.id + '_svg';
@@ -362,7 +373,32 @@ modified: E Furlan 2022-05-08; Lithic 2026-09-14 (re-applied D3 pan/zoom from xy
             };
 
             try {
-                renderDiagram();
+                // Mermaid measures node labels with its own offscreen probe while
+                // rendering. If the webfont named in fontFamily hasn't finished
+                // loading yet, the probe silently falls back and boxes get sized
+                // for the fallback metrics while the labels PAINT in the loaded
+                // webfont -- the mismatch shows up as clipped label edges. Wait
+                // for document.fonts.ready before the first render (per render,
+                // not per page load: @font-face sheets can land mid-session).
+                var startRender = function() { renderDiagram(); };
+                if (typeof document !== 'undefined' && document.fonts && typeof document.fonts.ready.then === 'function') {
+                    var started = false;
+                    var go = function() {
+                        if (started) return;
+                        started = true;
+                        try {
+                            renderDiagram();
+                        } catch (ex) {
+                            cleanupStrayErrorSVGs();
+                            throw ex;
+                        }
+                    };
+                    document.fonts.ready.then(go, go);
+                    // Belt and braces: never let a hung font block the diagram
+                    setTimeout(go, 3000);
+                } else {
+                    startRender();
+                }
             } catch (ex) {
                 cleanupStrayErrorSVGs();
                 throw ex;
