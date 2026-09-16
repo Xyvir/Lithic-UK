@@ -51,8 +51,20 @@
 
   // Desktop install: copies the app executable to a stable per-user location
   // and registers Windows "Open with" entries for the editor file types.
+  // PWA-style visibility: hidden while an identical copy is installed,
+  // shown as an update when the installed copy is older than this build.
   let installBusy = false;
   let installStatus = '';
+  let installState: 'uninstalled' | 'current' | 'stale' = 'uninstalled';
+
+  async function refreshInstallState() {
+    try {
+      const result = await tauriInvoke<{ installed: boolean; up_to_date: boolean }>('install_status');
+      installState = result.installed ? (result.up_to_date ? 'current' : 'stale') : 'uninstalled';
+    } catch {
+      installState = 'uninstalled';
+    }
+  }
 
   // GitHub sync (Tauri): mirror the self-host workflow — point the folder
   // containing the active file at a GitHub repo and auto-commit each save.
@@ -105,6 +117,7 @@
     try {
       const target = await tauriInvoke<string>('install_monolith');
       installStatus = target;
+      installState = 'current';
       status = `Installed to ${target}`;
       // The status line animates while it has text; retire the message
       // once it has had a moment to be read.
@@ -879,6 +892,7 @@
 
     // --- Tauri startup file (CLI arg / "Open with" association) ---
     if (mode === 'tauri') {
+      void refreshInstallState();
       void tauriInvoke<string | null>('get_startup_file')
         .then((startupPath) => { if (startupPath) void openTauriPath(startupPath); })
         .catch(() => { /* command missing or no startup file; stay on launcher */ });
@@ -1078,5 +1092,5 @@
       <button class="reset-cache" on:click={clearRecent}>Clear All Recent Files</button>
     </section>
   {/if}
-  <footer><a class="github-link" href="https://github.com/Lithic-UK/Lithic" target="_blank" rel="noreferrer">Github</a>{#if mode === 'tauri'}<button class="install-button" on:click={installMonolith} disabled={installBusy} title={installStatus || 'Copy this app to a stable per-user location and register file associations'}>{installBusy ? 'Installing…' : installStatus && !installStatus.startsWith('Install failed') ? 'Installed ✓' : 'Install'}</button>{:else}<button class="install-button" on:click={() => alert('Install is available from the browser menu.')}>Install</button>{/if}</footer>
+  <footer>{#if mode === 'webapp'}<a class="github-link" href="https://github.com/Lithic-UK/Lithic" target="_blank" rel="noreferrer">Github</a><button class="install-button" on:click={() => alert('Install is available from the browser menu.')}>Install</button>{:else if mode === 'tauri' && installState !== 'current'}<button class="install-button" on:click={installMonolith} disabled={installBusy} title={installStatus || 'Copy this app to a stable per-user location and register file associations'}>{installBusy ? 'Installing…' : installState === 'stale' ? 'Update Install' : 'Install'}</button>{/if}</footer>
 </main>

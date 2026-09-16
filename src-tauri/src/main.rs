@@ -94,6 +94,47 @@ fn write_text_path(path: String, text: String) -> Result<(), String> {
     fs::write(&path, text).map_err(|error| error.to_string())
 }
 
+/// Canonical per-user install target for the monolith executable: visible
+/// Documents\Lithic\Lithic.exe, falling back out of the way when Documents
+/// is unavailable. Shared by install and status queries.
+fn install_target() -> Option<PathBuf> {
+    dirs::document_dir()
+        .map(|docs| docs.join("Lithic"))
+        .or_else(|| dirs::data_local_dir().map(|local| local.join("Programs").join("Lithic")))
+        .or_else(|| dirs::home_dir().map(|home| home.join("Lithic")))
+        .map(|dir| dir.join("Lithic.exe"))
+}
+
+/// Install state for the launcher's PWA-style button: hidden once an
+/// installed copy exists and matches the running exe; shown as an update
+/// when the installed copy differs (older build).
+#[derive(serde::Serialize)]
+struct InstallStatus {
+    installed: bool,
+    up_to_date: bool,
+    path: String,
+}
+
+#[tauri::command]
+fn install_status() -> InstallStatus {
+    let target = install_target();
+    let installed = target.as_ref().map(|path| path.is_file()).unwrap_or(false);
+    let up_to_date = match (target.as_ref(), std::env::current_exe().ok()) {
+        (Some(target), Some(exe)) => match (fs::read(target), fs::read(&exe)) {
+            (Ok(installed_bytes), Ok(running_bytes)) => installed_bytes == running_bytes,
+            _ => false,
+        },
+        _ => false,
+    };
+    InstallStatus {
+        installed,
+        up_to_date,
+        path: target
+            .map(|path| path.to_string_lossy().into_owned())
+            .unwrap_or_default(),
+    }
+}
+
 /// Copy the running executable to a stable, *visible* per-user location so
 /// file associations ("Open with Lithic") survive updates and app moves, and
 /// register per-user Windows "Open with" entries for the editor file types.
@@ -103,20 +144,14 @@ fn write_text_path(path: String, text: String) -> Result<(), String> {
 fn install_monolith() -> Result<String, String> {
     let exe = std::env::current_exe().map_err(|error| error.to_string())?;
 
-    // Documents\Lithic\lithic.exe: user-visible and statically reachable;
-    // falls back to %LOCALAPPDATA%\Programs\Lithic, then ~/Lithic.
+    // Documents\Lithic\Lithic.exe: user-visible and statically reachable.
     // (Copying a running exe is safe on Windows: the source is locked for
     // write/delete, not for read, so self-copy needs no external download.)
-    let target_dir = dirs::document_dir()
-        .map(|docs| docs.join("Lithic"))
-        .or_else(|| dirs::data_local_dir().map(|local| local.join("Programs").join("Lithic")))
-        .or_else(|| dirs::home_dir().map(|home| home.join("Lithic")))
+    let target = install_target().ok_or_else(|| "Could not resolve a user program directory".to_string())?;
+    let target_dir = target
+        .parent()
+        .map(|parent| parent.to_path_buf())
         .ok_or_else(|| "Could not resolve a user program directory".to_string())?;
-
-    // Always land as Lithic.exe so the install, associations, and the
-    // Applications registry key are stable regardless of the artifact name
-    // the exe was built/shipped under (e.g. Lithic-Offline.exe).
-    let target = target_dir.join("Lithic.exe");
 
     // Copy only when different to keep timestamps stable across re-installs.
     let needs_copy = match fs::read(&exe) {
@@ -378,6 +413,7 @@ fn main() {
             save_lith_file,
             write_text_path,
             install_monolith,
+            install_status,
             git_sync_setup,
             git_sync_commit
         ])
