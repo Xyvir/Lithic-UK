@@ -320,6 +320,23 @@ export async function listWikiVersions(name: string): Promise<VersionSummary[]> 
   return historyStore.listVersions(name);
 }
 
+/**
+ * Per-wiki availability flag for the recents list: which of these wikis
+ * have any recorded versions? Lets the UI hide the history affordance on
+ * wikis (e.g. never-saved ones) where the modal would only report emptiness.
+ */
+export async function wikiHasHistory(names: string[]): Promise<Record<string, boolean>> {
+  const availability: Record<string, boolean> = {};
+  await Promise.all(names.map(async (name) => {
+    try {
+      availability[name] = (await historyStore.listVersions(name)).length > 0;
+    } catch {
+      availability[name] = false;
+    }
+  }));
+  return availability;
+}
+
 /** Materialize one version for download as `<stem>_recover_<stamp>.lith`. */
 export async function downloadWikiVersion(name: string, id: string): Promise<DownloadableVersion | null> {
   return historyStore.getVersion(name, id);

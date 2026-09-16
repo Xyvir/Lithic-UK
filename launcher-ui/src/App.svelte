@@ -4,7 +4,7 @@
   import { createFileBridge, tauriInvoke } from './file-bridge';
   import { isScratchFileName, resolveScratchKind, type ScratchKind } from './scratch-editor';
   import { bootLegacyWiki, bootLegacyHtml } from './legacy-launcher-runtime';
-  import { getRecentFiles, addRecentFile, removeRecentFile, clearAllRecentFiles, purgeOldestCachesIfNeeded, idb, getSearchCacheText, listWikiVersions, downloadWikiVersion, deleteWikiHistory, getDirtyState, clearDirtyState, listDirtyRecoveries, isWikiDriftedFromHead, type RecentEntry } from './storage';
+  import { getRecentFiles, addRecentFile, removeRecentFile, clearAllRecentFiles, purgeOldestCachesIfNeeded, idb, getSearchCacheText, listWikiVersions, wikiHasHistory, downloadWikiVersion, deleteWikiHistory, getDirtyState, clearDirtyState, listDirtyRecoveries, isWikiDriftedFromHead, type RecentEntry } from './storage';
   import { readBookmarks, saveBookmark, removeBookmark, verifyInstanceUrl, normalizeInstanceUrl } from './bookmarks';
   import { searchCachedWikis } from './cache-search';
   import { serializeJsonToLith } from './lithic-format';
@@ -160,6 +160,18 @@
   let historyEntries: HistoryEntry[] = [];
   let historyBusy = false;
   let historyError = '';
+  // Per-wiki version-history availability keys the history affordance:
+  // wikis with no recorded versions (never saved, scratch-before-save)
+  // hide the button instead of opening an empty modal.
+  let historyAvailable: Record<string, boolean> = {};
+
+  async function refreshHistoryAvailability(names: string[]) {
+    const wanted = names.filter((name) => !(name in historyAvailable));
+    if (wanted.length > 0) {
+      const availability = await wikiHasHistory(wanted);
+      historyAvailable = { ...historyAvailable, ...availability };
+    }
+  }
   type DirtyInfo = { name: string; ts: number; tiddlers: Array<Record<string, string>> };
   let showDirtyModal = false;
   let dirtyInfo: DirtyInfo | null = null;
@@ -286,6 +298,12 @@
   }
 
   $: void updateCacheMatches(search);
+  // Version-history availability tracks the recents + cached lists so newly
+  // appearing rows get their answer without re-checking existing ones.
+  $: void refreshHistoryAvailability([
+    ...recentFiles.map((file) => getEntryName(file)),
+    ...filteredCached.map((entry) => entry.name)
+  ]);
 
   async function loadRecent() {
     try {
@@ -1050,9 +1068,10 @@
           {@const name = getEntryName(file)}
           <div class="recent-row">
             <button class="recent-name" on:click={() => openRecent(file)}>{name}{#if cachedEntries[name]}<span class="cached-size">{formatCacheSize(cachedEntries[name].sizeBytes)}</span>{/if}</button>
-            <button class="recent-icon-button cache-history-button" class:dirty={dirtyEntries[name]} type="button" disabled={!cachedEntries[name]} aria-label={dirtyEntries[name] ? `${name} has unsaved edits; open to recover` : `Show version history for ${name}`} title={dirtyEntries[name] ? `Unsaved edits from ${new Date(dirtyEntries[name]).toLocaleString()}; click the name to open and recover` : (cachedEntries[name] ? 'Show version history' : 'No cached history available')} on:click={() => openHistoryModal(name)}>
+            {#if dirtyEntries[name] || historyAvailable[name]}<button class="recent-icon-button cache-history-button" class:dirty={dirtyEntries[name]} type="button" disabled={!cachedEntries[name] && !dirtyEntries[name]} aria-label={dirtyEntries[name] ? `${name} has unsaved edits; open to recover` : `Show version history for ${name}`} title={dirtyEntries[name] ? `Unsaved edits from ${new Date(dirtyEntries[name]).toLocaleString()}; click the name to open and recover` : (cachedEntries[name] ? 'Show version history' : 'No cached history available')} on:click={() => openHistoryModal(name)}>
               <svg class="history-download-icon" viewBox="56 108 33 36" aria-hidden="true"><path class="history-icon-shape" d="m 73.595508,109.76746 c -7.198235,0 -13.103617,5.58342 -13.647229,12.64471 h -0.0072 V 138.2696 H 58.61606 l 2.32389,4.02559 2.324405,-4.02559 h -1.323433 v -15.85123 c 0.530186,-5.97937 5.534806,-10.65103 11.654586,-10.65103 6.474618,0 11.703161,5.22855 11.703161,11.70316 0,6.47462 -5.228543,11.70161 -11.703161,11.70161 -2.644513,0 -5.080809,-0.87232 -7.037814,-2.34508 v 2.39572 c 2.058162,1.23707 4.46633,1.94924 7.037814,1.94924 7.555498,0 13.703556,-6.14599 13.703556,-13.70149 0,-7.5555 -6.148058,-13.70304 -13.703556,-13.70304 z m -2.108915,7.49825 v 8.05016 h 7.125663 v -1.59836 h -5.527311 v -6.4518 z"></path></svg>
             </button>
+            {/if}
             {#if cacheSearchMatches[name]?.preview}
               <div
                 use:positionCachePreview
@@ -1071,9 +1090,10 @@
         {#each filteredCached as entry}
           <div class="recent-row cached-only-row">
             <div class="recent-name cached-result" role="note">{entry.name}<span class="cached-size">{formatCacheSize(entry.sizeBytes)}</span><span class="cached-label">Cached locally</span></div>
-            <button class="recent-icon-button cache-history-button" class:dirty={dirtyEntries[entry.name]} type="button" aria-label={`Show version history for ${entry.name}`} title={dirtyEntries[entry.name] ? `Unsaved edits from ${new Date(dirtyEntries[entry.name]).toLocaleString()}; click the name to open and recover` : 'Show version history'} on:click={() => openHistoryModal(entry.name)}>
+            {#if dirtyEntries[entry.name] || historyAvailable[entry.name]}<button class="recent-icon-button cache-history-button" class:dirty={dirtyEntries[entry.name]} type="button" aria-label={`Show version history for ${entry.name}`} title={dirtyEntries[entry.name] ? `Unsaved edits from ${new Date(dirtyEntries[entry.name]).toLocaleString()}; click the name to open and recover` : 'Show version history'} on:click={() => openHistoryModal(entry.name)}>
               <svg class="history-download-icon" viewBox="56 108 33 36" aria-hidden="true"><path class="history-icon-shape" d="m 73.595508,109.76746 c -7.198235,0 -13.103617,5.58342 -13.647229,12.64471 h -0.0072 V 138.2696 H 58.61606 l 2.32389,4.02559 2.324405,-4.02559 h -1.323433 v -15.85123 c 0.530186,-5.97937 5.534806,-10.65103 11.654586,-10.65103 6.474618,0 11.703161,5.22855 11.703161,11.70316 0,6.47462 -5.228543,11.70161 -11.703161,11.70161 -2.644513,0 -5.080809,-0.87232 -7.037814,-2.34508 v 2.39572 c 2.058162,1.23707 4.46633,1.94924 7.037814,1.94924 7.555498,0 13.703556,-6.14599 13.703556,-13.70149 0,-7.5555 -6.148058,-13.70304 -13.703556,-13.70304 z m -2.108915,7.49825 v 8.05016 h 7.125663 v -1.59836 h -5.527311 v -6.4518 z"></path></svg>
             </button>
+            {/if}
             {#if cacheSearchMatches[entry.name]?.preview}
               <div
                 use:positionCachePreview
