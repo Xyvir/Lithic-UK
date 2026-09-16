@@ -1,36 +1,98 @@
 title: $:/plugins/tiddlywiki/highlight/styles
 tags: $:/tags/Stylesheet $:/tags/Stylesheet/Highlight
-type: text/vnd.tiddlywiki
+type: text/css
+
+/*
+Syntax colouring via the lithic contrast core (--lithic-c-*): every colour
+is derived from the live palette with WCAG contrast targets, so no palette
+can make these muddy. The lithic-contrast publisher always defines the
+variables. Role semantics (see $:/plugins/xyvir/lithic-core/contrast.js):
+  code-fg     neutral text / titles        code-accent  keywords (brand hue)
+  code-ref    strings & neutral refs       code-warn    numbers, symbols, meta
+*/
 
 .hljs {
-    background: <<colour code-background>>;
-    color: <<colour foreground>>;
-    border: 1px solid <<colour code-border>>;
+    background: var(--lithic-c-code-bg);
+    color: var(--lithic-c-code-fg);
+    border: 1px solid var(--lithic-c-code-border);
     padding: 0.5em;
     border-radius: 2px;
     display: block;
     overflow-x: auto;
-}/* COMMENTS: Muted text */.hljs-comment,.hljs-quote {
-    color: <<colour alert-muted-foreground>>;
+}
+
+/* COMMENTS: muted neutral */
+.hljs-comment,
+.hljs-quote {
+    color: var(--lithic-c-code-ref);
     font-style: italic;
-}/* KEYWORDS: Primary Color (Usually the Wiki's main brand color) */.hljs-keyword,.hljs-selector-tag,.hljs-addition {
-    color: <<colour dropzone-background>>;
+}
+
+/* KEYWORDS: brand accent */
+.hljs-keyword,
+.hljs-selector-tag,
+.hljs-addition {
+    color: var(--lithic-c-code-accent);
     font-weight: bold;
-}/* STRINGS & LITERALS: External Link Color (Usually distinct from body text) */.hljs-string,.hljs-meta .hljs-string,.hljs-literal,.hljs-doctag,.hljs-regexp {
-    color: <<colour external-link-foreground-visited>>;
-}/* NUMBERS */.hljs-number {
-    color: <<colour primary>>;
-}/* TITLES & SECTIONS: Tiddler Title Color */.hljs-title,.hljs-section,.hljs-name,.hljs-selector-id,.hljs-selector-class {
-    color: <<colour code-foreground>>;
+}
+
+/* STRINGS & LITERALS: neutral ref tone */
+.hljs-string,
+.hljs-meta .hljs-string,
+.hljs-literal,
+.hljs-doctag,
+.hljs-regexp {
+    color: var(--lithic-c-code-ref);
+}
+
+/* NUMBERS: secondary accent */
+.hljs-number {
+    color: var(--lithic-c-code-warn);
+}
+
+/* TITLES & SECTIONS: base text, bolded */
+.hljs-title,
+.hljs-section,
+.hljs-name,
+.hljs-selector-id,
+.hljs-selector-class {
+    color: var(--lithic-c-code-fg);
     font-weight: bold;
-}/* VARIABLES & ATTRIBUTES: Internal Link Color */.hljs-attribute,.hljs-attr,.hljs-variable,.hljs-template-variable,.hljs-class .hljs-title,.hljs-type {
-    color: <<colour sidebar-controls-foreground-hover>>;
-}/* META & SYMBOLS: Tag Background (Often colorful) */.hljs-symbol,.hljs-bullet,.hljs-subst,.hljs-meta,.hljs-meta .hljs-keyword,.hljs-selector-attr,.hljs-selector-pseudo,.hljs-link {
-    color: <<colour dirty-indicator>>; 
-}/* ERRORS & DELETIONS: Dirty/Unsaved Color (Usually Red) */.hljs-built_in,.hljs-deletion {
-    color: <<colour alert-background>>;
-}/* EMPHASIS & STRONG */.hljs-emphasis {
+}
+
+/* VARIABLES & ATTRIBUTES: brand accent (regular weight) */
+.hljs-attribute,
+.hljs-attr,
+.hljs-variable,
+.hljs-template-variable,
+.hljs-class .hljs-title,
+.hljs-type {
+    color: var(--lithic-c-code-accent);
+}
+
+/* META & SYMBOLS: secondary accent */
+.hljs-symbol,
+.hljs-bullet,
+.hljs-subst,
+.hljs-meta,
+.hljs-meta .hljs-keyword,
+.hljs-selector-attr,
+.hljs-selector-pseudo,
+.hljs-link {
+    color: var(--lithic-c-code-warn);
+}
+
+/* BUILTINS & DIFF DELETIONS: secondary accent */
+.hljs-built_in,
+.hljs-deletion {
+    color: var(--lithic-c-code-warn);
+}
+
+/* EMPHASIS & STRONG */
+.hljs-emphasis {
     font-style: italic;
-}.hljs-strong {
+}
+
+.hljs-strong {
     font-weight: bold;
 }

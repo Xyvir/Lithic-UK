@@ -20,6 +20,12 @@ and `derive` turns it into a role map guaranteed to hit contrast targets:
   cluster-bg/-border, note-bg/-fg/-border      (grouping, callouts)
   accent            >= 3:1 vs surface          (primary, locked)
   accent-fg         >= 4.5:1 vs accent
+  code-*            editor surfaces: subtle bg lift, >=1.8:1 border,
+                    refs >=3.5:1, accents hue-locked from dirty-indicator
+                    / primary, selection band + fg >=4.5:1, caret >=3:1
+  menu-*            popup surfaces: items >=4.5:1, icons >=3.5:1, hover
+                    band + fg >=4.5:1, border >=1.8:1
+  caret             editor caret, >=3:1 vs code background
   scale-1..8        categorical accents spun off primary
   dark              "1" on dark palettes, "0" on light
 
@@ -70,6 +76,7 @@ Derived from the validated "Contrast-locked" Mermaid theme (Lithic 2026-09).
     // mid-luminance backgrounds must be probed at their extremes, not the
     // midpoint. E.g. text on a mid blue: black hits 6:1 while white stalls at 3.3.
     function lumAdjust(color, bgc, target) {
+        target += 0.05; // headroom so final hex rounding cannot dip below target
         var c = color.slice();
         var dir = contrast([255, 255, 255], bgc) >= contrast([0, 0, 0], bgc) ? 1 : -1;
         for (var i = 0; i < 40; i++) {
@@ -141,13 +148,16 @@ Derived from the validated "Contrast-locked" Mermaid theme (Lithic 2026-09).
         }
         function pick(name, fb, depth) {
             depth = depth || 0;
+            // The palette's own entry wins whether it is a value or a
+            // `<<colour other>>` reference; Vanilla only covers keys the
+            // palette does not define at all (true <<colour>> semantics).
             var v = paletteField(name);
-            if (!isColor(v)) {
+            if (v === undefined || v === "") {
                 v = vanillaField(name);
             }
-            if (!isColor(v)) {
+            if (v === undefined || v === "") {
                 var d = wiki.getTiddler("$:/config/DefaultColourMappings/" + name);
-                v = d && d.fields && d.fields.text;
+                v = d ? d.fields && d.fields.text : undefined;
             }
             if (isColor(v)) return hexToRgb(v);
             // `<<colour other>>` -> recurse into the same chain (bounded)
@@ -164,8 +174,37 @@ Derived from the validated "Contrast-locked" Mermaid theme (Lithic 2026-09).
             fg: pick("foreground", [32, 32, 32]),
             primary: pick("primary", [96, 96, 200]),
             muted: pick("muted-foreground", [120, 120, 120]),
-            border: pick("table-border", pick("tiddler-border", [180, 180, 180]))
+            border: pick("table-border", pick("tiddler-border", [180, 180, 180])),
+            codeBg: pick("code-background", mix(bg, [0, 0, 0], 0.04)),
+            codeBorder: pick("code-border", pick("table-border", [180, 180, 180])),
+            dirty: pick("dirty-indicator", pick("alert-muted-foreground", pick("primary", [200, 80, 80]))),
+            alertBg: pick("alert-background", [220, 80, 80]),
+            altFg: pick("muted-foreground", [120, 120, 120]),
+            dropdownBg: pick("dropdown-background", bg),
+            msgBg: pick("message-background", pick("notification-background", mix(bg, [0, 0, 0], 0.03))),
+            msgBorder: pick("message-border", pick("table-border", [180, 180, 180]))
         };
+    }
+
+    // hue-locked accent: keeps the source hue, slides lightness (and lifts
+    // saturation with a floor) until it contrasts with `bgc`. For accent
+    // colors that must stay recognizable (primary, dirty-indicator) -- plain
+    // lumAdjust keeps hue but is bounded by mixing to white/black, which
+    // washes out; this steers in HSL instead.
+    function hueShift(color, bgc, target) {
+        var hsl = rgb2hsl(color);
+        var W = contrast([255, 255, 255], bgc) >= contrast([0, 0, 0], bgc) ? [255, 255, 255] : [0, 0, 0];
+        var lift = W[0] === 255;
+        var t = 0;
+        var c = color.slice();
+        for (var i = 0; i < 48; i++) {
+            if (contrast(c, bgc) >= target) return c;
+            t += 0.04;
+            var h2 = [hsl[0], Math.max(hsl[1], lift ? 0.45 : 0.55), hsl[2]];
+            h2[2] = lift ? Math.min(0.92, hsl[2] + t * (0.92 - hsl[2])) : Math.max(0.10, hsl[2] * (1 - t));
+            c = mix(hsl2rgb(h2), W, 0.05);
+        }
+        return c;
     }
 
     // ---------- generic derivation (the Contrast-locked role map) ----------
@@ -187,6 +226,37 @@ Derived from the validated "Contrast-locked" Mermaid theme (Lithic 2026-09).
         var accent = lumAdjust(p.primary, p.bg, 3);
         var accentFg = lumAdjust(dark ? [17, 17, 17] : [255, 255, 255], accent, 4.5);
         var scale = scaleFrom(p.primary, dark, 8);
+        // --- extended roles (editor / code / popup menus) ---
+        var wref = mix(p.codeBg, W, dark ? 0.30 : 0.16);
+        var wrefFg = lumAdjust(p.fg, wref, 4.5);
+        var wnoise = lumAdjust(hueShift(p.dirty, p.codeBg, dark ? 3 : 4.5), wref, 3.5);
+        var select = mix(p.primary, p.codeBg, dark ? 0.30 : 0.18);
+        var selectFg = lumAdjust(p.fg, select, 4.5);
+        var accentCode = hueShift(p.primary, p.codeBg, 3);
+        var menuBg = mix(p.dropdownBg, W, dark ? 0.06 : 0);
+        var menuFg = lumAdjust(p.fg, menuBg, 4.5);
+        var menuMuted = lumAdjust(p.altFg, menuBg, 3.5);
+        var menuHover = mix(p.primary, menuBg, dark ? 0.22 : 0.14);
+        var hoverInk = contrast([255, 255, 255], menuHover) >= contrast([17, 17, 17], menuHover) ? [255, 255, 255] : [17, 17, 17];
+        var menuHoverFg;
+        if (contrast(hoverInk, menuHover) >= 4.55) {
+            menuHoverFg = lumAdjust(hoverInk, menuHover, 4.5);
+        } else {
+            // Mid-luminance band: neither ink endpoint reaches 4.5 from
+            // here (ink adjustment saturates at its extreme). Slide the
+            // band toward the menu surface, re-picking the better ink,
+            // until an endpoint ink clears the target. Terminates at worst
+            // with the band fully faded into the surface (which itself has
+            // a >=4.5 endpoint pair by construction of menu-fg).
+            var baseHover = menuHover.slice();
+            for (var hi = 1; hi <= 40; hi++) {
+                menuHover = mix(baseHover, menuBg, hi * 0.05);
+                hoverInk = contrast([255, 255, 255], menuHover) >= contrast([17, 17, 17], menuHover) ? [255, 255, 255] : [17, 17, 17];
+                if (contrast(hoverInk, menuHover) >= 4.55) break;
+            }
+            menuHoverFg = hoverInk;
+        }
+        var menuBorder = lumAdjust(p.msgBorder, menuBg, 1.8);
         var out = {
             "surface": toHex(p.bg),
             "page": toHex(p.pageBg),
@@ -204,7 +274,23 @@ Derived from the validated "Contrast-locked" Mermaid theme (Lithic 2026-09).
             "note-border": toHex(noteB),
             "accent": toHex(accent),
             "accent-fg": toHex(accentFg),
-            "dark": dark ? "1" : "0"
+            "dark": dark ? "1" : "0",
+            "code-bg": toHex(p.codeBg),
+            "code-border": toHex(lumAdjust(p.codeBorder, p.bg, 1.8)),
+            "code-fg": toHex(txt),
+            "code-ref": toHex(wrefFg),
+            "code-accent": toHex(accentCode),
+            "code-warn": toHex(wnoise),
+            "code-select-bg": toHex(select),
+            "code-select-fg": toHex(selectFg),
+            "caret": toHex(accentCode),
+            "menu-bg": toHex(menuBg),
+            "menu-fg": toHex(menuFg),
+            "menu-muted": toHex(menuMuted),
+            "menu-hover-bg": toHex(menuHover),
+            "menu-hover-fg": toHex(menuHoverFg),
+            "menu-border": toHex(menuBorder),
+            "menu-selected-fg": toHex(menuHoverFg)
         };
         for (var i = 0; i < 8; i++) out["scale-" + (i + 1)] = toHex(scale[i]);
         return out;
@@ -220,6 +306,7 @@ Derived from the validated "Contrast-locked" Mermaid theme (Lithic 2026-09).
     exports.mix = mix;
     exports.lumAdjust = lumAdjust;
     exports.scaleFrom = scaleFrom;
+    exports.hueShift = hueShift;
     exports.resolvePalette = resolvePalette;
     exports.derive = derive;
     exports.deriveForWiki = deriveForWiki;

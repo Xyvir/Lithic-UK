@@ -1,6 +1,10 @@
 title: $:/plugins/ahanniga/context-menu/styles.css
-type: text/vnd.tiddlywiki
+type: text/css
 tags: $:/tags/Stylesheet
+
+/* Menu colours from the lithic contrast core (--lithic-c-menu-*): items,
+   icons and hover pairs are WCAG-checked against the live palette, so the
+   menu is readable on light and dark palettes alike. */
 
 .context-menu {
 	position: fixed;
@@ -9,11 +13,11 @@ tags: $:/tags/Stylesheet
 	z-index: 10000;
 	display: flex;
 	flex-direction: column;
-	background-color: <<colour dropdown-background>>;
+	background-color: var(--lithic-c-menu-bg);
 	border-radius: 6px;
 	box-shadow: rgba(0, 0, 0, 0.40) 0px 2px 20px;
 	padding: 12px 0;
-	border: 1px solid #dce0e2;
+	border: 1px solid var(--lithic-c-menu-border);
 	font-family: "Segoe UI", Roboto, Helvetica, Arial;
 	font-size: 13px;
 	margin-top: 4px;
@@ -36,8 +40,8 @@ tags: $:/tags/Stylesheet
 	flex-direction: row-reverse;
 	position: relative;
 	text-decoration: unset;
-	color: #c8ced8 !important;
-	fill: #c8ced8 !important;
+	color: var(--lithic-c-menu-fg) !important;
+	fill: var(--lithic-c-menu-fg) !important;
 	line-height: 24px;
 	font-weight: normal;
 	transition: none;
@@ -45,14 +49,14 @@ tags: $:/tags/Stylesheet
 }
 
 .context-menu > ul > li > a:hover {
-	background: <<colour tiddler-link-foreground>>;
-	color: <<colour tiddler-link-background>>; 
-	fill: <<colour tiddler-link-background>>; 
+	background: var(--lithic-c-menu-hover-bg);
+	color: var(--lithic-c-menu-hover-fg);
+	fill: var(--lithic-c-menu-hover-fg);
 }
 
 .context-menu > ul > li > a:hover > svg {
-	color: <<colour tiddler-link-background>>; 
-	fill: <<colour tiddler-link-background>>; 
+	color: var(--lithic-c-menu-hover-fg);
+	fill: var(--lithic-c-menu-hover-fg);
 }
 
 .context-menu > ul > li > a > i {
@@ -60,8 +64,8 @@ tags: $:/tags/Stylesheet
 }
 
 .context-menu > ul > li > a > svg {
-	color: #c8ced8 !important;
-	fill: #c8ced8 !important;
+	color: var(--lithic-c-menu-muted) !important;
+	fill: var(--lithic-c-menu-muted) !important;
 	width: 13px;
 	margin-left: 16px;
 	margin-right: 0;
@@ -69,16 +73,18 @@ tags: $:/tags/Stylesheet
 }
 
 ul .menu-separator {
-	border-bottom: 1px solid #eceef0;
+	border-bottom: 1px solid var(--lithic-c-menu-border);
 	margin-bottom: 6px;
 	margin-top: 6px;
 	padding-bottom: 0;
 }
 
-/* Context Menu Highlight Patch - applies when right-clicking a stream node or link */
+/* Context Menu Highlight Patch - applies when right-clicking a stream node or link.
+   The band/fg pair is the contrast-checked menu hover pair, so the highlight
+   stays readable on every palette. */
 .lithic-context-menu-active,
 .lithic-context-menu-active-children {
-	background: #3a5e39 !important;
-	color: #d5e2f1 !important;
-	border-radius: 4px; /* Optional: adds a slight rounding for standalone links */
+	background: var(--lithic-c-menu-hover-bg, #3a5e39) !important;
+	color: var(--lithic-c-menu-hover-fg, #d5e2f1) !important;
+	border-radius: 4px;
 }

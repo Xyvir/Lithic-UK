@@ -1,6 +1,6 @@
-title: $:/plugins/tiddlywiki/highlight/highlight.css 
+title: $:/plugins/tiddlywiki/highlight/highlight.css
 tags: $:/tags/Stylesheet $:/tags/Stylesheet/Highlight
-type: text/vnd.tiddlywiki
+type: text/css
 
 /*
   Theme: Base Reactive Fallback
@@ -25,8 +25,8 @@ type: text/vnd.tiddlywiki
     /* 2. MAIN CONTAINER DEFAULT */
     /* Matches your /styles preference, ensuring safety if /styles is disabled */
     .hljs {
-        background: <<colour code-background>>;
-        color: <<colour foreground>>;
+        background: var(--lithic-c-code-bg);
+        color: var(--lithic-c-code-fg);
     }
 
     /* 3. CRITICAL MISSING ELEMENTS (Not in your /styles) */
@@ -37,7 +37,7 @@ type: text/vnd.tiddlywiki
 */
     .hljs-punctuation,
     .hljs-tag {
-        color: <<colour alert-muted-foreground>>;
+        color: var(--lithic-c-code-ref);
     }
 
     /* Operators: 
@@ -46,7 +46,7 @@ type: text/vnd.tiddlywiki
    We map them to 'tag-background' to match your 'Symbols' logic.
 */
     .hljs-operator {
-        color: <<colour notification-background>>;
+        color: var(--lithic-c-code-warn);
     }
 
     /* Tag Names & Attributes:
@@ -55,10 +55,10 @@ type: text/vnd.tiddlywiki
 */
     .hljs-tag .hljs-name,
     .hljs-tag .hljs-attr {
-        color: <<colour primary>>;
+        color: var(--lithic-c-code-accent);
     }
 
     /* 4. FALLBACKS FOR INLINE CODE */
     .hljs-code {
-        color: <<colour download-background>>;
+        color: var(--lithic-c-code-fg);
     }

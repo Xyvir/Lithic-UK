@@ -1,0 +1,47 @@
+title: $:/lithic/streams/styles/ctxmenu-vars
+tags: $:/tags/Stylesheet
+type: text/css
+
+/*
+Streams context menu -- palette contrast override.
+
+Upstream $:/plugins/sq/streams contextmenu-styles.css hardcodes a light theme
+(#4b5155 text on #dce0e2 border). This sheet re-skins the same selectors from
+the lithic contrast core (--lithic-c-menu-*): item text, icons, hover band and
+borders are WCAG-checked against the live palette. Specificity is kept one
+class above upstream so ordering does not matter.
+*/
+
+/* surface */
+.tc-drop-down.sq-contextmenu {
+	background-color: var(--lithic-c-menu-bg);
+	border: 1px solid var(--lithic-c-menu-border);
+	box-shadow: rgba(0, 0, 0, 0.35) 0px 2px 20px;
+}
+
+/* item text */
+.tc-drop-down.sq-contextmenu .tc-menu-list-item {
+	color: var(--lithic-c-menu-fg);
+	background: transparent;
+}
+
+/* shortcut hints / icons */
+.tc-drop-down.sq-contextmenu .sq-contextmenu-itemicon {
+	color: var(--lithic-c-menu-muted);
+}
+
+/* hover / focused item */
+.tc-drop-down.sq-contextmenu .tc-menu-list-item:hover,
+.tc-drop-down.sq-contextmenu .tc-menu-list-item:focus {
+	background: var(--lithic-c-menu-hover-bg);
+	color: var(--lithic-c-menu-hover-fg);
+}
+.tc-drop-down.sq-contextmenu .tc-menu-list-item:hover .sq-contextmenu-itemicon,
+.tc-drop-down.sq-contextmenu .tc-menu-list-item:focus .sq-contextmenu-itemicon {
+	color: var(--lithic-c-menu-hover-fg);
+}
+
+/* divider */
+.tc-drop-down.sq-contextmenu .sq-contextmenu-divider {
+	border-top-color: var(--lithic-c-menu-border);
+}

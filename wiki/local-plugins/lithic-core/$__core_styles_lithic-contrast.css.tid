@@ -36,5 +36,21 @@ the publisher.
     --lithic-c-scale-6: <<colour primary>>;
     --lithic-c-scale-7: <<colour primary>>;
     --lithic-c-scale-8: <<colour primary>>;
+    --lithic-c-code-bg: <<colour code-background>>;
+    --lithic-c-code-border: <<colour code-border>>;
+    --lithic-c-code-fg: <<colour foreground>>;
+    --lithic-c-code-ref: <<colour foreground>>;
+    --lithic-c-code-accent: <<colour primary>>;
+    --lithic-c-code-warn: <<colour dirty-indicator>>;
+    --lithic-c-code-select-bg: <<colour primary>>;
+    --lithic-c-code-select-fg: <<colour foreground>>;
+    --lithic-c-caret: <<colour primary>>;
+    --lithic-c-menu-bg: <<colour dropdown-background>>;
+    --lithic-c-menu-fg: <<colour foreground>>;
+    --lithic-c-menu-muted: <<colour muted-foreground>>;
+    --lithic-c-menu-hover-bg: <<colour primary>>;
+    --lithic-c-menu-hover-fg: <<colour tiddler-background>>;
+    --lithic-c-menu-border: <<colour table-border>>;
+    --lithic-c-menu-selected-fg: <<colour tiddler-background>>;
     --lithic-c-dark: 0;
 }

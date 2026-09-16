@@ -36,7 +36,7 @@ div.unieditor > * {
   line-height: 1.2rem;
  
   font-family:  Consolas, Monaco, 'Andale Mono', 'Ubuntu Mono', monospace;
-  caret-color: #000;
+  caret-color: var(--lithic-c-caret, currentColor);
   font-size: 1em;
   text-align: left;
   word-spacing: normal;
@@ -49,8 +49,8 @@ div.unieditor > .unieditor__textarea {
    color: transparent;  
 }
 div.unieditor > .unieditor__textarea::selection {
-  background-color: rgba(245, 40, 145, 0.42); /* Highlight background color */
-  color:rgba(245, 40, 145, 0.42);            /* Highlighted text color */
+  background-color: var(--lithic-c-code-select-bg, rgba(245, 40, 145, 0.42));
+  color: var(--lithic-c-code-select-fg, inherit);
 }
 div.unieditor > .unieditor__textarea::-webkit-scrollbar {
   /*display: none;*/
@@ -74,5 +74,3 @@ div.unieditor   pre.unieditor__pre {
 .NoOverflowy::-webkit-scrollbar {
   display: none;
 }
-
-
