@@ -1,5 +1,6 @@
 import { parseLithToJSON } from './lithic-format.ts';
-import { isScratchFileName, resolveScratchKind, parseScratchSource } from './scratch-editor.ts';
+import { isScratchFileName, resolveScratchKind, parseScratchSource, parseTidFile } from './scratch-editor.ts';
+import { tagRootDogear } from './pending-imports.ts';
 import { JSON_PATCH_RUNTIME } from './json-patch.ts';
 import { DEFAULT_PLUGINS, LITHIC_BASE_FILTER } from './legacy-saver.ts';
 import { SCRATCH_SERIALIZE_RUNTIME } from './scratch-wiki.ts';
@@ -719,7 +720,28 @@ function parseHandoffImported(name: string, text: string): Array<Record<string, 
   }
   if (kind && text) {
     const plan = { kind, base: scratchRootTitle(name) };
-    return parseScratchSource(text, plan);
+    const parsed = parseScratchSource(text, plan);
+    if (kind === 'tid') {
+      // .tid saves re-serialize header fields, so anything the mount injected
+      // for editor UX must be tracked and stripped on save to keep round-trips
+      // byte-identical. `lithic-tid-injected` lists those field names; the
+      // injected saver removes them (plus the lithic-tid marker) before
+      // serializing. Dogear is only added when the file has no tags of its
+      // own, so authored tags are never rewritten.
+      const root = parsed[0];
+      if (!root) return parsed;
+      const injected: string[] = [];
+      if (!root.tags) injected.push('tags');
+      if (!parseTidFile(text).fields.some(([key]) => key === 'type')) injected.push('type');
+      if (injected.length === 0) return parsed;
+      const marked: Record<string, string> = { ...root, 'lithic-tid-injected': injected.join(' ') };
+      if (injected.includes('tags')) marked.tags = 'Dogear';
+      return [marked, ...parsed.slice(1)];
+    }
+    // .md/.txt/.json saves never serialize the tags field, so the root can
+    // carry Dogear unconditionally — it opens the document at the top of
+    // the story river, matching shared payloads.
+    return tagRootDogear(parsed);
   }
   return text ? parseLithToJSON(text) : [];
 }

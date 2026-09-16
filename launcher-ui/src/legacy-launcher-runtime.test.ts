@@ -177,3 +177,24 @@ test('non-scratch boots keep the scratch saver out of the document', () => {
   assert.ok(!html.includes('__LITHIC_SCRATCH_SERIALIZE__ = serialize'), 'no scratch runtime script for lith files');
   assert.match(html, /var scratchMode = "off"/);
 });
+
+test('scratch mounts tag the root tiddler with Dogear for the story river', () => {
+  const html = buildEngineHtml(ENGINE_STUB, { name: 'notes.txt', text: '# Heading\n\tchild' }, [], {}, { scratchMode: 'text' });
+  const store = readStore(html);
+  const root = store.find((tiddler) => tiddler.title === 'notes');
+  assert.ok(root, 'scratch root tiddler is present');
+  assert.ok((root.tags || '').split(' ').includes('Dogear'), 'root carries the Dogear tag');
+
+  // .tid files without their own tags also get the marker + bookkeeping.
+  const tidHtml = buildEngineHtml(ENGINE_STUB, { name: 'card.tid', text: 'title: card\n\nbody' }, [], {}, { scratchMode: 'tid' });
+  const tidRoot = readStore(tidHtml).find((tiddler) => tiddler.title === 'card');
+  assert.equal(tidRoot?.tags, 'Dogear');
+  assert.equal(tidRoot?.['lithic-tid-injected'], 'tags type');
+
+  // Authored tags are respected: no Dogear injection; the bookkeeping
+  // field tracks only the injected default type.
+  const taggedHtml = buildEngineHtml(ENGINE_STUB, { name: 'tagged.tid', text: 'title: tagged\ntags: Mine\n\nbody' }, [], {}, { scratchMode: 'tid' });
+  const taggedRoot = readStore(taggedHtml).find((tiddler) => tiddler.title === 'tagged');
+  assert.equal(taggedRoot?.tags, 'Mine');
+  assert.equal(taggedRoot?.['lithic-tid-injected'], 'type');
+});

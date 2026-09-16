@@ -94,8 +94,8 @@ fn write_text_path(path: String, text: String) -> Result<(), String> {
     fs::write(&path, text).map_err(|error| error.to_string())
 }
 
-/// Copy the running executable to a stable per-user location so file
-/// associations ("Open with Lithic") survive updates and app moves, and
+/// Copy the running executable to a stable, *visible* per-user location so
+/// file associations ("Open with Lithic") survive updates and app moves, and
 /// register per-user Windows "Open with" entries for the editor file types.
 /// Registration is deliberately non-destructive: it adds Lithic to each
 /// extension's Open With list without stealing any default association.
@@ -103,10 +103,13 @@ fn write_text_path(path: String, text: String) -> Result<(), String> {
 fn install_monolith() -> Result<String, String> {
     let exe = std::env::current_exe().map_err(|error| error.to_string())?;
 
-    // %LOCALAPPDATA%\Programs\Lithic\lithic.exe (per-user, no elevation);
-    // falls back to ~/Lithic when LOCALAPPDATA is unavailable.
-    let target_dir = dirs::data_local_dir()
-        .map(|local| local.join("Programs").join("Lithic"))
+    // Documents\Lithic\lithic.exe: user-visible and statically reachable;
+    // falls back to %LOCALAPPDATA%\Programs\Lithic, then ~/Lithic.
+    // (Copying a running exe is safe on Windows: the source is locked for
+    // write/delete, not for read, so self-copy needs no external download.)
+    let target_dir = dirs::document_dir()
+        .map(|docs| docs.join("Lithic"))
+        .or_else(|| dirs::data_local_dir().map(|local| local.join("Programs").join("Lithic")))
         .or_else(|| dirs::home_dir().map(|home| home.join("Lithic")))
         .ok_or_else(|| "Could not resolve a user program directory".to_string())?;
 

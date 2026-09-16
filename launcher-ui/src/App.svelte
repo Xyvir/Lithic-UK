@@ -105,8 +105,10 @@
     try {
       const target = await tauriInvoke<string>('install_monolith');
       installStatus = target;
+      status = `Installed to ${target}`;
     } catch (error) {
       installStatus = `Install failed: ${error instanceof Error ? error.message : String(error)}`;
+      status = installStatus;
     } finally {
       installBusy = false;
     }
