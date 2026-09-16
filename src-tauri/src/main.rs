@@ -399,6 +399,89 @@ fn git_sync_commit(path: String, message: String) -> Result<(), String> {
     Ok(())
 }
 
+/// Folder the running exe lives in — the root all sidecar-relative paths
+/// resolve against (the process CWD is unreliable on Windows).
+fn exe_dir() -> Option<PathBuf> {
+    std::env::current_exe().ok()?.parent().map(|parent| parent.to_path_buf())
+}
+
+/// Best-effort relative path from base to target. Empty or `..`-leading
+/// results (target outside the bundle, e.g. another drive) return None so
+/// the caller keeps the absolute path — relative escapes would silently
+/// re-anchor to whatever machine the drive is plugged into.
+fn relative_to(target: &std::path::Path, base: &std::path::Path) -> Option<PathBuf> {
+    let target_comps: Vec<_> = target.components().collect();
+    let base_comps: Vec<_> = base.components().collect();
+    let mut shared = 0;
+    while shared < target_comps.len()
+        && shared < base_comps.len()
+        && target_comps[shared] == base_comps[shared]
+    {
+        shared += 1;
+    }
+    let mut out = PathBuf::new();
+    for _ in shared..base_comps.len() {
+        out.push("..");
+    }
+    for comp in &target_comps[shared..] {
+        out.push(comp.as_os_str());
+    }
+    match out.components().next() {
+        Some(std::path::Component::ParentDir) | None => None,
+        Some(_) => Some(out),
+    }
+}
+
+/// Read the portable recents sidecar: recents.txt beside the exe, one path
+/// per line, most recent first. Comments (#) and blanks are skipped.
+/// Relative lines resolve against the exe's folder (process CWD is not
+/// reliable), and paths that no longer exist on this machine are dropped so
+/// a moved thumb drive only ever offers files that are actually present.
+/// Missing sidecar simply yields an empty list — optional by design.
+#[tauri::command]
+fn read_recents_sidecar() -> Vec<String> {
+    let Some(dir) = exe_dir() else { return Vec::new(); };
+    let Ok(text) = fs::read_to_string(dir.join("recents.txt")) else {
+        return Vec::new();
+    };
+    text.lines()
+        .map(|line| line.trim())
+        .filter(|line| !line.is_empty() && !line.starts_with('#'))
+        .filter_map(|line| {
+            let path = PathBuf::from(line);
+            let resolved = if path.is_absolute() { path } else { dir.join(path) };
+            if resolved.is_file() {
+                Some(resolved.to_string_lossy().into_owned())
+            } else {
+                None
+            }
+        })
+        .collect()
+}
+
+/// Write the portable recents sidecar beside the exe. Paths that live under
+/// the exe's folder are stored relative (so a thumb-drive bundle keeps its
+/// recents across machines); everything else stays absolute and is skipped
+/// gracefully on machines where it doesn't resolve.
+#[tauri::command]
+fn write_recents_sidecar(paths: Vec<String>) -> Result<(), String> {
+    let Some(dir) = exe_dir() else { return Ok(()); };
+    let mut lines = vec![
+        "# Lithic recent files (portable). One path per line, most recent first.".to_string(),
+        "# Relative paths resolve from this file's folder on any machine;".to_string(),
+        "# absolute paths only work on the machine that added them.".to_string(),
+    ];
+    for path in paths.into_iter().take(20) {
+        let target = PathBuf::from(&path);
+        if let Some(rel) = relative_to(&target, &dir) {
+            lines.push(rel.to_string_lossy().into_owned());
+        } else {
+            lines.push(path);
+        }
+    }
+    fs::write(dir.join("recents.txt"), lines.join("\n") + "\n").map_err(|error| error.to_string())
+}
+
 fn main() {
     let args: Vec<String> = std::env::args().collect();
     let startup_file = args.get(1).cloned();
@@ -414,6 +497,8 @@ fn main() {
             write_text_path,
             install_monolith,
             install_status,
+            read_recents_sidecar,
+            write_recents_sidecar,
             git_sync_setup,
             git_sync_commit
         ])

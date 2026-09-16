@@ -326,19 +326,57 @@
     } catch {
       recentFiles = [];
     }
+    if (mode === 'tauri') {
+      await mergeRecentsSidecar();
+    }
     // Dirty-state rows are keyed off the recent list (plus caches), so refresh
     // the unsaved-edit indicator once recents are known — a blank lith edited
     // but never saved has no cache, so the cache path alone never sees it.
     void refreshDirtyBadges();
   }
 
+  /**
+   * Implicit portable mode: recents.txt beside the exe carries one path per
+   * line so a thumb-drive bundle regrows its recents on any machine. Sidecar
+   * entries merge ahead of local ones (they were opened most recently on
+   * some machine); local entries are kept, browser storage stays the source
+   * of truth. Unresolvable paths are dropped by the Rust read and files
+   * that vanished from the drive are pruned here.
+   */
+  async function mergeRecentsSidecar() {
+    try {
+      const sidecarPaths = await tauriInvoke<string[]>('read_recents_sidecar');
+      if (sidecarPaths.length > 0) {
+        const existing = new Set(recentFiles.map((item) => ((item as any).path as string | undefined) ?? getEntryName(item)));
+        const merged = [...recentFiles];
+        for (const path of [...sidecarPaths].reverse()) {
+          if (existing.has(path)) continue;
+          merged.unshift({ name: path.split(/[\\/]/).pop() || path, path } as any);
+        }
+        recentFiles = merged.slice(0, 20);
+      }
+    } catch {
+      // No sidecar support (browser/dev) — ignore.
+    }
+  }
+
+  /** Mirror the current recents into the sidecar (fire-and-forget). */
+  function persistRecentsSidecar() {
+    if (mode !== 'tauri') return;
+    const paths = recentFiles      .map((item) => (item as any).path as string | undefined)
+      .filter((path): path is string => Boolean(path));
+    void tauriInvoke('write_recents_sidecar', { paths }).catch(() => { /* best effort */ });
+  }
+
   async function remember(file: { name: string; path?: string; text?: string; handle?: any }) {
     if (file.handle) {
       recentFiles = await addRecentFile(file.handle, file.path ?? null);
+      persistRecentsSidecar();
     } else {
       const name = file.name;
       recentFiles = [file, ...recentFiles.filter((item) => getEntryName(item) !== name)].slice(0, 20);
       localStorage.setItem(RECENT_KEY, JSON.stringify(recentFiles.map(({ name, path, text }) => ({ name, path, text }))));
+      persistRecentsSidecar();
     }
   }
 
@@ -777,6 +815,7 @@
     cachedEntries = {};
     cacheSearchMatches = {};
     localStorage.removeItem(RECENT_KEY);
+    persistRecentsSidecar();
   }
 
   /** Latest live cache entry text for a file (empty when none). */
@@ -865,9 +904,11 @@
       delete cacheSearchMatches[name];
       cachedEntries = cachedEntries;
       cacheSearchMatches = cacheSearchMatches;
+      persistRecentsSidecar();
     } else {
       recentFiles = recentFiles.filter((item) => item !== file);
       localStorage.setItem(RECENT_KEY, JSON.stringify(recentFiles.map((f: any) => ({ name: f.name, path: f.path, text: f.text }))));
+      persistRecentsSidecar();
     }
   }
 
