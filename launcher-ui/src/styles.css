@@ -242,6 +242,9 @@ footer {
 }
 footer > * { pointer-events: auto; }
 .github-link, .install-button { flex: 0 1 auto; min-width: 0; white-space: nowrap; }
+/* Keep the install affordance pinned right even when it's the only footer
+ * child (tauri mode has no Github link; webapp hides it post-install). */
+.install-button { margin-left: auto; }
 .modal-overlay { position: fixed; inset: 0; display: grid; place-items: center; padding: 20px; background: rgb(0 0 0 / 72%); z-index: 10; }
 .launcher-modal { position: relative; width: min(100%, 460px); max-height: 80vh; overflow: auto; padding: 22px; border: 1px solid #454545; border-radius: 10px; background: #252525; box-shadow: 0 12px 40px #000; }
 .launcher-modal h2 { margin: 0 0 14px; }
