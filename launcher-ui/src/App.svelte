@@ -106,6 +106,9 @@
       const target = await tauriInvoke<string>('install_monolith');
       installStatus = target;
       status = `Installed to ${target}`;
+      // The status line animates while it has text; retire the message
+      // once it has had a moment to be read.
+      setTimeout(() => { if (status.startsWith('Installed to ')) status = ''; }, 6000);
     } catch (error) {
       installStatus = `Install failed: ${error instanceof Error ? error.message : String(error)}`;
       status = installStatus;

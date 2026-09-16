@@ -113,11 +113,10 @@ fn install_monolith() -> Result<String, String> {
         .or_else(|| dirs::home_dir().map(|home| home.join("Lithic")))
         .ok_or_else(|| "Could not resolve a user program directory".to_string())?;
 
-    let file_name = exe
-        .file_name()
-        .map(|name| name.to_string_lossy().into_owned())
-        .unwrap_or_else(|| "lithic.exe".to_string());
-    let target = target_dir.join(&file_name);
+    // Always land as Lithic.exe so the install, associations, and the
+    // Applications registry key are stable regardless of the artifact name
+    // the exe was built/shipped under (e.g. Lithic-Offline.exe).
+    let target = target_dir.join("Lithic.exe");
 
     // Copy only when different to keep timestamps stable across re-installs.
     let needs_copy = match fs::read(&exe) {
@@ -129,6 +128,14 @@ fn install_monolith() -> Result<String, String> {
         fs::copy(&exe, &target).map_err(|error| error.to_string())?;
     }
 
+    // Tidy up a copy left by an earlier install that used the artifact's
+    // own name (e.g. Lithic-Offline.exe) instead of the canonical target.
+    if let Some(legacy) = exe.file_name().map(|name| target_dir.join(name)) {
+        if legacy != target {
+            let _ = fs::remove_file(&legacy);
+        }
+    }
+
     // Associations point at the *copied* exe so they stay valid even if the
     // original install location changes.
     #[cfg(windows)]
@@ -136,6 +143,13 @@ fn install_monolith() -> Result<String, String> {
         // Best-effort: the copy already succeeded; surface for debugging.
         eprintln!("Open With registration failed: {}", error);
     }
+
+    // Reveal the installed exe in Explorer so the user sees where it went.
+    #[cfg(windows)]
+    let _ = std::process::Command::new("explorer")
+        .arg("/select,")
+        .arg(&target)
+        .spawn();
 
     Ok(target.to_string_lossy().into_owned())
 }
