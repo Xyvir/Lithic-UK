@@ -901,7 +901,7 @@
       {#if status}<div class="status-line" role="status"><span class="status-label">{status.replace(/[…\.\s]+$/, '')}</span><span class="activity-dots" aria-hidden="true"><i></i><i></i><i></i></span></div>{/if}
       {#if mountError}<div class="status-line error" role="alert">{mountError}</div>{/if}
     </div>
-    <button class="help-button" aria-label="View Introduction" title="View Introduction" on:click={openIntro}>{introBusy ? '…' : '?'}</button>
+    {#if mode === 'webapp'}<button class="help-button" aria-label="View Introduction" title="View Introduction" on:click={openIntro}>{introBusy ? '…' : '?'}</button>{:else if mode === 'tauri'}<button class="sync-button" aria-label="GitHub Sync" title="Sync the active file's folder to a GitHub repository" on:click={openGitSyncModal}><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 17.6A5 5 0 0 0 18 8h-1.3A8 8 0 1 0 4 16.3"/><path d="M12 12v9"/><path d="m8.5 15.5 3.5-3.5 3.5 3.5"/></svg></button>{/if}
   </header>
   {#if pendingImports.length > 0}
     <div class="pending-imports" role="status" aria-label="Pending imports">
@@ -1073,5 +1073,5 @@
       <button class="reset-cache" on:click={clearRecent}>Clear All Recent Files</button>
     </section>
   {/if}
-  <footer><a class="github-link" href="https://github.com/Lithic-UK/Lithic" target="_blank" rel="noreferrer">Github</a>{#if mode === 'tauri'}<button class="install-button" on:click={installMonolith} disabled={installBusy} title={installStatus || 'Copy this app to a stable per-user location and register file associations'}>{installBusy ? 'Installing…' : installStatus && !installStatus.startsWith('Install failed') ? 'Installed ✓' : 'Install'}</button><button class="github-link" on:click={openGitSyncModal} title="Sync the active file's folder to a GitHub repository">GitHub Sync…</button>{:else}<button class="install-button" on:click={() => alert('Install is available from the browser menu.')}>Install</button>{/if}</footer>
+  <footer><a class="github-link" href="https://github.com/Lithic-UK/Lithic" target="_blank" rel="noreferrer">Github</a>{#if mode === 'tauri'}<button class="install-button" on:click={installMonolith} disabled={installBusy} title={installStatus || 'Copy this app to a stable per-user location and register file associations'}>{installBusy ? 'Installing…' : installStatus && !installStatus.startsWith('Install failed') ? 'Installed ✓' : 'Install'}</button>{:else}<button class="install-button" on:click={() => alert('Install is available from the browser menu.')}>Install</button>{/if}</footer>
 </main>
