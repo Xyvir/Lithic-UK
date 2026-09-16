@@ -3,6 +3,7 @@
   import type { LauncherMode } from './mode';
   import { createFileBridge, tauriInvoke } from './file-bridge';
   import { isScratchFileName, resolveScratchKind, type ScratchKind } from './scratch-editor';
+  import { pwaInstall, promptPwaInstall } from './pwa-install';
   import { bootLegacyWiki, bootLegacyHtml } from './legacy-launcher-runtime';
   import { getRecentFiles, addRecentFile, removeRecentFile, clearAllRecentFiles, purgeOldestCachesIfNeeded, idb, getSearchCacheText, listWikiVersions, wikiHasHistory, downloadWikiVersion, deleteWikiHistory, getDirtyState, clearDirtyState, listDirtyRecoveries, isWikiDriftedFromHead, type RecentEntry } from './storage';
   import { readBookmarks, saveBookmark, removeBookmark, verifyInstanceUrl, normalizeInstanceUrl } from './bookmarks';
@@ -63,6 +64,14 @@
       installState = result.installed ? (result.up_to_date ? 'current' : 'stale') : 'uninstalled';
     } catch {
       installState = 'uninstalled';
+    }
+  }
+
+  /** Legacy parity: fire the browser's native PWA install prompt. */
+  async function installPwa() {
+    const outcome = await promptPwaInstall();
+    if (outcome === 'unavailable') {
+      status = 'Install is available from the browser menu.';
     }
   }
 
@@ -1112,5 +1121,5 @@
       <button class="reset-cache" on:click={clearRecent}>Clear All Recent Files</button>
     </section>
   {/if}
-  <footer>{#if mode === 'webapp'}<a class="github-link" href="https://github.com/Lithic-UK/Lithic" target="_blank" rel="noreferrer">Github</a><button class="install-button" on:click={() => alert('Install is available from the browser menu.')}>Install</button>{:else if mode === 'tauri' && installState !== 'current'}<button class="install-button" on:click={installMonolith} disabled={installBusy} title={installStatus || 'Copy this app to a stable per-user location and register file associations'}>{installBusy ? 'Installing…' : installState === 'stale' ? 'Update Install' : 'Install'}</button>{/if}</footer>
+  <footer>{#if mode === 'webapp'}<a class="github-link" href="https://github.com/Lithic-UK/Lithic" target="_blank" rel="noreferrer">Github</a>{#if $pwaInstall.installable}<button class="install-button" on:click={installPwa}>Install App</button>{/if}{:else if mode === 'tauri' && installState !== 'current'}<button class="install-button" on:click={installMonolith} disabled={installBusy} title={installStatus || 'Copy this app to a stable per-user location and register file associations'}>{installBusy ? 'Installing…' : installState === 'stale' ? 'Update Install' : 'Install'}</button>{/if}</footer>
 </main>
