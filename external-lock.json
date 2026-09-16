@@ -57,7 +57,7 @@
     "url": "https://raw.githubusercontent.com/kookma/TW-PluginLibrary/main/docs/library/recipes/library/tiddlers/%2524%253A%252Fplugins%252Fkookma%252Fquickview.json",
     "etag": "d43e642b4f54b15dbe87dc89c64f5cd6941b6f193b14be1e1cd486508b2866f4",
     "lastModified": null,
-    "updatedAt": "2026-09-16T02:42:43.345Z"
+    "updatedAt": "2026-09-16T16:36:00.649Z"
   },
   "mermaid-tw5": {
     "url": "https://xyvir.github.io/tiny-mermaid11-tw5/",
@@ -70,5 +70,11 @@
     "etag": "6a068243-2cdd3d",
     "lastModified": "Fri, 15 May 2026 02:17:39 GMT",
     "updatedAt": "2026-09-15T13:54:37.645Z"
+  },
+  "uglify": {
+    "url": "https://github.com/flibbles/tw5-uglify/archive/refs/heads/master.zip",
+    "etag": "cc4c94614d5538bda0b21f73d72a462308df18340358cda398bb97fa53651e8e",
+    "lastModified": null,
+    "updatedAt": "2026-09-16T15:03:24.216Z"
   }
 }

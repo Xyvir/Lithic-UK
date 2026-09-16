@@ -1,0 +1,9 @@
+{
+    "title": "$:/plugins/xyvir/lithic-save",
+    "description": "Publishing override for $:/core/save/all: excludes build-time tooling (the uglify plugin and related tiddlers) from saved/published wiki files, mirroring the uglify wizard's purge option.",
+    "name": "Lithic Save",
+    "plugin-type": "plugin",
+    "version": "0.0.1",
+    "core-version": ">=5.3.0",
+    "plugin-priority": "1"
+}

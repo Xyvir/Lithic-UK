@@ -58,11 +58,34 @@ jobs:
         if: inputs.build_config == 'prod'
         run: node scripts/inject-launcher-plugins.js
 
-      - name: Build TiddlyWiki
+      - name: Build TiddlyWiki (uglified for prod, plain otherwise)
         env:
           TIDDLYWIKI_PLUGIN_PATH: '${{ github.workspace }}/wiki:${{ github.workspace }}/wiki/plugins'
           TIDDLYWIKI_THEME_PATH: '${{ github.workspace }}/wiki/themes'
-        run: set -o pipefail && npx tiddlywiki wiki --build index 2>&1 | tee wiki/tiddlywiki.log
+        run: |
+          if [ "${{ inputs.build_config }}" = "prod" ]; then
+            set -o pipefail && npx tiddlywiki wiki --uglify --build index 2>&1 | tee wiki/tiddlywiki.log
+          else
+            set -o pipefail && npx tiddlywiki wiki --build index 2>&1 | tee wiki/tiddlywiki.log
+          fi
+
+      - name: Verify Uglified Artifact (prod only)
+        if: ${{ inputs.build_config == 'prod' }}
+        run: |
+          # The uglify pass must actually engage: artifact should shrink
+          # materially versus an uncompressed build (typically ~30%).
+          SIZE=$(stat -c%s wiki/output/index.html)
+          echo "Uglified artifact size: $SIZE bytes"
+          if [ "$SIZE" -gt 9500000 ]; then
+            echo "::error::Artifact did not shrink as expected ($SIZE bytes) — the uglify pass may have silently failed. Check wiki/tiddlywiki.log"
+            exit 1
+          fi
+          # The uglify toolchain must not ship inside the artifact (mirrors
+          # the wizard's 'purge uglify-related tiddlers' option).
+          if grep -q '"title":"\$:/plugins/flibbles/uglify"' wiki/output/index.html; then
+            echo "::error::flibbles/uglify plugin leaked into the published artifact — the lithic-save save/all override is not being applied."
+            exit 1
+          fi
 
       - name: Rename Output
         run: mv wiki/output/index.html wiki/output/lith.html
@@ -74,6 +97,8 @@ jobs:
       - name: Commit Built Wiki and Bump PWA (prod release)
         if: ${{ inputs.create_release == true && inputs.build_config == 'prod' }}
         run: |
+          mkdir -p variants
+          cp wiki/output/lith.html variants/prod.html
           cp wiki/output/lith.html src/lithic.html
           
           # Bump PWA version to clear service worker cache
@@ -86,18 +111,19 @@ jobs:
 
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add src/lithic.html src/launcher.html manifest.json offline-service-worker.js
-          git diff --cached --quiet || git commit -m "Update src/lithic.html, src/launcher.html, and bump PWA to $NEW_VERSION (build-$(date +'%Y.%m.%d-%H%M'))"
+          git add variants/prod.html src/lithic.html src/launcher.html manifest.json offline-service-worker.js
+          git diff --cached --quiet || git commit -m "Update src/lithic.html + variants/prod.html, and bump PWA to $NEW_VERSION (build-$(date +'%Y.%m.%d-%H%M'))"
           git push
 
-      - name: Commit Built Wiki to repo root (non-prod)
+      - name: Commit Built Wiki to variants (non-prod)
         if: ${{ inputs.build_config != 'prod' }}
         run: |
-          cp wiki/output/lith.html ${{ inputs.build_config }}.html
+          mkdir -p variants
+          cp wiki/output/lith.html variants/${{ inputs.build_config }}.html
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add ${{ inputs.build_config }}.html
-          git diff --cached --quiet || git commit -m "Update ${{ inputs.build_config }}.html from build"
+          git add variants/${{ inputs.build_config }}.html
+          git diff --cached --quiet || git commit -m "Update variants/${{ inputs.build_config }}.html from build"
           git push
 
       - name: Archive Wiki Folder
@@ -126,6 +152,7 @@ jobs:
           prerelease: false
           files: |
             wiki/output/lith.html
+            variants/prod.html
             wiki.zip
             wiki/flatten-manifest.log
 

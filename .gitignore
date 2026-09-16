@@ -10,10 +10,14 @@ wiki/tiddlywiki.info
 wiki/output/
 wiki/mirror.log
 wiki/flatten-manifest.log
+wiki/tiddlywiki.log
 /scratch/
 
 # Local per-machine agent instructions (see .freebuff/local/agents.local.md)
 .freebuff/
+
+# Uglify plugin's on-disk compression cache (default: ./.cache/uglify)
+/.cache/
 
 # Local-only convenience exports for meatspace testing (regenerable via scripts/make-rollup.py)
 /rollups/

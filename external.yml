@@ -60,3 +60,7 @@
 - name: advanced-search
   url: https://b-yp.github.io/tiddlywiki-plugins/
   type: plugins
+
+- name: uglify
+  url: https://github.com/flibbles/tw5-uglify/archive/refs/heads/master.zip
+  type: plugins

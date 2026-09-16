@@ -34,6 +34,13 @@ function mergeConfigs(base, overlay) {
         result.plugins = [...new Set([...(result.plugins || []), ...overlay.plugins])];
     }
 
+    // The uglify plugin is a build-time-only compression tool. It is kept out
+    // of published artifacts by wiki/local-plugins/lithic-save (save/all shadow
+    // override) and must never leak into non-prod (pre/dev) builds.
+    if (TARGET_ENV !== 'prod' && Array.isArray(result.plugins)) {
+        result.plugins = result.plugins.filter(p => p !== 'flibbles/uglify');
+    }
+
     // Merge themes (deduplicated)
     if (overlay.themes) {
         result.themes = [...new Set([...(result.themes || []), ...overlay.themes])];
