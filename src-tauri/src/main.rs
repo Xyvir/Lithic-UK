@@ -4,7 +4,7 @@
 )]
 
 use std::fs;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 use tauri::api::dialog::blocking::FileDialogBuilder;
 
@@ -693,12 +693,18 @@ fn read_recents_sidecar() -> Vec<String> {
 /// the exe's folder are stored relative (so a thumb-drive bundle keeps its
 /// recents across machines); everything else stays absolute and is skipped
 /// gracefully on machines where it doesn't resolve.
+///
+/// A `dismissed=1` line records the install-offer dismissal ("Dismiss" on
+/// the Install button): delete recents.txt to restore the offer.
 #[tauri::command]
-fn write_recents_sidecar(paths: Vec<String>) -> Result<(), String> {
+fn write_recents_sidecar(paths: Vec<String>, dismissed: bool) -> Result<(), String> {
     let Some(dir) = exe_dir() else { return Ok(()); };
     let mut lines = vec![
         "# Lithic recent files (portable). One path per line, most recent first.".to_string(),
     ];
+    if dismissed {
+        lines.push("dismissed=1".to_string());
+    }
     for path in paths.into_iter().take(20) {
         let target = PathBuf::from(&path);
         if let Some(rel) = relative_to(&target, &dir) {
@@ -708,6 +714,57 @@ fn write_recents_sidecar(paths: Vec<String>) -> Result<(), String> {
         }
     }
     fs::write(dir.join("recents.txt"), lines.join("\n") + "\n").map_err(|error| error.to_string())
+}
+
+/// Current install-offer state for the launcher: whether an install exists
+/// (independent of up-to-dateness) and whether the user dismissed the offer
+/// (persisted as a sidecar marker). Delete recents.txt to restore the offer.
+#[derive(serde::Serialize)]
+struct InstallOfferStatus {
+    installed: bool,
+    dismissed: bool,
+}
+
+/// Read the sidecar's install-offer dismissal marker.
+fn sidecar_dismissed(dir: &Path) -> bool {
+    fs::read_to_string(dir.join("recents.txt"))
+        .map(|text| text.lines().any(|line| line.trim() == "dismissed=1"))
+        .unwrap_or(false)
+}
+
+#[tauri::command]
+fn install_offer_status() -> InstallOfferStatus {
+    let installed = install_target().map(|path| path.is_file()).unwrap_or(false);
+    let dismissed = exe_dir().map(|dir| sidecar_dismissed(&dir)).unwrap_or(false);
+    InstallOfferStatus { installed, dismissed }
+}
+
+/// Record or clear the install-offer dismissal in the sidecar. Fire-and-
+/// forget friendly: recents (if any) are preserved.
+#[tauri::command]
+fn set_install_dismissed(dismissed: bool) -> Result<(), String> {
+    let Some(dir) = exe_dir() else { return Ok(()); };
+    let paths: Vec<String> = if dir.join("recents.txt").is_file() {
+        fs::read_to_string(dir.join("recents.txt"))
+            .map(|text| {
+                text.lines()
+                    .map(|line| line.trim())
+                    .filter(|line| !line.is_empty() && !line.starts_with('#') && line != "dismissed=1")
+                    .map(|line| {
+                        let path = PathBuf::from(line);
+                        if path.is_absolute() {
+                            path.to_string_lossy().into_owned()
+                        } else {
+                            dir.join(path).to_string_lossy().into_owned()
+                        }
+                    })
+                    .collect()
+            })
+            .unwrap_or_default()
+    } else {
+        Vec::new()
+    };
+    write_recents_sidecar(paths, dismissed)
 }
 
 fn main() {
@@ -725,6 +782,8 @@ fn main() {
             write_text_path,
             install_monolith,
             install_status,
+            install_offer_status,
+            set_install_dismissed,
             read_recents_sidecar,
             write_recents_sidecar,
             git_sync_setup,

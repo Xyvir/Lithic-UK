@@ -87,6 +87,9 @@ export class KeyvalStore {
 
 export const idb = new KeyvalStore();
 
+/** IndexedDB key holding the webapp install-offer dismissal flag. */
+export const INSTALL_DISMISS_KEY = 'lithic-install-dismissed';
+
 /** The shared history store used by the launcher UI and versioned saves. */
 const historyStore = new KeyvalWikiHistory(idb);
 
@@ -142,6 +145,32 @@ export async function getRecentFiles(): Promise<RecentEntry[]> {
     return raw.map(normalizeRecentEntry);
   } catch {
     return [];
+  }
+}
+
+/**
+ * "Dismiss install offer" flag, webapp/PWA mode: user chose to hide the
+ * install button (e.g. using the launcher as a plain bookmark). Cleared by
+ * clearing site data — IndexedDB is the deliberate persistence choice so
+ * "clear cache" is the manual restore path.
+ */
+export async function isInstallDismissed(): Promise<boolean> {
+  try {
+    return (await idb.get<boolean>(INSTALL_DISMISS_KEY)) === true;
+  } catch {
+    return false;
+  }
+}
+
+export async function setInstallDismissed(dismissed: boolean): Promise<void> {
+  try {
+    if (dismissed) {
+      await idb.set(INSTALL_DISMISS_KEY, true);
+    } else {
+      await idb.del(INSTALL_DISMISS_KEY);
+    }
+  } catch {
+    /* best effort */
   }
 }
 

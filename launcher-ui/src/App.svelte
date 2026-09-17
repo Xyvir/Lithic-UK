@@ -5,7 +5,7 @@
   import { isScratchFileName, resolveScratchKind, type ScratchKind } from './scratch-editor';
   import { pwaInstall, promptPwaInstall } from './pwa-install';
   import { bootLegacyWiki, bootLegacyHtml } from './legacy-launcher-runtime';
-  import { getRecentFiles, addRecentFile, removeRecentFile, clearAllRecentFiles, purgeOldestCachesIfNeeded, idb, getSearchCacheText, listWikiVersions, wikiHasHistory, downloadWikiVersion, deleteWikiHistory, getDirtyState, clearDirtyState, listDirtyRecoveries, isWikiDriftedFromHead, type RecentEntry } from './storage';
+  import { getRecentFiles, addRecentFile, removeRecentFile, clearAllRecentFiles, purgeOldestCachesIfNeeded, idb, getSearchCacheText, listWikiVersions, wikiHasHistory, downloadWikiVersion, deleteWikiHistory, getDirtyState, clearDirtyState, listDirtyRecoveries, isWikiDriftedFromHead, isInstallDismissed, setInstallDismissed, type RecentEntry } from './storage';
   import { readBookmarks, saveBookmark, removeBookmark, verifyInstanceUrl, normalizeInstanceUrl } from './bookmarks';
   import { searchCachedWikis } from './cache-search';
   import { parseDeviceCode, parseDevicePoll, pollDelayMs, formatUserCode, generateRepoName, partitionRepos } from './github-device';
@@ -58,13 +58,37 @@
   let installBusy = false;
   let installStatus = '';
   let installState: 'uninstalled' | 'current' | 'stale' = 'uninstalled';
+  // "Dismiss" on the install offer: hides the button until manually restored
+  // (clear site data in webapp mode; delete recents.txt beside the exe in
+  // tauri mode). Once installed, dismissal no longer hides the update button.
+  let installDismissed = false;
 
   async function refreshInstallState() {
-    try {
-      const result = await tauriInvoke<{ installed: boolean; up_to_date: boolean }>('install_status');
-      installState = result.installed ? (result.up_to_date ? 'current' : 'stale') : 'uninstalled';
-    } catch {
-      installState = 'uninstalled';
+    if (mode === 'tauri') {
+      try {
+        const result = await tauriInvoke<{ installed: boolean; up_to_date: boolean }>('install_status');
+        installState = result.installed ? (result.up_to_date ? 'current' : 'stale') : 'uninstalled';
+      } catch {
+        installState = 'uninstalled';
+      }
+      try {
+        const offer = await tauriInvoke<{ installed: boolean; dismissed: boolean }>('install_offer_status');
+        installDismissed = offer.dismissed;
+      } catch {
+        installDismissed = false;
+      }
+    } else {
+      installDismissed = await isInstallDismissed();
+    }
+  }
+
+  /** Hide the install offer; per-mode persistence (IndexedDB / sidecar). */
+  async function dismissInstallOffer() {
+    installDismissed = true;
+    if (mode === 'tauri') {
+      void tauriInvoke('set_install_dismissed', { dismissed: true }).catch(() => { /* best effort */ });
+    } else {
+      void setInstallDismissed(true);
     }
   }
 
@@ -1226,6 +1250,11 @@
     // --- URL payload injection (?json= / ?lith= / ?url=) ---
     void processUrlPayload();
 
+    // Webapp/PWA mode: honor a previously dismissed install offer.
+    if (mode === 'webapp') {
+      void refreshInstallState();
+    }
+
     // --- Tauri startup file (CLI arg / "Open with" association) ---
     if (mode === 'tauri') {
       void refreshInstallState();
@@ -1493,5 +1522,5 @@
       <button class="reset-cache" on:click={clearRecent}>Clear All Recent Files</button>
     </section>
   {/if}
-  <footer>{#if mode === 'webapp'}<a class="github-link" href="https://github.com/Lithic-UK/Lithic" target="_blank" rel="noreferrer">Github</a>{#if $pwaInstall.installable}<button class="install-button" on:click={installPwa}>Install App</button>{/if}{:else if mode === 'tauri' && installState !== 'current'}<button class="install-button" on:click={installMonolith} disabled={installBusy} title={installStatus || 'Copy this app to a stable per-user location and register file associations'}>{installBusy ? 'Installing…' : installState === 'stale' ? 'Update Install' : 'Install'}</button>{/if}</footer>
+  <footer>{#if mode === 'webapp'}<a class="github-link" href="https://github.com/Lithic-UK/Lithic" target="_blank" rel="noreferrer">Github</a>{#if $pwaInstall.installable && !(installDismissed && installState !== 'stale')}<span class="install-offer"><button class="install-button" on:click={installPwa}>Install App</button><button class="install-dismiss" on:click={dismissInstallOffer} title="Hide the install offer. Restore it later by clearing site data." aria-label="Dismiss install offer">dismiss ✕</button></span>{/if}{:else if mode === 'tauri' && installState !== 'current' && !(installDismissed && installState === 'uninstalled')}<span class="install-offer"><button class="install-button" on:click={installMonolith} disabled={installBusy} title={installStatus || 'Copy this app to a stable per-user location and register file associations'}>{installBusy ? 'Installing…' : installState === 'stale' ? 'Update Install' : 'Install'}</button><button class="install-dismiss" on:click={dismissInstallOffer} title="Hide the install offer. Restore it later by deleting recents.txt beside the app." aria-label="Dismiss install offer">dismiss ✕</button></span>{/if}</footer>
 </main>
