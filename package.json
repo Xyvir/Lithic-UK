@@ -11,7 +11,8 @@
     "build:pre-launcher": "npm --prefix launcher-ui install --no-package-lock && node scripts/build-pre-launcher.mjs",
     "test:pre-launcher": "node scripts/pre-launcher-smoke.mjs",
     "test:puppeteer": "node scripts/test-puppeteer-launcher.mjs",
-    "test:puppeteer:headed": "HEADED=1 node scripts/test-puppeteer-launcher.mjs"
+    "test:puppeteer:headed": "HEADED=1 node scripts/test-puppeteer-launcher.mjs",
+    "check:push": "node scripts/pre-push-check.mjs"
   },
   "author": "Tyler Mills",
   "license": "ISC",
