@@ -84,13 +84,22 @@ jobs:
       - name: Build Offline Executable
         run: npm run tauri build
 
+      - name: Generate Date-Based Tag
+        id: tag
+        run: |
+           if ("${{ inputs.tag_name }}" -ne "") {
+             echo "date=${{ inputs.tag_name }}" >> $env:GITHUB_OUTPUT
+           } else {
+             echo "date=v$(Get-Date -Format 'yyyy.MM.dd-HHmm')" >> $env:GITHUB_OUTPUT
+           }
+
       - name: Rename Offline Artifact
         run: |
           $exe = Get-ChildItem -Path "src-tauri/target/release" -Filter "*.exe" -Recurse | Where-Object { $_.FullName -notmatch "deps" -and $_.FullName -notmatch "build" } | Select-Object -First 1
           if ($exe) {
             Write-Host "Found EXE at: $($exe.FullName)"
-            Copy-Item $exe.FullName -Destination "Lithic-Offline.exe"
-            Write-Host "Created Lithic-Offline.exe"
+            Copy-Item $exe.FullName -Destination "Lithic-Offline-${{ steps.tag.outputs.date }}.exe"
+            Write-Host "Created Lithic-Offline-${{ steps.tag.outputs.date }}.exe"
           } else {
             Write-Error "Build failed: No .exe found in target/release folder."
             exit 1
@@ -121,15 +130,6 @@ jobs:
       #     }
       # -----------------------------
 
-      - name: Generate Date-Based Tag
-        id: tag
-        run: |
-           if ("${{ inputs.tag_name }}" -ne "") {
-             echo "date=${{ inputs.tag_name }}" >> $env:GITHUB_OUTPUT
-           } else {
-             echo "date=v$(Get-Date -Format 'yyyy.MM.dd-HHmm')" >> $env:GITHUB_OUTPUT
-           }
-
       - name: Create Release
         uses: softprops/action-gh-release@v3
         env:
@@ -139,5 +139,5 @@ jobs:
           draft: false
           prerelease: false
           files: |
-            Lithic-Offline.exe
+            Lithic-Offline-${{ steps.tag.outputs.date }}.exe
             # Lithic-Online.exe
