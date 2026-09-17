@@ -8,6 +8,7 @@
   import { getRecentFiles, addRecentFile, removeRecentFile, clearAllRecentFiles, purgeOldestCachesIfNeeded, idb, getSearchCacheText, listWikiVersions, wikiHasHistory, downloadWikiVersion, deleteWikiHistory, getDirtyState, clearDirtyState, listDirtyRecoveries, isWikiDriftedFromHead, type RecentEntry } from './storage';
   import { readBookmarks, saveBookmark, removeBookmark, verifyInstanceUrl, normalizeInstanceUrl } from './bookmarks';
   import { searchCachedWikis } from './cache-search';
+  import { parseDeviceCode, parseDevicePoll, pollDelayMs, formatUserCode, generateRepoName, partitionRepos } from './github-device';
   import { serializeJsonToLith } from './lithic-format';
   // Inlined as a base64 data URL (assetsInlineLimit: Infinity) so the brand
   // mark survives when pre-launcher.html is bundled into the Tauri app.
@@ -75,25 +76,60 @@
     }
   }
 
-  // GitHub sync (Tauri): mirror the self-host workflow — point the folder
-  // containing the active file at a GitHub repo and auto-commit each save.
+  // GitHub sync (Tauri): the legacy launcher's slick flow, server-free —
+  // install the Lithic Sync GitHub App, authorize via OAuth device flow
+  // (github.com/login/device + user code), pick or create a lithic-sync-*
+  // repo, then the folder auto-commits on every save. Rust proxies the two
+  // GitHub OAuth endpoints; a PAT form stays as the advanced fallback.
+  type GitSyncView = 'disconnected' | 'connecting' | 'selecting' | 'connected';
   let showGitSyncModal = false;
-  let gitRepoInput = '';
-  let gitTokenInput = '';
+  let gitSyncView: GitSyncView = 'disconnected';
   let gitSyncBusy = false;
   let gitSyncMessage = '';
   let gitSyncError = '';
-  let gitSyncInputElement: HTMLInputElement;
+  let gitAuthActive = false;
+  let gitUserCode = '';
+  let gitPollAborted = false;
+  let gitDeviceToken: string | null = null;
+  let gitManagedRepos: string[] = [];
+  let gitOtherRepos: string[] = [];
+  let gitRepoChoice = '';
+  let gitCustomRepoInput = '';
+  let gitRepoNamePending = generateRepoName();
+  // Advanced fallback (direct PAT), hidden behind a details toggle.
+  let gitRepoInput = '';
+  let gitTokenInput = '';
 
   function openGitSyncModal() {
     gitSyncMessage = '';
     gitSyncError = '';
+    if (gitSyncView === 'connecting') {
+      // The poll loop was aborted when the dialog last closed; start fresh
+      // rather than showing a dead "waiting for authorization" screen.
+      gitPollAborted = true;
+      gitAuthActive = false;
+      gitSyncView = 'disconnected';
+      gitUserCode = '';
+    }
     showGitSyncModal = true;
-    setTimeout(() => gitSyncInputElement?.focus(), 0);
+    void refreshGitSyncStatus(true);
   }
 
   function closeGitSyncModal() {
     showGitSyncModal = false;
+    gitPollAborted = true;
+  }
+
+  function resetGitSyncFlow() {
+    gitPollAborted = true;
+    gitAuthActive = false;
+    gitDeviceToken = null;
+    gitUserCode = '';
+    gitSyncView = 'disconnected';
+    gitSyncError = '';
+    gitSyncMessage = '';
+    gitSyncBusy = false;
+    void refreshGitSyncStatus(true);
   }
 
   function gitSyncTargetPath(): string | null {
@@ -102,6 +138,132 @@
     return withPath ? ((withPath as any).path as string) : null;
   }
 
+  /** Ask Rust whether the target folder is a Lithic-managed sync repo. */
+  async function refreshGitSyncStatus(applyView: boolean): Promise<void> {
+    const target = gitSyncTargetPath();
+    let connected: { repo: string } | null = null;
+    if (target) {
+      try {
+        connected = await tauriInvoke<{ connected: boolean; repo: string } | null>('git_sync_status', { path: target });
+      } catch {
+        connected = null;
+      }
+    }
+    gitSyncConnectedRepo = connected ? connected.repo : '';
+    if (applyView && gitSyncView !== 'connecting' && gitSyncView !== 'selecting') {
+      gitSyncView = connected ? 'connected' : 'disconnected';
+    }
+  }
+
+  let gitSyncConnectedRepo = '';
+
+  /** Legacy flow, step 1: device code + user code display, then poll. */
+  async function startDeviceAuth() {
+    if (gitSyncBusy || gitAuthActive) return;
+    gitSyncBusy = true;
+    gitAuthActive = true;
+    gitSyncError = '';
+    gitSyncView = 'connecting';
+    gitPollAborted = false;
+    try {
+      const raw = await tauriInvoke<unknown>('github_device_code');
+      const parsed = parseDeviceCode(raw);
+      if (!parsed) throw new Error('GitHub did not return a device code');
+      gitUserCode = parsed.user_code;
+      void pollDeviceToken(parsed.device_code, parsed.interval);
+    } catch (error) {
+      gitSyncError = error instanceof Error ? error.message : String(error);
+      gitSyncView = 'disconnected';
+      gitAuthActive = false;
+    } finally {
+      gitSyncBusy = false;
+    }
+  }
+
+  /** Legacy flow, step 2: poll until the user authorizes (RFC 8628 timing). */
+  async function pollDeviceToken(deviceCode: string, interval: number | undefined) {
+    let delay = pollDelayMs(interval, false);
+    while (!gitPollAborted && gitAuthActive) {
+      await new Promise((resolve) => setTimeout(resolve, delay));
+      if (gitPollAborted) return;
+      try {
+        const decision = parseDevicePoll(await tauriInvoke<unknown>('github_device_poll', { deviceCode }));
+        if (decision.kind === 'authorized') {
+          gitAuthActive = false;
+          gitDeviceToken = decision.token;
+          await loadRepoDiscovery();
+          return;
+        }
+        if (decision.kind === 'pending') {
+          delay = pollDelayMs(interval, Boolean(decision.slowDown));
+          continue;
+        }
+        gitAuthActive = false;
+        gitSyncError = decision.message;
+        gitSyncView = 'disconnected';
+        return;
+      } catch (error) {
+        // Transient network hiccups shouldn't kill the flow; keep polling.
+        gitSyncError = error instanceof Error ? error.message : String(error);
+      }
+    }
+  }
+
+  /** Legacy flow, step 3: discover lithic-managed repos and offer creation. */
+  async function loadRepoDiscovery() {
+    gitSyncBusy = true;
+    gitSyncError = '';
+    try {
+      const repos = await tauriInvoke<Array<{ full_name: string }>>('github_list_repos', { token: gitDeviceToken });
+      const partitioned = partitionRepos(Array.isArray(repos) ? repos : []);
+      gitManagedRepos = partitioned.managed;
+      gitOtherRepos = partitioned.other;
+      gitRepoNamePending = generateRepoName();
+      gitRepoChoice = gitManagedRepos[0] ?? '';
+      gitCustomRepoInput = '';
+      gitSyncView = 'selecting';
+    } catch (error) {
+      gitSyncError = error instanceof Error ? error.message : String(error);
+      gitSyncView = 'disconnected';
+      gitAuthActive = false;
+    } finally {
+      gitSyncBusy = false;
+    }
+  }
+
+  function gitRepoSelection(): string {
+    if (gitRepoChoice === '__create__') return gitRepoNamePending;
+    if (gitRepoChoice === '__custom__') return gitCustomRepoInput.trim();
+    return gitRepoChoice;
+  }
+
+  /** Legacy flow, step 4: (optionally create the repo and) set up the sync. */
+  async function finalizeGitSync() {
+    const target = gitSyncTargetPath();
+    const repo = gitRepoSelection();
+    if (!target || !repo || !gitDeviceToken || gitSyncBusy) return;
+    gitSyncBusy = true;
+    gitSyncError = '';
+    gitSyncMessage = '';
+    try {
+      if (gitRepoChoice === '__create__') {
+        const created = await tauriInvoke<{ full_name: string }>('github_create_repo', { token: gitDeviceToken, name: repo });
+        gitSyncMessage = `Created ${created.full_name} — `;
+      }
+      const result = await tauriInvoke<string>('git_sync_setup', { path: target, repo, token: gitDeviceToken });
+      gitSyncMessage += result || 'Synced';
+      gitDeviceToken = null;
+      gitSyncView = 'connected';
+      markGitSyncActivity();
+      void refreshGitSyncStatus(false);
+    } catch (error) {
+      gitSyncError = error instanceof Error ? error.message : String(error);
+    } finally {
+      gitSyncBusy = false;
+    }
+  }
+
+  /** Advanced fallback: direct token entry (original MVP path). */
   async function connectGitSync() {
     const target = gitSyncTargetPath();
     if (!target || gitSyncBusy) return;
@@ -112,11 +274,90 @@
       const result = await tauriInvoke<string>('git_sync_setup', { path: target, repo: gitRepoInput, token: gitTokenInput });
       gitSyncMessage = result || 'Synced';
       gitTokenInput = '';
+      gitSyncView = 'connected';
+      markGitSyncActivity();
+      void refreshGitSyncStatus(false);
     } catch (error) {
       gitSyncError = error instanceof Error ? error.message : String(error);
     } finally {
       gitSyncBusy = false;
     }
+  }
+
+  async function disconnectGitSync() {
+    const target = gitSyncTargetPath();
+    if (!target || gitSyncBusy) return;
+    if (!window.confirm('Disconnect this folder from GitHub? Automatic sync on save will stop.')) return;
+    gitSyncBusy = true;
+    try {
+      await tauriInvoke('git_sync_disconnect', { path: target });
+      gitSyncConnectedRepo = '';
+      gitSyncView = 'disconnected';
+    } catch (error) {
+      gitSyncError = error instanceof Error ? error.message : String(error);
+    } finally {
+      gitSyncBusy = false;
+    }
+  }
+
+  // --- Status-reactive icon (legacy #github-sync-btn parity) ---
+  // grey = not set up, green = connected, purple pulsing = syncing,
+  // red = git error. One shared reactive instead of per-call bookkeeping.
+  let gitSyncIconState: 'idle' | 'connected' | 'syncing' | 'error' = 'idle';
+  let gitSyncIconTitle = 'GitHub Sync';
+  let gitSyncPollTimer: ReturnType<typeof setInterval> | null = null;
+  let gitSyncSyncingUntil = 0;
+  let gitSyncTick = 0;
+  let gitSyncErrored = false;
+
+  $: {
+    void gitSyncTick;
+    const now = Date.now();
+    const syncing = now < gitSyncSyncingUntil;
+    if (syncing) {
+      gitSyncIconState = 'syncing';
+      gitSyncIconTitle = 'Syncing to GitHub…';
+    } else if (gitSyncErrored) {
+      gitSyncIconState = 'error';
+      gitSyncIconTitle = 'GitHub Sync: last sync failed (offline?)';
+    } else if (gitSyncConnectedRepo) {
+      gitSyncIconState = 'connected';
+      gitSyncIconTitle = `GitHub Sync: ${gitSyncConnectedRepo}`;
+    } else {
+      gitSyncIconState = 'idle';
+      gitSyncIconTitle = 'GitHub Sync';
+    }
+  }
+
+  function markGitSyncActivity() {
+    // Purple pulse for a few seconds after each save-commit, mirroring the
+    // legacy "synced in the last 5 seconds" heuristic. The tick re-runs the
+    // reactive block when the pulse expires (Svelte reacts to assignments).
+    gitSyncSyncingUntil = Date.now() + 4000;
+    setTimeout(() => {
+      gitSyncTick += 1;
+    }, 4100);
+  }
+
+  function refreshGitSyncIcon() {
+    if (mode !== 'tauri') return;
+    const target = gitSyncTargetPath();
+    if (!target) {
+      gitSyncConnectedRepo = '';
+      return;
+    }
+    tauriInvoke<{ connected: boolean; repo: string } | null>('git_sync_status', { path: target })
+      .then((connected) => {
+        gitSyncConnectedRepo = connected ? connected.repo : '';
+        gitSyncErrored = false;
+      })
+      .catch((error) => {
+        // Git spawn failures surface red; a plain-browser preview (no Tauri
+        // API at all) must not — the icon isn't real there anyway.
+        if (!(error instanceof Error && error.message === 'Tauri API unavailable')) {
+          gitSyncErrored = true;
+        }
+      });
   }
 
   async function installMonolith() {
@@ -936,6 +1177,12 @@
   onMount(() => {
     loadRecent();
     bookmarks = readBookmarks();
+    // Reactive sync icon: poll while mounted (legacy refreshed /api/github/status
+    // every 15s; 10s keeps the icon honest across mounts and disconnects).
+    refreshGitSyncIcon();
+    gitSyncPollTimer = setInterval(refreshGitSyncIcon, 10000);
+    const onGitSyncSaved = (event: Event) => markGitSyncActivity();
+    window.addEventListener('lithic-git-sync-saved', onGitSyncSaved);
     void purgeOldestCachesIfNeeded().catch(() => { /* best effort */ });
     const closeOnEscape = (event: KeyboardEvent) => {
       if (event.key === 'Escape') {
@@ -993,6 +1240,9 @@
       window.removeEventListener('dragenter', onDragEnter);
       window.removeEventListener('dragleave', onDragLeave);
       window.removeEventListener('drop', onDrop);
+      if (gitSyncPollTimer) clearInterval(gitSyncPollTimer);
+      window.removeEventListener('lithic-git-sync-saved', onGitSyncSaved);
+      gitPollAborted = true;
     };
   });
 </script>
@@ -1009,7 +1259,7 @@
       {#if status}<div class="status-line" role="status"><span class="status-label">{status.replace(/[…\.\s]+$/, '')}</span><span class="activity-dots" aria-hidden="true"><i></i><i></i><i></i></span></div>{/if}
       {#if mountError}<div class="status-line error" role="alert">{mountError}</div>{/if}
     </div>
-    {#if mode === 'webapp'}<button class="help-button" aria-label="View Introduction" title="View Introduction" on:click={openIntro}>{introBusy ? '…' : '?'}</button>{:else if mode === 'tauri'}<button class="sync-button" aria-label="GitHub Sync" title="Sync the active file's folder to a GitHub repository" on:click={openGitSyncModal}><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 17.6A5 5 0 0 0 18 8h-1.3A8 8 0 1 0 4 16.3"/><path d="M12 12v9"/><path d="m8.5 15.5 3.5-3.5 3.5 3.5"/></svg></button>{/if}
+    {#if mode === 'webapp'}<button class="help-button" aria-label="View Introduction" title="View Introduction" on:click={openIntro}>{introBusy ? '…' : '?'}</button>{:else if mode === 'tauri'}<button class="sync-button {gitSyncIconState}" aria-label="GitHub Sync" title={gitSyncIconTitle} on:click={openGitSyncModal}><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 17.6A5 5 0 0 0 18 8h-1.3A8 8 0 1 0 4 16.3"/><path d="M12 12v9"/><path d="m8.5 15.5 3.5-3.5 3.5 3.5"/></svg></button>{/if}
   </header>
   {#if pendingImports.length > 0}
     <div class="pending-imports" role="status" aria-label="Pending imports">
@@ -1028,14 +1278,74 @@
     <div class="modal-overlay" role="presentation" on:click={(event) => event.currentTarget === event.target && closeGitSyncModal()}>
       <div class="launcher-modal" role="dialog" aria-modal="true" aria-labelledby="gitsync-title">
         <button class="modal-close" aria-label="Close GitHub sync dialog" on:click={closeGitSyncModal}>×</button>
-        <h2 id="gitsync-title">Sync to GitHub</h2>
-        <p>Backs up the folder containing the active file to a GitHub repository — the same workflow self-host uses. Requires a fine-grained or classic token with push access.</p>
-        {#if !gitSyncTargetPath()}<p class="status-line error" role="alert">Open a file from disk first — the sync targets its folder.</p>{/if}
-        <input bind:this={gitSyncInputElement} bind:value={gitRepoInput} aria-label="GitHub repository (owner/name)" placeholder="owner/repository" on:keydown={(event) => event.key === 'Enter' && connectGitSync()} />
-        <input bind:value={gitTokenInput} type="password" aria-label="GitHub token" placeholder="GitHub token (not stored; used for the remote)" on:keydown={(event) => event.key === 'Enter' && connectGitSync()} />
-        {#if gitSyncError}<p class="status-line error" role="alert">{gitSyncError}</p>{/if}
-        {#if gitSyncMessage}<p class="status-line" role="status">{gitSyncMessage}</p>{/if}
-        <div class="modal-actions"><button class="modal-action" disabled={!gitSyncTargetPath() || gitSyncBusy} on:click={connectGitSync}>{gitSyncBusy ? 'Connecting…' : 'Connect & Push'}</button><button class="modal-action secondary" on:click={closeGitSyncModal}>Cancel</button></div>
+        <h2 id="gitsync-title">GitHub Sync</h2>
+        {#if !gitSyncTargetPath()}
+          <p class="status-line error" role="alert">Open a file from disk first — the sync targets its folder.</p>
+        {:else if gitSyncView === 'disconnected'}
+          <p>Back up the folder containing <strong>{clipFilename(gitSyncTargetPath() ?? '')}</strong> to a GitHub repository. Saves commit and push automatically, like self-host.</p>
+          {#if gitSyncError}<p class="status-line error" role="alert">{gitSyncError}</p>{/if}
+          <div class="modal-actions"><button class="modal-action" disabled={gitSyncBusy} on:click={startDeviceAuth}>{gitSyncBusy ? '…' : 'Connect to GitHub'}</button></div>
+          <details class="git-sync-advanced">
+            <summary>Advanced: connect with a personal access token</summary>
+            <input bind:value={gitRepoInput} aria-label="GitHub repository (owner/name)" placeholder="owner/repository" on:keydown={(event) => event.key === 'Enter' && connectGitSync()} />
+            <input bind:value={gitTokenInput} type="password" aria-label="GitHub token" placeholder="Fine-grained or classic token with push access" on:keydown={(event) => event.key === 'Enter' && connectGitSync()} />
+            <div class="modal-actions"><button class="modal-action" disabled={!gitRepoInput || !gitTokenInput || gitSyncBusy} on:click={connectGitSync}>{gitSyncBusy ? 'Connecting…' : 'Connect & Push'}</button></div>
+          </details>
+        {:else if gitSyncView === 'connecting'}
+          <p>1. Open <a href="https://github.com/login/device" target="_blank" rel="noreferrer">github.com/login/device</a></p>
+          <p>2. Enter the code shown below (installs the Lithic Sync GitHub App if you haven't already):</p>
+          {#if gitUserCode}
+            <div class="user-code-display">{formatUserCode(gitUserCode)}</div>
+            <p class="git-sync-note">Waiting for authorization… this dialog closes when you're connected.</p>
+          {:else}
+            <p class="git-sync-note">Requesting a code from GitHub…</p>
+          {/if}
+          {#if gitSyncError}<p class="status-line error" role="alert">{gitSyncError}</p>{/if}
+          <div class="modal-actions"><button class="modal-action secondary" on:click={resetGitSyncFlow}>Cancel</button></div>
+        {:else if gitSyncView === 'selecting'}
+          <button class="repo-card create" class:selected={gitRepoChoice === '__create__'} type="button" on:click={() => (gitRepoChoice = '__create__')}>
+            <input type="radio" name="git-repo-choice" checked={gitRepoChoice === '__create__'} tabindex={-1} />
+            <span>+ Create {gitRepoNamePending} and sync</span>
+          </button>
+          {#if gitManagedRepos.length > 0}
+            <p class="repo-group-label">Found existing Lithic sync repos</p>
+            <ul class="repo-cards">
+              {#each gitManagedRepos as repo (repo)}
+                <li>
+                  <button class="repo-card" class:selected={gitRepoChoice === repo} type="button" on:click={() => (gitRepoChoice = repo)}>
+                    <input type="radio" name="git-repo-choice" checked={gitRepoChoice === repo} tabindex={-1} />
+                    <span>{repo}</span>
+                  </button>
+                </li>
+              {/each}
+            </ul>
+          {/if}
+          <p class="repo-group-label">Advanced: your other repositories</p>
+          <input bind:value={gitCustomRepoInput} class="repo-filter" aria-label="Custom repository (owner/name)" placeholder="Type an owner/name to use a specific repo" on:input={() => (gitRepoChoice = gitCustomRepoInput.trim() ? '__custom__' : gitRepoChoice)} />
+          {#if gitOtherRepos.length > 0}
+            <ul class="repo-list">
+              {#each gitOtherRepos.filter((repo) => !gitCustomRepoInput || repo.toLowerCase().includes(gitCustomRepoInput.toLowerCase())) as repo (repo)}
+                <li><button type="button" class="repo-card" class:selected={gitRepoChoice === repo} on:click={() => { gitCustomRepoInput = repo; gitRepoChoice = repo; }}>{repo}</button></li>
+              {/each}
+            </ul>
+          {/if}
+          {#if gitSyncError}<p class="status-line error" role="alert">{gitSyncError}</p>{/if}
+          {#if gitSyncMessage}<p class="status-line" role="status">{gitSyncMessage}</p>{/if}
+          <div class="modal-actions">
+            <button class="modal-action" disabled={gitSyncBusy || !gitRepoSelection()} on:click={finalizeGitSync}>{gitSyncBusy ? 'Syncing…' : 'Start Sync'}</button>
+            <button class="modal-action secondary" on:click={resetGitSyncFlow}>Back</button>
+          </div>
+        {:else}
+          <p>Connected repository</p>
+          <p class="user-code-display" style="font-size:1.05rem; letter-spacing:0.02em;">{gitSyncConnectedRepo || '—'}</p>
+          <p class="git-sync-note">Every save of a file in this folder commits and pushes to main automatically.</p>
+          {#if gitSyncError}<p class="status-line error" role="alert">{gitSyncError}</p>{/if}
+          {#if gitSyncMessage}<p class="status-line" role="status">{gitSyncMessage}</p>{/if}
+          <div class="modal-actions">
+            <button class="modal-action secondary" disabled={gitSyncBusy} on:click={disconnectGitSync}>Disconnect</button>
+            <button class="modal-action" on:click={closeGitSyncModal}>Done</button>
+          </div>
+        {/if}
       </div>
     </div>
   {/if}

@@ -644,12 +644,22 @@ function injectSaverBootstrap(
         }
         // Git-synced file (Tauri): auto-commit the save best-effort — never
         // blocks or fails the save itself, and Rust skips non-Lithic repos.
+        // Fires lithic-git-sync-saved on success so the launcher's sync icon
+        // can pulse (the engine document is a rewrite of the launcher page,
+        // so a direct reference back into the launcher UI is impossible).
         var savedPath = handle && handle.__lithicTauriPath__;
         if (tauriInvoke && savedPath) {
           try {
             tauriInvoke('git_sync_commit', {
               path: savedPath,
               message: 'Save ' + (handle.name || 'file') + ' from Lithic'
+            }).then(function() {
+              try {
+                window.parent.postMessage({ type: 'lithic-git-sync-saved' }, '*');
+              } catch (e) { /* same-window dispatch below still fires */ }
+              try {
+                window.dispatchEvent(new CustomEvent('lithic-git-sync-saved'));
+              } catch (e) { /* best effort */ }
             }).catch(function() { /* sync is opportunistic */ });
           } catch (e) { /* sync is opportunistic */ }
         }

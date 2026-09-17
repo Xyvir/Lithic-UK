@@ -338,8 +338,9 @@ fn ensure_git_identity(dir: &std::path::Path) {
 /// remote — the desktop analog of the self-host github-sync workflow: init
 /// (if needed), point origin at the repo with the token embedded (same as
 /// self-host's oauth2 URL), then force-push the current state to main.
+/// Async so the initial push runs off the main thread (it can take seconds).
 #[tauri::command]
-fn git_sync_setup(path: String, repo: String, token: String) -> Result<String, String> {
+async fn git_sync_setup(path: String, repo: String, token: String) -> Result<String, String> {
     let file = PathBuf::from(&path);
     let dir = file
         .parent()
@@ -376,8 +377,9 @@ fn git_sync_setup(path: String, repo: String, token: String) -> Result<String, S
 /// Best-effort auto-commit of one saved file: stage it, commit with the
 /// given message, and push when the folder is a git repo with an origin.
 /// Skips silently for non-synced folders so plain saves never error.
+/// Async so network pushes never block the window's main thread.
 #[tauri::command]
-fn git_sync_commit(path: String, message: String) -> Result<(), String> {
+async fn git_sync_commit(path: String, message: String) -> Result<(), String> {
     let file = PathBuf::from(&path);
     let dir = match file.parent().filter(|parent| parent.is_dir()) {
         Some(dir) => dir,
@@ -414,6 +416,215 @@ fn git_sync_commit(path: String, message: String) -> Result<(), String> {
         eprintln!("git push skipped: {}", error);
     }
     Ok(())
+}
+
+// --- GitHub OAuth device flow ------------------------------------------------
+// The self-host launcher proxies these two GitHub endpoints through its CGI
+// handler (deploy/github-sync.sh) because a browser can't call them directly.
+// The desktop app has no such restriction: tauri::api::http (reqwest) calls
+// GitHub from Rust, so the same GitHub App device flow works server-free.
+
+/// Device-flow app client id (the "Lithic Sync" GitHub App). Same shape as
+/// self-host's GITHUB_CLIENT_ID; overridable for local testing.
+fn github_client_id() -> String {
+    std::env::var("GITHUB_CLIENT_ID")
+        .unwrap_or_else(|_| "Iv23lippjEJMp4KLlLKI".to_string())
+}
+
+async fn github_post_form(url: &str, form: &str) -> Result<serde_json::Value, String> {
+    let client = tauri::api::http::ClientBuilder::new()
+        .max_redirections(3)
+        .build()
+        .map_err(|error| error.to_string())?;
+    let request = tauri::api::http::HttpRequestBuilder::new("POST", url)
+        .map_err(|error| error.to_string())?
+        .header("Accept", "application/json")
+        .map_err(|error| error.to_string())?
+        .header("Content-Type", "application/x-www-form-urlencoded")
+        .map_err(|error| error.to_string())?
+        .body(tauri::api::http::Body::Text(form.to_string()));
+    let response = client.send(request).await.map_err(|error| error.to_string())?;
+    let data = response.read().await.map_err(|error| error.to_string())?;
+    Ok(data.data)
+}
+
+async fn github_api_get(url: &str, token: &str) -> Result<serde_json::Value, String> {
+    let client = tauri::api::http::ClientBuilder::new()
+        .max_redirections(3)
+        .build()
+        .map_err(|error| error.to_string())?;
+    let request = tauri::api::http::HttpRequestBuilder::new("GET", url)
+        .map_err(|error| error.to_string())?
+        .header("Authorization", format!("Bearer {}", token))
+        .map_err(|error| error.to_string())?
+        .header("Accept", "application/vnd.github.v3+json")
+        .map_err(|error| error.to_string())?
+        .header("User-Agent", "Lithic-Sync")
+        .map_err(|error| error.to_string())?;
+    let response = client.send(request).await.map_err(|error| error.to_string())?;
+    let data = response.read().await.map_err(|error| error.to_string())?;
+    if data.status >= 400 {
+        return Err(format!("GitHub API returned {}", data.status));
+    }
+    Ok(data.data)
+}
+
+async fn github_api_post(url: &str, token: &str, json: &serde_json::Value) -> Result<serde_json::Value, String> {
+    let client = tauri::api::http::ClientBuilder::new()
+        .max_redirections(3)
+        .build()
+        .map_err(|error| error.to_string())?;
+    let request = tauri::api::http::HttpRequestBuilder::new("POST", url)
+        .map_err(|error| error.to_string())?
+        .header("Authorization", format!("Bearer {}", token))
+        .map_err(|error| error.to_string())?
+        .header("Accept", "application/vnd.github.v3+json")
+        .map_err(|error| error.to_string())?
+        .header("User-Agent", "Lithic-Sync")
+        .map_err(|error| error.to_string())?
+        .header("Content-Type", "application/json")
+        .map_err(|error| error.to_string())?
+        .body(tauri::api::http::Body::Json(json.clone()));
+    let response = client.send(request).await.map_err(|error| error.to_string())?;
+    let data = response.read().await.map_err(|error| error.to_string())?;
+    if data.status >= 400 {
+        let message = data
+            .data
+            .get("message")
+            .and_then(|value| value.as_str())
+            .unwrap_or("request failed");
+        return Err(format!("GitHub API error ({}): {}", data.status, message));
+    }
+    Ok(data.data)
+}
+
+fn json_str(value: &serde_json::Value, key: &str) -> Option<String> {
+    value.get(key).and_then(|field| field.as_str()).map(|field| field.to_string())
+}
+
+/// Step 1 of the device flow: ask GitHub for a user code to authorize the
+/// Lithic Sync app. Mirrors self-host's /api/github/device-code handler.
+#[tauri::command]
+async fn github_device_code() -> Result<serde_json::Value, String> {
+    let form = format!("client_id={}&scope=repo", github_client_id());
+    let data = github_post_form("https://github.com/login/device/code", &form).await?;
+    if let Some(error) = json_str(&data, "error") {
+        return Err(json_str(&data, "error_description").unwrap_or(error));
+    }
+    Ok(data)
+}
+
+/// Step 2 of the device flow: poll the token endpoint while the user
+/// authorizes. Returns `pending` until GitHub issues the access token.
+#[tauri::command]
+async fn github_device_poll(device_code: String) -> Result<serde_json::Value, String> {
+    let form = format!(
+        "client_id={}&device_code={}&grant_type=urn:ietf:params:oauth:grant-type:device_code",
+        github_client_id(),
+        device_code
+    );
+    let data = github_post_form("https://github.com/login/oauth/access_token", &form).await?;
+    if let Some(token) = json_str(&data, "access_token") {
+        return Ok(serde_json::json!({ "access_token": token }));
+    }
+    match json_str(&data, "error").as_deref() {
+        // Expected while the user is still typing the code.
+        Some("authorization_pending") => Ok(serde_json::json!({ "pending": true })),
+        // GitHub asks the client to back off; surfaced so the poller can wait longer.
+        Some("slow_down") => Ok(serde_json::json!({ "pending": true, "slow_down": true })),
+        Some(error) => Err(json_str(&data, "error_description").unwrap_or_else(|| error.to_string())),
+        None => Err("GitHub did not return a token".to_string()),
+    }
+}
+
+#[derive(serde::Serialize)]
+struct ManagedRepo {
+    full_name: String,
+}
+
+/// Repos the user owns, filtered client-side by the UI for Lithic-managed
+/// names (parity with self-host's /api/github/list-repos).
+#[tauri::command]
+async fn github_list_repos(token: String) -> Result<Vec<ManagedRepo>, String> {
+    let data = github_api_get(
+        "https://api.github.com/user/repos?type=owner&sort=updated&per_page=100",
+        token.trim(),
+    )
+    .await?;
+    let array = match data.as_array() {
+        Some(array) => array.clone(),
+        None => return Err("Unexpected response from GitHub".to_string()),
+    };
+    Ok(array
+        .iter()
+        .filter_map(|repo| {
+            let full_name = json_str(repo, "full_name")?;
+            Some(ManagedRepo { full_name })
+        })
+        .collect())
+}
+
+/// Create a private sync repo (parity with self-host's /api/github/create-repo).
+#[tauri::command]
+async fn github_create_repo(token: String, name: String) -> Result<ManagedRepo, String> {
+    let name = name.trim();
+    if name.is_empty() {
+        return Err("Repository name is required".to_string());
+    }
+    let data = github_api_post(
+        "https://api.github.com/user/repos",
+        token.trim(),
+        &serde_json::json!({
+            "name": name,
+            "private": true,
+            "description": "Lithic Automated Sync"
+        }),
+    )
+    .await?;
+    let full_name = json_str(&data, "full_name").ok_or_else(|| "GitHub did not return the new repository".to_string())?;
+    Ok(ManagedRepo { full_name })
+}
+
+#[derive(serde::Serialize)]
+struct GitSyncStatus {
+    connected: bool,
+    repo: String,
+}
+
+/// Status for the reactive sync icon: connected only when the file's folder
+/// is a git repo whose origin was configured by Lithic (oauth2 remote, same
+/// marker git_sync_commit uses).
+#[tauri::command]
+fn git_sync_status(path: String) -> Option<GitSyncStatus> {
+    let dir = PathBuf::from(&path).parent()?.to_path_buf();
+    if !dir.join(".git").is_dir() {
+        return None;
+    }
+    let url = git_run(&dir, &["remote", "get-url", "origin"]).ok()?;
+    if !url.contains("oauth2:") {
+        return None;
+    }
+    let repo = url
+        .split("github.com/")
+        .nth(1)
+        .map(|tail| tail.trim_end_matches(".git").trim().to_string())
+        .unwrap_or_else(|| "github repository".to_string());
+    Some(GitSyncStatus { connected: true, repo })
+}
+
+/// Disconnect: drop the managed origin remote. Refuses to touch repos the
+/// user configured themselves (no oauth2 marker) — those aren't ours.
+#[tauri::command]
+fn git_sync_disconnect(path: String) -> Result<(), String> {
+    let dir = PathBuf::from(&path)
+        .parent()
+        .filter(|parent| parent.is_dir())
+        .ok_or_else(|| format!("Cannot resolve a folder for {}", path))?;
+    let url = git_run(&dir, &["remote", "get-url", "origin"]).unwrap_or_default();
+    if !url.contains("oauth2:") {
+        return Err("This folder is not a Lithic-managed sync folder".to_string());
+    }
+    git_run(&dir, &["remote", "remove", "origin"]).map(|_| ())
 }
 
 /// Folder the running exe lives in — the root all sidecar-relative paths
@@ -515,7 +726,13 @@ fn main() {
             read_recents_sidecar,
             write_recents_sidecar,
             git_sync_setup,
-            git_sync_commit
+            git_sync_commit,
+            github_device_code,
+            github_device_poll,
+            github_list_repos,
+            github_create_repo,
+            git_sync_status,
+            git_sync_disconnect
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
