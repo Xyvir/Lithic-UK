@@ -267,9 +267,11 @@ var Widget = require("$:/core/modules/widgets/widget.js").widget;
 
 // Resolve where to POST a job:
 //   self-host   -> the same-origin /ephemeral/api/v1/run path
-//   local-tray  -> a local Ephemeral.exe tray/API server (127.0.0.1:8787,
-//                  configurable via window.__EPHEMERAL_LOCAL_BASE__); when the
-//                  tray is not answering, fall back to the paper-light swarm
+//   local-tray  -> a local Ephemeral.exe tray/API server (distributed-tray
+//                  bridge on 127.0.0.1:8788 first, then a local self-host
+//                  API sidecar on 8787; configurable via
+//                  window.__EPHEMERAL_LOCAL_BASE__); when no local server
+//                  is answering, fall back to the paper-light swarm
 //   paper-light -> the fastest/nearest bastion advertised in docs/swarm.json
 var _EPHEMERAL_TRAY_PROBED_AT = 0;
 var _EPHEMERAL_TRAY_AVAILABLE = false;
@@ -297,7 +299,7 @@ async function _probeEphemeralTray() {
     if (configured) {
         bases.push(configured);
     }
-    bases.push("http://127.0.0.1:8787", "http://localhost:8787");
+    bases.push("http://127.0.0.1:8788", "http://127.0.0.1:8787", "http://localhost:8788", "http://localhost:8787");
     var http = _ephemeralHttp();
     for (var i = 0; i < bases.length; i++) {
         var base = bases[i];
@@ -324,7 +326,7 @@ async function _resolveEphemeralEndpoint() {
     var mode = (typeof window !== "undefined" && window.__EPHEMERAL_MODE__) || "self-host";
     if (mode === "local-tray") {
         if (await _probeEphemeralTray()) {
-            var trayBase = ((typeof window !== "undefined" && window.__EPHEMERAL_LOCAL_BASE__) || "http://127.0.0.1:8787");
+            var trayBase = ((typeof window !== "undefined" && window.__EPHEMERAL_LOCAL_BASE__) || "http://127.0.0.1:8788");
             while (trayBase.charAt(trayBase.length - 1) === "/") { trayBase = trayBase.slice(0, -1); }
             return trayBase + "/ephemeral/api/v1/run";
         }

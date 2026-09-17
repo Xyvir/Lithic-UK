@@ -80,9 +80,11 @@ test('ephemeral resolver supports local-tray probing with paper-light fallback',
   const tiddlers = ephemeralIntegrationTiddlers();
   const action = tiddlers.find((t) => t.title.includes('action-ephemeral'))!;
   assert.ok(action, 'action-ephemeral tiddler missing');
-  // local-tray mode: probe loopback tray first...
+  // local-tray mode: probe loopback servers first...
   assert.match(action.text, /mode === "local-tray"/);
   assert.match(action.text, /_probeEphemeralTray/);
+  // distributed-tray bridge port first, then the self-host sidecar slot.
+  assert.match(action.text, /127\.0\.0\.1:8788/);
   assert.match(action.text, /127\.0\.0\.1:8787/);
   assert.match(action.text, /__EPHEMERAL_LOCAL_BASE__/);
   // ...then fall through to the public swarm discovery.
