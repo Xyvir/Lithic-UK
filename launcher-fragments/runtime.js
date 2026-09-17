@@ -348,12 +348,34 @@ class ActionEphemeralWidget extends Widget {
             }
             const base64code = window.btoa(binary);
             
-            const endpoint = await _resolveEphemeralEndpoint();
-            const response = await fetch(endpoint, {
-                method: 'POST',
-                headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({ document_blob: base64code, timeout: 300 })
-            });
+            // Tauri: run through the locally installed Ephemeral.exe tray in
+            // its headless CLI mode — the Rust side spawns it and pipes the
+            // markdown document over stdin (no network, no payload on any
+            // command line). No tray (or spawn failure): fall through to the
+            // paper-light swarm below.
+            var response = null;
+            var tauri = (typeof window !== "undefined") ? (window.__TAURI__ || null) : null;
+            if (tauri && typeof tauri.invoke === "function") {
+                var local = null, localErr = null;
+                try {
+                    local = await tauri.invoke("ephemeral_run", { markdown: markdownPayload });
+                } catch (invokeErr) {
+                    localErr = String((invokeErr && invokeErr.message) || invokeErr);
+                }
+                if (local) {
+                    response = { ok: true, status: 200, json: async function () { return local; } };
+                } else {
+                    console.info("Ephemeral local run unavailable, using swarm:", localErr || "not installed");
+                }
+            }
+            if (!response) {
+                const endpoint = await _resolveEphemeralEndpoint();
+                response = await fetch(endpoint, {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({ document_blob: base64code, timeout: 300 })
+                });
+            }
 
             // Surface HTTP errors instead of silently swallowing them: the
             // bastion answers 422 with {"detail": "..."} when a job cannot be

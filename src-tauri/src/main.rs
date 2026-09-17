@@ -111,6 +111,88 @@ fn write_text_path(path: String, text: String) -> Result<(), String> {
     fs::write(&path, text).map_err(|error| error.to_string())
 }
 
+#[derive(serde::Serialize)]
+struct EphemeralResult {
+    exit_code: i32,
+    stdout: String,
+    stderr: String,
+}
+
+/// Locate a locally installed Ephemeral.exe tray (distributed build) without
+/// any probing: only well-known filesystem locations are checked.
+fn ephemeral_exe_path() -> Option<PathBuf> {
+    let mut candidates = Vec::new();
+    if let Ok(local) = std::env::var("LOCALAPPDATA") {
+        candidates.push(PathBuf::from(&local).join("Ephemeral").join("Ephemeral.exe"));
+        candidates.push(PathBuf::from(&local).join("Programs").join("Ephemeral").join("Ephemeral.exe"));
+    }
+    if let Ok(exe) = std::env::current_exe() {
+        if let Some(dir) = exe.parent() {
+            candidates.push(dir.join("Ephemeral.exe"));
+            candidates.push(dir.join("Ephemeral").join("Ephemeral.exe"));
+        }
+    }
+    candidates
+        .into_iter()
+        .find(|path| path.is_file())
+}
+
+/// Run a Markdown document through the locally installed Ephemeral.exe tray
+/// in its headless CLI mode: spawn it with the document piped on stdin —
+/// no network, no payload on any command line — and map its result back to
+/// the REST RunResponse shape the injected coderunner expects. Returns a
+/// descriptive error when no tray is installed so the caller falls back to
+/// the paper-light swarm.
+#[tauri::command]
+fn ephemeral_run(markdown: String) -> Result<EphemeralResult, String> {
+    use std::io::Write;
+    use std::process::{Command, Stdio};
+
+    let exe = ephemeral_exe_path()
+        .ok_or_else(|| "Ephemeral.exe not found (no local tray installed)".to_string())?;
+
+    let mut child = Command::new(&exe)
+        .args(["--cli", "-"])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .map_err(|error| format!("Failed to launch Ephemeral.exe: {}", error))?;
+
+    {
+        let stdin = child
+            .stdin
+            .as_mut()
+            .ok_or_else(|| "Failed to open stdin pipe".to_string())?;
+        stdin
+            .write_all(markdown.as_bytes())
+            .map_err(|error| format!("Failed to pipe document to Ephemeral.exe: {}", error))?;
+    }
+    // Stdin dropped here: the CLI sees EOF and executes.
+
+    let output = child
+        .wait_with_output()
+        .map_err(|error| format!("Failed to read Ephemeral.exe output: {}", error))?;
+
+    let stdout = String::from_utf8_lossy(&output.stdout).into_owned();
+    let stderr = String::from_utf8_lossy(&output.stderr).into_owned();
+    let exit_code = output.status.code().unwrap_or(-1);
+
+    if exit_code != 0 {
+        return Err(format!(
+            "Ephemeral.exe exited with code {}: {}",
+            exit_code,
+            if stderr.trim().is_empty() { &stdout } else { &stderr }
+        ));
+    }
+
+    Ok(EphemeralResult {
+        exit_code,
+        stdout,
+        stderr,
+    })
+}
+
 /// Canonical per-user install target for the monolith executable: visible
 /// Documents\Lithic\Lithic.exe, falling back out of the way when Documents
 /// is unavailable. Shared by install and status queries.
@@ -784,6 +866,7 @@ fn main() {
             install_status,
             install_offer_status,
             set_install_dismissed,
+            ephemeral_run,
             read_recents_sidecar,
             write_recents_sidecar,
             git_sync_setup,
