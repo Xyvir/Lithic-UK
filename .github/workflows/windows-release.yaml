@@ -81,17 +81,32 @@ jobs:
             Write-Host "Icon file 'src/app-icon.png' not found, skipping icon generation."
           }
 
-      - name: Build Offline Executable
-        run: npm run tauri build
-
       - name: Generate Date-Based Tag
         id: tag
         run: |
            if ("${{ inputs.tag_name }}" -ne "") {
-             echo "date=${{ inputs.tag_name }}" >> $env:GITHUB_OUTPUT
+             $tag = "${{ inputs.tag_name }}"
            } else {
-             echo "date=v$(Get-Date -Format 'yyyy.MM.dd-HHmm')" >> $env:GITHUB_OUTPUT
+             $tag = "v$(Get-Date -Format 'yyyy.MM.dd-HHmm')"
            }
+           echo "date=$tag" >> $env:GITHUB_OUTPUT
+           # Semver for the exe's FileVersion/ProductVersion resources:
+           # tauri-build derives them from package.version, which we patch
+           # via TAURI_CONFIG at build time. Leading zeros are stripped
+           # (semver forbids them) and a non-version tag falls back to the
+           # config version so the build never fails.
+           if ($tag -match '(\d+)\.(\d+)\.(\d+)') {
+             $ver = "$($Matches[1]).$([int]$Matches[2]).$([int]$Matches[3])"
+           } else {
+             $ver = "0.2.0"
+           }
+           echo "version=$ver" >> $env:GITHUB_OUTPUT
+           echo ('tauri_config={"package":{"version":"' + $ver + '"}}') >> $env:GITHUB_OUTPUT
+
+      - name: Build Offline Executable
+        run: npm run tauri build
+        env:
+          TAURI_CONFIG: ${{ steps.tag.outputs.tauri_config }}
 
       - name: Rename Offline Artifact
         run: |
