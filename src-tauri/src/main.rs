@@ -616,7 +616,8 @@ fn git_sync_status(path: String) -> Option<GitSyncStatus> {
 /// user configured themselves (no oauth2 marker) — those aren't ours.
 #[tauri::command]
 fn git_sync_disconnect(path: String) -> Result<(), String> {
-    let dir = PathBuf::from(&path)
+    let file = PathBuf::from(&path);
+    let dir = file
         .parent()
         .filter(|parent| parent.is_dir())
         .ok_or_else(|| format!("Cannot resolve a folder for {}", path))?;
