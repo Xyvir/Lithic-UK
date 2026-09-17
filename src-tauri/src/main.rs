@@ -749,7 +749,7 @@ fn set_install_dismissed(dismissed: bool) -> Result<(), String> {
             .map(|text| {
                 text.lines()
                     .map(|line| line.trim())
-                    .filter(|line| !line.is_empty() && !line.starts_with('#') && line != "dismissed=1")
+                    .filter(|line| !line.is_empty() && !line.starts_with('#') && *line != "dismissed=1")
                     .map(|line| {
                         let path = PathBuf::from(line);
                         if path.is_absolute() {
