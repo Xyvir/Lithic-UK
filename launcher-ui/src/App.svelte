@@ -554,14 +554,25 @@
       // Tauri: path-backed recents (sidecar merges, save-dialog entries, and
       // legacy rows polluted with a Tauri pseudo-handle) all re-open through
       // the disk — browser file handles don't exist there.
+      const rawHandle = (recent as any).handle;
       const tauriPath = (recent as any).tauriPath
         ?? (recent as any).path
-        ?? (recent as any).handle?.__lithicTauriPath__;
-      if (mode === 'tauri' && tauriPath) {
-        await mountTauriPath(tauriPath);
-        return;
+        ?? rawHandle?.__lithicTauriPath__
+        // Legacy polluted shape: { handle: { handle: null, name, tauriPath } }
+        ?? rawHandle?.handle?.__lithicTauriPath__;
+      if (mode === 'tauri') {
+        if (tauriPath) {
+          await mountTauriPath(tauriPath);
+          return;
+        }
+        // A handle-less or pseudo-handle row with no path can't be opened:
+        // browser handles don't exist in this WebView.
+        if (!rawHandle?.getFile) {
+          status = 'This entry has no disk path recorded; open the file once via Mount to re-link it.';
+          return;
+        }
       }
-      const handle = (recent as any).handle;
+      const handle = rawHandle;
       if (handle) {
         if (handle.queryPermission) {
           const options = { mode: 'read' };

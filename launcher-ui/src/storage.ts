@@ -93,7 +93,7 @@ const historyStore = new KeyvalWikiHistory(idb);
 export async function addRecentFile(fileHandle: FileSystemFileHandle, tauriPath: string | null = null): Promise<RecentEntry[]> {
   try {
     const raw = (await idb.get<any[]>('recentFiles')) || [];
-    let recentFiles: RecentEntry[] = raw.map((f) => (f && f.handle ? f : { handle: f, tauriPath: null }));
+    let recentFiles: RecentEntry[] = raw.map(normalizeRecentEntry);
 
     if (!fileHandle || !fileHandle.isSameEntry) return recentFiles;
 
@@ -126,10 +126,20 @@ export async function addRecentFile(fileHandle: FileSystemFileHandle, tauriPath:
   }
 }
 
+/** Normalize a stored recents row into RecentEntry shape. */
+function normalizeRecentEntry(f: any): RecentEntry {
+  // Already shaped (has handle/tauriPath keys) — keep as-is.
+  if (f && typeof f === 'object' && ('handle' in f || 'tauriPath' in f)) {
+    return { handle: f.handle ?? null, name: f.name, tauriPath: f.tauriPath ?? null } as RecentEntry;
+  }
+  // Legacy raw rows: a bare handle (or string name).
+  return { handle: f, tauriPath: null } as RecentEntry;
+}
+
 export async function getRecentFiles(): Promise<RecentEntry[]> {
   try {
     const raw = (await idb.get<any[]>('recentFiles')) || [];
-    return raw.map((f) => (f && f.handle ? f : { handle: f, tauriPath: null }));
+    return raw.map(normalizeRecentEntry);
   } catch {
     return [];
   }
@@ -138,7 +148,7 @@ export async function getRecentFiles(): Promise<RecentEntry[]> {
 export async function removeRecentFile(fileHandleToRemove: FileSystemFileHandle): Promise<RecentEntry[]> {
   try {
     const raw = (await idb.get<any[]>('recentFiles')) || [];
-    const recentFiles: RecentEntry[] = raw.map((f) => (f && f.handle ? f : { handle: f, tauriPath: null }));
+    const recentFiles: RecentEntry[] = raw.map(normalizeRecentEntry);
     const newRecentFiles: RecentEntry[] = [];
 
     for (const f of recentFiles) {
