@@ -1,22 +1,29 @@
 #!/usr/bin/env node
 /**
- * Fast local pre-push gate. This machine has no MSVC toolchain, so Rust
- * cannot be compiled here — `cargo check` is handled by the Rust Check
- * workflow (.github/workflows/rust-check.yml), which runs on every push to
- * main that touches src-tauri/**. Everything else that CI would catch is
- * verified here, fast, before pushing:
+ * Local pre-push gate. Everything CI would catch is verified here before
+ * pushing:
  *
  *   1. launcher-ui unit tests (node --test)
  *   2. svelte-check (svelte + TS types)
  *   3. workflow YAML sanity (js-yaml parse of every .github/workflows file)
+ *   4. cargo check (Rust type/borrow check — catches the recent E07xx class
+ *      of release-workflow failures)
+ *   5. cargo clippy (Rust lint pass, warnings are failures)
  *
  * Usage: npm run check:push   (or: node scripts/pre-push-check.mjs)
  * Exit 0 = safe to push; nonzero = fix before pushing.
+ *
+ * Requires: node, launcher-ui deps, VS Build Tools (MSVC) on PATH-adjacent
+ * standard locations for cargo. First run compiles all Rust deps (~2-3 min);
+ * afterwards cargo steps are seconds, warm.
  */
 import { spawnSync } from 'node:child_process';
 import fs from 'node:fs';
+import path from 'node:path';
 import process from 'node:process';
 import { load as loadYaml } from 'js-yaml';
+
+const repoRoot = process.cwd();
 
 /** Returns null when every workflow file parses, else a failure message. */
 function checkWorkflowYaml() {
@@ -30,6 +37,16 @@ function checkWorkflowYaml() {
     }
   }
   return problems.length === 0 ? null : problems.join('\n  ');
+}
+
+/**
+ * Locate the MSVC linker environment. cargo finds MSVC itself via vswhere,
+ * but only when its registry/COM discovery runs outside Git Bash quirks —
+ * normally plain `cargo` just works once Build Tools are installed.
+ */
+function checkCargoAvailable() {
+  const probe = spawnSync('cargo', ['--version'], { encoding: 'utf8', shell: process.platform === 'win32' });
+  return probe.status === 0;
 }
 
 const spawned = [
@@ -48,6 +65,7 @@ const spawned = [
 ];
 
 let failed = false;
+
 for (const step of spawned) {
   const label = step.name.padEnd(28, ' ');
   process.stdout.write(`> ${label}`);
@@ -79,11 +97,37 @@ if (yamlProblems === null) {
   console.log('  ' + yamlProblems);
 }
 
+if (checkCargoAvailable()) {
+  const rustSteps = [
+    { name: 'cargo check (rust types)', args: ['check', '--quiet'] },
+    { name: 'cargo clippy (rust lints)', args: ['clippy', '--quiet', '--', '-D', 'warnings'] },
+  ];
+  for (const step of rustSteps) {
+    process.stdout.write(`> ${step.name.padEnd(28, ' ')}`);
+    const res = spawnSync('cargo', step.args, {
+      cwd: path.join(repoRoot, 'src-tauri'),
+      shell: process.platform === 'win32',
+      stdio: ['ignore', 'pipe', 'pipe'],
+      encoding: 'utf8',
+    });
+    const out = (res.stdout ?? '') + (res.stderr ?? '');
+    const tail = out.trim().split('\n').slice(-4).join('\n  ');
+    if (res.status === 0) {
+      console.log('OK');
+    } else {
+      failed = true;
+      console.log('FAILED');
+      console.log('  ' + tail);
+    }
+  }
+} else {
+  console.log('> cargo (rust checks)           SKIPPED — cargo not found; Rust is still gated by CI (Rust Check workflow)');
+}
+
 console.log('');
 if (failed) {
   console.error('check:push FAILED — fix the above before pushing.');
   process.exit(1);
 }
 console.log('check:push OK — safe to push.');
-console.log('Note: Rust is type-checked by CI (Rust Check workflow) — watch for it after pushing src-tauri changes.');
 process.exit(0);

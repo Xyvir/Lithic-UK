@@ -248,7 +248,7 @@ fn register_open_with(exe_path: &str) -> Result<(), String> {
         // OpenWithProgids subkey, where each *value name* is a ProgID.
         // Existing entries are preserved; no default association changes.
         let (ext_key, _) = classes
-            .create_subkey(&format!(".{}", ext))
+            .create_subkey(format!(".{}", ext))
             .map_err(|error| error.to_string())?;
         let (open_with, _) = ext_key
             .create_subkey("OpenWithProgids")
@@ -266,7 +266,7 @@ fn register_open_with(exe_path: &str) -> Result<(), String> {
         .map(|name| name.to_string_lossy().into_owned())
         .unwrap_or_else(|| "lithic.exe".to_string());
     let (app, _) = classes
-        .create_subkey(&format!(r"Applications\{}", installed_name))
+        .create_subkey(format!(r"Applications\{}", installed_name))
         .map_err(|error| error.to_string())?;
     app.set_value("FriendlyAppName", &"Lithic".to_string())
         .map_err(|error| error.to_string())?;
@@ -282,7 +282,7 @@ fn register_open_with(exe_path: &str) -> Result<(), String> {
         .map_err(|error| error.to_string())?;
     for (ext, _) in ASSOCIATION_TYPES {
         supported
-            .set_value(&format!(".{}", ext), &String::new())
+            .set_value(format!(".{}", ext), &String::new())
             .map_err(|error| error.to_string())?;
     }
 
@@ -622,11 +622,11 @@ fn git_sync_disconnect(path: String) -> Result<(), String> {
         .parent()
         .filter(|parent| parent.is_dir())
         .ok_or_else(|| format!("Cannot resolve a folder for {}", path))?;
-    let url = git_run(&dir, &["remote", "get-url", "origin"]).unwrap_or_default();
+    let url = git_run(dir, &["remote", "get-url", "origin"]).unwrap_or_default();
     if !url.contains("oauth2:") {
         return Err("This folder is not a Lithic-managed sync folder".to_string());
     }
-    git_run(&dir, &["remote", "remove", "origin"]).map(|_| ())
+    git_run(dir, &["remote", "remove", "origin"]).map(|_| ())
 }
 
 /// Folder the running exe lives in — the root all sidecar-relative paths
