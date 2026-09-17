@@ -61,7 +61,7 @@ fn dialog_start_dir() -> Option<PathBuf> {
 fn open_lith_file() -> Result<Option<LithFile>, String> {
     let mut dialog = FileDialogBuilder::new()
         .add_filter("Lithic files", &["lith"])
-        .add_filter("Text & data files", &["md", "txt", "tid", "json", "html", "htm"])
+        .add_filter("Text & data files", &["md", "txt", "tid", "json", "ipynb", "html", "htm"])
         .add_filter("All files", &["*"]);
     if let Some(dir) = dialog_start_dir() {
         dialog = dialog.set_directory(dir);
@@ -100,7 +100,7 @@ fn save_lith_file(
 }
 
 /// Write arbitrary text to an absolute path (fancy-editor in-place saves for
-/// the scratch file types: .md/.txt/.tid/.json). Only existing paths may be
+/// the scratch file types: .md/.txt/.tid/.json/.ipynb). Only existing paths may be
 /// overwritten — new files go through save_lith_file's dialog.
 #[tauri::command]
 fn write_text_path(path: String, text: String) -> Result<(), String> {
@@ -214,6 +214,7 @@ const ASSOCIATION_TYPES: &[(&str, &str)] = &[
     ("txt", "Lithic Text"),
     ("tid", "Lithic Tiddler"),
     ("json", "Lithic JSON"),
+    ("ipynb", "Lithic Notebook"),
     ("html", "Lithic HTML"),
 ];
 

@@ -5,9 +5,10 @@ import { JSON_PATCH_RUNTIME } from './json-patch.ts';
 import { DEFAULT_PLUGINS, LITHIC_BASE_FILTER } from './legacy-saver.ts';
 import { SCRATCH_SERIALIZE_RUNTIME } from './scratch-wiki.ts';
 import { TID_SERIALIZE_RUNTIME } from './tid-serialize-runtime.ts';
+import { IPYNB_SERIALIZE_RUNTIME } from './ipynb.ts';
 
 /** Scratch save behavior for the mounted engine's injected saver. */
-export type ScratchMode = 'off' | 'text' | 'tid' | 'json';
+export type ScratchMode = 'off' | 'text' | 'tid' | 'json' | 'ipynb';
 
 export type LauncherHandoff = {
   name: string;
@@ -105,7 +106,7 @@ function injectSaverBootstrap(
   const activeFileNameJson = isHtmlMode ? '""' : JSON.stringify(suggestedFileName || 'new.lith').replace(/</g, '\\u003c');
   const saveTypes = isHtmlMode
     ? [{ description: 'Lithic HTML File', accept: { 'text/html': ['.html', '.htm'] } }]
-    : [{ description: 'Lithic Monolith', accept: { 'application/x-lith': ['.lith'] } }];
+    : [{ description: 'Lithic Monolith', accept: { 'application/x-lith': ['.lith'] } }, { description: 'Jupyter Notebook', accept: { 'application/x-ipynb+json': ['.ipynb'] } }];
   const saveTypesJson = JSON.stringify(saveTypes);
   const htmlModeLiteral = isHtmlMode ? 'true' : 'false';
   const driftedFromHeadLiteral = driftedFromHead ? 'true' : 'false';
@@ -117,7 +118,7 @@ function injectSaverBootstrap(
   // mirroring scratch-wiki.ts) used by the in-place fancy-editor save path.
   const scratchRuntimes = scratchMode === 'off'
     ? ''
-    : `<script>${SCRATCH_SERIALIZE_RUNTIME}</script>\n<script>${TID_SERIALIZE_RUNTIME}</script>\n`;
+    : `<script>${SCRATCH_SERIALIZE_RUNTIME}</script>\n<script>${TID_SERIALIZE_RUNTIME}</script>\n${scratchMode === 'ipynb' ? `<script>${IPYNB_SERIALIZE_RUNTIME}</script>\n` : ''}`;
 
   const bootstrap = `${scratchRuntimes}<script>${jsonPatchRuntime}</script>\n<script>(function(){
     var root = window;
@@ -548,6 +549,19 @@ function injectSaverBootstrap(
       }
       if (scratchMode === 'tid') {
         return root.__LITHIC_TID_SERIALIZE__ ? root.__LITHIC_TID_SERIALIZE__(fields) : null;
+      }
+      if (scratchMode === 'ipynb') {
+        return root.__LITHIC_IPYNB_SERIALIZE__ ? root.__LITHIC_IPYNB_SERIALIZE__(docTitle, function(title) {
+          var t = twNow.wiki.getTiddler(title);
+          if (!t || !t.fields) return undefined;
+          var out = {};
+          for (var k in t.fields) {
+            if (!Object.prototype.hasOwnProperty.call(t.fields, k)) continue;
+            var v = t.fields[k];
+            out[k] = typeof v === 'string' ? v : String(v);
+          }
+          return out;
+        }) : null;
       }
       if (scratchMode === 'json') {
         return typeof fields.text === 'string' ? fields.text : '';

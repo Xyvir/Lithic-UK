@@ -1,4 +1,4 @@
-title: $:/plugins/lithic/lithic-pdf-to-whiteboard/pdf.worker.js
+title: $:/plugins/lithic/lithic-import-handler/pdf.worker.js
 type: application/javascript
 module-type: library
 

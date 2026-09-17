@@ -73,7 +73,9 @@ function browserBridge(): FileBridge {
             types: [
               { description: 'Lithic Monolith', accept: { 'application/x-lith': ['.lith'] } },
               { description: 'Lithic JSON Backups', accept: { 'application/json': ['.json'] } },
-              { description: 'Lithic HTML Files', accept: { 'text/html': ['.html', '.htm'] } }
+              { description: 'Lithic HTML Files', accept: { 'text/html': ['.html', '.htm'] } },
+              { description: 'Editable text files', accept: { 'text/plain': ['.md', '.txt', '.tid'] } },
+              { description: 'Jupyter Notebooks', accept: { 'application/x-ipynb+json': ['.ipynb'] } }
             ]
           };
           const [fileHandle] = await (window as any).showOpenFilePicker(openOptions);
@@ -90,7 +92,7 @@ function browserBridge(): FileBridge {
       return new Promise((resolve, reject) => {
         const input = document.createElement('input');
         input.type = 'file';
-        input.accept = '.lith,.html,.htm,text/plain,text/html';
+        input.accept = '.lith,.html,.htm,.json,.md,.txt,.tid,.ipynb,text/plain,text/html';
         input.onchange = () => {
           const file = input.files?.[0];
           if (!file) return resolve(null);

@@ -198,3 +198,28 @@ test('scratch mounts tag the root tiddler with Dogear for the story river', () =
   assert.equal(taggedRoot?.tags, 'Mine');
   assert.equal(taggedRoot?.['lithic-tid-injected'], 'type');
 });
+
+test('ipynb scratch mode injects the notebook runtime and parses notebook cells', () => {
+  const notebook = JSON.stringify({
+    cells: [
+      { cell_type: 'markdown', metadata: {}, source: '# Notes' },
+      { cell_type: 'code', execution_count: 1, metadata: {}, outputs: [], source: 'print(1)' }
+    ],
+    metadata: { language_info: { name: 'python' } },
+    nbformat: 4,
+    nbformat_minor: 5
+  });
+  const html = buildEngineHtml(ENGINE_STUB, { name: 'analysis.ipynb', text: notebook }, [], {}, { scratchMode: 'ipynb' });
+  // The ES5 notebook serializer ships alongside the other scratch runtimes.
+  assert.match(html, /__LITHIC_IPYNB_SERIALIZE__/);
+  assert.match(html, /var scratchMode = "ipynb"/);
+  assert.match(html, /__LITHIC_SCRATCH_ROOT__"\] = "analysis"/);
+
+  // Cells mount as a nodestream: markdown cell, fenced code cell, root.
+  const store = readStore(html);
+  const codeNode = store.find((tiddler) => (tiddler.text || '').startsWith('```python'));
+  assert.ok(codeNode, 'code cell is fenced for the ephemeral coderunner');
+  const root = store.find((tiddler) => tiddler.title === 'analysis');
+  assert.equal(root?.['lithic-ipynb'], 'yes');
+  assert.ok(root?.['lithic-ipynb-meta'], 'root carries the notebook metadata for re-export');
+});

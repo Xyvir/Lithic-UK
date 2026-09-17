@@ -12,8 +12,9 @@
 
 import { parseLithToJSON } from './lithic-format.ts';
 import { parseScratchText, scratchTiddlers, parseTidFile } from './scratch-wiki.ts';
+import { ipynbTiddlers } from './ipynb.ts';
 
-export type ScratchKind = 'text' | 'tid' | 'json';
+export type ScratchKind = 'text' | 'tid' | 'json' | 'ipynb';
 
 export type ScratchPlan = {
   kind: ScratchKind;
@@ -22,7 +23,7 @@ export type ScratchPlan = {
 };
 
 /** File extensions that open as editable scratch wikis (fancy text editor). */
-export const SCRATCH_EXTENSIONS = ['md', 'txt', 'tid', 'json'] as const;
+export const SCRATCH_EXTENSIONS = ['md', 'txt', 'tid', 'json', 'ipynb'] as const;
 
 /** True when this file name opens as an in-place scratch editor document. */
 export function isScratchFileName(name: string): boolean {
@@ -35,6 +36,7 @@ export function resolveScratchKind(name: string): ScratchKind | null {
   if (ext === 'md' || ext === 'txt' || ext === 'markdown') return 'text';
   if (ext === 'tid') return 'tid';
   if (ext === 'json') return 'json';
+  if (ext === 'ipynb') return 'ipynb';
   return null;
 }
 
@@ -54,9 +56,14 @@ export function resolveScratchPlan(name: string, base?: string): ScratchPlan | n
  * Parse flat scratch source into streams wiki payload tiddlers (the shape
  * pending-imports injects into the engine store). `.tid` files embed their
  * parsed header fields on the root tiddler; `.json` placeholders keep the
- * body verbatim in the root tiddler and re-serialize as-is on save.
+ * body verbatim in the root tiddler and re-serialize as-is on save;
+ * `.ipynb` notebooks convert cells to stream nodes (code cells fenced for
+ * the ephemeral coderunner) and re-export valid notebook JSON on save.
  */
 export function parseScratchSource(source: string, plan: ScratchPlan): Array<Record<string, string>> {
+  if (plan.kind === 'ipynb') {
+    return ipynbTiddlers(source, plan.base);
+  }
   if (plan.kind === 'json') {
     // JSON files are a placeholder: the body round-trips verbatim.
     return [{ title: plan.base, type: 'text/plain', 'lithic-json': 'yes', text: source }];

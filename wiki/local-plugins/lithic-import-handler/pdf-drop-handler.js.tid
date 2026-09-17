@@ -1,4 +1,4 @@
-title: $:/plugins/lithic/lithic-pdf-to-whiteboard/pdf-drop-handler.js
+title: $:/plugins/lithic/lithic-import-handler/pdf-drop-handler.js
 type: application/javascript
 module-type: startup
 
@@ -9,7 +9,7 @@ module-type: startup
 /*global $tw: false */
 "use strict";
 
-exports.name = "pdf-to-whiteboard";
+exports.name = "import-handler";
 exports.platforms = ["browser"];
 exports.after = ["startup"];
 exports.synchronous = true;
@@ -128,11 +128,11 @@ function generateWhiteboardData(images) {
 }
 
 async function convertPdfDataToTiddlers(arrayBuffer, fileName, setProgress) {
-    const pdfjsLib = require("$:/plugins/lithic/lithic-pdf-to-whiteboard/pdf.js");
+    const pdfjsLib = require("$:/plugins/lithic/lithic-import-handler/pdf.js");
     
     // --- Worker Configuration ---
     if (!globalThis.pdfjsWorker) {
-        var workerText = $tw.wiki.getTiddlerText("$:/plugins/lithic/lithic-pdf-to-whiteboard/pdf.worker.js");
+        var workerText = $tw.wiki.getTiddlerText("$:/plugins/lithic/lithic-import-handler/pdf.worker.js");
         if (workerText) {
             (new Function(workerText))();
         }
@@ -234,12 +234,12 @@ async function convertPdfDataToTiddlers(arrayBuffer, fileName, setProgress) {
 }
 
 exports.startup = function() {
-    var alertTitle = "$:/temp/alerts/pdf-import-progress";
+    var alertTitle = "$:/temp/alerts/lithic-import-progress";
     function setProgress(msg) {
         $tw.wiki.addTiddler(new $tw.Tiddler({
             title: alertTitle,
             text: msg,
-            component: "pdf-to-whiteboard",
+            component: "import-handler",
             tags: "$:/tags/Alert",
             modified: new Date()
         }));
@@ -275,10 +275,85 @@ exports.startup = function() {
         });
     }
 
+    // One-way Jupyter notebook import: cells become a nodestream under a
+    // container tiddler (code cells fenced so the ephemeral coderunner can
+    // run them; stream/error outputs become marked child tiddlers). Shape
+    // mirrors the launcher scratch-editor's .ipynb representation.
+    function notebookCellSource(source) {
+        if (Array.isArray(source)) return source.join("");
+        return typeof source === "string" ? source : "";
+    }
+
+    function convertNotebookToTiddlers(file) {
+        return file.text().then(function(text) {
+            const nb = JSON.parse(text);
+            if (!nb || !Array.isArray(nb.cells)) throw new Error("Not a Jupyter notebook");
+            const languageInfo = nb.metadata && nb.metadata.language_info;
+            const language = (languageInfo && typeof languageInfo.name === "string" && languageInfo.name.trim()) ? languageInfo.name.trim() : "python";
+            const baseTitle = file.name.replace(/\.ipynb$/i, "");
+            const containerTitle = $tw.wiki.generateNewTitle(baseTitle);
+            const tiddlers = [];
+            const cellTitles = [];
+            let cellIndex = 0;
+            nb.cells.forEach(function(cell) {
+                const cellType = cell.cell_type || "raw";
+                const source = notebookCellSource(cell.source);
+                const cellTitle = $tw.wiki.generateNewTitle(containerTitle + " " + (++cellIndex));
+                const fields = {
+                    title: cellTitle,
+                    parent: containerTitle,
+                    type: "text/markdown",
+                    "stream-type": "default",
+                    text: cellType === "code" ? "```" + language + "\n" + source.replace(/\n$/, "") + "\n```" : source
+                };
+                if (cellType === "raw") fields["lithic-ipynb-raw"] = "yes";
+                const childTitles = [];
+                (cellType === "code" ? (cell.outputs || []) : []).forEach(function(out) {
+                    let outText = null;
+                    let isTrace = false;
+                    if (out.output_type === "stream") {
+                        outText = notebookCellSource(out.text);
+                    } else if (out.output_type === "error") {
+                        outText = Array.isArray(out.traceback) ? out.traceback.join("\n") : String(out.evalue || "");
+                        isTrace = true;
+                    } else if (out.output_type === "execute_result" || out.output_type === "display_data") {
+                        const plain = (out.data || {})["text/plain"];
+                        outText = Array.isArray(plain) ? plain.join("") : (typeof plain === "string" ? plain : null);
+                    }
+                    if (outText && outText.trim() !== "") {
+                        const outTitle = $tw.wiki.generateNewTitle(containerTitle + " " + (++cellIndex));
+                        tiddlers.push({
+                            title: outTitle,
+                            parent: cellTitle,
+                            type: "text/markdown",
+                            "stream-type": "default",
+                            text: isTrace ? "```\n" + outText + "\n```" : outText,
+                            "lithic-ipynb-output": "yes"
+                        });
+                        childTitles.push(outTitle);
+                    }
+                });
+                if (childTitles.length > 0) fields["stream-list"] = $tw.utils.stringifyList(childTitles);
+                tiddlers.push(fields);
+                cellTitles.push(cellTitle);
+            });
+            tiddlers.push({
+                title: containerTitle,
+                "stream-list": $tw.utils.stringifyList(cellTitles),
+                "stream-type": "default",
+                text: "",
+                "lithic-ipynb": "yes",
+                "lithic-ipynb-meta": JSON.stringify({ metadata: nb.metadata || {}, nbformat: nb.nbformat || 4, nbformat_minor: nb.nbformat_minor || 5 })
+            });
+            return tiddlers;
+        });
+    }
+
     async function handleFiles(files, event) {
         const pdfFiles = Array.from(files).filter(f => f.type === "application/pdf" || f.name.toLowerCase().endsWith(".pdf"));
         const imageFiles = Array.from(files).filter(f => f.type.startsWith("image/"));
-        if (pdfFiles.length > 0 || imageFiles.length > 0) {
+        const notebookFiles = Array.from(files).filter(f => f.type === "application/x-ipynb+json" || f.name.toLowerCase().endsWith(".ipynb"));
+        if (pdfFiles.length > 0 || imageFiles.length > 0 || notebookFiles.length > 0) {
             // We found PDFs or images, so intercept this event completely
             event.preventDefault();
             event.stopPropagation();
@@ -301,6 +376,21 @@ exports.startup = function() {
                     // Add tiddlers to the wiki
                     for (const fields of tiddlers) {
                         $tw.wiki.addTiddler(new $tw.Tiddler(fields));
+                        if (!fields.parent) { // It's the container
+                            createdTitles.push(fields.title);
+                        }
+                    }
+                }
+
+                for (const file of notebookFiles) {
+                    setProgress("Importing " + file.name + " as a nodestream...");
+                    const tiddlers = await convertNotebookToTiddlers(file);
+                    for (const fields of tiddlers) {
+                        $tw.wiki.addTiddler(new $tw.Tiddler(
+                            $tw.wiki.getCreationFields(),
+                            $tw.wiki.getModificationFields(),
+                            fields
+                        ));
                         if (!fields.parent) { // It's the container
                             createdTitles.push(fields.title);
                         }
@@ -385,8 +475,8 @@ exports.startup = function() {
                     list: $tw.utils.stringifyList(storyList)
                 }));
 
-                // Handle other (non-PDF/image) files that were part of the same selection
-                const otherFiles = Array.from(files).filter(f => !pdfFiles.includes(f) && !imageFiles.includes(f));
+                // Handle other (non-PDF/image/notebook) files that were part of the same selection
+                const otherFiles = Array.from(files).filter(f => !pdfFiles.includes(f) && !imageFiles.includes(f) && !notebookFiles.includes(f));
                 if (otherFiles.length > 0) {
                     $tw.utils.each(otherFiles, function(file) {
                         $tw.utils.deserializeTiddlers(file.type, file, {}, function(tiddlers) {

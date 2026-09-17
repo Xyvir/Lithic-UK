@@ -47,7 +47,7 @@ export const DEFAULT_PLUGINS: string[] = [
   'xyvir/lithic-patch-markdown',
   'xyvir/lithic-patch-streams',
   'xyvir/lithic-patch-whiteboard',
-  'xyvir/lithic-pdf-to-whiteboard',
+  'xyvir/lithic-import-handler',
   'xyvir/lithic-python-codeblocks',
   'xyvir/lithic-richlinks',
   'xyvir/lithic-tweaks',
