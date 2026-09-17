@@ -1,6 +1,6 @@
 import { mount } from 'svelte';
 import App from './App.svelte';
-import { resolveMode } from './mode';
+import { resolveMode, ephemeralModeFor } from './mode';
 import './styles.css';
 
 const mode = resolveMode(window.location);
@@ -8,8 +8,9 @@ const mode = resolveMode(window.location);
 // Preserve the legacy globals expected by the existing launcher integrations.
 window.__LITHIC_LAUNCHER_MODE__ = mode;
 // Ephemeral code-runner resolution: self-host instances post to the same-origin
-// /ephemeral API; the webapp discovers a paper-light bastion from swarm.json.
-(window as any).__EPHEMERAL_MODE__ = mode === 'self-host' ? 'self-host' : 'paper-light';
+// /ephemeral API; tauri probes a local Ephemeral tray first (paper-light
+// fallback); the webapp discovers a paper-light bastion from swarm.json.
+(window as any).__EPHEMERAL_MODE__ = ephemeralModeFor(mode);
 
 mount(App, {
   target: document.getElementById('app')!,

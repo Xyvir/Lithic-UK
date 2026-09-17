@@ -267,10 +267,70 @@ var Widget = require("$:/core/modules/widgets/widget.js").widget;
 
 // Resolve where to POST a job:
 //   self-host   -> the same-origin /ephemeral/api/v1/run path
+//   local-tray  -> a local Ephemeral.exe tray/API server (127.0.0.1:8787,
+//                  configurable via window.__EPHEMERAL_LOCAL_BASE__); when the
+//                  tray is not answering, fall back to the paper-light swarm
 //   paper-light -> the fastest/nearest bastion advertised in docs/swarm.json
+var _EPHEMERAL_TRAY_PROBED_AT = 0;
+var _EPHEMERAL_TRAY_AVAILABLE = false;
+var EPHEMERAL_TRAY_PROBE_COOLDOWN_MS = 30000;
+
+function _ephemeralHttp() {
+    // Inside the Tauri webview, prefer the Rust HTTP API: the tray server is
+    // a loopback origin, so browser fetches would need CORS the tray does not
+    // send. Tauri's fetch issues from the native side where no CORS applies.
+    var tauri = (typeof window !== "undefined") ? (window.__TAURI__ || null) : null;
+    if (tauri && tauri.http && typeof tauri.http.fetch === "function") {
+        return tauri.http.fetch;
+    }
+    return null;
+}
+
+async function _probeEphemeralTray() {
+    var now = Date.now();
+    if (now - _EPHEMERAL_TRAY_PROBED_AT < EPHEMERAL_TRAY_PROBE_COOLDOWN_MS) {
+        return _EPHEMERAL_TRAY_AVAILABLE;
+    }
+    _EPHEMERAL_TRAY_PROBED_AT = now;
+    var bases = [];
+    var configured = (typeof window !== "undefined" && window.__EPHEMERAL_LOCAL_BASE__) || "";
+    if (configured) {
+        bases.push(configured);
+    }
+    bases.push("http://127.0.0.1:8787", "http://localhost:8787");
+    var http = _ephemeralHttp();
+    for (var i = 0; i < bases.length; i++) {
+        var base = bases[i];
+        while (base.charAt(base.length - 1) === "/") { base = base.slice(0, -1); }
+        try {
+            var res = http
+                ? await http(base + "/ephemeral/api/v1/health", { method: "GET", timeout: { seconds: 2 } })
+                : await fetch(base + "/ephemeral/api/v1/health", { method: "GET", signal: AbortSignal.timeout(2000) });
+            // Any HTTP answer (even 404) means a server is listening; 200
+            // confirms it is the Ephemeral API.
+            if (res && res.status) {
+                _EPHEMERAL_TRAY_AVAILABLE = true;
+                return true;
+            }
+        } catch (e) {
+            // not listening on this base — try the next
+        }
+    }
+    _EPHEMERAL_TRAY_AVAILABLE = false;
+    return false;
+}
+
 async function _resolveEphemeralEndpoint() {
     var mode = (typeof window !== "undefined" && window.__EPHEMERAL_MODE__) || "self-host";
-    if (mode !== "paper-light") {
+    if (mode === "local-tray") {
+        if (await _probeEphemeralTray()) {
+            var trayBase = ((typeof window !== "undefined" && window.__EPHEMERAL_LOCAL_BASE__) || "http://127.0.0.1:8787");
+            while (trayBase.charAt(trayBase.length - 1) === "/") { trayBase = trayBase.slice(0, -1); }
+            return trayBase + "/ephemeral/api/v1/run";
+        }
+        // Tray not running: fall through to the paper-light public swarm.
+    }
+    if (mode !== "paper-light" && mode !== "local-tray") {
         return "/ephemeral/api/v1/run";
     }
     var swarmUrls = [
@@ -349,11 +409,28 @@ class ActionEphemeralWidget extends Widget {
             const base64code = window.btoa(binary);
             
             const endpoint = await _resolveEphemeralEndpoint();
-            const response = await fetch(endpoint, {
-                method: 'POST',
-                headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({ document_blob: base64code, timeout: 300 })
-            });
+            let response = null;
+            if (endpoint.indexOf("http://127.0.0.1") === 0 || endpoint.indexOf("http://localhost") === 0 || (typeof window !== "undefined" && window.__EPHEMERAL_LOCAL_BASE__ && endpoint.indexOf(String(window.__EPHEMERAL_LOCAL_BASE__).replace(//$/, "")) === 0)) {
+                // Loopback tray endpoint: use the native HTTP client when
+                // available (no CORS from the webview), else plain fetch.
+                const http = _ephemeralHttp();
+                const requestInit = {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({ document_blob: base64code, timeout: 300 })
+                };
+                const raw = http ? await http(endpoint, requestInit) : await fetch(endpoint, requestInit);
+                const bodyText = await raw.text();
+                let parsed = null;
+                try { parsed = JSON.parse(bodyText); } catch (parseErr2) { parsed = null; }
+                response = { ok: raw.ok, status: raw.status, json: async () => parsed };
+            } else {
+                response = await fetch(endpoint, {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({ document_blob: base64code, timeout: 300 })
+                });
+            }
 
             // Surface HTTP errors instead of silently swallowing them: the
             // bastion answers 422 with {"detail": "..."} when a job cannot be
@@ -606,7 +683,7 @@ exports["action-ephemeral"] = ActionEphemeralWidget;
 			</$set>
 		</$button>
 	</$list>
-	<$list filter="[<language>!match[jspython]]" variable="ignore">
+	<$list filter="[<language>!match[jspython]!match[txt]!match[text]!match[plaintext]!match[plain]!match[]]" variable="ignore">
 		<$button tooltip="Run on Ephemeral API" class="tc-btn-invisible run-jspython-btn">&gt;_
 			<$action-ephemeral code=<<code>> language=<<language>> parentTiddler=<<currentTiddler>> />
 		</$button>
