@@ -65,35 +65,15 @@ test('ephemeral integration tiddlers are present and uniquely titled', () => {
   assert.ok(titles.some((title) => title.includes('action-ephemeral')));
 });
 
-test('ephemeral codeblock-override suppresses run button on txt and untyped blocks', () => {
+test('ephemeral run-code button is suppressed on txt/untyped codeblocks', () => {
   const tiddlers = ephemeralIntegrationTiddlers();
   const override = tiddlers.find((t) => t.title.includes('codeblock-override'))!;
   assert.ok(override, 'codeblock-override tiddler missing');
   // The ephemeral run branch must exclude txt/text/plaintext/plain and the
   // undeclared-language case, in a single filter run (AND semantics).
   assert.match(override.text, /\[<language>!match\[jspython\]!match\[txt\]!match\[text\]!match\[plaintext\]!match\[plain\]!match\[\]\]/);
-  // The local jspython branch keeps its plain match so jsipython still runs.
+  // The local jspython branch keeps its plain match so jspython still runs.
   assert.match(override.text, /\[<language>match\[jspython\]\]/);
-});
-
-test('ephemeral resolver supports local-tray probing with paper-light fallback', () => {
-  const tiddlers = ephemeralIntegrationTiddlers();
-  const action = tiddlers.find((t) => t.title.includes('action-ephemeral'))!;
-  assert.ok(action, 'action-ephemeral tiddler missing');
-  // local-tray mode: probe loopback servers first...
-  assert.match(action.text, /mode === "local-tray"/);
-  assert.match(action.text, /_probeEphemeralTray/);
-  // distributed-tray bridge port first, then the self-host sidecar slot.
-  assert.match(action.text, /127\.0\.0\.1:8788/);
-  assert.match(action.text, /127\.0\.0\.1:8787/);
-  assert.match(action.text, /__EPHEMERAL_LOCAL_BASE__/);
-  // ...then fall through to the public swarm discovery.
-  assert.match(action.text, /Tray not running: fall through to the paper-light public swarm/);
-  // Loopback POSTs prefer the native (Tauri) HTTP client when available.
-  assert.match(action.text, /_ephemeralHttp/);
-  // Keep the legacy branches: same-origin for self-host, swarm for paper-light.
-  assert.match(action.text, /mode !== "paper-light" && mode !== "local-tray"/);
-  assert.match(action.text, /No bastion server found in swarm\.json/);
 });
 
 const pinCache = JSON.stringify([

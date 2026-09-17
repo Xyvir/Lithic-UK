@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onMount } from 'svelte';
-  import { ephemeralModeFor, type LauncherMode } from './mode';
+  import type { LauncherMode } from './mode';
   import { createFileBridge, tauriInvoke } from './file-bridge';
   import { isScratchFileName, resolveScratchKind, type ScratchKind } from './scratch-editor';
   import { pwaInstall, promptPwaInstall } from './pwa-install';
@@ -743,7 +743,7 @@
     // globals are also injected defensively so the Ephemeral widget
     // (__EPHEMERAL_MODE__) works regardless of the boot path.
     await bootLegacyWiki(handoff, [...pendingImports, ...ephemeralIntegrationTiddlers(), ...extraTiddlers], {
-      __EPHEMERAL_MODE__: ephemeralModeFor(mode),
+      __EPHEMERAL_MODE__: mode === 'self-host' ? 'self-host' : 'paper-light',
       __LITHIC_LAUNCHER_MODE__: mode
     }, { driftedFromHead, scratchMode });
     pendingImports = [];
@@ -1153,7 +1153,7 @@
       { title: '$:/state/DisableAutoSaver', text: 'yes' },
       ...ephemeralIntegrationTiddlers()
     ], {
-      __EPHEMERAL_MODE__: ephemeralModeFor(mode),
+      __EPHEMERAL_MODE__: mode === 'self-host' ? 'self-host' : 'paper-light',
       __LITHIC_LAUNCHER_MODE__: mode
     });
   }
