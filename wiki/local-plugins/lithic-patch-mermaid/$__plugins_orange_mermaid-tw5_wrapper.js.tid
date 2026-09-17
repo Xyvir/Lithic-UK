@@ -7,7 +7,7 @@ title: $:/plugins/orange/mermaid-tw5/wrapper.js
 type: application/javascript
 module-type: widget
 author: Nathaniel Jones 2017-05-26
-modified: E Furlan 2022-05-08; Lithic 2026-09-14 (re-applied D3 pan/zoom from xyvir/lithic-patch-mermaid); Lithic 2026-09-15 (style gating: self-styled diagrams opt out of palette default CSS; palette-responsiveness lives in the stylesheet via <<colour>>); Lithic 2026-09-16 (font-only init no longer flags mm-user; render gated on document.fonts.ready so label measure == label paint; site-wide Vollkorn default via buildSiteConfig)
+modified: E Furlan 2022-05-08; Lithic 2026-09-14 (re-applied D3 pan/zoom from xyvir/lithic-patch-mermaid); Lithic 2026-09-15 (style gating: self-styled diagrams opt out of palette default CSS; palette-responsiveness lives in the stylesheet via <<colour>>); Lithic 2026-09-16 (font-only init no longer flags mm-user; render gated on document.fonts.ready so label measure == label paint; site-wide Vollkorn default via buildSiteConfig); Lithic 2026-09-16b (robustness: own lossless source extractor -- upstream tree-walk only decodes 5 entities and drops the rest as literal poison text; poison-char sanitizer for paste/markdown/import artifacts; self-heal render retry ladder + global-config reset after a failed directive)
 */
 (function() {
     // jslint node: true, browser: true
@@ -80,6 +80,144 @@ modified: E Furlan 2022-05-08; Lithic 2026-09-14 (re-applied D3 pan/zoom from xy
                 if (errorSvgs[i] && errorSvgs[i].parentNode) {
                     errorSvgs[i].parentNode.removeChild(errorSvgs[i]);
                 }
+            }
+        } catch (e) {}
+    }
+
+    // ---- ROBUST SOURCE EXTRACTION --------------------------------------
+    // Replaces rocklib.getScriptBody. The upstream tree-walk hard-codes only
+    // FIVE entities (&ndash; &gt; &lt; &amp; &quot;) and passes every OTHER
+    // entity through as LITERAL TEXT -- so a diagram containing &nbsp;,
+    // &#45;, &rsquo;, or any numeric reference inside a label hands mermaid
+    // garbage it rejects with a parse error ("poison characters"). This
+    // variant decodes ALL entities and preserves line structure.
+    function decodeEntity(entity) {
+        if (!entity) return '';
+        var named = {
+            '&ndash;': '--',   // wikitext turns -- into en-dash; keep upstream heal
+            '&mdash;': '---',  // same for ---
+            '&gt;': '>', '&lt;': '<', '&amp;': '&', '&quot;': '"',
+            '&nbsp;': ' ',
+            '&lsquo;': "'", '&rsquo;': "'", '&sbquo;': "'",
+            '&ldquo;': '"', '&rdquo;': '"',
+            '&hellip;': '...', '&bull;': '*', '&middot;': '*',
+            '&minus;': '-', '&lowast;': '*', '&plusmn;': '+/-'
+        };
+        if (named[entity] !== undefined) return named[entity];
+        var m = /^&#(\d+);$/.exec(entity);
+        if (m) {
+            var code = parseInt(m[1], 10);
+            if (code > 0 && code <= 0x10FFFF) {
+                try { return String.fromCodePoint(code); } catch (e) {}
+            }
+        }
+        m = /^&#x([0-9a-f]+);$/i.exec(entity);
+        if (m) {
+            var code2 = parseInt(m[1], 16);
+            if (code2 > 0 && code2 <= 0x10FFFF) {
+                try { return String.fromCodePoint(code2); } catch (e) {}
+            }
+        }
+        // any other named entity: let the DOM decode it; unparseable stays literal
+        try {
+            if (typeof document !== 'undefined') {
+                var el = document.createElement('textarea');
+                el.innerHTML = entity;
+                if (el.value !== undefined && el.value !== '') return el.value;
+            }
+        } catch (e) {}
+        return entity;
+    }
+
+    function extractDiagramSource(widget) {
+        var attr = widget.getAttribute('text', '');
+        if (attr) return String(attr);
+        var node = widget.parseTreeNode;
+        if (!node) return '';
+        if (typeof node.text === 'string') return node.text;
+        if (!node.children || !node.children.length) return '';
+        var out = '';
+        var walk = function(nodes) {
+            for (var i = 0; i < nodes.length; i++) {
+                var n = nodes[i];
+                if (!n) continue;
+                if (n.type === 'text') { out += (n.text || ''); continue; }
+                if (n.type === 'entity') { out += decodeEntity(n.entity); continue; }
+                if (n.type === 'element') {
+                    if (n.tag === 'br') { out += '\n'; continue; }
+                    if (n.children && n.children.length) {
+                        walk(n.children);
+                        if (n.tag === 'div' || n.tag === 'p') out += '\n';
+                    }
+                    continue;
+                }
+                if (n.children && n.children.length) walk(n.children);
+            }
+        };
+        walk(node.children);
+        return out;
+    }
+
+    // ---- POISON-CHARACTER SANITIZER -------------------------------------
+    // Diagram sources reach this widget via typing, paste, tiddler import and
+    // markdown transclusion; any of those paths can leave characters that are
+    // invisible (or semantically inert) to a human but reject mermaid's
+    // grammar outright. Every replacement below maps a character that is
+    // INVALID or meaningless in mermaid syntax onto its plain-ASCII meaning,
+    // so sanitizing can never corrupt a diagram that already parses.
+    function sanitizeDiagramSource(src) {
+        if (!src) return src;
+        var s = String(src);
+        // BOM + line/paragraph separators -> plain newlines; CRLF -> LF
+        s = s.replace(/^\uFEFF/, '').replace(/\u2028|\u2029/g, '\n').replace(/\r\n?/g, '\n');
+        // zero-width characters and bidi controls (invisible paste artifacts)
+        s = s.replace(/[\u200B-\u200D\u2060\uFEFF\u202A-\u202E\u2066-\u2069]/g, '');
+        // every Unicode whitespace variant -> plain space (nbsp, narrow nbsp,
+        // en/em quad, math space, ideographic space...)
+        s = s.replace(/[\u00A0\u1680\u2000-\u200A\u202F\u205F\u3000]/g, ' ');
+        // C0 controls (except tab/newline) and DEL -- pure poison, no meaning
+        s = s.replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/g, '');
+        // typographic punctuation that mermaid's grammar never accepts
+        s = s.replace(/\u2212/g, '-')            // unicode minus
+             .replace(/[\u2010\u2011]/g, '-')    // hyphen variants
+             .replace(/[\u2018\u2019\u201B]/g, "'")  // smart single quotes
+             .replace(/[\u201C\u201D]/g, '"')    // smart double quotes
+             .replace(/\u2032/g, "'")            // prime
+             .replace(/\u2033/g, '"')            // double prime
+             .replace(/\u2026/g, '...');         // ellipsis
+        return s;
+    }
+
+    // ---- SELF-HEAL RENDER LADDER -----------------------------------------
+    // Attempt 1 is the sanitized source; attempt 2 (only if attempt 1 failed)
+    // drops ALL %%{...}%% directives -- a malformed/stale init directive is
+    // the most common hand-edit failure, and palette-default rendering beats
+    // an error box. Each rung must be semantics-preserving enough that
+    // rendering it beats showing an error.
+    function buildRenderAttempts(scriptBody) {
+        var attempts = [{ label: 'sanitized', text: scriptBody }];
+        if (/%%\{[\s\S]*?%%/.test(scriptBody)) {
+            attempts.push({
+                label: 'directives-stripped',
+                text: scriptBody.replace(/%%\{[\s\S]*?}%%/g, '').trim()
+            });
+        }
+        return attempts;
+    }
+
+    function attemptText(task) {
+        var idx = task.attemptIndex || 0;
+        if (task.attempts && task.attempts[idx]) return task.attempts[idx].text;
+        return task.scriptBody;
+    }
+
+    // A failed %%{init}%% directive can leave mermaid's global config polluted
+    // (directive parsing mutates state before the parse error surfaces), which
+    // then breaks SUBSEQUENT diagrams on the page. Restore known-good config.
+    function resetMermaidToSiteConfig() {
+        try {
+            if (mermaidAPI && typeof mermaidAPI.initialize === 'function') {
+                mermaidAPI.initialize(buildSiteConfig());
             }
         } catch (e) {}
     }
@@ -219,7 +357,7 @@ modified: E Furlan 2022-05-08; Lithic 2026-09-14 (re-applied D3 pan/zoom from xy
         this.computeAttributes();
         this.execute();
         var tag = 'mermaid',
-            rawBody = rocklib.getScriptBody(this, 'text') || '',
+            rawBody = extractDiagramSource(this) || '',
             scriptBody = (typeof rawBody === 'string' ? rawBody : String(rawBody)).trim(),
             divNode = rocklib.getCanvas(this, tag);
         // Marker consumed by the default-theming CSS: rules are scoped to
@@ -228,7 +366,7 @@ modified: E Furlan 2022-05-08; Lithic 2026-09-14 (re-applied D3 pan/zoom from xy
             divNode.classList.add('mm-themed');
             // Visible version stamp for meatspace debugging: which wrapper is
             // actually running? Inspect a rendered diagram div for this attr.
-            divNode.setAttribute('data-mmwrapver', '2026-09-16.3');
+            divNode.setAttribute('data-mmwrapver', '2026-09-16.4');
         }
         var _insertSVG = function(svgCode, bindFunctions) {
             divNode.innerHTML = svgCode;
@@ -287,6 +425,10 @@ modified: E Furlan 2022-05-08; Lithic 2026-09-14 (re-applied D3 pan/zoom from xy
             // TiddlyWiki's WikiText parser converts -- to en-dash and --- to em-dash
             // in widget attribute values. Normalize them back for Mermaid arrow syntax.
             scriptBody = scriptBody.replace(/\u2013/g, '--').replace(/\u2014/g, '---');
+            // Poison-character pass: invisible/typographic characters picked up
+            // from paste, import or markdown transclusion are normalized to
+            // what mermaid's grammar accepts (see sanitizeDiagramSource).
+            scriptBody = sanitizeDiagramSource(scriptBody);
 
             // D-02: per-widget non-secure config injection
             var perWidgetInit = buildPerWidgetInit(options);
@@ -324,6 +466,8 @@ modified: E Furlan 2022-05-08; Lithic 2026-09-14 (re-applied D3 pan/zoom from xy
                 var task = {
                     svgId: svgId,
                     scriptBody: scriptBody,
+                    attempts: buildRenderAttempts(scriptBody),
+                    attemptIndex: 0,
                     onSuccess: function(res) {
                         _insertSVG(res.svg, res.bindFunctions);
                         if (selfStyled && divNode.classList) {
@@ -332,6 +476,27 @@ modified: E Furlan 2022-05-08; Lithic 2026-09-14 (re-applied D3 pan/zoom from xy
                         hookupZoom(divNode);
                     },
                     onError: function(ex) {
+                        // Self-heal ladder: if the current attempt failed, retry
+                        // with the next (more forgiving) source variant before
+                        // surfacing an error box.
+                        var next = (task.attemptIndex || 0) + 1;
+                        if (task.attempts && next < task.attempts.length) {
+                            task.attemptIndex = next;
+                            task.scriptBody = task.attempts[next].text;
+                            if (typeof window !== 'undefined') {
+                                window.$tw_mermaid_queue.unshift(task);
+                            }
+                            console.warn('[mermaid-tw5] render failed (attempt: ' + task.attempts[next - 1].label + '), retrying with ' + task.attempts[next].label);
+                            if (typeof window !== 'undefined') {
+                                setTimeout(processQueue, 0);
+                            }
+                            return;
+                        }
+                        // All attempts exhausted. A failed %%{init}%% directive can
+                        // leave mermaid's global config polluted (directive parsing
+                        // mutates state before the parse error surfaces), which then
+                        // breaks SUBSEQUENT diagrams on the page. Restore known-good.
+                        resetMermaidToSiteConfig();
                         cleanupStrayErrorSVGs();
                         var errorHtml = '<div style="border-left:3px solid #ff4444;background:#fff0f0;padding:8px 12px;">' +
                             '<p><strong>Mermaid diagram could not be rendered.</strong> The diagram syntax may contain an error.</p>' +

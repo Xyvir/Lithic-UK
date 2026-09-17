@@ -25,7 +25,7 @@ from pathlib import Path
 from fontTools.ttLib import TTFont
 
 ROOT = Path(__file__).resolve().parent.parent
-VOLLKORN_WOFF2 = ROOT / 'tmp' / 'fonts' / 'vollkorn_0.woff2'   # extracted from the current tiddler
+VOLLKORN_WOFF2 = ROOT / 'assets' / 'fonts' / 'vollkorn-pre-merge.woff2'  # pre-merge subset, extracted from the current tiddler (durable copy under assets/)
 KATEX_WOFF2 = ROOT / 'node_modules' / 'tiddlywiki' / 'plugins' / 'tiddlywiki' / 'katex' / 'files' / 'fonts' / 'KaTeX_Main-Regular.woff2'
 TIDDLER = ROOT / 'wiki' / 'local-plugins' / 'lithic-core' / '$__lithic_fonts_vollkorn.css.tid'
 
