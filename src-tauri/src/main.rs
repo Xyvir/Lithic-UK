@@ -118,13 +118,28 @@ struct EphemeralResult {
     stderr: String,
 }
 
-/// Locate a locally installed Ephemeral.exe tray (distributed build) without
-/// any probing: only well-known filesystem locations are checked.
+/// Locate a locally installed Ephemeral tray without any probing: only
+/// well-known filesystem locations are checked, in priority order.
+/// 1. StartupManager's per-user install copies (%LOCALAPPDATA%\<app_key>\),
+///    both the distributed and local tray identities
+/// 2. The per-user WindowsApps shims those installs also write (hardlink
+///    named <app_key>.exe, or the .cmd fallback) so PATH-visible installs
+///    are found too
+/// 3. Beside Lithic.exe itself (thumb-drive bundles carrying both exes)
 fn ephemeral_exe_path() -> Option<PathBuf> {
     let mut candidates = Vec::new();
     if let Ok(local) = std::env::var("LOCALAPPDATA") {
-        candidates.push(PathBuf::from(&local).join("Ephemeral").join("Ephemeral.exe"));
-        candidates.push(PathBuf::from(&local).join("Programs").join("Ephemeral").join("Ephemeral.exe"));
+        for app_key in ["Ephemeral-Distributed", "Ephemeral"] {
+            candidates.push(
+                PathBuf::from(&local)
+                    .join(app_key)
+                    .join(format!("{app_key}.exe")),
+            );
+        }
+        let win_apps = PathBuf::from(&local).join("Microsoft").join("WindowsApps");
+        for app_key in ["Ephemeral-Distributed", "Ephemeral"] {
+            candidates.push(win_apps.join(format!("{app_key}.exe")));
+        }
     }
     if let Ok(exe) = std::env::current_exe() {
         if let Some(dir) = exe.parent() {
