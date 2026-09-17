@@ -6,8 +6,8 @@
 - [x] Allow specifying 'modes' via http parameters so the launcher monolith html can be forced into specific modes to make unit tests easier; (all unit tests can be performed in 1 test environment this way, but with multiple test profiles/users)
     - (Done: `launcher-ui/src/mode.ts` honors `?mode=`, `?launcher-mode=`, `?launcher_mode=`)
 - [ ] Create unit tests for all lithic.html and launcher.html UI elements, logic and functions
-    - (In progress: 42 launcher-ui unit tests + puppeteer smoke + pre-launcher smoke)
-    - [ ] this can also intercept bad manual builds and prevent them from pushing 'bad' releases.
+    - (In progress: 136 launcher-ui unit tests + fragment-parity assertions + puppeteer smoke + pre-launcher smoke)
+    - [x] this can also intercept bad manual builds and prevent them from pushing 'bad' releases. (Rust Check workflow runs cargo check on every push touching src-tauri; npm run check:push runs tests, svelte-check, workflow-YAML sanity, cargo check and clippy locally before pushing)
 - [ ] Modularize launcher.html into separate javascript / html / css files
     - [x] begin modularizing launcher.html and test packaging into prelauncher.html
         - (Svelte launcher builds to `src/pre-launcher.html` via `scripts/build-pre-launcher.mjs`)
@@ -16,6 +16,12 @@
 - [ ] Move "install app" button on mobile UI only to be next to the 'clear cache' button.
 - [ ] Add git history rollback UI/widget to online sync modal. (this should theoretically work for the local git instance even if not synced to github)
 - [ ] Make sure the custom.ico is actually saved to GitHub so restoring the GitHub will restore your disambiguation / icon
+
+### Next legs (agreed order, 2026-09-17)
+
+1. **Ephemeral coderunner pass** (queued final tauri leg, small): paperlite/tauri injected coderunner tiddler should probe a local ephemeral.exe tray service first and fall back to the paperlite public swarm; in BOTH coderunner modes, codeblocks with language `txt` or no declared language get no run-code button.
+2. **Self-host/WebDAV milestone** (biggest remaining parity gap): port legacy `runtime.webdav` fragment into the Svelte launcher — remote file listing, locks, sync modal, emoji picker.
+3. **Build cutover**: flip `build-wiki.yml` to package `pre-launcher.html` as the shipped launcher, then archive legacy `launcher.html` and move to the modularized build permanently.
 
 ### Launcher parity (Svelte `pre-launcher.html` vs legacy `launcher.html`) — webapp/local mode
 
@@ -30,7 +36,7 @@ Tracked per-fragment in `launcher-ui/src/legacy-fragments.ts`; statuses are asse
 - [x] HTML monolith mounting (`.html`/`.htm` opened directly as a complete wiki page)
 - [x] PWA head (manifest/favicon/theme-color) + `/offline-service-worker.js` registration + `__EPHEMERAL_MODE__` global
 - [ ] WebDAV / self-host mode (`runtime.webdav`, remote file listing, locks, GitHub sync modal, emoji picker) — deferred, next milestone
-- [ ] Tauri mode — deferred
+- [x] Tauri mode — shipped: file bridges + native dialogs, scratch editor (.md/.txt/.tid/.json/.ipynb round-trip), install button w/ file associations + dismissible offer, portable recents.txt sidecar, GitHub device-flow sync w/ status-reactive icon, per-wiki version-history button hiding, Save-As defaulting to the install folder
 - [ ] `document.bootstrap` original-path rewrite — deployment glue, still extracted
 
 ## Post Modularization Todo
@@ -38,7 +44,7 @@ Tracked per-fragment in `launcher-ui/src/legacy-fragments.ts`; statuses are asse
 - [ ] Create self-destroying /anchor option based on <<stamp>> macro, maybe even super-ceding stamp?
 	-I'm making this too complicated, just create a new tiddler and use slashcommands to fill in a re-usable todo template. (This is literlaly it's use case) Maybe I should make a workflow to save convert existing content as a new slashcommands though.
 
-- [ ] Create/Integrate EPUB Serialization based on current to_lithic logic (but have user provide shortcode instead of AI-generated one); add it to existing pdf-to-whiteboard and name the plugin 'lithic-import' or something.
+- [ ] Create/Integrate EPUB Serialization based on current to_lithic logic (but have user provide shortcode instead of AI-generated one); add it to the renamed `lithic-import-handler` plugin (formerly lithic-pdf-to-whiteboard).
 - [ ] make links and transclusions in uni-editor edit-mode clickable and hover-able (appear plugin)
 - [ ] Add hotzone for sidebar to autoopen/closen on mouseover?
     (this is mostly for when exporting static HTML sites)
@@ -123,8 +129,8 @@ Tracked per-fragment in `launcher-ui/src/legacy-fragments.ts`; statuses are asse
 - [ ] Create "Lithic for Teams" backend version based on Multi-Wiki Server.
 
 - Tauri App Ideas:
-    - [ ] Add 'run code' button next to copy code that hooks into ephemeral.exe
-    - [ ] Allow file associations for *.txt; *.py, *.md etc so it can act as a lightweight text editor for local files.
+    - [x] Add 'run code' button next to copy code that hooks into ephemeral.exe (shipped; local-tray/paperlite backend selection is the queued ephemeral pass above)
+    - [x] Allow file associations for *.txt; *.py, *.md etc so it can act as a lightweight text editor for local files. (shipped for *.lith *.md *.txt *.html *.json *.tid *.ipynb)
     - [ ] Iroh P2P Sync
 - [ ] Add local 2fa totp for backend wiki access?
     - Maybe just suggest cloudflare tunnels for this instead. Or only include in `lithic-teams` or desktop apps
