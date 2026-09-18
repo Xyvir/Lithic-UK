@@ -76,13 +76,14 @@ test('ephemeral run-code button is suppressed on txt/untyped codeblocks', () => 
   assert.match(override.text, /\[<language>match\[jspython\]\]/);
 });
 
-test('ephemeral tauri branch routes runs through the Rust stdin spawn', () => {
+test('ephemeral tauri branch routes runs through the tray hotkey handoff', () => {
   const tiddlers = ephemeralIntegrationTiddlers();
   const action = tiddlers.find((t) => t.title.includes('action-ephemeral'))!;
   assert.ok(action, 'action-ephemeral tiddler missing');
-  // Tauri runs invoke the Rust command (markdown piped to the tray CLI by
-  // the native side) and fall back to the swarm fetch when it fails.
-  assert.match(action.text, /invoke\("ephemeral_run", \{ markdown: markdownPayload \}\)/);
+  // Tauri runs invoke the Rust clipboard-handoff command (document parked on
+  // the clipboard + simulated ctrl+alt+x; the tray's own flow, no CLI/API
+  // surface) and fall back to the swarm fetch when it fails.
+  assert.match(action.text, /invoke\("ephemeral_tray_run", \{ markdown: markdownPayload, timeoutSecs: 45 \}\)/);
   assert.match(action.text, /Ephemeral local run unavailable, using swarm/);
   // The swarm path is unchanged: bastion discovery from swarm.json.
   assert.match(action.text, /No bastion server found in swarm\.json/);

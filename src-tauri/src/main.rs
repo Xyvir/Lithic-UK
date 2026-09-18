@@ -111,21 +111,24 @@ fn write_text_path(path: String, text: String) -> Result<(), String> {
     fs::write(&path, text).map_err(|error| error.to_string())
 }
 
+// ---- Ephemeral tray handoff ------------------------------------------------
+// The tauri app triggers the tray's own user flow instead of any CLI/API
+// surface: it parks the Markdown document on the clipboard, simulates the
+// tray's ctrl+alt+x hotkey (the exact keystroke a user presses), then polls
+// the clipboard for the results block the tray writes back. Nothing here
+// changes the tray's behavior or binary profile in any way.
+
 #[derive(serde::Serialize)]
-struct EphemeralResult {
-    exit_code: i32,
+struct EphemeralRunResult {
     stdout: String,
     stderr: String,
 }
 
 /// Locate a locally installed Ephemeral tray without any probing: only
-/// well-known filesystem locations are checked, in priority order.
-/// 1. StartupManager's per-user install copies (%LOCALAPPDATA%\<app_key>\),
-///    both the distributed and local tray identities
-/// 2. The per-user WindowsApps shims those installs also write (hardlink
-///    named <app_key>.exe, or the .cmd fallback) so PATH-visible installs
-///    are found too
-/// 3. Beside Lithic.exe itself (thumb-drive bundles carrying both exes)
+/// well-known filesystem locations are checked, in priority order —
+/// StartupManager's per-user install copies (%LOCALAPPDATA%\<app_key>\,
+/// both the distributed and local tray identities), then beside Lithic.exe
+/// itself (thumb-drive bundles carrying both exes).
 fn ephemeral_exe_path() -> Option<PathBuf> {
     let mut candidates = Vec::new();
     if let Ok(local) = std::env::var("LOCALAPPDATA") {
@@ -136,10 +139,6 @@ fn ephemeral_exe_path() -> Option<PathBuf> {
                     .join(format!("{app_key}.exe")),
             );
         }
-        let win_apps = PathBuf::from(&local).join("Microsoft").join("WindowsApps");
-        for app_key in ["Ephemeral-Distributed", "Ephemeral"] {
-            candidates.push(win_apps.join(format!("{app_key}.exe")));
-        }
     }
     if let Ok(exe) = std::env::current_exe() {
         if let Some(dir) = exe.parent() {
@@ -147,65 +146,103 @@ fn ephemeral_exe_path() -> Option<PathBuf> {
             candidates.push(dir.join("Ephemeral").join("Ephemeral.exe"));
         }
     }
-    candidates
-        .into_iter()
-        .find(|path| path.is_file())
+    candidates.into_iter().find(|path| path.is_file())
+}
+
+#[cfg(windows)]
+mod ephemeral_tray {
+    const VK_CONTROL: u8 = 0x11;
+    const VK_MENU: u8 = 0x12; // Alt
+    const VK_X: u8 = 0x58;
+    const KEYEVENTF_KEYUP: u32 = 0x0002;
+
+    #[link(name = "user32")]
+    extern "system" {
+        fn keybd_event(b_vk: u8, b_scan: u8, dw_flags: u32, dw_extra_info: usize);
+    }
+
+    /// Send the tray's Run Clipboard hotkey (ctrl+alt+x) as real global
+    /// keystrokes — indistinguishable from the user pressing it. The tray's
+    /// keyboard hook sees the combo regardless of which window has focus.
+    pub(super) fn send_run_hotkey() {
+        unsafe {
+            keybd_event(VK_CONTROL, 0, 0, 0);
+            keybd_event(VK_MENU, 0, 0, 0);
+            keybd_event(VK_X, 0, 0, 0);
+            keybd_event(VK_X, 0, KEYEVENTF_KEYUP, 0);
+            keybd_event(VK_MENU, 0, KEYEVENTF_KEYUP, 0);
+            keybd_event(VK_CONTROL, 0, KEYEVENTF_KEYUP, 0);
+        }
+    }
 }
 
 /// Run a Markdown document through the locally installed Ephemeral.exe tray
-/// in its headless CLI mode: spawn it with the document piped on stdin —
-/// no network, no payload on any command line — and map its result back to
-/// the REST RunResponse shape the injected coderunner expects. Returns a
-/// descriptive error when no tray is installed so the caller falls back to
-/// the paper-light swarm.
+/// using only surfaces the tray already exposes to its own user: the document
+/// goes to the clipboard, the tray's ctrl+alt+x hotkey is simulated, and the
+/// clipboard is polled (bounded by `timeout_secs`) for the results the tray
+/// writes back. Leaving the results on the clipboard is the tray's own
+/// designed behavior (its clipboard-history workflow), so contents are not
+/// restored — the tauri path inherits that contract unchanged.
+/// Returns a descriptive error when no tray is installed or the run produces
+/// no results, so the caller falls back to the paper-light swarm.
 #[tauri::command]
-fn ephemeral_run(markdown: String) -> Result<EphemeralResult, String> {
-    use std::io::Write;
-    use std::process::{Command, Stdio};
-
-    let exe = ephemeral_exe_path()
-        .ok_or_else(|| "Ephemeral.exe not found (no local tray installed)".to_string())?;
-
-    let mut child = Command::new(&exe)
-        .args(["--cli", "-"])
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
-        .map_err(|error| format!("Failed to launch Ephemeral.exe: {}", error))?;
-
+fn ephemeral_tray_run(
+    app: tauri::AppHandle,
+    markdown: String,
+    timeout_secs: Option<u64>,
+) -> Result<EphemeralRunResult, String> {
+    #[cfg(windows)]
     {
-        let stdin = child
-            .stdin
-            .as_mut()
-            .ok_or_else(|| "Failed to open stdin pipe".to_string())?;
-        stdin
-            .write_all(markdown.as_bytes())
-            .map_err(|error| format!("Failed to pipe document to Ephemeral.exe: {}", error))?;
+        use std::time::{Duration, Instant};
+        use tauri::ClipboardManager;
+
+        ephemeral_exe_path()
+            .ok_or_else(|| "Ephemeral.exe not found (no local tray installed)".to_string())?;
+
+        let mut clipboard = app.clipboard_manager();
+        clipboard
+            .write_text(markdown.clone())
+            .map_err(|error| format!("Clipboard write failed: {}", error))?;
+        // Give the clipboard a moment to settle before the keystrokes land.
+        std::thread::sleep(Duration::from_millis(400));
+
+        ephemeral_tray::send_run_hotkey();
+
+        let timeout = Duration::from_secs(timeout_secs.unwrap_or(45).clamp(5, 120));
+        let deadline = Instant::now() + timeout;
+        let mut result_text: Option<String> = None;
+        while Instant::now() < deadline {
+            std::thread::sleep(Duration::from_millis(600));
+            if let Ok(Some(text)) = clipboard.read_text() {
+                if text != markdown {
+                    // The tray writes the results in one shot; take a second
+                    // read in case it is still finishing the write.
+                    std::thread::sleep(Duration::from_millis(250));
+                    result_text = Some(match clipboard.read_text() {
+                        Ok(Some(settled)) => settled,
+                        _ => text,
+                    });
+                    break;
+                }
+            }
+        }
+
+        match result_text {
+            Some(stdout) => Ok(EphemeralRunResult {
+                stdout,
+                stderr: String::new(),
+            }),
+            None => Err(
+                "Ephemeral tray run produced no results (is the tray running, and did it accept the document?)"
+                    .to_string(),
+            ),
+        }
     }
-    // Stdin dropped here: the CLI sees EOF and executes.
-
-    let output = child
-        .wait_with_output()
-        .map_err(|error| format!("Failed to read Ephemeral.exe output: {}", error))?;
-
-    let stdout = String::from_utf8_lossy(&output.stdout).into_owned();
-    let stderr = String::from_utf8_lossy(&output.stderr).into_owned();
-    let exit_code = output.status.code().unwrap_or(-1);
-
-    if exit_code != 0 {
-        return Err(format!(
-            "Ephemeral.exe exited with code {}: {}",
-            exit_code,
-            if stderr.trim().is_empty() { &stdout } else { &stderr }
-        ));
+    #[cfg(not(windows))]
+    {
+        let _ = (&app, &markdown, &timeout_secs);
+        Err("The Ephemeral tray handoff is Windows-only".to_string())
     }
-
-    Ok(EphemeralResult {
-        exit_code,
-        stdout,
-        stderr,
-    })
 }
 
 /// Canonical per-user install target for the monolith executable: visible
@@ -881,7 +918,7 @@ fn main() {
             install_status,
             install_offer_status,
             set_install_dismissed,
-            ephemeral_run,
+            ephemeral_tray_run,
             read_recents_sidecar,
             write_recents_sidecar,
             git_sync_setup,

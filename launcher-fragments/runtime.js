@@ -348,17 +348,17 @@ class ActionEphemeralWidget extends Widget {
             }
             const base64code = window.btoa(binary);
             
-            // Tauri: run through the locally installed Ephemeral.exe tray in
-            // its headless CLI mode — the Rust side spawns it and pipes the
-            // markdown document over stdin (no network, no payload on any
-            // command line). No tray (or spawn failure): fall through to the
-            // paper-light swarm below.
+            // Tauri: run through the locally installed Ephemeral.exe tray via
+            // its own user flow — Rust parks the document on the clipboard,
+            // simulates the tray's ctrl+alt+x hotkey, and returns the results
+            // block the tray writes back to the clipboard. No tray (or failed
+            // handoff): fall through to the paper-light swarm below.
             var response = null;
             var tauri = (typeof window !== "undefined") ? (window.__TAURI__ || null) : null;
             if (tauri && typeof tauri.invoke === "function") {
                 var local = null, localErr = null;
                 try {
-                    local = await tauri.invoke("ephemeral_run", { markdown: markdownPayload });
+                    local = await tauri.invoke("ephemeral_tray_run", { markdown: markdownPayload, timeoutSecs: 45 });
                 } catch (invokeErr) {
                     localErr = String((invokeErr && invokeErr.message) || invokeErr);
                 }
