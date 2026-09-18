@@ -4,10 +4,10 @@ export type LauncherMode = (typeof MODES)[number];
 /**
  * How the Ephemeral code-runner reaches an execution backend:
  *   'self-host'   -> same-origin /ephemeral/api/v1/* (the WebDAV backend proxies it)
- *   'local-tray'  -> Tauri: run through the locally installed Ephemeral.exe
- *                    tray's own user flow (clipboard handoff + simulated
- *                    ctrl+alt+x hotkey via a Rust command), falling back to
- *                    the paper-light public swarm when no tray is installed
+ *   'local-tray'  -> Tauri: reuse the tray's own clipboard flow via a Rust
+ *                    command (clipboard handoff + pipe-trigger doorbell),
+ *                    falling back to the paper-light public swarm when the
+ *                    tray is not running
  *   'paper-light' -> discover a bastion from docs/swarm.json and POST over https
  */
 export type EphemeralMode = 'self-host' | 'local-tray' | 'paper-light';

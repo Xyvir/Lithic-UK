@@ -348,11 +348,12 @@ class ActionEphemeralWidget extends Widget {
             }
             const base64code = window.btoa(binary);
             
-            // Tauri: run through the locally installed Ephemeral.exe tray via
-            // its own user flow — Rust parks the document on the clipboard,
-            // simulates the tray's ctrl+alt+x hotkey, and returns the results
-            // block the tray writes back to the clipboard. No tray (or failed
-            // handoff): fall through to the paper-light swarm below.
+            // Tauri: reuse the tray's own clipboard flow — Rust writes the
+            // document to the clipboard, rings the tray's pipe trigger (a
+            // doorbell: opening the pipe makes the tray run the clipboard,
+            // exactly like a ctrl+alt+x press), and harvests the results
+            // block from the clipboard. No tray (or no results in time):
+            // fall through to the paper-light swarm below.
             var response = null;
             var tauri = (typeof window !== "undefined") ? (window.__TAURI__ || null) : null;
             if (tauri && typeof tauri.invoke === "function") {

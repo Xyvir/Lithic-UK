@@ -112,11 +112,14 @@ fn write_text_path(path: String, text: String) -> Result<(), String> {
 }
 
 // ---- Ephemeral tray handoff ------------------------------------------------
-// The tauri app triggers the tray's own user flow instead of any CLI/API
-// surface: it parks the Markdown document on the clipboard, simulates the
-// tray's ctrl+alt+x hotkey (the exact keystroke a user presses), then polls
-// the clipboard for the results block the tray writes back. Nothing here
-// changes the tray's behavior or binary profile in any way.
+// The tauri app reuses the tray's own clipboard flow: Rust writes the
+// Markdown document to the clipboard, rings the tray's pipe trigger (a
+// local doorbell — opening the pipe makes the tray run the clipboard,
+// exactly like a ctrl+alt+x press), then polls the clipboard for the
+// results block the tray writes back. No sockets, no HTTP, no synthetic
+// input, and no payload in the pipe: the clipboard is the only data
+// channel. Trigger unreachable or no results in time -> the caller falls
+// back to the paper-light swarm.
 
 #[derive(serde::Serialize)]
 struct EphemeralRunResult {
@@ -124,83 +127,50 @@ struct EphemeralRunResult {
     stderr: String,
 }
 
-/// Locate a locally installed Ephemeral tray without any probing: only
-/// well-known filesystem locations are checked, in priority order —
-/// StartupManager's per-user install copies (%LOCALAPPDATA%\<app_key>\,
-/// both the distributed and local tray identities), then beside Lithic.exe
-/// itself (thumb-drive bundles carrying both exes).
-fn ephemeral_exe_path() -> Option<PathBuf> {
-    let mut candidates = Vec::new();
-    if let Ok(local) = std::env::var("LOCALAPPDATA") {
-        for app_key in ["Ephemeral-Distributed", "Ephemeral"] {
-            candidates.push(
-                PathBuf::from(&local)
-                    .join(app_key)
-                    .join(format!("{app_key}.exe")),
-            );
-        }
-    }
-    if let Ok(exe) = std::env::current_exe() {
-        if let Some(dir) = exe.parent() {
-            candidates.push(dir.join("Ephemeral.exe"));
-            candidates.push(dir.join("Ephemeral").join("Ephemeral.exe"));
-        }
-    }
-    candidates.into_iter().find(|path| path.is_file())
-}
-
 #[cfg(windows)]
-mod ephemeral_tray {
-    const VK_CONTROL: u32 = 0x11;
-    const VK_MENU: u32 = 0x12; // Alt
-    const VK_X: u32 = 0x58;
-    const KEYEVENTF_KEYUP: u32 = 0x0002;
-    const MAPVK_VK_TO_VSC: u32 = 0;
+mod ephemeral_trigger {
+    use std::time::Duration;
 
-    #[link(name = "user32")]
-    extern "system" {
-        fn keybd_event(b_vk: u8, b_scan: u8, dw_flags: u32, dw_extra_info: usize);
-        fn MapVirtualKeyW(u_code: u32, u_map_type: u32) -> u32;
+    fn pipe_name() -> String {
+        std::env::var("EPHEMERAL_TRAY_PIPE_NAME")
+            .unwrap_or_else(|_| "\\\\.\\pipe\\ephemeral-run".to_string())
     }
 
-    fn tap(vk: u32, keyup: bool) {
-        // The scan code matters: the tray's keyboard hook (the `keyboard`
-        // library) matches hotkeys by scan code, and a scan-0 keystroke is
-        // nameless and ignored. MapVirtualKey is the same translation the
-        // library itself applies before injecting.
-        let (scan, flags) = unsafe {
-            (
-                MapVirtualKeyW(vk, MAPVK_VK_TO_VSC) as u8,
-                if keyup { KEYEVENTF_KEYUP } else { 0 },
-            )
-        };
-        unsafe { keybd_event(vk as u8, scan, flags, 0) };
-    }
-
-    /// Send the tray's Run Clipboard hotkey (ctrl+alt+x) as real global
-    /// keystrokes — properly translated, paced like a human chord, and
-    /// indistinguishable at the hook level from the user pressing it.
-    pub(super) fn send_run_hotkey() {
-        for &vk in &[VK_CONTROL, VK_MENU, VK_X] {
-            tap(vk, false);
-            std::thread::sleep(std::time::Duration::from_millis(15));
+    /// Ring the doorbell: open the pipe and immediately close it. The tray
+    /// treats a connection as "run the clipboard now"; zero bytes travel in
+    /// either direction.
+    pub fn ring() -> Result<(), String> {
+        let name = pipe_name();
+        // Retry briefly: the tray serves one connection instance at a time,
+        // so an eager client can land in the gap between instances.
+        for attempt in 0..20 {
+            match std::fs::OpenOptions::new()
+                .read(true)
+                .write(true)
+                .open(&name)
+            {
+                Ok(_file) => return Ok(()),
+                Err(_) if attempt < 19 => {
+                    std::thread::sleep(Duration::from_millis(100 + attempt * 25))
+                }
+                Err(error) => {
+                    return Err(format!(
+                        "Ephemeral pipe trigger not reachable (is the distributed tray running?): {}",
+                        error
+                    ))
+                }
+            }
         }
-        for &vk in &[VK_X, VK_MENU, VK_CONTROL] {
-            tap(vk, true);
-            std::thread::sleep(std::time::Duration::from_millis(15));
-        }
+        unreachable!("retry loop always returns")
     }
 }
 
-/// Run a Markdown document through the locally installed Ephemeral.exe tray
-/// using only surfaces the tray already exposes to its own user: the document
-/// goes to the clipboard, the tray's ctrl+alt+x hotkey is simulated, and the
-/// clipboard is polled (bounded by `timeout_secs`) for the results the tray
-/// writes back. Leaving the results on the clipboard is the tray's own
-/// designed behavior (its clipboard-history workflow), so contents are not
-/// restored — the tauri path inherits that contract unchanged.
-/// Returns a descriptive error when no tray is installed or the run produces
-/// no results, so the caller falls back to the paper-light swarm.
+/// Run a Markdown document through the locally running Ephemeral tray using
+/// only surfaces the tray already exposes to its user: the document goes to
+/// the clipboard, the pipe trigger fires Run Clipboard, and the clipboard
+/// is polled (bounded by `timeout_secs`) for the results the tray writes
+/// back. Leaving the results on the clipboard is the tray's own designed
+/// behavior (its clipboard-history workflow), so contents are not restored.
 #[tauri::command]
 fn ephemeral_tray_run(
     app: tauri::AppHandle,
@@ -212,58 +182,47 @@ fn ephemeral_tray_run(
         use std::time::{Duration, Instant};
         use tauri::ClipboardManager;
 
-        ephemeral_exe_path()
-            .ok_or_else(|| "Ephemeral.exe not found (no local tray installed)".to_string())?;
-
+        // 1) Park the document on the clipboard (the tray's input channel).
         let mut clipboard = app.clipboard_manager();
         clipboard
             .write_text(markdown.clone())
             .map_err(|error| format!("Clipboard write failed: {}", error))?;
-        // Give the clipboard a moment to settle before the keystrokes land.
-        std::thread::sleep(Duration::from_millis(400));
+        // Give the clipboard a moment to settle before ringing.
+        std::thread::sleep(Duration::from_millis(300));
 
-        ephemeral_tray::send_run_hotkey();
+        // 2) Ring the pipe trigger (the tray's ctrl+alt+x equivalent).
+        ephemeral_trigger::ring()?;
 
+        // 3) Watch the clipboard for the results block.
         let timeout = Duration::from_secs(timeout_secs.unwrap_or(45).clamp(10, 120));
-        let started = Instant::now();
-        let mut result_text: Option<String> = None;
-        // Send the chord, then watch the clipboard; if nothing consumes it
-        // (tray busy, a stray modifier held down), resend periodically until
-        // the timeout gives up.
-        while result_text.is_none() && started.elapsed() < timeout {
-            ephemeral_tray::send_run_hotkey();
-            let watch = Instant::now() + Duration::from_secs(12).min(timeout);
-            while result_text.is_none() && Instant::now() < watch && started.elapsed() < timeout {
-                std::thread::sleep(Duration::from_millis(600));
-                if let Ok(Some(text)) = clipboard.read_text() {
-                    if text != markdown {
-                        // The tray writes the results in one shot; take a second
-                        // read in case it is still finishing the write.
-                        std::thread::sleep(Duration::from_millis(250));
-                        result_text = Some(match clipboard.read_text() {
-                            Ok(Some(settled)) => settled,
-                            _ => text,
-                        });
-                    }
+        let deadline = Instant::now() + timeout;
+        while Instant::now() < deadline {
+            std::thread::sleep(Duration::from_millis(500));
+            if let Ok(Some(text)) = clipboard.read_text() {
+                if text != markdown {
+                    // The tray writes the results in one shot; take a second
+                    // read in case it is still finishing the write.
+                    std::thread::sleep(Duration::from_millis(250));
+                    let settled = match clipboard.read_text() {
+                        Ok(Some(text)) => text,
+                        _ => text,
+                    };
+                    return Ok(EphemeralRunResult {
+                        stdout: settled,
+                        stderr: String::new(),
+                    });
                 }
             }
         }
-
-        match result_text {
-            Some(stdout) => Ok(EphemeralRunResult {
-                stdout,
-                stderr: String::new(),
-            }),
-            None => Err(
-                "Ephemeral tray run produced no results (is the tray running, and did it accept the document?)"
-                    .to_string(),
-            ),
-        }
+        Err(
+            "Ephemeral tray run produced no results (is the tray running, and did it accept the document?)"
+                .to_string(),
+        )
     }
     #[cfg(not(windows))]
     {
         let _ = (&app, &markdown, &timeout_secs);
-        Err("The Ephemeral tray handoff is Windows-only".to_string())
+        Err("The Ephemeral tray trigger is Windows-only".to_string())
     }
 }
 
