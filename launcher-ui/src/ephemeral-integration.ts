@@ -104,12 +104,12 @@ class ActionEphemeralWidget extends Widget {
             }
             const base64code = window.btoa(binary);
             
-            // Tauri: reuse the tray's own clipboard flow — Rust probes the
-            // tray's double-knock pipe trigger (knock 1 = side-effect-free
-            // ack), writes the document to the clipboard, knocks again to
-            // fire Run Clipboard (exactly like a ctrl+alt+x press), and
-            // harvests the results block from the clipboard. No tray (or no
-            // results in time): fall through to the paper-light swarm below.
+            // Tauri: manual sidecar flow with the locally installed tray —
+            // Rust parks the document on the clipboard, the user fires the
+            // tray's own Ctrl+Alt+X (or a tray-icon click), and Rust
+            // harvests the results block from the clipboard. No tray
+            // installed (or no results in time): fall through to the
+            // paper-light swarm below.
             var response = null;
             var tauri = (typeof window !== "undefined") ? (window.__TAURI__ || null) : null;
             if (tauri && typeof tauri.invoke === "function") {
@@ -122,7 +122,7 @@ class ActionEphemeralWidget extends Widget {
                 if (local) {
                     response = { ok: true, status: 200, json: async function () { return local; } };
                 } else {
-                    console.info("Ephemeral local run unavailable, using swarm:", localErr || "not installed");
+                    console.info("Ephemeral local run unavailable, using swarm (fire the Ephemeral tray with Ctrl+Alt+X to run locally):", localErr || "not installed");
                 }
             }
             if (!response) {
