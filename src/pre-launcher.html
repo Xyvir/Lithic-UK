@@ -259,12 +259,12 @@ class ActionEphemeralWidget extends Widget {
             }
             const base64code = window.btoa(binary);
             
-            // Tauri: reuse the tray's own clipboard flow — Rust writes the
-            // document to the clipboard, rings the tray's pipe trigger (a
-            // doorbell: opening the pipe makes the tray run the clipboard,
-            // exactly like a ctrl+alt+x press), and harvests the results
-            // block from the clipboard. No tray (or no results in time):
-            // fall through to the paper-light swarm below.
+            // Tauri: reuse the tray's own clipboard flow — Rust probes the
+            // tray's double-knock pipe trigger (knock 1 = side-effect-free
+            // ack), writes the document to the clipboard, knocks again to
+            // fire Run Clipboard (exactly like a ctrl+alt+x press), and
+            // harvests the results block from the clipboard. No tray (or no
+            // results in time): fall through to the paper-light swarm below.
             var response = null;
             var tauri = (typeof window !== "undefined") ? (window.__TAURI__ || null) : null;
             if (tauri && typeof tauri.invoke === "function") {

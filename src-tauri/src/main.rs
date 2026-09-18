@@ -112,13 +112,15 @@ fn write_text_path(path: String, text: String) -> Result<(), String> {
 }
 
 // ---- Ephemeral tray handoff ------------------------------------------------
-// The tauri app reuses the tray's own clipboard flow: Rust writes the
-// Markdown document to the clipboard, rings the tray's pipe trigger (a
-// local doorbell — opening the pipe makes the tray run the clipboard,
-// exactly like a ctrl+alt+x press), then polls the clipboard for the
-// results block the tray writes back. No sockets, no HTTP, no synthetic
-// input, and no payload in the pipe: the clipboard is the only data
-// channel. Trigger unreachable or no results in time -> the caller falls
+// The tauri app reuses the tray's own clipboard flow: Rust probes the
+// tray's double-knock pipe trigger (knock 1 = side-effect-free ack; the
+// tray only exists while it is listening, so the open itself is the
+// probe), writes the Markdown document to the clipboard, then knocks
+// again — the second knock within the tray's arm window fires Run
+// Clipboard exactly like a ctrl+alt+x press — and polls the clipboard
+// for the results the tray writes back. No sockets, no HTTP, no
+// synthetic input, and no payload in the pipe: the clipboard is the only
+// data channel. Probe failure or no results in time -> the caller falls
 // back to the paper-light swarm.
 
 #[derive(serde::Serialize)]
@@ -136,10 +138,12 @@ mod ephemeral_trigger {
             .unwrap_or_else(|_| "\\\\.\\pipe\\ephemeral-run".to_string())
     }
 
-    /// Ring the doorbell: open the pipe and immediately close it. The tray
-    /// treats a connection as "run the clipboard now"; zero bytes travel in
-    /// either direction.
-    pub fn ring() -> Result<(), String> {
+    /// Probe knock (knock 1): open and close the pipe. The tray acks by
+    /// merely existing — the open succeeds only while it is listening —
+    /// and arms its trigger; zero bytes travel in either direction. Failed
+    /// probe means no tray: the caller falls back without touching the
+    /// clipboard.
+    pub fn ping() -> Result<(), String> {
         let name = pipe_name();
         // Retry briefly: the tray serves one connection instance at a time,
         // so an eager client can land in the gap between instances.
@@ -163,6 +167,21 @@ mod ephemeral_trigger {
         }
         unreachable!("retry loop always returns")
     }
+
+    /// Fire knock (knock 2): one attempt, no retries — the tray's arm
+    /// window is open, so a rejected open means the window lapsed and the
+    /// caller simply re-probes and re-arms.
+    pub fn fire() -> Result<(), String> {
+        let name = pipe_name();
+        match std::fs::OpenOptions::new()
+            .read(true)
+            .write(true)
+            .open(&name)
+        {
+            Ok(_file) => Ok(()),
+            Err(error) => Err(format!("Ephemeral trigger knock rejected: {}", error)),
+        }
+    }
 }
 
 /// Run a Markdown document through the locally running Ephemeral tray using
@@ -182,28 +201,45 @@ fn ephemeral_tray_run(
         use std::time::{Duration, Instant};
         use tauri::ClipboardManager;
 
-        // 1) Park the document on the clipboard (the tray's input channel).
-        let mut clipboard = app.clipboard_manager();
-        clipboard
-            .write_text(markdown.clone())
-            .map_err(|error| format!("Clipboard write failed: {}", error))?;
-        // Give the clipboard a moment to settle before ringing.
-        std::thread::sleep(Duration::from_millis(300));
+        // 0) Probe knock first: no tray -> fall back before we ever touch
+        // the user's clipboard.
+        ephemeral_trigger::ping()?;
 
-        // 2) Ring the pipe trigger (the tray's ctrl+alt+x equivalent).
-        ephemeral_trigger::ring()?;
+        let arm_cycle = |markdown: &str| -> Result<(), String> {
+            let mut clipboard = app.clipboard_manager();
+            // 1) Park the document on the clipboard (the tray's input channel).
+            clipboard
+                .write_text(markdown.to_string())
+                .map_err(|error| format!("Clipboard write failed: {}", error))?;
+            // Give the clipboard a moment to settle before firing.
+            std::thread::sleep(Duration::from_millis(300));
+            // 2) Fire knock (the tray's ctrl+alt+x equivalent).
+            ephemeral_trigger::fire()
+        };
+
+        // The fire knock is a single attempt inside the tray's arm window;
+        // if the window lapsed anyway, re-probe and re-arm (a few cycles
+        // max — each costs about a second).
+        for cycle in 0..3 {
+            match arm_cycle(&markdown) {
+                Ok(()) => break,
+                Err(_) if cycle < 2 => ephemeral_trigger::ping()?,
+                Err(error) => return Err(error),
+            }
+        }
 
         // 3) Watch the clipboard for the results block.
+        let watcher = app.clipboard_manager();
         let timeout = Duration::from_secs(timeout_secs.unwrap_or(45).clamp(10, 120));
         let deadline = Instant::now() + timeout;
         while Instant::now() < deadline {
             std::thread::sleep(Duration::from_millis(500));
-            if let Ok(Some(text)) = clipboard.read_text() {
+            if let Ok(Some(text)) = watcher.read_text() {
                 if text != markdown {
                     // The tray writes the results in one shot; take a second
                     // read in case it is still finishing the write.
                     std::thread::sleep(Duration::from_millis(250));
-                    let settled = match clipboard.read_text() {
+                    let settled = match watcher.read_text() {
                         Ok(Some(text)) => text,
                         _ => text,
                     };

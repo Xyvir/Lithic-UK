@@ -80,9 +80,10 @@ test('ephemeral tauri branch routes runs through the clipboard + pipe trigger', 
   const tiddlers = ephemeralIntegrationTiddlers();
   const action = tiddlers.find((t) => t.title.includes('action-ephemeral'))!;
   assert.ok(action, 'action-ephemeral tiddler missing');
-  // Tauri runs invoke the Rust clipboard-handoff command (document parked on
-  // the clipboard, pipe doorbell fires Run Clipboard, results harvested from
-  // the clipboard) and fall back to the swarm fetch when it fails.
+  // Tauri runs invoke the Rust clipboard-handoff command (probe knock, doc
+  // parked on the clipboard, second knock fires Run Clipboard, results
+  // harvested from the clipboard) and fall back to the swarm fetch when it
+  // fails.
   assert.match(action.text, /invoke\("ephemeral_tray_run", \{ markdown: markdownPayload, timeoutSecs: 45 \}\)/);
   assert.match(action.text, /Ephemeral local run unavailable, using swarm/);
   // The swarm path is unchanged: bastion discovery from swarm.json.
