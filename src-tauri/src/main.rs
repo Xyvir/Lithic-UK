@@ -111,110 +111,6 @@ fn write_text_path(path: String, text: String) -> Result<(), String> {
     fs::write(&path, text).map_err(|error| error.to_string())
 }
 
-// ---- Ephemeral tray handoff ------------------------------------------------
-// Manual sidecar integration with the Ephemeral tray, using only surfaces
-// that already passed Windows Defender on both sides: Rust checks that the
-// tray is installed (exact known paths, nothing executed), parks the
-// Markdown document on the clipboard, and polls the clipboard (bounded by
-// `timeout_secs`) for the results. The user (or anything else) triggers the
-// run manually — the tray's own Ctrl+Alt+X hotkey or a tray-icon click —
-// exactly as they would when running Ephemeral by hand. No process
-// spawning, no synthetic input, no pipes, no sockets. No results in time
-// -> the caller falls back to the paper-light swarm.
-
-#[derive(serde::Serialize)]
-struct EphemeralRunResult {
-    stdout: String,
-    stderr: String,
-}
-
-#[cfg(windows)]
-mod ephemeral_sidecar {
-    /// Whether an Ephemeral tray is installed, by exact-path existence
-    /// checks only: the two StartupManager install copies, then next to
-    /// Lithic.exe itself. Nothing is executed, scanned, or probed.
-    pub fn tray_installed() -> bool {
-        let mut candidates = Vec::new();
-        if let Ok(local) = std::env::var("LOCALAPPDATA") {
-            let local = std::path::PathBuf::from(local);
-            candidates.push(local.join("Ephemeral-Distributed\\Ephemeral-Distributed.exe"));
-            candidates.push(local.join("Ephemeral\\Ephemeral.exe"));
-        }
-        if let Ok(exe) = std::env::current_exe() {
-            if let Some(dir) = exe.parent() {
-                candidates.push(dir.join("Ephemeral.exe"));
-            }
-        }
-        candidates.iter().any(|path| path.is_file())
-    }
-}
-
-/// Run a Markdown document through the locally installed Ephemeral tray
-/// using the manual sidecar flow: the document goes to the clipboard and
-/// the clipboard is polled (bounded by `timeout_secs`) for the results
-/// after the user fires the tray's own Ctrl+Alt+X hotkey (or a tray-icon
-/// click). Leaving the results on the clipboard is the tray's own designed
-/// behavior (its clipboard-history workflow), so contents are not restored.
-#[tauri::command]
-fn ephemeral_tray_run(
-    app: tauri::AppHandle,
-    markdown: String,
-    timeout_secs: Option<u64>,
-) -> Result<EphemeralRunResult, String> {
-    #[cfg(windows)]
-    {
-        use std::time::{Duration, Instant};
-        use tauri::ClipboardManager;
-
-        // The button is only offered when a tray is installed, but keep the
-        // exact-path check as the gate: no tray -> fall back before we ever
-        // touch the user's clipboard.
-        if !ephemeral_sidecar::tray_installed() {
-            return Err("No Ephemeral tray installation found".to_string());
-        }
-
-        let mut clipboard = app.clipboard_manager();
-        // 1) Park the document on the clipboard (the tray's input channel).
-        clipboard
-            .write_text(markdown.clone())
-            .map_err(|error| format!("Clipboard write failed: {}", error))?;
-        // Give the clipboard a moment to settle before the user fires.
-        std::thread::sleep(Duration::from_millis(300));
-
-        // 2) Watch the clipboard for the results block once the user runs
-        // the tray (hotkey or tray click).
-        let timeout = Duration::from_secs(timeout_secs.unwrap_or(45).clamp(10, 120));
-        let deadline = Instant::now() + timeout;
-        while Instant::now() < deadline {
-            std::thread::sleep(Duration::from_millis(500));
-            if let Ok(Some(text)) = clipboard.read_text() {
-                if text != markdown {
-                    // The tray writes the results in one shot; take a second
-                    // read in case it is still finishing the write.
-                    std::thread::sleep(Duration::from_millis(250));
-                    let settled = match clipboard.read_text() {
-                        Ok(Some(text)) => text,
-                        _ => text,
-                    };
-                    return Ok(EphemeralRunResult {
-                        stdout: settled,
-                        stderr: String::new(),
-                    });
-                }
-            }
-        }
-        Err(format!(
-            "No results arrived on the clipboard within {}s — fire the Ephemeral tray (Ctrl+Alt+X or its tray icon) while the run is waiting",
-            timeout.as_secs()
-        ))
-    }
-    #[cfg(not(windows))]
-    {
-        let _ = (&app, &markdown, &timeout_secs);
-        Err("The Ephemeral tray handoff is Windows-only".to_string())
-    }
-}
-
 /// Canonical per-user install target for the monolith executable: visible
 /// Documents\Lithic\Lithic.exe, falling back out of the way when Documents
 /// is unavailable. Shared by install and status queries.
@@ -888,7 +784,6 @@ fn main() {
             install_status,
             install_offer_status,
             set_install_dismissed,
-            ephemeral_tray_run,
             read_recents_sidecar,
             write_recents_sidecar,
             git_sync_setup,

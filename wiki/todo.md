@@ -129,7 +129,7 @@ Tracked per-fragment in `launcher-ui/src/legacy-fragments.ts`; statuses are asse
 - [ ] Create "Lithic for Teams" backend version based on Multi-Wiki Server.
 
 - Tauri App Ideas:
-    - [x] Add 'run code' button next to copy code that hooks into ephemeral.exe (shipped; local-tray/paperlite backend selection is the queued ephemeral pass above)
+    - [x] Add 'run code' button next to copy code (webapp/Tauri use paper-light; self-host uses its private same-origin API; Ephemeral.exe remains an invisible manual clipboard sidecar)
     - [x] Allow file associations for *.txt; *.py, *.md etc so it can act as a lightweight text editor for local files. (shipped for *.lith *.md *.txt *.html *.json *.tid *.ipynb)
     - [ ] Iroh P2P Sync
 - [ ] Add local 2fa totp for backend wiki access?

@@ -348,35 +348,16 @@ class ActionEphemeralWidget extends Widget {
             }
             const base64code = window.btoa(binary);
             
-            // Tauri: manual sidecar flow with the locally installed tray —
-            // Rust parks the document on the clipboard, the user fires the
-            // tray's own Ctrl+Alt+X (or a tray-icon click), and Rust
-            // harvests the results block from the clipboard. No tray
-            // installed (or no results in time): fall through to the
-            // paper-light swarm below.
-            var response = null;
-            var tauri = (typeof window !== "undefined") ? (window.__TAURI__ || null) : null;
-            if (tauri && typeof tauri.invoke === "function") {
-                var local = null, localErr = null;
-                try {
-                    local = await tauri.invoke("ephemeral_tray_run", { markdown: markdownPayload, timeoutSecs: 45 });
-                } catch (invokeErr) {
-                    localErr = String((invokeErr && invokeErr.message) || invokeErr);
-                }
-                if (local) {
-                    response = { ok: true, status: 200, json: async function () { return local; } };
-                } else {
-                    console.info("Ephemeral local run unavailable, using swarm (fire the Ephemeral tray with Ctrl+Alt+X to run locally):", localErr || "not installed");
-                }
-            }
-            if (!response) {
-                const endpoint = await _resolveEphemeralEndpoint();
-                response = await fetch(endpoint, {
-                    method: 'POST',
-                    headers: {'Content-Type': 'application/json'},
-                    body: JSON.stringify({ document_blob: base64code, timeout: 300 })
-                });
-            }
+            // Tauri and webapp use the paper-light public swarm. The tray
+            // remains a completely invisible, user-controlled sidecar:
+            // users copy code, press its existing hotkey, and paste results
+            // wherever they choose. Lithic never detects or controls it.
+            const endpoint = await _resolveEphemeralEndpoint();
+            const response = await fetch(endpoint, {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({ document_blob: base64code, timeout: 300 })
+            });
 
             // Surface HTTP errors instead of silently swallowing them: the
             // bastion answers 422 with {"detail": "..."} when a job cannot be

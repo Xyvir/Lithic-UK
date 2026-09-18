@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onMount } from 'svelte';
-  import { ephemeralModeFor, type LauncherMode } from './mode';
+  import type { LauncherMode } from './mode';
   import { createFileBridge, tauriInvoke } from './file-bridge';
   import { isScratchFileName, resolveScratchKind, type ScratchKind } from './scratch-editor';
   import { pwaInstall, promptPwaInstall } from './pwa-install';
@@ -736,14 +736,14 @@
     sessionStorage.setItem('lithic-launcher-file', JSON.stringify(handoff));
     const scratchKind: ScratchKind | null = resolveScratchKind(safeName);
     const scratchMode = isScratch && scratchKind ? scratchKind : undefined;
-    // Local mode always injects the Ephemeral integration on every mount,
-    // then drains whatever the user queued via drop / share URL / intro.
+    // Inject the Ephemeral integration on every wiki mount, then drain
+    // whatever the user queued via drop / share URL / intro.
     // The engine boots in place (document.open/write/close), keeping the
     // launcher URL in the address bar and preserving window globals; the
     // globals are also injected defensively so the Ephemeral widget
     // (__EPHEMERAL_MODE__) works regardless of the boot path.
     await bootLegacyWiki(handoff, [...pendingImports, ...ephemeralIntegrationTiddlers(), ...extraTiddlers], {
-      __EPHEMERAL_MODE__: ephemeralModeFor(mode),
+      __EPHEMERAL_MODE__: mode === 'self-host' ? 'self-host' : 'paper-light',
       __LITHIC_LAUNCHER_MODE__: mode
     }, { driftedFromHead, scratchMode });
     pendingImports = [];
@@ -1153,7 +1153,7 @@
       { title: '$:/state/DisableAutoSaver', text: 'yes' },
       ...ephemeralIntegrationTiddlers()
     ], {
-      __EPHEMERAL_MODE__: ephemeralModeFor(mode),
+      __EPHEMERAL_MODE__: mode === 'self-host' ? 'self-host' : 'paper-light',
       __LITHIC_LAUNCHER_MODE__: mode
     });
   }

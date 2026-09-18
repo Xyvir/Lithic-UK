@@ -76,19 +76,14 @@ test('ephemeral run-code button is suppressed on txt/untyped codeblocks', () => 
   assert.match(override.text, /\[<language>match\[jspython\]\]/);
 });
 
-test('ephemeral tauri branch routes runs through the manual sidecar flow', () => {
+test('ephemeral runner uses the normal API request path without local tray integration', () => {
   const tiddlers = ephemeralIntegrationTiddlers();
   const action = tiddlers.find((t) => t.title.includes('action-ephemeral'))!;
   assert.ok(action, 'action-ephemeral tiddler missing');
-  // Tauri runs invoke the Rust manual-sidecar command (doc parked on the
-  // clipboard, the user fires the tray's own Ctrl+Alt+X, results harvested
-  // from the clipboard) and fall back to the swarm fetch when it fails.
-  assert.match(action.text, /invoke\("ephemeral_tray_run", \{ markdown: markdownPayload, timeoutSecs: 45 \}\)/);
-  assert.match(action.text, /Ephemeral local run unavailable, using swarm/);
-  // The swarm path is unchanged: bastion discovery from swarm.json.
+  assert.match(action.text, /const endpoint = await _resolveEphemeralEndpoint\(\);/);
+  assert.match(action.text, /fetch\(endpoint, \{/);
+  assert.doesNotMatch(action.text, /ephemeral_tray_run|__TAURI__|127\.0\.0\.1|localhost:878|__EPHEMERAL_LOCAL_BASE__/);
   assert.match(action.text, /No bastion server found in swarm\.json/);
-  // No loopback probing anywhere: the Defender-flagging pattern stays gone.
-  assert.doesNotMatch(action.text, /127\.0\.0\.1|localhost:878|__EPHEMERAL_LOCAL_BASE__/);
 });
 
 const pinCache = JSON.stringify([
