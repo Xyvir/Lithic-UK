@@ -151,27 +151,43 @@ fn ephemeral_exe_path() -> Option<PathBuf> {
 
 #[cfg(windows)]
 mod ephemeral_tray {
-    const VK_CONTROL: u8 = 0x11;
-    const VK_MENU: u8 = 0x12; // Alt
-    const VK_X: u8 = 0x58;
+    const VK_CONTROL: u32 = 0x11;
+    const VK_MENU: u32 = 0x12; // Alt
+    const VK_X: u32 = 0x58;
     const KEYEVENTF_KEYUP: u32 = 0x0002;
+    const MAPVK_VK_TO_VSC: u32 = 0;
 
     #[link(name = "user32")]
     extern "system" {
         fn keybd_event(b_vk: u8, b_scan: u8, dw_flags: u32, dw_extra_info: usize);
+        fn MapVirtualKeyW(u_code: u32, u_map_type: u32) -> u32;
+    }
+
+    fn tap(vk: u32, keyup: bool) {
+        // The scan code matters: the tray's keyboard hook (the `keyboard`
+        // library) matches hotkeys by scan code, and a scan-0 keystroke is
+        // nameless and ignored. MapVirtualKey is the same translation the
+        // library itself applies before injecting.
+        let (scan, flags) = unsafe {
+            (
+                MapVirtualKeyW(vk, MAPVK_VK_TO_VSC) as u8,
+                if keyup { KEYEVENTF_KEYUP } else { 0 },
+            )
+        };
+        unsafe { keybd_event(vk as u8, scan, flags, 0) };
     }
 
     /// Send the tray's Run Clipboard hotkey (ctrl+alt+x) as real global
-    /// keystrokes — indistinguishable from the user pressing it. The tray's
-    /// keyboard hook sees the combo regardless of which window has focus.
+    /// keystrokes — properly translated, paced like a human chord, and
+    /// indistinguishable at the hook level from the user pressing it.
     pub(super) fn send_run_hotkey() {
-        unsafe {
-            keybd_event(VK_CONTROL, 0, 0, 0);
-            keybd_event(VK_MENU, 0, 0, 0);
-            keybd_event(VK_X, 0, 0, 0);
-            keybd_event(VK_X, 0, KEYEVENTF_KEYUP, 0);
-            keybd_event(VK_MENU, 0, KEYEVENTF_KEYUP, 0);
-            keybd_event(VK_CONTROL, 0, KEYEVENTF_KEYUP, 0);
+        for &vk in &[VK_CONTROL, VK_MENU, VK_X] {
+            tap(vk, false);
+            std::thread::sleep(std::time::Duration::from_millis(15));
+        }
+        for &vk in &[VK_X, VK_MENU, VK_CONTROL] {
+            tap(vk, true);
+            std::thread::sleep(std::time::Duration::from_millis(15));
         }
     }
 }
@@ -208,21 +224,27 @@ fn ephemeral_tray_run(
 
         ephemeral_tray::send_run_hotkey();
 
-        let timeout = Duration::from_secs(timeout_secs.unwrap_or(45).clamp(5, 120));
-        let deadline = Instant::now() + timeout;
+        let timeout = Duration::from_secs(timeout_secs.unwrap_or(45).clamp(10, 120));
+        let started = Instant::now();
         let mut result_text: Option<String> = None;
-        while Instant::now() < deadline {
-            std::thread::sleep(Duration::from_millis(600));
-            if let Ok(Some(text)) = clipboard.read_text() {
-                if text != markdown {
-                    // The tray writes the results in one shot; take a second
-                    // read in case it is still finishing the write.
-                    std::thread::sleep(Duration::from_millis(250));
-                    result_text = Some(match clipboard.read_text() {
-                        Ok(Some(settled)) => settled,
-                        _ => text,
-                    });
-                    break;
+        // Send the chord, then watch the clipboard; if nothing consumes it
+        // (tray busy, a stray modifier held down), resend periodically until
+        // the timeout gives up.
+        while result_text.is_none() && started.elapsed() < timeout {
+            ephemeral_tray::send_run_hotkey();
+            let watch = Instant::now() + Duration::from_secs(12).min(timeout);
+            while result_text.is_none() && Instant::now() < watch && started.elapsed() < timeout {
+                std::thread::sleep(Duration::from_millis(600));
+                if let Ok(Some(text)) = clipboard.read_text() {
+                    if text != markdown {
+                        // The tray writes the results in one shot; take a second
+                        // read in case it is still finishing the write.
+                        std::thread::sleep(Duration::from_millis(250));
+                        result_text = Some(match clipboard.read_text() {
+                            Ok(Some(settled)) => settled,
+                            _ => text,
+                        });
+                    }
                 }
             }
         }
