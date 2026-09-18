@@ -140,28 +140,27 @@ mod ephemeral_trigger {
 
     /// Probe knock (knock 1): open and close the pipe. The tray acks by
     /// merely existing — the open succeeds only while it is listening —
-    /// and arms its trigger; zero bytes travel in either direction. Failed
-    /// probe means no tray: the caller falls back without touching the
-    /// clipboard.
+    /// and arms its trigger; zero bytes travel in either direction. A
+    /// missing tray is detected in well under a second (a couple of quick
+    /// retries only cover the millisecond gap between pipe instances), so
+    /// the caller falls back to the swarm without touching the clipboard.
     pub fn ping() -> Result<(), String> {
         let name = pipe_name();
-        // Retry briefly: the tray serves one connection instance at a time,
-        // so an eager client can land in the gap between instances.
-        for attempt in 0..20 {
+        for attempt in 0..4 {
             match std::fs::OpenOptions::new()
                 .read(true)
                 .write(true)
                 .open(&name)
             {
                 Ok(_file) => return Ok(()),
-                Err(_) if attempt < 19 => {
-                    std::thread::sleep(Duration::from_millis(100 + attempt * 25))
+                Err(_) if attempt < 3 => {
+                    std::thread::sleep(Duration::from_millis(60))
                 }
-                Err(error) => {
-                    return Err(format!(
-                        "Ephemeral pipe trigger not reachable (is the distributed tray running?): {}",
-                        error
-                    ))
+                Err(_) => {
+                    return Err(
+                        "Ephemeral pipe trigger not reachable (is the distributed tray running?)"
+                            .to_string(),
+                    )
                 }
             }
         }
