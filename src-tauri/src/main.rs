@@ -289,10 +289,29 @@ fn register_open_with(exe_path: &str) -> Result<(), String> {
     Ok(())
 }
 
+/// A `git` command that never shows a console window.
+///
+/// On Windows a foreground `git` spawns its own console, which flashes on
+/// screen. The launcher polls sync status while a file is mounted and commits
+/// on every save, so that flash repeated every few seconds and looked like the
+/// app was opening terminals by itself. `CREATE_NO_WINDOW` gives the child a
+/// hidden console (grandchildren such as git-remote-https inherit it) while
+/// stdout/stderr stay captured.
+fn git_command() -> std::process::Command {
+    let mut command = std::process::Command::new("git");
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+        command.creation_flags(CREATE_NO_WINDOW);
+    }
+    command
+}
+
 /// Run `git` in `dir`, returning trimmed combined output. Stderr is merged
 /// so git's human-readable failures surface directly in command errors.
 fn git_run(dir: &std::path::Path, args: &[&str]) -> Result<String, String> {
-    let output = std::process::Command::new("git")
+    let output = git_command()
         .args(args)
         .current_dir(dir)
         .output()

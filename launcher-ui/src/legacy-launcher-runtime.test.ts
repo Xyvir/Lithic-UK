@@ -3,9 +3,8 @@ import test from 'node:test';
 import { resolveEngineCandidates, bootLegacyWiki, buildEngineHtml } from './legacy-launcher-runtime.ts';
 
 test('resolves lithic.html as a sibling for file URLs', () => {
-  assert.deepEqual(resolveEngineCandidates('file:///C:/Lithic/src/pre-launcher.html'), [
+  assert.deepEqual(resolveEngineCandidates('file:///C:/Lithic/src/launcher.html'), [
     'file:///C:/Lithic/src/lithic.html',
-    'file:///C:/Lithic/src/pre-launcher-engine.html',
     'file:///C:/Lithic/src/src/lithic.html',
     'file:///lithic.html',
     'file:///src/lithic.html'
@@ -13,11 +12,11 @@ test('resolves lithic.html as a sibling for file URLs', () => {
 });
 
 test('resolves lithic.html as a sibling for hosted URLs', () => {
-  assert.equal(resolveEngineCandidates('https://example.test/src/pre-launcher.html')[0], 'https://example.test/src/lithic.html');
+  assert.equal(resolveEngineCandidates('https://example.test/src/launcher.html')[0], 'https://example.test/src/lithic.html');
 });
 
 test('keeps the canonical online engine as the recovery source', () => {
-  assert.equal(resolveEngineCandidates('https://example.test/pre-launcher.html').length, 5);
+  assert.equal(resolveEngineCandidates('https://example.test/launcher.html').length, 4);
 });
 
 const ENGINE_STUB = '<html><head></head><body><script class="tiddlywiki-tiddler-store" type="application/json">[]</script></body></html>';
@@ -103,7 +102,7 @@ test('bootLegacyWiki boots the engine in place so the launcher URL stays in the 
   const savedCreateObjectURL = URL.createObjectURL;
 
   const locationMock = {
-    href: 'file:///src/pre-launcher.html',
+    href: 'file:///src/launcher.html',
     replace(url: string) { blobNavigated = true; }
   };
   globalAny.location = locationMock;
@@ -197,6 +196,130 @@ test('scratch mounts tag the root tiddler with Dogear for the story river', () =
   const taggedRoot = readStore(taggedHtml).find((tiddler) => tiddler.title === 'tagged');
   assert.equal(taggedRoot?.tags, 'Mine');
   assert.equal(taggedRoot?.['lithic-tid-injected'], 'type');
+});
+
+/**
+ * Every inline script the launcher injects is generated from a template
+ * literal, so a stray backslash silently produces a document that throws on
+ * boot. Parsing each one here is the cheapest way to catch that class of bug.
+ */
+function inlineScriptBodies(html: string): string[] {
+  const bodies: string[] = [];
+  const pattern = /<script([^>]*)>([\s\S]*?)<\/script>/g;
+  let match: RegExpExecArray | null;
+  while ((match = pattern.exec(html)) !== null) {
+    const attributes = match[1];
+    if (/\bsrc=/.test(attributes)) continue;
+    if (/type="application\/json"/.test(attributes)) continue; // the tiddler store
+    bodies.push(match[2]);
+  }
+  return bodies;
+}
+
+function assertInjectedScriptsParse(html: string, label: string): string[] {
+  const bodies = inlineScriptBodies(html);
+  assert.ok(bodies.length > 0, `${label}: expected injected scripts`);
+  for (const body of bodies) {
+    try {
+      new Function(body);
+    } catch (error) {
+      assert.fail(`${label}: injected script does not parse: ${(error as Error).message}\n${body.slice(0, 400)}`);
+    }
+  }
+  return bodies;
+}
+
+const REMOTE_TARGET = {
+  fileName: 'my wiki.lith',
+  baseText: 'title: Home\ntype: \n\none\ntwo\n',
+  digest: 'abc123digest',
+  apiAvailable: true
+};
+
+test('every injected bootstrap script parses for every launch shape', () => {
+  assertInjectedScriptsParse(buildEngineHtml(ENGINE_STUB, { name: 'x.lith', text: '' }), 'plain lith');
+  assertInjectedScriptsParse(buildEngineHtml(ENGINE_STUB, { name: 'x.txt', text: '' }, [], {}, { scratchMode: 'text' }), 'scratch text');
+  assertInjectedScriptsParse(buildEngineHtml(ENGINE_STUB, { name: 'x.tid', text: '' }, [], {}, { scratchMode: 'tid' }), 'scratch tid');
+  assertInjectedScriptsParse(buildEngineHtml(ENGINE_STUB, { name: 'x.ipynb', text: '' }, [], {}, { scratchMode: 'ipynb' }), 'scratch ipynb');
+  assertInjectedScriptsParse(buildEngineHtml(ENGINE_STUB, { name: 'x.html', text: '' }, [], {}, { isHtmlMode: true }), 'html monolith');
+  assertInjectedScriptsParse(
+    buildEngineHtml(ENGINE_STUB, { name: 'my wiki.lith', text: '' }, [], {}, { remote: REMOTE_TARGET }),
+    'self-host remote'
+  );
+  assertInjectedScriptsParse(
+    buildEngineHtml(ENGINE_STUB, { name: 'my wiki.lith', text: '' }, [], {}, { remote: { ...REMOTE_TARGET, readOnly: true } }),
+    'self-host remote read-only'
+  );
+});
+
+test('a read-only remote mount claims no lock and installs no saver', () => {
+  const html = buildEngineHtml(ENGINE_STUB, { name: 'my wiki.lith', text: '' }, [], {}, {
+    remote: { ...REMOTE_TARGET, readOnly: true }
+  });
+
+  // No save target at all: it compiles down to the same inert `null` a local
+  // file gets, so the remote saver is unreachable even by accident.
+  assert.match(html, /var remote = null;/);
+  assert.ok(!html.includes('__LITHIC_LINE_PATCH__ = { create: create'), 'read-only ships no diff runtime');
+  assert.ok(!html.includes('window["__LITHIC_REMOTE_BASE__"] = '), 'no base text to diff against');
+  assert.ok(!html.includes('window["__LITHIC_REMOTE_DIGEST__"] = '), 'no digest to send');
+  // The custom saver is the only thing that writes back, so it is gated off.
+  assert.match(html, /if \(!true\) \{\n      root\.\$tw\.customSaver = \{ save: save \};\n    \}/);
+  // No lock-release tiddler either: this session holds nothing to release.
+  assert.ok(
+    !readStore(html).some((tiddler) => tiddler.title === '$:/lithic/startup/webdav-utils.js'),
+    'read-only mounts do not inject the lock cleanup tiddler'
+  );
+  // The writable path is untouched.
+  const writable = buildEngineHtml(ENGINE_STUB, { name: 'my wiki.lith', text: '' }, [], {}, { remote: REMOTE_TARGET });
+  assert.match(writable, /if \(!false\) \{\n      root\.\$tw\.customSaver = \{ save: save \};\n    \}/);
+});
+
+test('self-host mounts inject the patch saver, base digest and lock release', () => {
+  const html = buildEngineHtml(ENGINE_STUB, { name: 'my wiki.lith', text: '' }, [], {}, { remote: REMOTE_TARGET });
+
+  // The diff engine ships with the document; the mounted wiki builds its own patch.
+  assert.match(html, /__LITHIC_LINE_PATCH__ = \{ create: create/);
+  // The base text and digest arrive as globals so a large wiki is not embedded twice.
+  assert.match(html, /window\["__LITHIC_REMOTE_BASE__"\] = "title: Home/);
+  assert.match(html, /window\["__LITHIC_REMOTE_DIGEST__"\] = "abc123digest";/);
+  // Target identity: webdav base for the fallback PUT, api base for patches.
+  assert.match(html, /var remote = \{"fileName":"my wiki\.lith","base":"\/sync\/","apiBase":"\/api\/lithic\/","api":true\}/);
+  // The patch is the preferred path; the whole-file PUT stays the fallback.
+  assert.match(html, /function saveRemote\(tw, callback\)/);
+  assert.match(html, /function remotePut\(tw, lithText, jsonText, callback\)/);
+  assert.match(html, /patchApi\.create\(baseText, lithText, remote\.fileName\)/);
+  assert.match(html, /patchApi\.worthSending\(patch, lithText\)/);
+  // A byte-identical wiki must send nothing at all.
+  assert.match(html, /if \(patch === ''\) \{ callback\(null\); return; \}/);
+  // The apply body frames the patch the way the CGI reads it.
+  assert.match(html, /remote\.fileName \+ '\\n' \+ digest \+ '\\n' \+ patch/);
+  // Remote saves still feed the local delta-based version history.
+  assert.match(html, /saveSearchCache\(remote\.fileName, jsonText\)/);
+  // Engine-side lock release, excluded from saves by the base filter.
+  const titles = readStore(html).map((tiddler) => tiddler.title);
+  assert.ok(titles.includes('$:/lithic/startup/webdav-utils.js'), 'webdav lock cleanup tiddler is injected');
+});
+
+test('non-self-host mounts keep the patch saver out of the document', () => {
+  const html = buildEngineHtml(ENGINE_STUB, { name: 'wiki.lith', text: '' });
+  assert.match(html, /var remote = null;/);
+  assert.ok(!html.includes('__LITHIC_LINE_PATCH__ = { create: create'), 'no diff runtime for local files');
+  // The remote saver is compiled in but gated behind the `remote` flag, so a
+  // local mount always falls through to the file-handle / Tauri write path.
+  assert.match(html, /if \(remote\) \{\n        saveRemote\(tw, callback\);\n        return true;\n      \}/);
+  assert.ok(!readStore(html).some((tiddler) => tiddler.title === '$:/lithic/startup/webdav-utils.js'), 'no lock tiddler for local files');
+});
+
+test('instances without the patch API still mount, but save whole files', () => {
+  const html = buildEngineHtml(ENGINE_STUB, { name: 'old.lith', text: '' }, [], {}, {
+    remote: { ...REMOTE_TARGET, apiAvailable: false }
+  });
+  assert.match(html, /"api":false/);
+  // The runtime is still injected (the branch is data-driven), and the guard
+  // routes everything to the legacy whole-file PUT.
+  assert.match(html, /if \(!remote\.api \|\| !patchApi \|\| !digest\) \{ remotePut\(tw, lithText, jsonText, callback\); return; \}/);
+  assertInjectedScriptsParse(html, 'legacy self-host');
 });
 
 test('ipynb scratch mode injects the notebook runtime and parses notebook cells', () => {

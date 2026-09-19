@@ -21,11 +21,17 @@ test('all legacy responsibilities have an explicit migration state', () => {
   assert.ok(launcherFragments.some((fragment) => fragment.id === 'ui.pwa'));
 });
 
-test('webapp-mode parity fragments are migrated while WebDAV/Tauri remain pending', () => {
+test('every launcher fragment is migrated except the deployment bootstrap', () => {
   const byId = new Map(launcherFragments.map((fragment) => [fragment.id, fragment]));
   assert.equal(byId.get('runtime.pending-imports')?.status, 'migrated');
   assert.equal(byId.get('ui.pending-imports')?.status, 'migrated');
   assert.equal(byId.get('ui.intro')?.status, 'migrated');
-  assert.equal(byId.get('runtime.webdav')?.status, 'pending');
-  assert.equal(byId.get('ui.emoji')?.status, 'pending');
+  // Self-host parity: WebDAV locking/saving and the emoji instance icon are
+  // ported, so nothing is left 'pending' any more.
+  assert.equal(byId.get('runtime.webdav')?.status, 'migrated');
+  assert.equal(byId.get('ui.emoji')?.status, 'migrated');
+  const pending = launcherFragments.filter((fragment) => fragment.status === 'pending');
+  assert.deepEqual(pending.map((fragment) => fragment.id), []);
+  const extracted = launcherFragments.filter((fragment) => fragment.status === 'extracted');
+  assert.deepEqual(extracted.map((fragment) => fragment.id), ['document.bootstrap']);
 });

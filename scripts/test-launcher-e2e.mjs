@@ -3,8 +3,8 @@ import { resolve } from 'node:path';
 import assert from 'node:assert/strict';
 import puppeteer from 'puppeteer';
 
-const preLauncherHtml = readFileSync('src/pre-launcher.html', 'utf8');
-const testHtmlPath = resolve('src/test-prelauncher-e2e.html');
+const launcherHtml = readFileSync('src/launcher.html', 'utf8');
+const testHtmlPath = resolve('src/test-launcher-e2e.html');
 const profileDir = resolve('scratch/chrome-test-profile-e2e');
 
 // Drive everything from the Puppeteer side: mounting a wiki boots the engine
@@ -34,7 +34,7 @@ async function poll(fn, what, timeoutMs = 120000) {
 }
 
 try {
-  writeFileSync(testHtmlPath, preLauncherHtml, 'utf8');
+  writeFileSync(testHtmlPath, launcherHtml, 'utf8');
 
   const page = await browser.newPage();
   const pageErrors = [];
@@ -130,7 +130,7 @@ try {
     typedName: JSON.parse(sessionStorage.getItem('lithic-active-file') || 'null')?.name || null
   }));
 
-  console.log('E2E Pre-Launcher Test Results:\n', JSON.stringify(result, null, 2));
+  console.log('E2E Launcher Test Results:\n', JSON.stringify(result, null, 2));
 
   assert.equal(result.hasCustomSaver, true);
   const customSaver = result.savers.find(s => s.name === 'custom');
@@ -155,7 +155,7 @@ try {
     !text.includes('Access to manifest')
   ), []);
 
-  console.log('\n✔ E2E Pre-Launcher Save-As Parity Test Passed!');
+  console.log('\n✔ E2E Launcher Save-As Parity Test Passed!');
 } finally {
   await browser.close();
   unlinkSync(testHtmlPath);

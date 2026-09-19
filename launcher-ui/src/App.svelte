@@ -4,14 +4,16 @@
   import { createFileBridge, tauriInvoke } from './file-bridge';
   import { isScratchFileName, resolveScratchKind, type ScratchKind } from './scratch-editor';
   import { pwaInstall, promptPwaInstall } from './pwa-install';
-  import { bootLegacyWiki, bootLegacyHtml } from './legacy-launcher-runtime';
+  import { bootLegacyWiki, bootLegacyHtml, type RemoteTarget } from './legacy-launcher-runtime';
+  import { EMOJI_LIST, uploadInstanceIcon, clearInstanceIcon, emojiFaviconUrl, applyFavicon, bustIconCache, readInstanceEmoji, saveInstanceEmoji, clearInstanceEmoji } from './instance-icon';
   import { getRecentFiles, addRecentFile, removeRecentFile, clearAllRecentFiles, purgeOldestCachesIfNeeded, idb, getSearchCacheText, listWikiVersions, wikiHasHistory, downloadWikiVersion, deleteWikiHistory, getDirtyState, clearDirtyState, listDirtyRecoveries, isWikiDriftedFromHead, isInstallDismissed, setInstallDismissed, type RecentEntry } from './storage';
-  import { readBookmarks, saveBookmark, removeBookmark, verifyInstanceUrl, normalizeInstanceUrl } from './bookmarks';
+  import { readBookmarkEntries, saveBookmark, removeBookmark, setBookmarkIcon, refreshBookmarkIcon, verifyInstanceUrl, normalizeInstanceUrl, instanceLabel, type BookmarkEntry } from './bookmarks';
+  import { fetchRemoteFiles, fetchRemoteWiki, probePatchApi, createLockHeartbeat, readRemoteLock, uploadRemoteFile, webdavUrl, resolveSessionId, lithUploadName, type WebdavFile } from './webdav';
   import { searchCachedWikis } from './cache-search';
   import { parseDeviceCode, parseDevicePoll, pollDelayMs, formatUserCode, generateRepoName, partitionRepos } from './github-device';
   import { serializeJsonToLith } from './lithic-format';
   // Inlined as a base64 data URL (assetsInlineLimit: Infinity) so the brand
-  // mark survives when pre-launcher.html is bundled into the Tauri app.
+  // mark survives when launcher.html is bundled into the Tauri app.
   import mstile150 from './mstile-150x150.png';
   import {
     parsePayloadText,
@@ -41,8 +43,30 @@
   let recentFiles: Array<RecentEntry | { name: string; path?: string; text?: string; handle?: any }> = [];
   let search = '';
   let mountError = '';
-  let bookmarks: string[] = [];
+  let bookmarks: BookmarkEntry[] = [];
   let showBookmarkModal = false;
+
+  // --- Self-host (WebDAV listing + the git-backed patch API) ---
+  // remoteFiles is the server's .lith listing; activeRemote is the wiki this
+  // tab currently has open over the network, which drives the REMOTE pill and
+  // the presence-lock heartbeat.
+  let remoteFiles: WebdavFile[] = [];
+  let remoteBusy = false;
+  let remoteError = '';
+  let remoteNotice = '';
+  let patchApiAvailable = false;
+  let activeRemote: { name: string; digest: string; api: boolean } | null = null;
+  // Set when the server reports a live lock held by someone else: the open is
+  // paused on a choice (read-only / ignore / cancel) instead of guessing.
+  let remoteCollision: { name: string; who: string } | null = null;
+  let lockHeartbeat: ReturnType<typeof createLockHeartbeat> | null = null;
+
+  // --- Instance icon (emoji favicon) ---
+  let brandEmoji = '';
+  let showEmojiPicker = false;
+  let emojiChoice = '';
+  let emojiBusy = false;
+  let emojiStatus = '';
   let bookmarkInput = '';
   let bookmarkError = '';
   let bookmarkInputElement: HTMLInputElement;
@@ -370,6 +394,10 @@
       gitSyncConnectedRepo = '';
       return;
     }
+    // Each poll spawns a real `git`; while the window is hidden nobody can see
+    // the icon, so skip the work until it is shown again (visibilitychange
+    // triggers an immediate refresh below).
+    if (typeof document !== 'undefined' && document.hidden) return;
     tauriInvoke<{ connected: boolean; repo: string } | null>('git_sync_status', { path: target })
       .then((connected) => {
         gitSyncConnectedRepo = connected ? connected.repo : '';
@@ -528,6 +556,10 @@
     return name.toLowerCase().includes(search.toLowerCase()) || Boolean(cacheSearchMatches[name]?.preview);
   });
 
+  // Self-host: the server's own Liths are the primary list, filtered by the
+  // same search box as the local recents.
+  $: filteredRemote = remoteFiles.filter((file) => file.name.toLowerCase().includes(search.toLowerCase()));
+
   $: filteredCached = Object.values(cachedEntries).filter((entry) => {
     const isRecent = recentFiles.some((file) => getEntryName(file) === entry.name);
     const query = search.trim().toLowerCase();
@@ -539,7 +571,10 @@
   // The name that will actually be created (extension normalized), used to
   // detect case-insensitive collisions with liths in the recent list.
   $: newLithNormalized = normalizeLithName(newLithName);
-  $: newLithTaken = recentFiles.some((file) => getEntryName(file).toLowerCase() === newLithNormalized.toLowerCase());
+  // Self-host: a name already on the server is taken even though this device
+  // has never seen it, so the checkmark reports the collision before a PUT.
+  $: newLithTaken = recentFiles.some((file) => getEntryName(file).toLowerCase() === newLithNormalized.toLowerCase())
+    || (isSelfHost() && remoteNameTaken(newLithNormalized));
 
   async function updateCacheMatches(query: string) {
     const request = ++cacheSearchRequest;
@@ -628,7 +663,8 @@
   /** Mirror the current recents into the sidecar (fire-and-forget). */
   function persistRecentsSidecar() {
     if (mode !== 'tauri') return;
-    const paths = recentFiles      .map((item) => (item as any).path as string | undefined)
+    const paths = recentFiles
+      .map((item) => (item as any).path as string | undefined)
       .filter((path): path is string => Boolean(path));
     void tauriInvoke('write_recents_sidecar', { paths }).catch(() => { /* best effort */ });
   }
@@ -697,7 +733,16 @@
     }
   }
 
-  async function mountWiki(contents: string, name: string, path?: string, handle?: any, extraTiddlers: Array<Record<string, string>> = []) {
+  async function mountWiki(
+    contents: string,
+    name: string,
+    path?: string,
+    handle?: any,
+    extraTiddlers: Array<Record<string, string>> = [],
+    // Self-host mounts carry the text and digest the saver diffs against, so a
+    // save sends only changed lines instead of re-serializing the whole wiki.
+    remote: RemoteTarget | null = null
+  ) {
     mountError = '';
     const isHtmlMonolith = /\.(?:html?|htm)$/i.test(name);
     // A .json file holding a top-level tiddler array is a wiki backup and
@@ -745,7 +790,7 @@
     await bootLegacyWiki(handoff, [...pendingImports, ...ephemeralIntegrationTiddlers(), ...extraTiddlers], {
       __EPHEMERAL_MODE__: mode === 'self-host' ? 'self-host' : 'paper-light',
       __LITHIC_LAUNCHER_MODE__: mode
-    }, { driftedFromHead, scratchMode });
+    }, { driftedFromHead, scratchMode, remote });
     pendingImports = [];
   }
 
@@ -780,6 +825,10 @@
   function submitNewLith() {
     if (newLithTaken) {
       newLithError = 'Name already in use.';
+      return;
+    }
+    if (isSelfHost()) {
+      void createRemoteLith(newLithName);
       return;
     }
     createBlankLith();
@@ -999,6 +1048,229 @@
     }
   }
 
+  // --- Self-host: listing, opening, presence locks ---------------------------
+
+  /**
+   * The self-host server is same-origin by construction, so "the remote" in
+   * this mode is always the origin serving this page.
+   */
+  function isSelfHost(): boolean {
+    return mode === 'self-host';
+  }
+
+  /**
+   * List the server's Liths and ask whether it exposes the git-backed patch
+   * API. An older deployment answers 404 and simply lists with whole-file
+   * saves, so a failure here degrades rather than blocks.
+   */
+  async function refreshRemoteList(): Promise<void> {
+    if (!isSelfHost()) return;
+    remoteBusy = true;
+    remoteError = '';
+    try {
+      patchApiAvailable = await probePatchApi();
+      remoteFiles = await fetchRemoteFiles();
+    } catch (error) {
+      remoteFiles = [];
+      remoteError = `Could not list this server’s Liths (${error instanceof Error ? error.message : String(error)}).`;
+    } finally {
+      remoteBusy = false;
+    }
+  }
+
+  function remoteNameTaken(name: string): boolean {
+    return remoteFiles.some((file) => file.name.toLowerCase() === name.toLowerCase());
+  }
+
+  /**
+   * Open a Lith from the server. With the patch API the fetch also returns the
+   * digest the server will check the next patch against; without it the wiki
+   * still opens, and saves fall back to whole-file PUTs.
+   */
+  async function openRemoteFile(name: string): Promise<void> {
+    if (busy) return;
+    busy = true;
+    remoteError = '';
+    status = `Opening ${name}…`;
+    // readRemoteLock is failure-tolerant by design: a lock check that cannot
+    // run (or a stale/own lock) returns null, so the open proceeds normally.
+    const lock = await readRemoteLock(name, resolveSessionId());
+    if (lock) {
+      // Someone else's lock is live. Legacy parity: offer a read-only open
+      // (claims no lock, installs no saver) instead of a yes/no prompt that
+      // would otherwise silently overwrite their copy.
+      busy = false;
+      status = '';
+      remoteCollision = { name, who: lock.user || '' };
+      return;
+    }
+    remoteNotice = '';
+    await mountRemoteFile(name);
+  }
+
+  /**
+   * Fetch a remote Lith and mount it. A read-only mount claims no lock and
+   * installs no saver, so the other session keeps their lock and nothing here
+   * can write over their copy — the legacy "Open Read-Only" path.
+   */
+  async function mountRemoteFile(name: string, readOnly = false): Promise<void> {
+    busy = true;
+    remoteError = '';
+    status = `Opening ${name}…`;
+    try {
+      let text: string;
+      let digest = '';
+      if (patchApiAvailable) {
+        const remote = await fetchRemoteWiki(name);
+        text = remote.text;
+        digest = remote.digest;
+      } else {
+        const response = await fetch(webdavUrl(name));
+        if (!response.ok) throw new Error(`GET failed: ${response.status}`);
+        text = await response.text();
+      }
+
+      activeRemote = { name, digest, api: patchApiAvailable && Boolean(digest) };
+      if (readOnly) {
+        stopLockHeartbeat();
+        status = `Mounted ${name} read-only — the other session keeps the lock`;
+      } else {
+        await startLockHeartbeat(name);
+        status = activeRemote.api ? `Mounted ${name} — saves send only the changed lines` : `Mounted ${name}`;
+      }
+      await mountWiki(text, name, undefined, undefined, [], {
+        fileName: name,
+        baseText: text,
+        digest,
+        apiAvailable: activeRemote.api,
+        readOnly
+      });
+    } catch (error) {
+      activeRemote = null;
+      stopLockHeartbeat();
+      remoteError = `Could not open ${name}: ${error instanceof Error ? error.message : String(error)}`;
+      busy = false;
+    }
+  }
+
+  /** Apply the user's choice from the active-session dialog. */
+  function resolveRemoteCollision(choice: 'read-only' | 'ignore'): void {
+    const collision = remoteCollision;
+    if (!collision) return;
+    remoteCollision = null;
+    remoteNotice = choice === 'ignore' && collision.who ? `${collision.who} also has this Lith open.` : '';
+    void mountRemoteFile(collision.name, choice === 'read-only');
+  }
+
+  /**
+   * Claim a Lith on the server and mount it blank. The name is PUT first so the
+   * patch API has a file to diff against, and so two launchers cannot silently
+   * create the same Lith.
+   */
+  async function createRemoteLith(rawName: string): Promise<void> {
+    const name = lithUploadName(normalizeLithName(rawName));
+    showNewLithModal = false;
+    remoteError = '';
+    busy = true;
+    status = `Creating ${name}…`;
+    try {
+      await uploadRemoteFile(name, '');
+      await refreshRemoteList();
+      busy = false;
+      await openRemoteFile(name);
+    } catch (error) {
+      remoteError = `Could not create ${name}: ${error instanceof Error ? error.message : String(error)}`;
+      busy = false;
+    }
+  }
+
+  async function startLockHeartbeat(name: string): Promise<void> {
+    stopLockHeartbeat();
+    const heartbeat = createLockHeartbeat({ sessionId: resolveSessionId() });
+    lockHeartbeat = heartbeat;
+    // The mounted wiki is a rewrite of this document and cannot call back into
+    // the launcher, so the injected `$:/lithic/startup/webdav-utils.js` startup
+    // tiddler looks for this global to release the lock from inside the engine.
+    (window as any).webdavStopHeartbeat = () => stopLockHeartbeat();
+    await heartbeat.start(name);
+  }
+
+  function stopLockHeartbeat(): void {
+    lockHeartbeat?.stop();
+    lockHeartbeat = null;
+  }
+
+  // --- Instance icon: the emoji favicon this instance is known by ------------
+
+  /** Apply the remembered emoji to the launcher header and the tab favicon. */
+  function restoreInstanceIcon(): void {
+    brandEmoji = readInstanceEmoji();
+    applyFavicon(brandEmoji ? emojiFaviconUrl(brandEmoji) : null);
+  }
+
+  function openEmojiPicker(): void {
+    if (!isSelfHost()) return;
+    emojiChoice = brandEmoji;
+    emojiStatus = '';
+    showEmojiPicker = true;
+  }
+
+  function closeEmojiPicker(): void {
+    showEmojiPicker = false;
+  }
+
+  /** Preview on click: the header and tab update before anything is saved. */
+  function chooseEmoji(emoji: string): void {
+    emojiChoice = emoji;
+    brandEmoji = emoji;
+    applyFavicon(emojiFaviconUrl(emoji));
+  }
+
+  /**
+   * Write the chosen emoji out as this instance's whole icon set. The emoji is
+   * remembered locally even when the server write fails, so the choice still
+   * disambiguates instances in this browser.
+   */
+  async function confirmEmojiIcon(): Promise<void> {
+    if (!emojiChoice || emojiBusy) return;
+    emojiBusy = true;
+    saveInstanceEmoji(emojiChoice);
+    brandEmoji = emojiChoice;
+    applyFavicon(emojiFaviconUrl(emojiChoice));
+    emojiStatus = 'Saving…';
+    const result = await uploadInstanceIcon(emojiChoice, {
+      onProgress: (saved, total) => {
+        emojiStatus = `Saving… (${saved} of ${total})`;
+      }
+    });
+    if (result.ok) {
+      emojiStatus = `✓ Saved — this instance now shows ${emojiChoice} in its tab and app icons.`;
+      bustIconCache();
+    } else {
+      emojiStatus = `Saved on this device only — the server write failed (${result.error ?? 'unknown error'}).`;
+    }
+    emojiBusy = false;
+  }
+
+  async function restoreDefaultInstanceIcon(): Promise<void> {
+    clearInstanceEmoji();
+    brandEmoji = '';
+    applyFavicon(null);
+    emojiStatus = (await clearInstanceIcon()) ? '✓ Default icon restored server-wide.' : 'Restored on this device only.';
+  }
+
+  /**
+   * Cache each bookmark's own icon. Sequential on purpose: this runs on
+   * launcher boot and must not stampede several instances at once. Only
+   * missing or stale icons are actually fetched.
+   */
+  async function refreshBookmarkIcons(): Promise<void> {
+    for (const entry of readBookmarkEntries()) {
+      await refreshBookmarkIcon(entry.url);
+    }
+    bookmarks = readBookmarkEntries();
+  }
+
   function openBookmarkModal() {
     bookmarkInput = '';
     bookmarkError = '';
@@ -1029,6 +1301,9 @@
         return;
       }
       bookmarks = saveBookmark(normalized);
+      // Cache the instance's own icon so the meta-launcher list can tell
+      // instances apart at a glance — and keep doing so offline.
+      void refreshBookmarkIcons();
       closeBookmarkModal();
       status = 'Self-hosted instance bookmarked';
     } catch (error) {
@@ -1200,19 +1475,33 @@
 
   onMount(() => {
     loadRecent();
-    bookmarks = readBookmarks();
+    bookmarks = readBookmarkEntries();
+    // The emoji favicon is the instance's identity in the tab, so restore it
+    // (and the tab icon) before anything else renders.
+    restoreInstanceIcon();
+    if (mode === 'self-host') {
+      void refreshRemoteList();
+    } else {
+      // Meta-launcher: only the local modes keep a list of remote instances.
+      void refreshBookmarkIcons();
+    }
     // Reactive sync icon: poll while mounted (legacy refreshed /api/github/status
     // every 15s; 10s keeps the icon honest across mounts and disconnects).
     refreshGitSyncIcon();
     gitSyncPollTimer = setInterval(refreshGitSyncIcon, 10000);
     const onGitSyncSaved = (event: Event) => markGitSyncActivity();
     window.addEventListener('lithic-git-sync-saved', onGitSyncSaved);
+    // The poll is a real `git` spawn per tick, so refresh on the way back to a
+    // visible window instead of staying stale until the next tick.
+    const onVisibilityChange = () => { if (!document.hidden) refreshGitSyncIcon(); };
+    document.addEventListener('visibilitychange', onVisibilityChange);
     void purgeOldestCachesIfNeeded().catch(() => { /* best effort */ });
     const closeOnEscape = (event: KeyboardEvent) => {
       if (event.key === 'Escape') {
         if (showDirtyModal) resolveDirtyModal('later');
         if (showHistoryModal) closeHistoryModal();
         closeBookmarkModal();
+        closeEmojiPicker();
         closeGitSyncModal();
       }
     };
@@ -1269,8 +1558,12 @@
       window.removeEventListener('dragenter', onDragEnter);
       window.removeEventListener('dragleave', onDragLeave);
       window.removeEventListener('drop', onDrop);
+      // Leaving the launcher screen entirely: drop the presence lock so the
+      // wiki is not held for the full staleness window.
+      stopLockHeartbeat();
       if (gitSyncPollTimer) clearInterval(gitSyncPollTimer);
       window.removeEventListener('lithic-git-sync-saved', onGitSyncSaved);
+      document.removeEventListener('visibilitychange', onVisibilityChange);
       gitPollAborted = true;
     };
   });
@@ -1280,11 +1573,33 @@
 
 <main class="container" data-mode={mode}>
   <header class="heading">
-    <span class="brand-icon-wrap">
-      <img class="brand-icon" src={mstile150} alt="Lithic" />
-    </span>
+    <button
+      type="button"
+      class="brand-icon-wrap"
+      class:brand-emoji-wrap={Boolean(brandEmoji)}
+      class:pickable={isSelfHost()}
+      disabled={!isSelfHost()}
+      aria-label={isSelfHost() ? 'Set this instance’s icon' : undefined}
+      title={isSelfHost() ? 'Set this instance’s icon — the emoji shows in the browser tab and app icons, so you can tell your instances apart' : undefined}
+      on:click={() => openEmojiPicker()}
+    >
+      {#if brandEmoji}
+        <span class="brand-emoji" aria-hidden="true">{brandEmoji}</span>
+      {:else}
+        <img class="brand-icon" src={mstile150} alt="Lithic" />
+      {/if}
+    </button>
     <div class="heading-copy">
       <h1>Lithic - Launcher</h1>
+      {#if isSelfHost()}
+        <div class="remote-line">
+          <span class="remote-pill" title={patchApiAvailable ? 'Saves send only the lines that changed; the server applies them with git.' : 'This server has no patch API, so saves upload the whole wiki.'}>{patchApiAvailable ? 'REMOTE' : 'REMOTE · whole-file'}</span>
+          {#if activeRemote}<span class="remote-file">{activeRemote.name}</span>{/if}
+          <button class="remote-refresh" type="button" on:click={refreshRemoteList} disabled={remoteBusy} title="Re-list this server’s Liths" aria-label="Refresh the server’s Lith list">{remoteBusy ? '…' : '⟳'}</button>
+        </div>
+      {/if}
+      {#if remoteNotice}<div class="status-line">{remoteNotice}</div>{/if}
+      {#if remoteError}<div class="status-line error" role="alert">{remoteError}</div>{/if}
       {#if status}<div class="status-line" role="status"><span class="status-label">{status.replace(/[…\.\s]+$/, '')}</span><span class="activity-dots" aria-hidden="true"><i></i><i></i><i></i></span></div>{/if}
       {#if mountError}<div class="status-line error" role="alert">{mountError}</div>{/if}
     </div>
@@ -1389,6 +1704,50 @@
         <div class="modal-actions"><button class="modal-action" on:click={addInstanceBookmark}>Save Bookmark</button><button class="modal-action secondary" on:click={closeBookmarkModal}>Cancel</button></div>      </div>
     </div>
   {/if}
+  {#if remoteCollision}
+    <div class="modal-overlay" role="presentation">
+      <div class="launcher-modal" role="dialog" aria-modal="true" aria-labelledby="collision-title">
+        <h2 id="collision-title">Active Session Detected</h2>
+        <p>{remoteCollision.who || 'Someone else'} is editing <strong>{remoteCollision.name}</strong> on this server right now. Lithic has no collaboration — the last writer wins.</p>
+        <p class="git-sync-note">Open it read-only to look without touching their copy, or ignore the lock if you know they are gone.</p>
+        <div class="modal-actions">
+          <button class="modal-action" on:click={() => resolveRemoteCollision('read-only')}>Open Read-Only</button>
+          <button class="modal-action secondary" on:click={() => resolveRemoteCollision('ignore')}>Ignore Lock and Open</button>
+          <button class="modal-action secondary" on:click={() => (remoteCollision = null)}>Cancel</button>
+        </div>
+      </div>
+    </div>
+  {/if}
+  {#if showEmojiPicker}
+    <div class="modal-overlay" role="presentation" on:click={(event) => event.currentTarget === event.target && closeEmojiPicker()}>
+      <div class="launcher-modal emoji-modal" role="dialog" aria-modal="true" aria-labelledby="emoji-title">
+        <button class="modal-close" aria-label="Close icon picker" on:click={closeEmojiPicker}>×</button>
+        <h2 id="emoji-title">Instance Icon</h2>
+        <p>
+          Pick the icon this instance is known by. It becomes the browser tab, taskbar and
+          phone-home-screen icon, so your instances stay distinguishable at a glance.
+        </p>
+        <div class="emoji-preview" aria-hidden="true">{emojiChoice || '🎨'}</div>
+        <div class="emoji-grid" role="listbox" aria-label="Choose an instance icon">
+          {#each EMOJI_LIST as emoji}
+            <button
+              type="button"
+              class="emoji-btn"
+              class:selected={emojiChoice === emoji}
+              role="option"
+              aria-selected={emojiChoice === emoji}
+              on:click={() => chooseEmoji(emoji)}
+            >{emoji}</button>
+          {/each}
+        </div>
+        {#if emojiStatus}<p class="status-line" role="status">{emojiStatus}</p>{/if}
+        <div class="modal-actions">
+          <button class="modal-action" disabled={emojiBusy || !emojiChoice} on:click={confirmEmojiIcon}>{emojiBusy ? 'Saving…' : 'Save Icon'}</button>
+          <button class="modal-action secondary" disabled={emojiBusy} on:click={restoreDefaultInstanceIcon} title="Delete custom.ico so the instance serves the shipped Lithic icon again">Restore Default</button>
+        </div>
+      </div>
+    </div>
+  {/if}
   {#if showHistoryModal}
     <div class="modal-overlay" role="presentation" on:click={(event) => event.currentTarget === event.target && closeHistoryModal()}>
       <div class="launcher-modal history-modal" role="dialog" aria-modal="true" aria-labelledby="history-title">
@@ -1456,10 +1815,12 @@
         <button class="action-button" on:click={openNewLithModal} disabled={busy}>New Blank Lith</button>
       {/if}
       <button class="action-button mount-button" on:click={mountFromDisk} disabled={busy}>Mount a Lith</button>
+      {#if mode !== 'self-host'}
       <button class="bookmark-button" aria-label="Bookmark a self-hosted instance" title="Bookmark a Remote Instance" on:click={openBookmarkModal}><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 21V5a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v16l-6-4z" /></svg></button>
+      {/if}
     </div>
   </section>
-  {#if bookmarks.length > 0 || recentFiles.length > 0 || Object.keys(cachedEntries).length > 0 || showRecent}
+  {#if bookmarks.length > 0 || recentFiles.length > 0 || remoteFiles.length > 0 || isSelfHost() || Object.keys(cachedEntries).length > 0 || showRecent}
     <section class="recent-section" aria-label="Recent Liths">
       <div class="recent-search-wrap">
         <svg class="recent-search-icon" viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="7.5"></circle><path d="m16.5 16.5 4 4"></path></svg>
@@ -1467,13 +1828,32 @@
         {#if search}<button class="recent-search-clear" type="button" aria-label="Clear recent Lith search" on:click={() => search = ''}>×</button>{/if}
       </div>
       <div class="recent-list">
-        {#each bookmarks.filter((url) => url.toLowerCase().includes(search.toLowerCase())) as url}
+        {#if isSelfHost()}
+          {#if remoteBusy && remoteFiles.length === 0}
+            <p class="empty">Reading this server’s Liths…</p>
+          {:else if filteredRemote.length > 0}
+            <p class="recent-group-label">On this server</p>
+          {/if}
+          {#each filteredRemote as file (file.name)}
+            <div class="recent-row remote-row">
+              <span class="remote-dot" aria-hidden="true"></span>
+              <button class="recent-name" title="Open {file.name} from this server" on:click={() => openRemoteFile(file.name)}>{file.name}{#if file.lastModified}<span class="cached-size">{file.lastModified.toLocaleDateString()}</span>{/if}</button>
+            </div>
+          {/each}
+        {/if}
+        {#if !isSelfHost() && bookmarks.length > 0}<p class="recent-group-label">Remote instances</p>{/if}
+        {#each bookmarks.filter((entry) => entry.label.toLowerCase().includes(search.toLowerCase()) || entry.url.toLowerCase().includes(search.toLowerCase())) as entry (entry.url)}
           <div class="recent-row bookmark-row">
-            <button class="recent-name" on:click={() => openInstance(url)}>{url.replace(/^https?:\/\//, '')}</button>
-            <button class="recent-icon-button remove-recent" type="button" aria-label={`Remove bookmark ${url}`} on:click={() => removeInstanceBookmark(url)}><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m7 7 10 10M17 7 7 17"></path></svg></button>
+            {#if entry.icon}
+              <img class="bookmark-icon" src={entry.icon} alt="" aria-hidden="true" />
+            {:else}
+              <span class="bookmark-icon bookmark-icon-empty" aria-hidden="true"></span>
+            {/if}
+            <button class="recent-name" title="Open {entry.url}" on:click={() => openInstance(entry.url)}>{entry.label}</button>
+            <button class="recent-icon-button remove-recent" type="button" aria-label={`Remove bookmark ${entry.url}`} on:click={() => removeInstanceBookmark(entry.url)}><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m7 7 10 10M17 7 7 17"></path></svg></button>
           </div>
         {/each}
-        {#if filteredRecent.length === 0 && filteredCached.length === 0 && bookmarks.filter((url) => url.toLowerCase().includes(search.toLowerCase())).length === 0}<p class="empty">No matching Liths.</p>{/if}
+        {#if filteredRecent.length === 0 && filteredCached.length === 0 && filteredRemote.length === 0 && bookmarks.filter((entry) => entry.label.toLowerCase().includes(search.toLowerCase()) || entry.url.toLowerCase().includes(search.toLowerCase())).length === 0}<p class="empty">{isSelfHost() && remoteFiles.length === 0 ? 'No Liths on this server yet — use New Blank Lith to start one.' : 'No matching Liths.'}</p>{/if}
         {#each filteredRecent as file}
           {@const name = getEntryName(file)}
           <div class="recent-row">

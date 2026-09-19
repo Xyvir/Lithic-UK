@@ -32,10 +32,8 @@ wiki/tiddlywiki.log
 
 # Generated single-file launcher intermediates
 /src/index.html
-/src/pre-launcher.js
-/src/pre-launcher.css
-/src/pre-launcher-engine.html
-/src/pre-launcher.html
+/src/launcher.js
+/src/launcher.css
 /src/launcher-fragments-assembled.html
 
 # Root dependency install

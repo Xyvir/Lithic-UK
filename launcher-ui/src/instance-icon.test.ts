@@ -1,0 +1,218 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import {
+  EMOJI_LIST,
+  ICON_TARGETS,
+  ICON_DOORBELL,
+  INSTANCE_EMOJI_KEY,
+  uploadInstanceIcon,
+  clearInstanceIcon,
+  emojiFaviconUrl,
+  applyFavicon,
+  readInstanceEmoji,
+  saveInstanceEmoji,
+  clearInstanceEmoji,
+  type CanvasLike
+} from './instance-icon.ts';
+
+/** Records what was drawn so the geometry can be asserted. */
+function fakeCanvasFactory() {
+  const drawn: Array<{ size: number; emoji: string; font: string; background: string }> = [];
+  const factory = (size: number): CanvasLike => ({
+    width: size,
+    height: size,
+    getContext: () => ({
+      fillStyle: '',
+      font: '',
+      textAlign: '',
+      textBaseline: '',
+      fillRect() {},
+      fillText(text: string, _x: number, _y: number) {
+        const last = drawn[drawn.length - 1];
+        if (last) last.emoji = text;
+      }
+    }),
+    toBlob(callback) {
+      callback(new Blob([`icon-${size}`], { type: 'image/png' }));
+    },
+    toDataURL: () => `data:image/png;base64,size-${size}`
+  });
+  // Wrap so each created canvas is registered before anything is drawn on it.
+  return {
+    drawn,
+    factory: ((size: number) => {
+      drawn.push({ size, emoji: '', font: '', background: '' });
+      const canvas = factory(size);
+      const context = canvas.getContext('2d');
+      if (context) {
+        const originalFillText = context.fillText;
+        const originalFillRect = context.fillRect;
+        context.fillRect = () => originalFillRect.call(context, 0, 0, 0, 0);
+        context.fillText = (text: string, x: number, y: number) =>
+          originalFillText.call(context, text, x, y);
+      }
+      return canvas;
+    }) as (size: number) => CanvasLike
+  };
+}
+
+type Call = { url: string; method: string; body?: unknown; contentType?: string };
+
+function recordingFetcher(failAt: number | null = null) {
+  const calls: Call[] = [];
+  const fetcher = async (url: string, init?: RequestInit) => {
+    calls.push({
+      url,
+      method: init?.method ?? 'GET',
+      body: init?.body,
+      contentType: (init?.headers as Record<string, string> | undefined)?.['Content-Type']
+    });
+    if (failAt !== null && calls.length === failAt) return new Response('nope', { status: 500 });
+    // 200 rather than 204: a null-body status cannot carry a body, and the
+    // module accepts 200/201/204 identically.
+    return new Response('', { status: 200 });
+  };
+  return { calls, fetcher: fetcher as unknown as typeof fetch };
+}
+
+function storage() {
+  const data = new Map<string, string>();
+  return {
+    getItem: (key: string) => data.get(key) ?? null,
+    setItem: (key: string, value: string) => data.set(key, value),
+    removeItem: (key: string) => data.delete(key),
+    clear: () => data.clear(),
+    key: (index: number) => [...data.keys()][index] ?? null,
+    get length() { return data.size; }
+  } as unknown as Storage;
+}
+
+test('the icon doorbell is written last — the watcher depends on it', () => {
+  assert.equal(ICON_TARGETS[ICON_TARGETS.length - 1].path, ICON_DOORBELL);
+  assert.equal(ICON_TARGETS.filter((target) => target.path === ICON_DOORBELL).length, 1);
+  const paths = ICON_TARGETS.map((target) => target.path);
+  assert.equal(new Set(paths).size, paths.length);
+  // The legacy sizes are what the deployment's <link rel="icon"> tags expect.
+  assert.deepEqual(
+    ICON_TARGETS.map((target) => target.size),
+    [16, 32, 32, 150, 192, 180, 512, 512]
+  );
+});
+
+test('uploadInstanceIcon PUTs every pre-sized icon in order', async () => {
+  const { calls, fetcher } = recordingFetcher();
+  const { drawn, factory } = fakeCanvasFactory();
+  const progress: number[] = [];
+  const result = await uploadInstanceIcon('🎨', {
+    fetcher,
+    createCanvas: factory,
+    onProgress: (saved) => progress.push(saved)
+  });
+
+  assert.deepEqual(result, { ok: true, saved: ICON_TARGETS.length, total: ICON_TARGETS.length });
+  assert.equal(calls.length, ICON_TARGETS.length);
+  assert.deepEqual(
+    calls.map((call) => call.url),
+    ICON_TARGETS.map((target) => `/sync/${target.path}`)
+  );
+  assert.ok(calls.every((call) => call.method === 'PUT'));
+  assert.ok(calls.every((call) => call.contentType === 'image/png'));
+  assert.deepEqual(calls.map((call) => call.url).lastIndexOf('/sync/custom.ico'), calls.length - 1);
+  // Every size is rendered from the same emoji.
+  assert.deepEqual(drawn.map((entry) => entry.size), ICON_TARGETS.map((target) => target.size));
+  assert.ok(drawn.every((entry) => entry.emoji === '🎨'));
+  assert.deepEqual(progress, [1, 2, 3, 4, 5, 6, 7, 8]);
+});
+
+test('a failed write stops the run before the doorbell fires', async () => {
+  const { calls, fetcher } = recordingFetcher(3);
+  const { factory } = fakeCanvasFactory();
+  const result = await uploadInstanceIcon('🔥', { fetcher, createCanvas: factory });
+
+  assert.equal(result.ok, false);
+  assert.equal(result.saved, 2);
+  assert.match(result.error ?? '', /favicon\.ico → 500/);
+  // No doorbell write, so the watcher never copies a half-updated set.
+  assert.equal(calls.length, 3);
+  assert.ok(!calls.some((call) => call.url.endsWith(ICON_DOORBELL)));
+});
+
+test('uploadInstanceIcon reports a DOM-less environment instead of claiming success', async () => {
+  const { calls, fetcher } = recordingFetcher();
+  const result = await uploadInstanceIcon('🔥', { fetcher, createCanvas: () => null });
+  assert.equal(result.ok, false);
+  assert.equal(calls.length, 0);
+});
+
+test('clearInstanceIcon deletes the doorbell and reports failures', async () => {
+  const { calls, fetcher } = recordingFetcher();
+  assert.equal(await clearInstanceIcon({ fetcher }), true);
+  assert.deepEqual(calls, [{ url: '/sync/custom.ico', method: 'DELETE', body: undefined, contentType: undefined }]);
+
+  const broken = (async () => { throw new Error('offline'); }) as unknown as typeof fetch;
+  assert.equal(await clearInstanceIcon({ fetcher: broken }), false);
+});
+
+test('the emoji choice round-trips through storage', () => {
+  const store = storage();
+  assert.equal(readInstanceEmoji(store), '');
+  saveInstanceEmoji('🌿', store);
+  assert.equal(store.getItem(INSTANCE_EMOJI_KEY), '🌿');
+  assert.equal(readInstanceEmoji(store), '🌿');
+  clearInstanceEmoji(store);
+  assert.equal(readInstanceEmoji(store), '');
+});
+
+test('emojiFaviconUrl renders a 32px data URL and survives a hostile canvas', () => {
+  const { factory } = fakeCanvasFactory();
+  assert.equal(emojiFaviconUrl('📚', 32, factory), 'data:image/png;base64,size-32');
+  assert.equal(emojiFaviconUrl('📚', 32, () => null), null);
+  const throwing = (() => {
+    throw new Error('canvas unavailable');
+  }) as unknown as (size: number) => CanvasLike;
+  assert.equal(emojiFaviconUrl('📚', 32, throwing), null);
+});
+
+test('applyFavicon creates the icon link and can restore the shipped one', () => {
+  const appended: FakeLink[] = [];
+  let existing: FakeLink | null = null;
+  class FakeLink {
+    rel = '';
+    href = '';
+    type: string | undefined = undefined;
+    removed: string[] = [];
+    removeAttribute(name: string) {
+      this.removed.push(name);
+      if (name === 'type') this.type = undefined;
+    }
+  }
+  const doc = {
+    querySelector: () => existing,
+    createElement: () => new FakeLink(),
+    head: { appendChild: (node: FakeLink) => appended.push(node) }
+  } as unknown as Document;
+
+  applyFavicon('data:image/png;base64,aaa', doc);
+  assert.equal(appended.length, 1);
+  assert.equal(appended[0].rel, 'icon');
+  assert.equal(appended[0].href, 'data:image/png;base64,aaa');
+  assert.equal(appended[0].type, 'image/png');
+
+  // An existing icon link is reused rather than duplicated.
+  existing = new FakeLink();
+  existing.rel = 'icon';
+  applyFavicon('data:image/png;base64,bbb', doc);
+  assert.equal(appended.length, 1);
+  assert.equal(existing.href, 'data:image/png;base64,bbb');
+
+  applyFavicon(null, doc);
+  assert.equal(existing.href, '/favicon.ico');
+  assert.deepEqual(existing.removed, ['type']);
+});
+
+test('the emoji shortlist matches the legacy picker categories', () => {
+  assert.ok(EMOJI_LIST.length > 100);
+  assert.ok(EMOJI_LIST.includes('🎨'));
+  assert.equal(new Set(EMOJI_LIST).size, EMOJI_LIST.length);
+  assert.ok(EMOJI_LIST.every((emoji) => emoji.length > 0));
+});

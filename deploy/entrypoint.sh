@@ -172,6 +172,19 @@ ${CADDY_SITE_ADDRESS} {
         ${LITHIC_USER} ${HASHED_PASSWORD}
     }
 
+    # 1b. Public icon slots: served without auth and readable cross-origin so a
+    # DIFFERENT Lithic instance (the desktop/PWA meta-launcher) can fetch and
+    # cache this instance's custom emoji icon for its bookmark list.
+    @publicIcons path /favicon.ico /favicon-16x16.png /favicon-32x32.png /apple-touch-icon.png /android-chrome-192x192.png /android-chrome-512x512.png
+    header @publicIcons Access-Control-Allow-Origin "*"
+
+    # 2a. Git-backed patch save API: the launcher sends only the changed lines
+    # and this handler applies them with `git apply` and commits, so git is the
+    # source of truth for wiki history instead of whole-file re-uploads.
+    handle /api/lithic/* {
+        cgi * ${SCRIPT_DIR}/lithic-sync.sh
+    }
+
     # 2. GitHub Sync API (CGI)
     handle /api/github/* {
         cgi * ${SCRIPT_DIR}/github-sync.sh
@@ -258,9 +271,24 @@ auth.require = ( "" => (
     "require" => "valid-user"
 ))
 
+# Public icon slots: readable cross-origin so a different Lithic instance (the
+# desktop/PWA meta-launcher) can cache this instance's custom emoji icon.
+\$HTTP["url"] =~ "^/(favicon.*\.(ico|png)|apple-touch-icon\.png|android-chrome-.*\.png)$" {
+    setenv.add-response-header = ( "Access-Control-Allow-Origin" => "*" )
+}
+
 # Exclude public assets from auth
 \$HTTP["url"] =~ "^/(manifest\.json|site\.webmanifest|offline-service-worker\.js|android-chrome-.*|apple-touch-icon\.png|favicon.*|health)$" {
     auth.require = ()
+}
+
+# CGI for the git-backed patch save API
+alias.url += ( "/api/lithic" => "${SCRIPT_DIR}/lithic-sync.sh" )
+\$HTTP["url"] =~ "^/api/lithic" {
+    cgi.assign = ( ".sh" => "" )
+    setenv.add-environment = (
+        "DATA_DIR" => "${DATA_DIR}"
+    )
 }
 
 # CGI for GitHub Sync

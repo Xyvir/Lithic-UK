@@ -6,10 +6,16 @@ import { fileURLToPath } from 'node:url';
 
 const currentDir = dirname(fileURLToPath(import.meta.url));
 const sourceDir = resolve(currentDir, '../src');
+const archiveDir = resolve(currentDir, '../assets');
 
+/**
+ * Dev/preview-only mirrors of the deployment-relative files the launcher
+ * fetches while it runs: the TiddlyWiki engine, and the frozen legacy launcher
+ * kept for side-by-side parity checks.
+ */
 function legacySourcePlugin(): Plugin {
   const files: Record<string, { path: string; contentType: string }> = {
-    '/src/launcher.html': { path: resolve(sourceDir, 'launcher.html'), contentType: 'text/html; charset=utf-8' },
+    '/legacy-launcher.html': { path: resolve(archiveDir, 'legacy-launcher.html'), contentType: 'text/html; charset=utf-8' },
     '/src/lithic.html': { path: resolve(sourceDir, 'lithic.html'), contentType: 'text/html; charset=utf-8' }
   };
 
@@ -67,8 +73,8 @@ export default defineConfig({
     rollupOptions: {
       output: {
         inlineDynamicImports: true,
-        entryFileNames: 'pre-launcher.js',
-        assetFileNames: 'pre-launcher.[ext]'
+        entryFileNames: 'launcher.js',
+        assetFileNames: 'launcher.[ext]'
       }
     }
   }

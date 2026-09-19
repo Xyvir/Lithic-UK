@@ -140,6 +140,14 @@ sync_now() {
             git -C "${DATA_DIR}" commit -m "Automated Sync: $(date +'%Y-%m-%d %H:%M:%S')" || SYNC_SUCCESS=false
             echo "[Watcher] Pushing to GitHub..."
             git -C "${DATA_DIR}" push origin main || SYNC_SUCCESS=false
+        elif [ -n "$REMOTE_HASH" ] && [ "$LOCAL_HASH" != "$REMOTE_HASH" ] \
+             && git -C "${DATA_DIR}" merge-base --is-ancestor "$REMOTE_HASH" HEAD; then
+            # A commit made directly by the patch save API (/api/lithic/apply)
+            # leaves a CLEAN working tree, so the HAS_LOCAL_CHANGES branch above
+            # never fires even though HEAD has moved ahead of origin. Push those
+            # commits too, or a patch-based save would never reach GitHub.
+            echo "[Watcher] Pushing commit made by the patch save API..."
+            git -C "${DATA_DIR}" push origin main || SYNC_SUCCESS=false
         fi
 
         # If remote is ahead but it's a clean fast-forward (or we were behind)

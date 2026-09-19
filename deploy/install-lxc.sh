@@ -49,6 +49,7 @@ chmod +x "${INSTALL_DIR}/entrypoint.sh"
 [ -f "${INSTALL_DIR}/watcher.sh" ] && chmod +x "${INSTALL_DIR}/watcher.sh"
 [ -f "${INSTALL_DIR}/autoupdate.sh" ] && chmod +x "${INSTALL_DIR}/autoupdate.sh"
 [ -f "${INSTALL_DIR}/scripts/github-sync.sh" ] && chmod +x "${INSTALL_DIR}/scripts/github-sync.sh"
+[ -f "${INSTALL_DIR}/scripts/lithic-sync.sh" ] && chmod +x "${INSTALL_DIR}/scripts/lithic-sync.sh"
 [ -f "${INSTALL_DIR}/caddy" ] && chmod +x "${INSTALL_DIR}/caddy"
 
 # --- Create data directory ---

@@ -1,7 +1,9 @@
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
 
-const source = await readFile(resolve('src/launcher.html'), 'utf8');
+// The legacy launcher is archived now that the Svelte launcher builds to
+// src/launcher.html; the fragments are extracted from the frozen archive.
+const source = await readFile(resolve('assets/legacy-launcher.html'), 'utf8');
 const lines = source.split(/(?<=\n)/);
 const markers = [
   ['head/bootstrap', '    <script type="module">'],
@@ -33,7 +35,7 @@ await writeFile(resolve(output, 'document-tail.html'), source.slice(endBody));
 await writeFile(resolve(output, 'README.md'), [
   '# Legacy launcher fragments',
   '',
-  'These files are extracted verbatim from src/launcher.html by scripts/extract-launcher-fragments.mjs.',
+  'These files are extracted verbatim from assets/legacy-launcher.html by scripts/extract-launcher-fragments.mjs.',
   '',
   '- document-head.html: document metadata and styles',
   '- runtime.js: the legacy runtime, including local saver, engine loading, WebDAV, and startup logic',

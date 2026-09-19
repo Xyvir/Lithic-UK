@@ -43,6 +43,13 @@ h1 { flex: none; min-width: 0; margin: 0; color: #f4edf5; font-size: 1.8rem; fon
   width: 52px;
   height: 52px;
   margin-right: 15px;
+  /* It is a real <button> in self-host mode so the emoji picker is keyboard
+     reachable; strip the UA chrome so the header looks identical elsewhere. */
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  cursor: default;
 }
 .brand-icon {
   display: block;
@@ -122,14 +129,36 @@ h1 { flex: none; min-width: 0; margin: 0; color: #f4edf5; font-size: 1.8rem; fon
   display: flex;
   align-items: center;
   gap: 10px;
+  /* width/font/colour are stated explicitly: these are <button> elements, so
+     without them they inherit the browser's own button chrome (light grey
+     fill, centred text, shrink-to-fit width) instead of the dark modal. */
+  width: 100%;
   padding: 10px 12px;
   margin-bottom: 6px;
   border: 1px solid var(--border-color, #333);
   border-radius: 8px;
+  background: #2c2c2c;
+  color: #e7e1e9;
+  font: inherit;
+  text-align: left;
   cursor: pointer;
 }
-.repo-card.selected { border-color: var(--accent-color, #8ab4f8); background: rgba(138, 180, 248, 0.08); }
-.repo-card input { accent-color: var(--accent-color, #8ab4f8); }
+.repo-card span { flex: 1 1 auto; min-width: 0; overflow-wrap: anywhere; }
+.repo-card:hover { border-color: #6b6b6b; }
+.repo-card.selected { border-color: var(--accent-color, #8ab4f8); background: rgba(138, 180, 248, 0.12); }
+/* Higher specificity than `.launcher-modal input` on purpose: that rule gives
+   every input in a modal `width: 100%` and padding, which turned the radio into
+   a full-width box that swallowed the row and squeezed the repo name into a
+   vertical ribbon. Beating it explicitly is safer than relying on order. */
+.repo-card input[type='radio'] {
+  flex: 0 0 auto;
+  width: auto;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: none;
+  accent-color: var(--accent-color, #8ab4f8);
+}
 .repo-card.create { border-style: dashed; color: var(--accent-color, #8ab4f8); font-weight: 600; }
 .repo-filter {
   width: 100%;
@@ -142,14 +171,26 @@ h1 { flex: none; min-width: 0; margin: 0; color: #f4edf5; font-size: 1.8rem; fon
 }
 .repo-group-label {
   margin: 12px 0 4px;
-  font-size: 0.72rem;
+  color: #b3acb5;
+  font-size: 0.74rem;
   text-transform: uppercase;
   letter-spacing: 0.06em;
-  opacity: 0.5;
 }
-.repo-list { margin: 0; padding: 0 0 0 4px; list-style: none; max-height: 150px; overflow-y: auto; }
-.repo-list li { padding: 3px 0; font-size: 0.85rem; }
-.git-sync-note { font-size: 0.8rem; opacity: 0.55; margin: 6px 0 0; }
+.repo-list { margin: 0; padding: 0 0 0 4px; list-style: none; }
+/* No inner scroll region: the list used to scroll inside an already-scrolling
+   modal, which stacked two scrollbars a few pixels apart. The modal is the
+   single scroll container, so a long repo list just makes it taller. */
+.repo-list li { padding: 3px 0; font-size: 0.9rem; }
+.repo-list .repo-card { font-size: 0.9rem; }
+.git-sync-note { margin: 8px 0 0; color: #a9a2ab; font-size: 0.85rem; }
+.git-sync-advanced { margin-top: 14px; }
+.git-sync-advanced summary {
+  color: #c8c2ca;
+  font-size: 0.85rem;
+  cursor: pointer;
+}
+.git-sync-advanced summary:hover { color: #f4edf5; }
+.git-sync-advanced input { margin-top: 10px; }
 
 .launcher-actions { flex: 0 0 auto; margin-top: 16px; }
 .action-card:first-child { margin-top: 0; }
@@ -331,7 +372,7 @@ footer > * { pointer-events: auto; }
   50% { transform: scale(1.18); }
 }
 .modal-overlay { position: fixed; inset: 0; display: grid; place-items: center; padding: 20px; background: rgb(0 0 0 / 72%); z-index: 10; }
-.launcher-modal { position: relative; width: min(100%, 460px); max-height: 80vh; overflow: auto; padding: 22px; border: 1px solid #454545; border-radius: 10px; background: #252525; box-shadow: 0 12px 40px #000; }
+.launcher-modal { position: relative; width: min(100%, 460px); max-height: 80vh; overflow-x: hidden; overflow-y: auto; padding: 22px; border: 1px solid #454545; border-radius: 10px; background: #252525; box-shadow: 0 12px 40px #000; }
 .launcher-modal h2 { margin: 0 0 14px; }
 .launcher-modal p { color: #ccc; line-height: 1.5; }
 .launcher-modal input { width: 100%; padding: 12px 10px; border: 1px solid #454545; border-radius: 7px; background: #333; color: #eee; font: inherit; }
@@ -406,8 +447,10 @@ footer > * { pointer-events: auto; }
   white-space: nowrap;
   box-shadow: 0 2px 6px rgb(0 0 0 / 45%);
 }
-.modal-actions { display: flex; gap: 10px; margin-top: 18px; }
-.modal-action { flex: 1; padding: 10px; border: 1px solid #8ab4f8; border-radius: 7px; background: rgb(138 180 248 / 12%); color: #8ab4f8; cursor: pointer; }
+/* Buttons stay on one line and move to their own row when the modal is too
+   narrow for all of them, instead of squeezing the label into a stack. */
+.modal-actions { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 18px; }
+.modal-action { flex: 1 1 auto; white-space: nowrap; padding: 10px; border: 1px solid #8ab4f8; border-radius: 7px; background: rgb(138 180 248 / 12%); color: #8ab4f8; cursor: pointer; }
 .modal-action.secondary { border-color: #454545; background: transparent; color: #ddd; }
 .recent-modal { position: relative; width: min(100%, 700px); max-height: 80vh; padding: 20px; border: 1px solid #454545; border-radius: 10px; background: #252525; box-shadow: 0 12px 40px #000; }
 .recent-modal h2 { margin: 0 0 14px; font-size: 1.5rem; }
@@ -615,3 +658,56 @@ body.drag-over::after {
 .cache-history-button.dirty,
 .cache-history-button.dirty:hover { color: #ff9d80; }
 .cache-history-button.dirty:disabled { opacity: 1; }
+
+/* --- Self-host: remote pill and server-owned Lith list ------------------- */
+.remote-line { display: flex; align-items: center; gap: 8px; margin-top: 2px; min-width: 0; }
+.remote-pill {
+  flex: none; padding: 1px 7px; border: 1px solid #4d6b4d; border-radius: 999px;
+  background: rgb(122 190 122 / 12%); color: #9ed29e; font-size: 0.62rem;
+  font-weight: 600; letter-spacing: 0.09em; text-transform: uppercase; cursor: help;
+}
+.remote-file { min-width: 0; color: #bbb; font-size: 0.76rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.remote-refresh {
+  flex: none; width: 24px; height: 24px; padding: 0; border: 1px solid #454545; border-radius: 6px;
+  background: #333; color: #ccc; font-size: 0.85rem; line-height: 1; cursor: pointer;
+}
+.remote-refresh:hover:not(:disabled) { background: #3d3d3d; color: #fff; }
+.remote-refresh:disabled { opacity: 0.5; cursor: default; }
+.recent-group-label {
+  margin: 4px 2px 6px; color: #888; font-size: 0.68rem; font-weight: 600;
+  letter-spacing: 0.1em; text-transform: uppercase;
+}
+.remote-dot {
+  flex: 0 0 4px; margin: 0 0 0 6px; align-self: center; width: 4px; height: 24px;
+  border-radius: 2px; background: #4d6b4d;
+}
+.bookmark-icon {
+  flex: none; align-self: center; width: 24px; height: 24px; margin-left: 12px;
+  border-radius: 5px; object-fit: contain;
+}
+.bookmark-icon-empty { border: 1px dashed #4a4a4a; background: #2c2c2c; }
+
+/* --- Instance icon picker ------------------------------------------------ */
+.brand-icon-wrap.pickable { cursor: pointer; }
+.brand-icon-wrap.pickable:hover .brand-icon { border-color: #ffb74d; }
+.brand-icon-wrap.pickable:focus-visible { outline: 2px solid #ffb74d; outline-offset: 2px; border-radius: 8px; }
+.brand-icon-wrap.brand-emoji-wrap .brand-emoji {
+  display: grid; place-items: center; width: 52px; height: 52px; border: 3px solid #444;
+  border-radius: 6px; background: #f4f4f4; font-size: 1.7rem; line-height: 1;
+}
+.brand-icon-wrap.pickable:hover .brand-emoji { border-color: #ffb74d; }
+.emoji-modal { width: min(100%, 440px); }
+.emoji-preview { margin: 6px 0 10px; font-size: 2rem; line-height: 1; text-align: center; }
+.emoji-grid {
+  display: grid; grid-template-columns: repeat(auto-fill, minmax(38px, 1fr)); gap: 4px;
+  /* No inner scroll region: the modal owns the only scrollbar (same reason as
+     .repo-list — two scrollbars a few pixels apart is unusable). */
+  padding: 6px; border: 1px solid #3a3a3a;
+  border-radius: 7px; background: #2c2c2c;
+}
+.emoji-btn {
+  display: grid; place-items: center; width: 100%; height: 34px; padding: 0; border: 1px solid transparent;
+  border-radius: 6px; background: transparent; font-size: 1.15rem; line-height: 1; cursor: pointer;
+}
+.emoji-btn:hover { background: rgb(255 255 255 / 8%); }
+.emoji-btn.selected { border-color: #ffb74d; background: rgb(255 183 77 / 16%); }

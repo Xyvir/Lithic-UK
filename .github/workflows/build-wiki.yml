@@ -54,9 +54,13 @@ jobs:
       - name: Generate Build Config
         run: node scripts/generate-config.js ${{ inputs.build_config }}
 
-      - name: Inject Plugins into Launcher
+      - name: Build Launcher (Svelte)
         if: inputs.build_config == 'prod'
-        run: node scripts/inject-launcher-plugins.js
+        run: npm run build:launcher
+
+      - name: Verify Launcher Artifact (prod only)
+        if: inputs.build_config == 'prod'
+        run: npm run test:launcher
 
       - name: Build TiddlyWiki (uglified for prod, plain otherwise)
         env:
@@ -162,6 +166,14 @@ jobs:
         with:
           name: build-artifacts-dry-run
           path: wiki/output/lith.html
+
+      - name: Upload Built Launcher (prod only)
+        if: inputs.build_config == 'prod'
+        uses: actions/upload-artifact@v5
+        with:
+          name: launcher-html
+          path: src/launcher.html
+          retention-days: 14
 
       - name: Upload Debug Logs
         if: always()

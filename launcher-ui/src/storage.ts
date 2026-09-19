@@ -226,7 +226,7 @@ export async function clearAllRecentFiles(store: CacheStore = idb): Promise<void
  * paying for themselves. The legacy flat `search_cache_<name>` key is kept in
  * sync so search and cached-entry views keep working unchanged. The old
  * bk1/bk2 deep-copy backups are intentionally NOT migrated or written — the
- * frozen legacy launcher (src/launcher.html) is the only producer of those.
+ * frozen legacy launcher (assets/legacy-launcher.html) is the only producer of those.
  */
 export async function saveSearchCache(fileName: string, text: string): Promise<void> {
   try {

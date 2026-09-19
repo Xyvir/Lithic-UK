@@ -31,7 +31,7 @@
     },
     "windows": [
       {
-        "url": "pre-launcher.html",
+        "url": "launcher.html",
         "fullscreen": false,
         "height": 600,
         "resizable": true,

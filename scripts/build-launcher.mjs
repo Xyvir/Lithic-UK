@@ -6,10 +6,13 @@ const root = resolve('launcher-ui');
 const viteBin = resolve(root, 'node_modules/vite/bin/vite.js');
 const outputDir = resolve('src');
 const generatedHtml = resolve(outputDir, 'index.html');
-const generatedJs = resolve(outputDir, 'pre-launcher.js');
-const generatedCss = resolve(outputDir, 'pre-launcher.css');
-const destination = resolve(outputDir, 'pre-launcher.html');
-const previewEngine = resolve(outputDir, 'pre-launcher-engine.html');
+const generatedJs = resolve(outputDir, 'launcher.js');
+const generatedCss = resolve(outputDir, 'launcher.css');
+// ONE artifact. The legacy launcher was moved to assets/legacy-launcher.html
+// and this is the only launcher we emit; there is no historical-name alias and
+// no preview-only engine sibling. The TiddlyWiki engine already lives beside
+// it as src/lithic.html, which is the sibling the runtime resolves first.
+const destination = resolve(outputDir, 'launcher.html');
 
 await new Promise((resolveBuild, rejectBuild) => {
   const child = spawn(process.execPath, [viteBin, 'build', '--config', 'vite.config.ts'], {
@@ -39,10 +42,5 @@ html = html
   .replace(/<script type="module"[^>]*><\/script>/g, () => `<script type="module">${js}</script>`);
 
 await writeFile(destination, html);
-// The single-file launcher fetches the legacy engine after the user chooses
-// "New Blank Lith". Keep a preview-only sibling with the same contents so
-// local HTML previews have the deployment-relative engine available too.
-const engine = await readFile(resolve(outputDir, 'lithic.html'), 'utf8');
-await writeFile(previewEngine, engine);
 await Promise.all([rm(generatedHtml, { force: true }), rm(generatedJs, { force: true }), rm(generatedCss, { force: true })]);
 console.log(`Wrote ${destination}`);

@@ -18,7 +18,8 @@ COPY deploy/entrypoint.sh /app/entrypoint.sh
 COPY deploy/watcher.sh /app/watcher.sh
 COPY deploy/autoupdate.sh /app/autoupdate.sh
 COPY deploy/github-sync.sh /app/scripts/github-sync.sh
-RUN chmod +x /app/entrypoint.sh /app/watcher.sh /app/autoupdate.sh /app/scripts/github-sync.sh
+COPY deploy/lithic-sync.sh /app/scripts/lithic-sync.sh
+RUN chmod +x /app/entrypoint.sh /app/watcher.sh /app/autoupdate.sh /app/scripts/github-sync.sh /app/scripts/lithic-sync.sh
 
 COPY index.html              /app/public/index.html
 COPY src/launcher.html       /app/public/src/launcher.html

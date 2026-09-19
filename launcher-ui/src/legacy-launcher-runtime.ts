@@ -6,9 +6,31 @@ import { DEFAULT_PLUGINS, LITHIC_BASE_FILTER } from './legacy-saver.ts';
 import { SCRATCH_SERIALIZE_RUNTIME } from './scratch-wiki.ts';
 import { TID_SERIALIZE_RUNTIME } from './tid-serialize-runtime.ts';
 import { IPYNB_SERIALIZE_RUNTIME } from './ipynb.ts';
+import { LINE_PATCH_RUNTIME } from './line-patch.ts';
+import { LITHIC_API_BASE, WEBDAV_BASE, WEBDAV_UTILS_JS } from './webdav.ts';
 
 /** Scratch save behavior for the mounted engine's injected saver. */
 export type ScratchMode = 'off' | 'text' | 'tid' | 'json' | 'ipynb';
+
+/**
+ * A self-host wiki opened over the patch API. `baseText`/`digest` are the exact
+ * text and `git hash-object` digest the launcher loaded, so the injected saver
+ * can diff against that base and the server can refuse a stale patch.
+ * `apiAvailable` is false on instances without the patch API (older deployments,
+ * or a plain WebDAV target), where every save is a whole-file PUT.
+ */
+export type RemoteTarget = {
+  fileName: string;
+  baseText: string;
+  digest: string;
+  apiAvailable: boolean;
+  /**
+   * Open without claiming the lock or installing a saver — the legacy
+   * "Active Session Detected → Open Read-Only" path, used when someone else's
+   * lock is still live and this session must not write over their copy.
+   */
+  readOnly?: boolean;
+};
 
 export type LauncherHandoff = {
   name: string;
@@ -26,8 +48,10 @@ export function resolveEngineCandidates(href: string): string[] {
   const location = new URL(href);
   const base = new URL('.', location.href);
   return [
+    // The engine ships beside the launcher, so this covers both the repo
+    // layout (src/launcher.html + src/lithic.html) and a deployed instance
+    // (/src/launcher.html + /src/lithic.html) with no extra copies.
     new URL('lithic.html', base).href,
-    new URL('pre-launcher-engine.html', base).href,
     new URL('src/lithic.html', base).href,
     location.origin === 'null' ? 'file:///lithic.html' : new URL('/lithic.html', location.origin).href,
     location.origin === 'null' ? 'file:///src/lithic.html' : new URL('/src/lithic.html', location.origin).href
@@ -92,7 +116,8 @@ function injectSaverBootstrap(
   suggestedFileName?: string,
   isHtmlMode = false,
   driftedFromHead = false,
-  scratchMode: ScratchMode = 'off'
+  scratchMode: ScratchMode = 'off',
+  remote: RemoteTarget | null = null
 ): string {
   const pluginsJson = JSON.stringify(DEFAULT_PLUGINS);
   const jsonPatchRuntime = JSON_PATCH_RUNTIME;
@@ -111,6 +136,15 @@ function injectSaverBootstrap(
   const htmlModeLiteral = isHtmlMode ? 'true' : 'false';
   const driftedFromHeadLiteral = driftedFromHead ? 'true' : 'false';
   const scratchModeJson = JSON.stringify(scratchMode);
+  // Self-host: the saver talks to the same-origin save API instead of a file
+  // handle. Only the target identity is baked in here; the base text and digest
+  // arrive as engine globals so a large wiki is not embedded twice.
+  // A read-only mount carries no save target at all: it never writes, so the
+  // whole remote saver compiles down to the same inert `null` a local file gets.
+  const writableRemote = remote && !remote.readOnly ? remote : null;
+  const remoteJson = writableRemote
+    ? JSON.stringify({ fileName: writableRemote.fileName, base: WEBDAV_BASE, apiBase: LITHIC_API_BASE, api: writableRemote.apiAvailable })
+    : 'null';
 
   // The patch runtime is injected as its own script so the mounted wiki can
   // record per-version history (window.__LITHIC_JSON_PATCH__) from the saver.
@@ -120,7 +154,12 @@ function injectSaverBootstrap(
     ? ''
     : `<script>${SCRATCH_SERIALIZE_RUNTIME}</script>\n<script>${TID_SERIALIZE_RUNTIME}</script>\n${scratchMode === 'ipynb' ? `<script>${IPYNB_SERIALIZE_RUNTIME}</script>\n` : ''}`;
 
-  const bootstrap = `${scratchRuntimes}<script>${jsonPatchRuntime}</script>\n<script>(function(){
+  // A read-only mount never saves, so it ships neither the patch runtime nor a
+  // saver at all (legacy parity: no customSaver on the read-only path).
+  const readOnlyLiteral = remote?.readOnly ? 'true' : 'false';
+  const remoteRuntime = remote && !remote.readOnly ? `<script>${LINE_PATCH_RUNTIME}</script>\n` : '';
+
+  const bootstrap = `${remoteRuntime}${scratchRuntimes}<script>${jsonPatchRuntime}</script>\n<script>(function(){
     var root = window;
     var defaultPlugins = ${pluginsJson};
     var pluginExclusions = defaultPlugins.map(function(p){ return '-[[$:/plugins/' + p + ']]'; }).join(' ');
@@ -530,6 +569,7 @@ function injectSaverBootstrap(
     }
 
     var scratchMode = ${scratchModeJson};
+    var remote = ${remoteJson};
 
     // Scratch (fancy text editor) save: serialize the wiki back to the
     // original flat format — stream nodes for .md/.txt, a .tid document for
@@ -580,8 +620,61 @@ function injectSaverBootstrap(
       });
     }
 
+    // --- Self-host save path -------------------------------------------------
+    // Whole-file PUT, the fallback whenever a patch cannot be used (no API on
+    // the instance, an oversized edit, or a server-side conflict).
+    function remotePut(tw, lithText, jsonText, callback) {
+      fetch(remote.base + encodeURIComponent(remote.fileName), { method: 'PUT', body: lithText }).then(function(res) {
+        if (!res.ok && res.status !== 201 && res.status !== 204) throw new Error('PUT failed: ' + res.status);
+        root.__LITHIC_REMOTE_BASE__ = lithText;
+        return saveSearchCache(remote.fileName, jsonText);
+      }).then(function() { callback(null); }, function(err) { callback(err); });
+    }
+
+    // Preferred self-host save: send only the changed lines and let the server
+    // apply them with git, so git stays the source of truth. The local search
+    // cache is still updated with the same delta-based history the local modes
+    // use, so version history works identically for remote wikis.
+    function saveRemote(tw, callback) {
+      var jsonText = (tw && tw.wiki && tw.wiki.getTiddlersAsJson) ? tw.wiki.getTiddlersAsJson(userTiddlerFilter) : '[]';
+      var lithText = serializeJsonToLith(jsonText);
+      var patchApi = root.__LITHIC_LINE_PATCH__;
+      var baseText = root.__LITHIC_REMOTE_BASE__ || '';
+      var digest = root.__LITHIC_REMOTE_DIGEST__ || '';
+      if (!remote.api || !patchApi || !digest) { remotePut(tw, lithText, jsonText, callback); return; }
+
+      var patch = patchApi.create(baseText, lithText, remote.fileName);
+      // '' means the wiki is byte-identical to what was loaded: nothing to send.
+      if (patch === '') { callback(null); return; }
+      // null means the edit was too large to diff; the patch would be bigger
+      // than the file, so upload the file.
+      if (patch === null || !patchApi.worthSending(patch, lithText)) { remotePut(tw, lithText, jsonText, callback); return; }
+
+      fetch(remote.apiBase + 'apply', {
+        method: 'POST',
+        headers: { 'Content-Type': 'text/plain; charset=utf-8' },
+        body: remote.fileName + '\\n' + digest + '\\n' + patch
+      }).then(function(res) {
+        if (!res.ok) {
+          // 409 stale / 422 unusable patch / 404 unsupported: fall back to the
+          // whole-file path rather than losing the save.
+          remotePut(tw, lithText, jsonText, callback);
+          return null;
+        }
+        return res.json().catch(function() { return {}; }).then(function(payload) {
+          if (payload && payload.digest) root.__LITHIC_REMOTE_DIGEST__ = payload.digest;
+          root.__LITHIC_REMOTE_BASE__ = lithText;
+          return saveSearchCache(remote.fileName, jsonText);
+        }).then(function() { callback(null); });
+      }).catch(function(err) { callback(err); });
+    }
+
     var save = function(_text, _method, callback) {
       var tw = root.$tw;
+      if (remote) {
+        saveRemote(tw, callback);
+        return true;
+      }
       var saveOptions = {
         suggestedName: ${suggestedNameJson},
         types: ${saveTypesJson}
@@ -692,7 +785,12 @@ function injectSaverBootstrap(
     };
 
     root.$tw = root.$tw || {};
-    root.$tw.customSaver = { save: save };
+    // Read-only remote mounts deliberately install no saver: TiddlyWiki keeps
+    // its default one and $:/state/DisableAutoSaver keeps autosave off, so the
+    // other session's lock and file stay untouched until the user saves by hand.
+    if (!${readOnlyLiteral}) {
+      root.$tw.customSaver = { save: save };
+    }
   })();</script>`;
 
   const bootScript = /<script[^>]+(?:src=["'][^"']*boot[^"']*["']|data-tiddler-title=["']\$:\/boot\/)/i;
@@ -785,7 +883,7 @@ export function buildEngineHtml(
   handoff: LauncherHandoff,
   extraTiddlers: Array<Record<string, string>> = [],
   engineGlobals: Record<string, string> = {},
-  options: { isHtmlMode?: boolean; driftedFromHead?: boolean; scratchMode?: ScratchMode } = {}
+  options: { isHtmlMode?: boolean; driftedFromHead?: boolean; scratchMode?: ScratchMode; remote?: RemoteTarget | null } = {}
 ): string {
   const imported = handoff.text
     ? parseHandoffImported(handoff.name, handoff.text)
@@ -797,6 +895,16 @@ export function buildEngineHtml(
   // The engine's journal stub creates the today entry at boot, so blank
   // liths no longer need a pre-hydrated journal tiddler here. Saver and
   // plugin-library defaults are still injected before the store.
+  if (options.remote && !options.remote.readOnly) {
+    // Enables the engine-side lock release (tm-lithic-stop-lock); excluded from
+    // saves by LITHIC_BASE_FILTER so it never lands in the wiki.
+    tiddlers.push({
+      title: '$:/lithic/startup/webdav-utils.js',
+      type: 'application/javascript',
+      'module-type': 'startup',
+      text: WEBDAV_UTILS_JS
+    });
+  }
   tiddlers.push({ title: '$:/state/DisableAutoSaver', text: 'yes' });
   tiddlers.push({ title: '$:/config/OfficialPluginLibrary', text: 'yes' });
 
@@ -807,8 +915,18 @@ export function buildEngineHtml(
     handoff.name,
     options.isHtmlMode === true,
     options.driftedFromHead === true,
-    options.scratchMode ?? 'off'
+    options.scratchMode ?? 'off',
+    options.remote ?? null
   );
+  if (options.remote && !options.remote.readOnly) {
+    // The saver diffs the wiki against the exact text the launcher loaded, so
+    // hand it that base and its digest as globals.
+    html = injectEngineGlobals(html, {
+      __LITHIC_REMOTE_BASE__: options.remote.baseText,
+      __LITHIC_REMOTE_DIGEST__: options.remote.digest,
+      __LITHIC_REMOTE_FILE__: options.remote.fileName
+    });
+  }
   if (options.scratchMode && options.scratchMode !== 'off') {
     // The scratch saver serializes the stream rooted at the document title;
     // publish it as an engine global so the injected saver can find it. The
@@ -823,7 +941,7 @@ export async function bootLegacyWiki(
   handoff: LauncherHandoff,
   extraTiddlers: Array<Record<string, string>> = [],
   engineGlobals: Record<string, string> = {},
-  options: { isHtmlMode?: boolean; driftedFromHead?: boolean; scratchMode?: ScratchMode } = {}
+  options: { isHtmlMode?: boolean; driftedFromHead?: boolean; scratchMode?: ScratchMode; remote?: RemoteTarget | null } = {}
 ): Promise<void> {
   const engine = await fetchEngine();
   const html = buildEngineHtml(engine, handoff, extraTiddlers, engineGlobals, options);

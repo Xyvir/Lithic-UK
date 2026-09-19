@@ -1,4 +1,4 @@
-name: Build Modular Launcher (Preview)
+name: Build Launcher (Preview)
 
 on:
   workflow_dispatch:
@@ -13,7 +13,7 @@ permissions:
   contents: write
 
 jobs:
-  build-pre-launcher:
+  build-launcher:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout Code
@@ -27,11 +27,11 @@ jobs:
       - name: Install repository dependencies
         run: npm install
 
-      - name: Test modular launcher logic
+      - name: Test launcher logic
         run: npm test
 
-      - name: Build modular launcher
-        run: npm run build:pre-launcher
+      - name: Build launcher
+        run: npm run build:launcher
 
       - name: Install Puppeteer browser
         run: npx puppeteer browsers install chrome
@@ -46,6 +46,8 @@ jobs:
       - name: Upload preview artifact
         uses: actions/upload-artifact@v5
         with:
-          name: pre-launcher
-          path: src/pre-launcher.html
+          name: launcher
+          path: |
+            src/launcher.html
+            src/lithic.html
           retention-days: 14

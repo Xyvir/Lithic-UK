@@ -3,8 +3,8 @@ import { existsSync } from 'node:fs';
 import { resolve } from 'node:path';
 import puppeteer from 'puppeteer';
 
-const artifact = resolve('src/pre-launcher.html');
-assert.ok(existsSync(artifact), 'Build src/pre-launcher.html before running this test');
+const artifact = resolve('src/launcher.html');
+assert.ok(existsSync(artifact), 'Build src/launcher.html before running this test');
 
 const browser = await puppeteer.launch({
   headless: process.env.HEADED === '1' ? false : 'new',

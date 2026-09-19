@@ -1,9 +1,12 @@
 import { readFile } from 'node:fs/promises';
+import { dirname, resolve } from 'node:path';
 
-const path = process.argv[2] || 'src/pre-launcher.html';
+const path = process.argv[2] || 'src/launcher.html';
 const html = await readFile(path, 'utf8');
 
-const enginePath = path.replace(/pre-launcher\.html$/, 'pre-launcher-engine.html');
+// The engine is the tracked src/lithic.html sibling — the launcher build no
+// longer emits a copy of it, so check the file the runtime actually resolves.
+const enginePath = resolve(dirname(path), 'lithic.html');
 const engine = await readFile(enginePath, 'utf8');
 
 const checks = [
@@ -13,7 +16,7 @@ const checks = [
   ['no Vite source script', !/<script type="module"[^>]+src=/i.test(html)],
   ['no escaped script markup', !/&lt;script/i.test(html)],
   ['Svelte bundle content', /createElement|mount\(/.test(html)],
-  ['preview engine exists', engine.length > 1000],
+  ['sibling engine exists', engine.length > 1000],
   ['engine has TiddlyWiki store', /tiddlywiki-tiddler-store/.test(engine)]
 ];
 

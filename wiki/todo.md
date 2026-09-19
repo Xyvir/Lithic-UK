@@ -6,13 +6,15 @@
 - [x] Allow specifying 'modes' via http parameters so the launcher monolith html can be forced into specific modes to make unit tests easier; (all unit tests can be performed in 1 test environment this way, but with multiple test profiles/users)
     - (Done: `launcher-ui/src/mode.ts` honors `?mode=`, `?launcher-mode=`, `?launcher_mode=`)
 - [ ] Create unit tests for all lithic.html and launcher.html UI elements, logic and functions
-    - (In progress: 136 launcher-ui unit tests + fragment-parity assertions + puppeteer smoke + pre-launcher smoke)
+    - (In progress: launcher-ui unit tests + fragment-parity assertions + puppeteer smoke + launcher smoke)
     - [x] this can also intercept bad manual builds and prevent them from pushing 'bad' releases. (Rust Check workflow runs cargo check on every push touching src-tauri; npm run check:push runs tests, svelte-check, workflow-YAML sanity, cargo check and clippy locally before pushing)
 - [ ] Modularize launcher.html into separate javascript / html / css files
     - [x] begin modularizing launcher.html and test packaging into prelauncher.html
-        - (Svelte launcher builds to `src/pre-launcher.html` via `scripts/build-pre-launcher.mjs`)
-    - [ ] once all unit tests pass, update the build-wiki to package launcher.html into the build
-    - [ ] archive original launcher.html and begin using new modularized build process moving forward.
+        - (Svelte launcher builds to `src/launcher.html` via `scripts/build-launcher.mjs`; the `pre-launcher.html` alias and the preview-only engine copy were retired on 2026-09-19, so exactly one launcher artifact ships)
+    - [x] once all unit tests pass, update the build-wiki to package launcher.html into the build
+        - (`build-wiki.yml` now runs `npm run build:launcher` and commits the regenerated `src/launcher.html` with the wiki, so the shipped launcher always matches the commit)
+    - [x] archive original launcher.html and begin using new modularized build process moving forward.
+        - (legacy launcher archived at `assets/legacy-launcher.html`; `scripts/extract-launcher-fragments.mjs` and `scripts/inject-launcher-plugins.js` now read/write the archive)
 - [ ] Move "install app" button on mobile UI only to be next to the 'clear cache' button.
 - [ ] Add git history rollback UI/widget to online sync modal. (this should theoretically work for the local git instance even if not synced to github)
 - [ ] Make sure the custom.ico is actually saved to GitHub so restoring the GitHub will restore your disambiguation / icon
@@ -21,9 +23,10 @@
 
 1. **Ephemeral coderunner pass** (queued final tauri leg, small): paperlite/tauri injected coderunner tiddler should probe a local ephemeral.exe tray service first and fall back to the paperlite public swarm; in BOTH coderunner modes, codeblocks with language `txt` or no declared language get no run-code button.
 2. **Self-host/WebDAV milestone** (biggest remaining parity gap): port legacy `runtime.webdav` fragment into the Svelte launcher — remote file listing, locks, sync modal, emoji picker.
-3. **Build cutover**: flip `build-wiki.yml` to package `pre-launcher.html` as the shipped launcher, then archive legacy `launcher.html` and move to the modularized build permanently.
+3. **Build cutover** — done 2026-09-18: legacy `src/launcher.html` archived to `assets/legacy-launcher.html`, the Svelte build now emits `src/launcher.html`, and `build-wiki.yml` rebuilds + commits it with each prod release. `deploy/Dockerfile`, `build-server.yml`, `autoupdate.sh`, `index.html` and `manifest.json` all pick it up unchanged because the *name* stayed `launcher.html`.
+    - Follow-up: the launcher's plugin list (`DEFAULT_PLUGINS` in `launcher-ui/src/legacy-saver.ts`) is no longer synced from the generated wiki config by `scripts/inject-launcher-plugins.js` (which now maintains only the archive). Needs a drift check or codegen so a newly added wiki plugin cannot silently go missing from new blank wikis.
 
-### Launcher parity (Svelte `pre-launcher.html` vs legacy `launcher.html`) — webapp/local mode
+### Launcher parity (Svelte `launcher.html` vs legacy `launcher.html`) — webapp/local mode
 
 Tracked per-fragment in `launcher-ui/src/legacy-fragments.ts`; statuses are asserted by `fragment-parity.test.ts`.
 

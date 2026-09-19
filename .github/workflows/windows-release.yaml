@@ -60,8 +60,8 @@ jobs:
       - name: Run Launcher UI Tests
         run: npm --prefix launcher-ui test
 
-      - name: Build Pre-Launcher (Svelte Launcher Bundle)
-        run: node scripts/build-pre-launcher.mjs
+      - name: Build Launcher (Svelte Launcher Bundle)
+        run: node scripts/build-launcher.mjs
 
       # --- DEBUG STEP ---
       - name: Debug - List Files & Tauri Info
