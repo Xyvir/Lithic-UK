@@ -16,6 +16,12 @@ tauri = { version = "1", features = ["api-all"] }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 dirs = "5"
+# In-process git for the GitHub sync. `https` maps to the platform TLS stack
+# (WinHTTP on Windows, OpenSSL elsewhere); the default features are empty, so
+# it has to be requested explicitly. `vendored-libgit2` compiles the vendored C
+# sources with the `cc` crate and links them statically — no cmake, no system
+# libgit2, nothing for a user to install.
+git2 = { version = "0.21.0", default-features = false, features = ["https", "vendored-libgit2"] }
 
 [features]
 custom-protocol = ["tauri/custom-protocol"]

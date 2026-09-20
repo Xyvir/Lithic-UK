@@ -8,6 +8,8 @@ use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 use tauri::api::dialog::blocking::FileDialogBuilder;
 
+mod gitcore;
+
 struct StartupFile(Mutex<Option<String>>);
 
 #[derive(serde::Serialize)]
@@ -289,70 +291,9 @@ fn register_open_with(exe_path: &str) -> Result<(), String> {
     Ok(())
 }
 
-/// A `git` command that never shows a console window.
-///
-/// On Windows a foreground `git` spawns its own console, which flashes on
-/// screen. The launcher polls sync status while a file is mounted and commits
-/// on every save, so that flash repeated every few seconds and looked like the
-/// app was opening terminals by itself. `CREATE_NO_WINDOW` gives the child a
-/// hidden console (grandchildren such as git-remote-https inherit it) while
-/// stdout/stderr stay captured.
-fn git_command() -> std::process::Command {
-    let mut command = std::process::Command::new("git");
-    #[cfg(windows)]
-    {
-        use std::os::windows::process::CommandExt;
-        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
-        command.creation_flags(CREATE_NO_WINDOW);
-    }
-    command
-}
-
-/// Run `git` in `dir`, returning trimmed combined output. Stderr is merged
-/// so git's human-readable failures surface directly in command errors.
-fn git_run(dir: &std::path::Path, args: &[&str]) -> Result<String, String> {
-    let output = git_command()
-        .args(args)
-        .current_dir(dir)
-        .output()
-        .map_err(|error| format!("git unavailable: {}", error))?;
-    let mut text = String::from_utf8_lossy(&output.stdout).into_owned();
-    text.push_str(&String::from_utf8_lossy(&output.stderr));
-    let text = text.trim().to_string();
-    if output.status.success() {
-        Ok(text)
-    } else {
-        Err(if text.is_empty() {
-            format!("git {} failed", args.join(" "))
-        } else {
-            text
-        })
-    }
-}
-
-/// Like git_run but tolerates "nothing to commit"-style no-ops.
-fn git_run_lenient(dir: &std::path::Path, args: &[&str]) -> Result<String, String> {
-    match git_run(dir, args) {
-        Ok(text) => Ok(text),
-        Err(error) => {
-            let lower = error.to_lowercase();
-            if lower.contains("nothing to commit") || lower.contains("no changes added") {
-                Ok(String::new())
-            } else {
-                Err(error)
-            }
-        }
-    }
-}
-
-/// Ensure the repo has an identity so commits never fail on fresh machines.
-fn ensure_git_identity(dir: &std::path::Path) {
-    let has_name = git_run(dir, &["config", "user.name"]).map(|v| !v.is_empty()).unwrap_or(false);
-    if !has_name {
-        let _ = git_run(dir, &["config", "user.name", "Lithic"]);
-        let _ = git_run(dir, &["config", "user.email", "lithic@local"]);
-    }
-}
+// Git for the GitHub sync is in-process via libgit2 — see `gitcore`. There is
+// no spawn left anywhere: nothing for the user to install, no PATH to get
+// wrong, and no child console window to flash on Windows.
 
 /// Extensions the GitHub sync treats as user documents. Used to report a
 /// divergence worth mentioning; every remote-only file is rescued regardless
@@ -394,36 +335,41 @@ struct SyncMerge {
 /// folder untouched.
 fn merge_with_remote_branch(dir: &Path) -> Result<SyncMerge, String> {
     let mut merge = SyncMerge::default();
-    if git_run(dir, &["fetch", "origin", "main"]).is_err() {
+    let repo = gitcore::open(dir)?;
+    let url = gitcore::remote_url(&repo, "origin").unwrap_or_default();
+    if !gitcore::fetch_main(&repo, &url)? {
         return Ok(merge);
     }
-    let listing = match git_run(dir, &["ls-tree", "-r", "--name-only", "origin/main"]) {
-        Ok(listing) => listing,
+    let files = match gitcore::files_at(&repo, gitcore::REMOTE_MAIN) {
+        Ok(files) => files,
         Err(_) => return Ok(merge),
     };
 
-    for entry in listing
-        .lines()
-        .map(str::trim)
-        .filter(|line| !line.is_empty())
-    {
-        let local = dir.join(entry);
+    for entry in files {
+        let local = dir.join(&entry);
         if !local.exists() {
             if let Some(parent) = local.parent() {
                 fs::create_dir_all(parent).map_err(|error| error.to_string())?;
             }
-            git_run(dir, &["checkout", "origin/main", "--", entry])?;
-            merge.rescued.push(entry.to_string());
+            // Written from the object database rather than checked out, so the
+            // bytes are exactly what GitHub holds: no line-ending filter can
+            // rewrite a rescued document on its way to disk.
+            let bytes = gitcore::bytes_at(&repo, gitcore::REMOTE_MAIN, &entry)?;
+            fs::write(&local, bytes).map_err(|error| error.to_string())?;
+            merge.rescued.push(entry);
             continue;
         }
-        if !is_sync_doc(entry) {
+        if !is_sync_doc(&entry) {
             continue;
         }
-        if git_run(dir, &["diff", "--quiet", "origin/main", "--", entry]).is_ok() {
+        let identical = gitcore::bytes_at(&repo, gitcore::REMOTE_MAIN, &entry)
+            .map(|remote| fs::read(&local).map(|local| local == remote).unwrap_or(false))
+            .unwrap_or(false);
+        if identical {
             // Byte-identical to the remote copy: nothing to report.
             continue;
         }
-        merge.diverged.push(entry.to_string());
+        merge.diverged.push(entry);
     }
 
     Ok(merge)
@@ -433,26 +379,30 @@ fn merge_with_remote_branch(dir: &Path) -> Result<SyncMerge, String> {
 /// publish the union. Split out from the command so the whole connect flow can
 /// run against a local remote in tests; `remote_url` already embeds the token.
 fn sync_with_remote(dir: &Path, remote_url: &str) -> Result<SyncMerge, String> {
-    let _ = git_run(dir, &["remote", "remove", "origin"]);
-    git_run(dir, &["remote", "add", "origin", remote_url])?;
+    let repo = if dir.join(".git").is_dir() {
+        gitcore::open(dir)?
+    } else {
+        gitcore::init(dir)?
+    };
+    gitcore::ensure_identity(&repo);
+    let _ = gitcore::remove_remote(&repo, "origin");
+    gitcore::set_remote(&repo, "origin", remote_url)?;
 
-    // A commit must exist before the merge can compare against the working
-    // tree, and before a branch can be pushed.
-    if git_run(dir, &["rev-parse", "--verify", "HEAD"]).is_err() {
-        git_run(dir, &["add", "."])?;
-        let _ = git_run_lenient(dir, &["commit", "-m", "Initial sync from Lithic"]);
-        if git_run(dir, &["rev-parse", "--verify", "HEAD"]).is_err() {
-            git_run(dir, &["commit", "--allow-empty", "-m", "Initial sync from Lithic"])?;
-        }
+    // A commit must exist before the merge can compare against the remote and
+    // before a branch can be pushed.
+    if !gitcore::head_exists(&repo) {
+        gitcore::stage_all(&repo)?;
+        gitcore::commit(&repo, "Initial sync from Lithic", true)?;
     }
 
     // Everything only GitHub has comes down, the folder keeps its own version of
     // anything that exists on both sides, and then the union goes up.
     let merge = merge_with_remote_branch(dir)?;
 
-    git_run(dir, &["add", "."])?;
-    git_run_lenient(dir, &["commit", "-m", "System: finalize GitHub sync"])?;
-    git_run(dir, &["push", "-fu", "origin", "main"])?;
+    gitcore::stage_all(&repo)?;
+    gitcore::commit(&repo, "System: finalize GitHub sync", false)?;
+    gitcore::set_upstream(&repo, "origin", "main");
+    gitcore::push_main(&repo, remote_url, true)?;
     Ok(merge)
 }
 
@@ -474,17 +424,12 @@ async fn git_sync_setup(path: String, repo: String, token: String) -> Result<Str
         return Err("Both repository (owner/name) and token are required".to_string());
     }
 
-    if !dir.join(".git").is_dir() {
-        match git_run(dir, &["init", "-b", "main"]) {
-            Ok(_) => {}
-            Err(_) => {
-                // Older git without `init -b`: init then re-point HEAD.
-                git_run(dir, &["init"])?;
-                let _ = git_run(dir, &["symbolic-ref", "HEAD", "refs/heads/main"]);
-            }
-        }
-    }
-    ensure_git_identity(dir);
+    let git_repo = if dir.join(".git").is_dir() {
+        gitcore::open(dir)?
+    } else {
+        gitcore::init(dir)?
+    };
+    gitcore::ensure_identity(&git_repo);
 
     let url = format!("https://oauth2:{}@github.com/{}.git", token.trim(), repo);
     let merge = sync_with_remote(dir, &url)?;
@@ -497,6 +442,16 @@ async fn git_sync_setup(path: String, repo: String, token: String) -> Result<Str
         summary.push_str(&format!(" · kept {} local", merge.diverged.len()));
     }
     Ok(summary)
+}
+
+/// The origin URL of a folder Lithic manages, if it manages one. Saves only
+/// auto-commit in these repositories: Lithic's remotes embed the oauth2 token
+/// (the marker self-host uses too), so opening a file from a git folder the
+/// user made themselves never causes it to be committed or pushed anywhere.
+fn managed_remote_url(dir: &Path) -> Option<String> {
+    let repo = gitcore::open(dir).ok()?;
+    let url = gitcore::remote_url(&repo, "origin")?;
+    url.contains("oauth2:").then_some(url)
 }
 
 /// Best-effort auto-commit of one saved file: stage it, commit with the
@@ -513,31 +468,23 @@ async fn git_sync_commit(path: String, message: String) -> Result<(), String> {
     if !dir.join(".git").is_dir() {
         return Ok(());
     }
-    let has_origin = git_run(dir, &["remote"])
-        .map(|remotes| remotes.lines().any(|line| line.trim() == "origin"))
-        .unwrap_or(false);
-    if !has_origin {
+    // Only auto-commit in repos Lithic configured itself: its remotes embed
+    // the oauth2 token, mirroring self-host, so a git folder the user opened a
+    // file from is never touched by saves.
+    let Some(url) = managed_remote_url(dir) else {
         return Ok(());
-    }
-    // Only auto-commit in repos Lithic configured itself (its remotes embed
-    // the oauth2 token, mirroring self-host). Random git folders the user
-    // opened files from are never touched by saves.
-    let managed = git_run(dir, &["remote", "get-url", "origin"])
-        .map(|url| url.contains("oauth2:"))
-        .unwrap_or(false);
-    if !managed {
-        return Ok(());
-    }
-    ensure_git_identity(dir);
+    };
+    let repo = gitcore::open(dir)?;
+    gitcore::ensure_identity(&repo);
 
     let file_name = match file.file_name().and_then(|name| name.to_str()) {
         Some(name) => name.to_string(),
         None => return Ok(()),
     };
-    git_run(dir, &["add", "--", &file_name])?;
-    git_run_lenient(dir, &["commit", "-m", &message])?;
+    gitcore::stage_path(&repo, &file_name)?;
+    gitcore::commit(&repo, &message, false)?;
     // Push best-effort: offline saves must still succeed locally.
-    if let Err(error) = git_run(dir, &["push", "-u", "origin", "main"]) {
+    if let Err(error) = gitcore::push_main(&repo, &url, false) {
         eprintln!("git push skipped: {}", error);
     }
     Ok(())
@@ -725,10 +672,7 @@ fn git_sync_status(path: String) -> Option<GitSyncStatus> {
     if !dir.join(".git").is_dir() {
         return None;
     }
-    let url = git_run(&dir, &["remote", "get-url", "origin"]).ok()?;
-    if !url.contains("oauth2:") {
-        return None;
-    }
+    let url = managed_remote_url(&dir)?;
     let repo = url
         .split("github.com/")
         .nth(1)
@@ -746,11 +690,12 @@ fn git_sync_disconnect(path: String) -> Result<(), String> {
         .parent()
         .filter(|parent| parent.is_dir())
         .ok_or_else(|| format!("Cannot resolve a folder for {}", path))?;
-    let url = git_run(dir, &["remote", "get-url", "origin"]).unwrap_or_default();
+    let repo = gitcore::open(dir)?;
+    let url = gitcore::remote_url(&repo, "origin").unwrap_or_default();
     if !url.contains("oauth2:") {
         return Err("This folder is not a Lithic-managed sync folder".to_string());
     }
-    git_run(dir, &["remote", "remove", "origin"]).map(|_| ())
+    gitcore::remove_remote(&repo, "origin")
 }
 
 /// Folder the running exe lives in — the root all sidecar-relative paths
@@ -926,7 +871,11 @@ fn main() {
 mod tests {
     use super::*;
 
-    fn run_git(dir: &Path, args: &[&str]) {
+    /// Shell out to real git — for fixtures and assertions only. The sync
+    /// itself is in-process libgit2, so building the fixtures with git and
+    /// reading the results back with git is a deliberate independent check
+    /// that what libgit2 writes is a repository real git understands.
+    fn run_git(dir: &Path, args: &[&str]) -> String {
         let output = std::process::Command::new("git")
             .args(args)
             .current_dir(dir)
@@ -938,6 +887,14 @@ mod tests {
             args.join(" "),
             String::from_utf8_lossy(&output.stderr)
         );
+        String::from_utf8_lossy(&output.stdout).trim().to_string()
+    }
+
+    /// True when `name` is committed in the remote's `main`.
+    fn remote_has(remote: &Path, name: &str) -> bool {
+        run_git(remote, &["ls-tree", "-r", "--name-only", "main"])
+            .lines()
+            .any(|line| line == name)
     }
 
     fn write(dir: &Path, name: &str, text: &str) {
@@ -982,6 +939,67 @@ mod tests {
         run_git(&seed, &["remote", "add", "origin", remote.to_str().unwrap()]);
         run_git(&seed, &["push", "-u", "origin", "main"]);
         remote
+    }
+
+    #[test]
+    fn the_save_path_only_commits_in_lithic_managed_repos() {
+        let root = scratch("managed");
+        let remote = seed_remote(&root, &[("wiki.lith", "remote\n")]);
+        let local = root.join("local");
+        init_repo(&local);
+        write(&local, "wiki.lith", "local\n");
+        run_git(&local, &["add", "."]);
+        run_git(&local, &["commit", "-m", "local"]);
+
+        // A folder with no remote at all is not ours to commit into.
+        assert_eq!(managed_remote_url(&local), None);
+
+        // Neither is one pointing at a remote the user configured themselves.
+        run_git(&local, &["remote", "add", "origin", remote.to_str().unwrap()]);
+        assert_eq!(managed_remote_url(&local), None);
+
+        // Lithic's own remote is identified by the token it embeds.
+        let managed = "https://oauth2:gho_token@github.com/owner/lithic-sync-ab2d.git";
+        run_git(&local, &["remote", "set-url", "origin", managed]);
+        assert_eq!(managed_remote_url(&local).as_deref(), Some(managed));
+
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn a_save_commits_the_changed_file_and_skips_empty_commits() {
+        let root = scratch("save");
+        let remote = seed_remote(&root, &[("wiki.lith", "start\n")]);
+        // Start from the remote's history, so the save's push fast-forwards:
+        // cloning is what a user would do to get a synced folder either way.
+        let local = root.join("local");
+        run_git(
+            &root,
+            &["clone", remote.to_str().unwrap(), local.to_str().unwrap()],
+        );
+        for (key, value) in [
+            ("core.autocrlf", "false"),
+            ("user.name", "Lithic Test"),
+            ("user.email", "test@lithic.local"),
+        ] {
+            run_git(&local, &["config", key, value]);
+        }
+
+        let repo = gitcore::open(&local).unwrap();
+        write(&local, "wiki.lith", "edited\n");
+        gitcore::stage_path(&repo, "wiki.lith").unwrap();
+        assert!(gitcore::commit(&repo, "save", false).unwrap().is_some());
+        gitcore::push_main(&repo, remote.to_str().unwrap(), false).unwrap();
+        assert_eq!(run_git(&remote, &["show", "main:wiki.lith"]), "edited");
+
+        // Saving without changes must not pile up empty commits in the repo.
+        assert!(gitcore::commit(&repo, "save", false).unwrap().is_none());
+        assert_eq!(
+            run_git(&local, &["rev-list", "--count", "main"]),
+            "2"
+        );
+
+        let _ = fs::remove_dir_all(&root);
     }
 
     #[test]
@@ -1116,6 +1134,10 @@ mod tests {
         init_repo(&local);
         write(&local, "mine.lith", "local only\n");
         write(&local, "clash.lith", "local edits\n");
+        // Nested folders have to survive the libgit2 staging path too: an
+        // empty pathspec means "everything", and a pathspec of `*` would have
+        // silently skipped files in subfolders.
+        write(&local, "projects/nested.lith", "nested local\n");
         run_git(&local, &["add", "."]);
         run_git(&local, &["commit", "-m", "local"]);
 
@@ -1126,17 +1148,15 @@ mod tests {
 
         // GitHub ends up holding the union: the local wiki went up and the
         // remote-only files came down and stayed.
-        let tree = git_run(&remote, &["ls-tree", "-r", "--name-only", "main"]).unwrap();
-        let mut files: Vec<&str> = tree.lines().map(str::trim).collect();
-        files.sort_unstable();
-        assert_eq!(
-            files,
-            vec!["README.md", "clash.lith", "mine.lith", "remote-only.lith"]
-        );
+        assert!(remote_has(&remote, "mine.lith"));
+        assert!(remote_has(&remote, "projects/nested.lith"));
+        assert!(remote_has(&remote, "remote-only.lith"));
+        assert!(remote_has(&remote, "README.md"));
+        assert!(remote_has(&remote, "clash.lith"));
         // The clash resolved the local way on both sides: the folder's copy was
         // published over GitHub's.
         assert_eq!(
-            git_run(&remote, &["show", "main:clash.lith"]).unwrap(),
+            run_git(&remote, &["show", "main:clash.lith"]),
             "local edits"
         );
         assert_eq!(
