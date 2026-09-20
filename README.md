@@ -38,6 +38,14 @@ If you are interested in running codeblocks from Lithic or any other text-based 
 
 Self hosting instructions can be found in [self-host.md](https://github.com/Xyvir/Lithic/blob/main/self-host.md)
 
+## GitHub Sync (Desktop App)
+
+The GitHub button in the launcher links the folder holding your wikis to a repository. Every save of a file in that folder is committed and pushed to `main`, so the repository is a backup you can restore from.
+
+* **Your folder is the source of truth.** GitHub is only read when the folder does not have a file yet. When a wiki exists in both places with different content, the copy in your folder is published and the remote copy stays where it is, in the repository's commit history.
+* **First connect merges both ways.** Wikis that exist only on GitHub are downloaded into the folder, and everything in the folder is pushed up.
+* **Deletions do not propagate.** Removing a wiki from the folder leaves it on GitHub, and removing it on GitHub does not delete your local copy.
+
 # Roadmap
 1. Version 1 Released: 
 - Lithic is packaged as a plugin

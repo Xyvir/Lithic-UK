@@ -101,6 +101,10 @@ if (checkCargoAvailable()) {
   const rustSteps = [
     { name: 'cargo check (rust types)', args: ['check', '--quiet'] },
     { name: 'cargo clippy (rust lints)', args: ['clippy', '--quiet', '--', '-D', 'warnings'] },
+    // Rust unit tests (the GitHub-sync merge policy). CI type-checks them via
+    // `cargo check --all-targets`, which does not run them, so they are
+    // enforced here. Skipped when cargo is unavailable, like the steps above.
+    { name: 'cargo test (rust units)', args: ['test', '--quiet'] },
   ];
   for (const step of rustSteps) {
     process.stdout.write(`> ${step.name.padEnd(28, ' ')}`);

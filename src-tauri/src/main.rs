@@ -354,11 +354,114 @@ fn ensure_git_identity(dir: &std::path::Path) {
     }
 }
 
+/// Extensions the GitHub sync treats as user documents. Used to report a
+/// divergence worth mentioning; every remote-only file is rescued regardless
+/// of type so the union push below can never delete one.
+const SYNC_DOC_EXTENSIONS: [&str; 7] = ["lith", "json", "md", "tid", "txt", "ipynb", "html"];
+
+/// True for the document types the sync reports on.
+fn is_sync_doc(path: &str) -> bool {
+    Path::new(path)
+        .extension()
+        .and_then(|extension| extension.to_str())
+        .map(|extension| SYNC_DOC_EXTENSIONS.contains(&extension.to_ascii_lowercase().as_str()))
+        .unwrap_or(false)
+}
+
+/// What the first-connect merge did, for the message the launcher shows.
+#[derive(Debug, Default, PartialEq, Eq)]
+struct SyncMerge {
+    /// Remote files the local folder did not have; brought down.
+    rescued: Vec<String>,
+    /// Documents present on both sides with different content. The folder's
+    /// copy is kept, so these are reported rather than acted on.
+    diverged: Vec<String>,
+}
+
+/// The desktop counterpart of the self-host `/setup` rescue step
+/// (deploy/github-sync.sh): fetch (never merge working trees), then bring down
+/// everything only the remote has.
+///
+/// The folder is the source of truth and GitHub is the backup, so a document
+/// that exists on both sides with different content keeps its local copy — the
+/// same thing an ordinary save does, since `git_sync_commit` never pulls.
+/// Nothing is ever overwritten on this side, and the remote's previous copy
+/// stays in the repository's history.
+///
+/// Every remote-only file is rescued, not just documents: the push that follows
+/// rewrites the remote branch, so anything left behind would be deleted from
+/// GitHub. Offline, or a remote branch that does not exist yet, leaves the
+/// folder untouched.
+fn merge_with_remote_branch(dir: &Path) -> Result<SyncMerge, String> {
+    let mut merge = SyncMerge::default();
+    if git_run(dir, &["fetch", "origin", "main"]).is_err() {
+        return Ok(merge);
+    }
+    let listing = match git_run(dir, &["ls-tree", "-r", "--name-only", "origin/main"]) {
+        Ok(listing) => listing,
+        Err(_) => return Ok(merge),
+    };
+
+    for entry in listing
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty())
+    {
+        let local = dir.join(entry);
+        if !local.exists() {
+            if let Some(parent) = local.parent() {
+                fs::create_dir_all(parent).map_err(|error| error.to_string())?;
+            }
+            git_run(dir, &["checkout", "origin/main", "--", entry])?;
+            merge.rescued.push(entry.to_string());
+            continue;
+        }
+        if !is_sync_doc(entry) {
+            continue;
+        }
+        if git_run(dir, &["diff", "--quiet", "origin/main", "--", entry]).is_ok() {
+            // Byte-identical to the remote copy: nothing to report.
+            continue;
+        }
+        merge.diverged.push(entry.to_string());
+    }
+
+    Ok(merge)
+}
+
+/// Point the folder at a remote, merge in what only the remote has, and
+/// publish the union. Split out from the command so the whole connect flow can
+/// run against a local remote in tests; `remote_url` already embeds the token.
+fn sync_with_remote(dir: &Path, remote_url: &str) -> Result<SyncMerge, String> {
+    let _ = git_run(dir, &["remote", "remove", "origin"]);
+    git_run(dir, &["remote", "add", "origin", remote_url])?;
+
+    // A commit must exist before the merge can compare against the working
+    // tree, and before a branch can be pushed.
+    if git_run(dir, &["rev-parse", "--verify", "HEAD"]).is_err() {
+        git_run(dir, &["add", "."])?;
+        let _ = git_run_lenient(dir, &["commit", "-m", "Initial sync from Lithic"]);
+        if git_run(dir, &["rev-parse", "--verify", "HEAD"]).is_err() {
+            git_run(dir, &["commit", "--allow-empty", "-m", "Initial sync from Lithic"])?;
+        }
+    }
+
+    // Everything only GitHub has comes down, the folder keeps its own version of
+    // anything that exists on both sides, and then the union goes up.
+    let merge = merge_with_remote_branch(dir)?;
+
+    git_run(dir, &["add", "."])?;
+    git_run_lenient(dir, &["commit", "-m", "System: finalize GitHub sync"])?;
+    git_run(dir, &["push", "-fu", "origin", "main"])?;
+    Ok(merge)
+}
+
 /// Set up the directory containing `path` as a git repo synced to a GitHub
-/// remote — the desktop analog of the self-host github-sync workflow: init
-/// (if needed), point origin at the repo with the token embedded (same as
-/// self-host's oauth2 URL), then force-push the current state to main.
-/// Async so the initial push runs off the main thread (it can take seconds).
+/// remote — the desktop counterpart of the self-host github-sync workflow:
+/// init (if needed), point origin at the repo with the token embedded (same as
+/// self-host's oauth2 URL), run the same first-connect merge the CGI does —
+/// remote-only files come down, a name clash keeps the local copy — then
+/// publish the union. Async so the fetch and push run off the main thread.
 #[tauri::command]
 async fn git_sync_setup(path: String, repo: String, token: String) -> Result<String, String> {
     let file = PathBuf::from(&path);
@@ -384,14 +487,16 @@ async fn git_sync_setup(path: String, repo: String, token: String) -> Result<Str
     ensure_git_identity(dir);
 
     let url = format!("https://oauth2:{}@github.com/{}.git", token.trim(), repo);
-    let _ = git_run(dir, &["remote", "remove", "origin"]);
-    git_run(dir, &["remote", "add", "origin", &url])?;
+    let merge = sync_with_remote(dir, &url)?;
 
-    git_run(dir, &["add", "."])?;
-    git_run_lenient(dir, &["commit", "-m", "Initial sync from Lithic"])?;
-    git_run(dir, &["push", "-fu", "origin", "main"])?;
-
-    Ok(format!("Syncing {} to github.com/{}", dir.display(), repo))
+    let mut summary = format!("Backed up to github.com/{}", repo);
+    if !merge.rescued.is_empty() {
+        summary.push_str(&format!(" · pulled {} from GitHub", merge.rescued.len()));
+    }
+    if !merge.diverged.is_empty() {
+        summary.push_str(&format!(" · kept {} local", merge.diverged.len()));
+    }
+    Ok(summary)
 }
 
 /// Best-effort auto-commit of one saved file: stage it, commit with the
@@ -816,4 +921,229 @@ fn main() {
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
+}
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn run_git(dir: &Path, args: &[&str]) {
+        let output = std::process::Command::new("git")
+            .args(args)
+            .current_dir(dir)
+            .output()
+            .expect("git must be installed for the sync tests");
+        assert!(
+            output.status.success(),
+            "git {} failed: {}",
+            args.join(" "),
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+
+    fn write(dir: &Path, name: &str, text: &str) {
+        let path = dir.join(name);
+        if let Some(parent) = path.parent() {
+            fs::create_dir_all(parent).unwrap();
+        }
+        fs::write(path, text).unwrap();
+    }
+
+    fn init_repo(dir: &Path) {
+        fs::create_dir_all(dir).unwrap();
+        run_git(dir, &["init", "-b", "main"]);
+        // Pin line endings so the byte assertions below mean what they say.
+        run_git(dir, &["config", "core.autocrlf", "false"]);
+        run_git(dir, &["config", "user.name", "Lithic Test"]);
+        run_git(dir, &["config", "user.email", "test@lithic.local"]);
+    }
+
+    /// A clean scratch directory under the system temp dir.
+    fn scratch(name: &str) -> PathBuf {
+        let dir = std::env::temp_dir().join(format!("lithic-sync-{}-{}", name, std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    /// A bare repo standing in for GitHub, seeded with `files`.
+    fn seed_remote(root: &Path, files: &[(&str, &str)]) -> PathBuf {
+        let remote = root.join("remote.git");
+        let seed = root.join("seed");
+        run_git(
+            root,
+            &["init", "--bare", "-b", "main", remote.to_str().unwrap()],
+        );
+        init_repo(&seed);
+        for (name, text) in files {
+            write(&seed, name, text);
+        }
+        run_git(&seed, &["add", "."]);
+        run_git(&seed, &["commit", "-m", "seed"]);
+        run_git(&seed, &["remote", "add", "origin", remote.to_str().unwrap()]);
+        run_git(&seed, &["push", "-u", "origin", "main"]);
+        remote
+    }
+
+    #[test]
+    fn sync_doc_filter_covers_lithic_documents_only() {
+        assert!(is_sync_doc("wiki.lith"));
+        assert!(is_sync_doc("Nested/Notebook.IPYNB"));
+        assert!(is_sync_doc("notes.md"));
+        assert!(!is_sync_doc("diagram.png"));
+        assert!(!is_sync_doc("no-extension"));
+    }
+
+    #[test]
+    fn merge_rescues_remote_only_files_and_keeps_the_local_copy_on_a_clash() {
+        let root = scratch("merge");
+        let remote = seed_remote(
+            &root,
+            &[
+                ("remote-only.lith", "from github\n"),
+                ("clash.lith", "github copy\n"),
+                ("same.lith", "identical\n"),
+                ("projects/paper.lith", "nested from github\n"),
+                ("README.md", "project readme\n"),
+                ("notes.png", "github image\n"),
+            ],
+        );
+        let local = root.join("local");
+        init_repo(&local);
+        write(&local, "clash.lith", "local edits\n");
+        write(&local, "same.lith", "identical\n");
+        write(&local, "mine.lith", "local only\n");
+        write(&local, "notes.png", "local image\n");
+        run_git(&local, &["add", "."]);
+        run_git(&local, &["commit", "-m", "local"]);
+        run_git(&local, &["remote", "add", "origin", remote.to_str().unwrap()]);
+
+        let merge = merge_with_remote_branch(&local).expect("merge should succeed");
+
+        // Every remote-only file comes down, documents and non-documents
+        // alike, so the union push cannot delete it from GitHub.
+        assert_eq!(
+            merge.rescued,
+            vec!["README.md", "projects/paper.lith", "remote-only.lith"]
+        );
+        // The clash is reported, not resolved against the local file.
+        assert_eq!(merge.diverged, vec!["clash.lith"]);
+
+        // Local-first: the folder's copy of the clash is untouched...
+        assert_eq!(
+            fs::read_to_string(local.join("clash.lith")).unwrap(),
+            "local edits\n"
+        );
+        // ...and nothing was written anywhere to preserve it.
+        assert!(!local.join(".lithic-backups").exists());
+        // Rescued files land, nested ones included.
+        assert_eq!(
+            fs::read_to_string(local.join("remote-only.lith")).unwrap(),
+            "from github\n"
+        );
+        assert_eq!(
+            fs::read_to_string(local.join("projects/paper.lith")).unwrap(),
+            "nested from github\n"
+        );
+        assert_eq!(
+            fs::read_to_string(local.join("README.md")).unwrap(),
+            "project readme\n"
+        );
+        // A non-document clash is left alone and is not reported as a document
+        // divergence.
+        assert_eq!(
+            fs::read_to_string(local.join("notes.png")).unwrap(),
+            "local image\n"
+        );
+        // Identical files are neither rescued nor reported.
+        assert_eq!(
+            fs::read_to_string(local.join("same.lith")).unwrap(),
+            "identical\n"
+        );
+
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn merge_is_a_no_op_without_a_remote_branch() {
+        let root = scratch("fresh");
+        let remote = root.join("remote.git");
+        let local = root.join("local");
+
+        run_git(
+            &root,
+            &["init", "--bare", "-b", "main", remote.to_str().unwrap()],
+        );
+        init_repo(&local);
+        write(&local, "mine.lith", "local only\n");
+        run_git(&local, &["add", "."]);
+        run_git(&local, &["commit", "-m", "local"]);
+        run_git(&local, &["remote", "add", "origin", remote.to_str().unwrap()]);
+
+        // A brand-new (empty) GitHub repo must not break the connect.
+        let merge = merge_with_remote_branch(&local).expect("empty remote should be tolerated");
+        assert_eq!(merge, SyncMerge::default());
+        assert_eq!(
+            fs::read_to_string(local.join("mine.lith")).unwrap(),
+            "local only\n"
+        );
+
+        // Nor should an unreachable remote.
+        run_git(
+            &local,
+            &["remote", "set-url", "origin", "https://example.invalid/nope.git"],
+        );
+        let offline = merge_with_remote_branch(&local).expect("offline connect should be tolerated");
+        assert_eq!(offline, SyncMerge::default());
+
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn connect_publishes_the_union_without_overwriting_local_work() {
+        let root = scratch("connect");
+        let remote = seed_remote(
+            &root,
+            &[
+                ("remote-only.lith", "from github\n"),
+                ("clash.lith", "github copy\n"),
+                ("README.md", "project readme\n"),
+            ],
+        );
+
+        // What the user has been working on locally: a new wiki and one name
+        // that already exists on GitHub with different content.
+        let local = root.join("local");
+        init_repo(&local);
+        write(&local, "mine.lith", "local only\n");
+        write(&local, "clash.lith", "local edits\n");
+        run_git(&local, &["add", "."]);
+        run_git(&local, &["commit", "-m", "local"]);
+
+        let merge =
+            sync_with_remote(&local, remote.to_str().unwrap()).expect("connect should succeed");
+        assert_eq!(merge.rescued, vec!["README.md", "remote-only.lith"]);
+        assert_eq!(merge.diverged, vec!["clash.lith"]);
+
+        // GitHub ends up holding the union: the local wiki went up and the
+        // remote-only files came down and stayed.
+        let tree = git_run(&remote, &["ls-tree", "-r", "--name-only", "main"]).unwrap();
+        let mut files: Vec<&str> = tree.lines().map(str::trim).collect();
+        files.sort_unstable();
+        assert_eq!(
+            files,
+            vec!["README.md", "clash.lith", "mine.lith", "remote-only.lith"]
+        );
+        // The clash resolved the local way on both sides: the folder's copy was
+        // published over GitHub's.
+        assert_eq!(
+            git_run(&remote, &["show", "main:clash.lith"]).unwrap(),
+            "local edits"
+        );
+        assert_eq!(
+            fs::read_to_string(local.join("clash.lith")).unwrap(),
+            "local edits\n"
+        );
+
+        let _ = fs::remove_dir_all(&root);
+    }
 }
