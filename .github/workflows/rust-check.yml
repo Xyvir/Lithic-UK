@@ -50,3 +50,12 @@ jobs:
       - name: cargo check
         working-directory: src-tauri
         run: cargo check --all-targets 2>&1 | tail -40 && exit ${PIPESTATUS[0]}
+
+      # The GitHub-sync tests in main.rs. `cargo check --all-targets` only
+      # type-checks them and the release workflow never runs cargo at all, so
+      # without this step they only execute on a machine running the local
+      # push gate. Linking the test binary needs the system deps above, hence
+      # running after the cheap type gate rather than before it.
+      - name: cargo test
+        working-directory: src-tauri
+        run: cargo test --quiet 2>&1 | tail -40 && exit ${PIPESTATUS[0]}
