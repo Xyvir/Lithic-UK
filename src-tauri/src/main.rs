@@ -309,6 +309,34 @@ fn is_sync_doc(path: &str) -> bool {
         .unwrap_or(false)
 }
 
+/// Progress line for the launcher's sync modal. Connect is a handful of long
+/// blocking calls (fetch, the rescue writes, commit, push), so the modal shows
+/// the stage it is on instead of a dead "Syncing…" label that reads as frozen.
+#[derive(Clone, serde::Serialize)]
+struct SyncProgress {
+    stage: String,
+    detail: String,
+}
+
+/// What `git_sync_setup` hands back: the summary line for the modal, plus the
+/// folder's wikis so a first connect can slot them into recents immediately.
+#[derive(serde::Serialize)]
+struct GitSyncSetup {
+    summary: String,
+    recents: Vec<String>,
+}
+
+/// Best-effort progress emit: a closed window just means nobody is watching.
+fn report(window: &tauri::Window, stage: &str, detail: &str) {
+    let _ = window.emit(
+        "git-sync-progress",
+        SyncProgress {
+            stage: stage.to_string(),
+            detail: detail.to_string(),
+        },
+    );
+}
+
 /// What the first-connect merge did, for the message the launcher shows.
 #[derive(Debug, Default, PartialEq, Eq)]
 struct SyncMerge {
@@ -333,17 +361,40 @@ struct SyncMerge {
 /// rewrites the remote branch, so anything left behind would be deleted from
 /// GitHub. Offline, or a remote branch that does not exist yet, leaves the
 /// folder untouched.
-fn merge_with_remote_branch(dir: &Path) -> Result<SyncMerge, String> {
+fn merge_with_remote_branch(
+    dir: &Path,
+    progress: &dyn Fn(&str, &str),
+) -> Result<SyncMerge, String> {
     let mut merge = SyncMerge::default();
     let repo = gitcore::open(dir)?;
     let url = gitcore::remote_url(&repo, "origin").unwrap_or_default();
+    progress("fetch", "Fetching from GitHub…");
     if !gitcore::fetch_main(&repo, &url)? {
         return Ok(merge);
     }
+    // Remote-only entries are the slowest part of a first connect on a big
+    // repo, so count them up front and report each one as it lands.
+    progress("merge", "Comparing with GitHub…");
     let files = match gitcore::files_at(&repo, gitcore::REMOTE_MAIN) {
         Ok(files) => files,
         Err(_) => return Ok(merge),
     };
+
+    let remote_only = files
+        .iter()
+        .filter(|entry| !dir.join(entry.as_str()).exists())
+        .count();
+    if remote_only > 0 {
+        progress(
+            "pull",
+            &format!(
+                "Pulling {} file{} from GitHub…",
+                remote_only,
+                if remote_only == 1 { "" } else { "s" }
+            ),
+        );
+    }
+    let mut pulled = 0usize;
 
     for entry in files {
         let local = dir.join(&entry);
@@ -356,6 +407,13 @@ fn merge_with_remote_branch(dir: &Path) -> Result<SyncMerge, String> {
             // rewrite a rescued document on its way to disk.
             let bytes = gitcore::bytes_at(&repo, gitcore::REMOTE_MAIN, &entry)?;
             fs::write(&local, bytes).map_err(|error| error.to_string())?;
+            pulled += 1;
+            if remote_only > 1 {
+                progress(
+                    "pull",
+                    &format!("Pulled {}/{} · {}", pulled, remote_only, entry),
+                );
+            }
             merge.rescued.push(entry);
             continue;
         }
@@ -378,7 +436,11 @@ fn merge_with_remote_branch(dir: &Path) -> Result<SyncMerge, String> {
 /// Point the folder at a remote, merge in what only the remote has, and
 /// publish the union. Split out from the command so the whole connect flow can
 /// run against a local remote in tests; `remote_url` already embeds the token.
-fn sync_with_remote(dir: &Path, remote_url: &str) -> Result<SyncMerge, String> {
+fn sync_with_remote(
+    dir: &Path,
+    remote_url: &str,
+    progress: &dyn Fn(&str, &str),
+) -> Result<SyncMerge, String> {
     let repo = if dir.join(".git").is_dir() {
         gitcore::open(dir)?
     } else {
@@ -391,17 +453,20 @@ fn sync_with_remote(dir: &Path, remote_url: &str) -> Result<SyncMerge, String> {
     // A commit must exist before the merge can compare against the remote and
     // before a branch can be pushed.
     if !gitcore::head_exists(&repo) {
+        progress("commit", "Committing the folder's files…");
         gitcore::stage_all(&repo)?;
         gitcore::commit(&repo, "Initial sync from Lithic", true)?;
     }
 
     // Everything only GitHub has comes down, the folder keeps its own version of
     // anything that exists on both sides, and then the union goes up.
-    let merge = merge_with_remote_branch(dir)?;
+    let merge = merge_with_remote_branch(dir, progress)?;
 
     gitcore::stage_all(&repo)?;
+    progress("commit", "Recording the merged state…");
     gitcore::commit(&repo, "System: finalize GitHub sync", false)?;
     gitcore::set_upstream(&repo, "origin", "main");
+    progress("push", "Pushing to GitHub…");
     gitcore::push_main(&repo, remote_url, true)?;
     Ok(merge)
 }
@@ -411,37 +476,137 @@ fn sync_with_remote(dir: &Path, remote_url: &str) -> Result<SyncMerge, String> {
 /// init (if needed), point origin at the repo with the token embedded (same as
 /// self-host's oauth2 URL), run the same first-connect merge the CGI does —
 /// remote-only files come down, a name clash keeps the local copy — then
-/// publish the union. Async so the fetch and push run off the main thread.
+/// publish the union, then hand back the folder's wikis so a first connect can
+/// populate the launcher's recents. The git work is blocking (libgit2
+/// fetch/commit/push over HTTPS), so it runs on the blocking pool rather than
+/// holding an async worker for the length of a network round trip, and each
+/// stage is reported to the modal as it starts.
 #[tauri::command]
-async fn git_sync_setup(path: String, repo: String, token: String) -> Result<String, String> {
+async fn git_sync_setup(
+    path: String,
+    repo: String,
+    token: String,
+    window: tauri::Window,
+) -> Result<GitSyncSetup, String> {
     let file = PathBuf::from(&path);
     let dir = file
         .parent()
         .filter(|parent| parent.is_dir())
-        .ok_or_else(|| format!("Cannot resolve a folder for {}", path))?;
-    let repo = repo.trim().trim_end_matches(".git").trim();
+        .ok_or_else(|| format!("Cannot resolve a folder for {}", path))?
+        .to_path_buf();
+    let repo = repo.trim().trim_end_matches(".git").trim().to_string();
     if repo.is_empty() || token.trim().is_empty() {
         return Err("Both repository (owner/name) and token are required".to_string());
     }
 
-    let git_repo = if dir.join(".git").is_dir() {
-        gitcore::open(dir)?
-    } else {
-        gitcore::init(dir)?
+    let outcome = tauri::async_runtime::spawn_blocking(move || -> Result<GitSyncSetup, String> {
+        let url = format!("https://oauth2:{}@github.com/{}.git", token.trim(), repo);
+        let merge = sync_with_remote(&dir, &url, &|stage, detail| report(&window, stage, detail))?;
+
+        let mut summary = format!("Backed up to github.com/{}", repo);
+        if !merge.rescued.is_empty() {
+            summary.push_str(&format!(" · pulled {} from GitHub", merge.rescued.len()));
+        }
+        if !merge.diverged.is_empty() {
+            summary.push_str(&format!(" · kept {} local", merge.diverged.len()));
+        }
+        Ok(GitSyncSetup {
+            summary,
+            recents: list_lith_wikis(&dir, WIKI_LIST_LIMIT),
+        })
+    })
+    .await
+    .map_err(|error| error.to_string())?;
+    outcome
+}
+
+/// Absolute paths of the folder's own `.lith` wikis, newest first: what a first
+/// connect drops into the launcher's recents, so the wikis GitHub just handed
+/// the user are visible without hunting through the mount dialog.
+///
+/// Flat on purpose — top-level files only, nothing from subfolders. A synced
+/// folder is one unit the user adds, and wikis that ride along from deeper in
+/// the tree are the ones that later become a support headache: rename the
+/// parent and the backup quietly stops matching. A subfolder worth backing up
+/// is a folder the user adds on its own.
+///
+/// `max_results` is a parameter because the two callers want different things:
+/// a first connect samples the newest wikis to put a few rows in front of the
+/// user, while a rebuild re-indexes as much as it can find.
+const WIKI_LIST_LIMIT: usize = 20;
+const REINDEX_LIST_LIMIT: usize = 500;
+
+fn list_lith_wikis(dir: &Path, max_results: usize) -> Vec<String> {
+    let mut found: Vec<(std::time::SystemTime, String)> = Vec::new();
+    let Ok(entries) = fs::read_dir(dir) else {
+        return Vec::new();
     };
-    gitcore::ensure_identity(&git_repo);
-
-    let url = format!("https://oauth2:{}@github.com/{}.git", token.trim(), repo);
-    let merge = sync_with_remote(dir, &url)?;
-
-    let mut summary = format!("Backed up to github.com/{}", repo);
-    if !merge.rescued.is_empty() {
-        summary.push_str(&format!(" · pulled {} from GitHub", merge.rescued.len()));
+    for entry in entries.flatten() {
+        if !entry.file_type().map(|kind| kind.is_file()).unwrap_or(false) {
+            continue;
+        }
+        let name = entry.file_name().to_string_lossy().into_owned();
+        if !name.to_ascii_lowercase().ends_with(".lith") {
+            continue;
+        }
+        let modified = entry
+            .metadata()
+            .and_then(|meta| meta.modified())
+            .unwrap_or(std::time::UNIX_EPOCH);
+        found.push((modified, entry.path().to_string_lossy().into_owned()));
     }
-    if !merge.diverged.is_empty() {
-        summary.push_str(&format!(" · kept {} local", merge.diverged.len()));
+    found.sort_by_key(|entry| std::cmp::Reverse(entry.0));
+    found
+        .into_iter()
+        .take(max_results)
+        .map(|(_, path)| path)
+        .collect()
+}
+
+/// The managed repository backing each of these wiki paths, as the folder that
+/// contains it — absent when no repository covers the path.
+///
+/// Walks *up* from each file, because the commit does: staging is recursive, so
+/// a wiki in `Lithic/projects/` really is published by the repository at
+/// `Lithic/`. Reporting it as un-backed-up would be false, and worse, it would
+/// point the user at "back up this folder" for a folder inside a repository —
+/// which git handles badly. Answering this in one call also spares the desktop
+/// app a status round trip per ancestor per row.
+///
+/// Discovery stays flat (`list_lith_wikis`); this only resolves containment for
+/// a file the user already has in front of them.
+#[tauri::command]
+fn git_sync_coverage(paths: Vec<String>) -> std::collections::HashMap<String, String> {
+    let mut backed: std::collections::HashMap<String, String> = std::collections::HashMap::new();
+    for path in paths {
+        let mut current = PathBuf::from(&path).parent().map(|parent| parent.to_path_buf());
+        while let Some(dir) = current {
+            if dir.join(".git").is_dir() && managed_remote_url(&dir).is_some() {
+                backed.insert(path.clone(), dir.to_string_lossy().into_owned());
+                break;
+            }
+            current = dir.parent().map(|parent| parent.to_path_buf());
+        }
     }
-    Ok(summary)
+    backed
+}
+
+/// Every `.lith` under a folder, for the launcher's re-index.
+///
+/// Accepts a folder or any file inside it, so the caller can hand over the same
+/// path it uses as its sync target without knowing which it holds.
+#[tauri::command]
+fn list_folder_liths(path: String) -> Vec<String> {
+    let given = PathBuf::from(&path);
+    let dir = if given.is_dir() {
+        given
+    } else {
+        match given.parent() {
+            Some(parent) => parent.to_path_buf(),
+            None => return Vec::new(),
+        }
+    };
+    list_lith_wikis(&dir, REINDEX_LIST_LIMIT)
 }
 
 /// The origin URL of a folder Lithic manages, if it manages one. Saves only
@@ -862,7 +1027,9 @@ fn main() {
             github_list_repos,
             github_create_repo,
             git_sync_status,
-            git_sync_disconnect
+            git_sync_disconnect,
+            git_sync_coverage,
+            list_folder_liths
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
@@ -1035,7 +1202,8 @@ mod tests {
         run_git(&local, &["commit", "-m", "local"]);
         run_git(&local, &["remote", "add", "origin", remote.to_str().unwrap()]);
 
-        let merge = merge_with_remote_branch(&local).expect("merge should succeed");
+        let merge =
+            merge_with_remote_branch(&local, &|_, _| {}).expect("merge should succeed");
 
         // Every remote-only file comes down, documents and non-documents
         // alike, so the union push cannot delete it from GitHub.
@@ -1098,7 +1266,8 @@ mod tests {
         run_git(&local, &["remote", "add", "origin", remote.to_str().unwrap()]);
 
         // A brand-new (empty) GitHub repo must not break the connect.
-        let merge = merge_with_remote_branch(&local).expect("empty remote should be tolerated");
+        let merge = merge_with_remote_branch(&local, &|_, _| {})
+            .expect("empty remote should be tolerated");
         assert_eq!(merge, SyncMerge::default());
         assert_eq!(
             fs::read_to_string(local.join("mine.lith")).unwrap(),
@@ -1110,7 +1279,8 @@ mod tests {
             &local,
             &["remote", "set-url", "origin", "https://example.invalid/nope.git"],
         );
-        let offline = merge_with_remote_branch(&local).expect("offline connect should be tolerated");
+        let offline = merge_with_remote_branch(&local, &|_, _| {})
+            .expect("offline connect should be tolerated");
         assert_eq!(offline, SyncMerge::default());
 
         let _ = fs::remove_dir_all(&root);
@@ -1142,7 +1312,8 @@ mod tests {
         run_git(&local, &["commit", "-m", "local"]);
 
         let merge =
-            sync_with_remote(&local, remote.to_str().unwrap()).expect("connect should succeed");
+            sync_with_remote(&local, remote.to_str().unwrap(), &|_, _| {})
+                .expect("connect should succeed");
         assert_eq!(merge.rescued, vec!["README.md", "remote-only.lith"]);
         assert_eq!(merge.diverged, vec!["clash.lith"]);
 
@@ -1163,6 +1334,136 @@ mod tests {
             fs::read_to_string(local.join("clash.lith")).unwrap(),
             "local edits\n"
         );
+
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    /// The modal's progress line is fed by these stages; without them a slow
+    /// first connect sits on a dead "Syncing…" button and reads as frozen.
+    #[test]
+    fn connect_reports_each_stage_it_reaches() {
+        let root = scratch("progress");
+        let remote = seed_remote(&root, &[("remote-only.lith", "from github\n")]);
+        let local = root.join("local");
+        init_repo(&local);
+        write(&local, "mine.lith", "local only\n");
+        run_git(&local, &["add", "."]);
+        run_git(&local, &["commit", "-m", "local"]);
+
+        let stages = std::cell::RefCell::new(Vec::new());
+        sync_with_remote(&local, remote.to_str().unwrap(), &|stage, _| {
+            stages.borrow_mut().push(stage.to_string());
+        })
+        .expect("connect should succeed");
+
+        let stages = stages.into_inner();
+        for expected in ["fetch", "merge", "pull", "commit", "push"] {
+            assert!(
+                stages.iter().any(|stage| stage == expected),
+                "connect never reported the '{}' stage: {:?}",
+                expected,
+                stages
+            );
+        }
+
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    /// Coverage has to answer from the repository *root*: a wiki in a subfolder
+    /// is still published by the repository above it, because staging is
+    /// recursive. Marking it un-backed-up would be false and would send the
+    /// user to create a repository inside another one.
+    ///
+    /// Discovery is flat, so this is the only place nesting is reasoned about.
+    #[test]
+    fn coverage_resolves_each_wiki_up_to_its_repository_root() {
+        let root = scratch("coverage");
+        let local = root.join("Lithic");
+        init_repo(&local);
+        write(&local, "top.lith", "top\n");
+        write(&local, "projects/deep.lith", "deep\n");
+
+        // Somebody else's repository: present, but not Lithic's to back up.
+        let private = root.join("private");
+        init_repo(&private);
+        write(&private, "notes.lith", "notes\n");
+        run_git(
+            &private,
+            &["remote", "add", "origin", "https://github.com/me/private.git"],
+        );
+
+        let top = local.join("top.lith").to_string_lossy().into_owned();
+        let nested = local
+            .join("projects/deep.lith")
+            .to_string_lossy()
+            .into_owned();
+        let outside = private.join("notes.lith").to_string_lossy().into_owned();
+
+        // Not connected yet: a repository with no Lithic remote covers nothing.
+        assert!(git_sync_coverage(vec![top.clone(), nested.clone()]).is_empty());
+
+        run_git(
+            &local,
+            &[
+                "remote",
+                "add",
+                "origin",
+                "https://oauth2:gho_token@github.com/owner/lithic-sync-ab2d.git",
+            ],
+        );
+        let covered = git_sync_coverage(vec![top.clone(), nested.clone(), outside.clone()]);
+        let expected_root = local.to_string_lossy().into_owned();
+        assert_eq!(covered.get(&top), Some(&expected_root));
+        assert_eq!(covered.get(&nested), Some(&expected_root));
+        assert_eq!(covered.get(&outside), None);
+
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    /// A rebuild hands over whichever path it holds, so the folder walk has to
+    /// work from a file inside the folder as well as from the folder itself.
+    #[test]
+    fn list_folder_liths_accepts_a_file_or_a_folder() {
+        let root = scratch("folderlist");
+        write(&root, "one.lith", "one\n");
+        write(&root, "sub/two.lith", "two\n");
+
+        let from_folder = list_folder_liths(root.to_string_lossy().into_owned());
+        let from_file = list_folder_liths(root.join("one.lith").to_string_lossy().into_owned());
+        // Flat: `sub/two.lith` is a different folder's wiki, not this one's.
+        assert_eq!(from_folder.len(), 1);
+        assert_eq!(from_file, from_folder);
+
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn list_lith_wikis_lists_only_the_folder_itself() {
+        let root = scratch("recents");
+        let local = root.join("local");
+        init_repo(&local);
+        write(&local, "top.lith", "top\n");
+        write(&local, "other.lith", "other\n");
+        write(&local, "notes.md", "not a wiki\n");
+        write(&local, "projects/nested.lith", "a different folder's wiki\n");
+        write(&local, "node_modules/pkg/vendored.lith", "dependency\n");
+
+        let found = list_lith_wikis(&local, WIKI_LIST_LIMIT);
+        // Sorted by mtime, so compare as a set; what matters is what is absent.
+        let mut names: Vec<String> = found
+            .iter()
+            .map(|path| {
+                Path::new(path)
+                    .file_name()
+                    .unwrap_or_default()
+                    .to_string_lossy()
+                    .into_owned()
+            })
+            .collect();
+        names.sort();
+
+        // Nothing from a subfolder, however deep — including the repository's own.
+        assert_eq!(names, vec!["other.lith".to_string(), "top.lith".to_string()]);
 
         let _ = fs::remove_dir_all(&root);
     }

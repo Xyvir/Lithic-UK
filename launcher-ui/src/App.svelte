@@ -1,17 +1,18 @@
 <script lang="ts">
   import { onMount } from 'svelte';
   import type { LauncherMode } from './mode';
-  import { createFileBridge, tauriInvoke } from './file-bridge';
+  import { createFileBridge, tauriInvoke, tauriListen } from './file-bridge';
   import { isScratchFileName, resolveScratchKind, type ScratchKind } from './scratch-editor';
   import { pwaInstall, promptPwaInstall } from './pwa-install';
   import { bootLegacyWiki, bootLegacyHtml, type RemoteTarget } from './legacy-launcher-runtime';
   import { EMOJI_LIST, uploadInstanceIcon, clearInstanceIcon, emojiFaviconUrl, applyFavicon, bustIconCache, readInstanceEmoji, saveInstanceEmoji, clearInstanceEmoji } from './instance-icon';
-  import { getRecentFiles, addRecentFile, removeRecentFile, clearAllRecentFiles, purgeOldestCachesIfNeeded, idb, getSearchCacheText, listWikiVersions, wikiHasHistory, downloadWikiVersion, deleteWikiHistory, getDirtyState, clearDirtyState, listDirtyRecoveries, isWikiDriftedFromHead, isInstallDismissed, setInstallDismissed, type RecentEntry } from './storage';
+  import { getRecentFiles, addRecentFile, removeRecentFile, clearAllRecentFiles, purgeOldestCachesIfNeeded, saveSearchCache, forgetWikiCache, idb, getSearchCacheText, listWikiVersions, wikiHasHistory, downloadWikiVersion, getDirtyState, clearDirtyState, listDirtyRecoveries, isWikiDriftedFromHead, isInstallDismissed, setInstallDismissed, recentDiskPath, type RecentEntry } from './storage';
   import { readBookmarkEntries, saveBookmark, removeBookmark, setBookmarkIcon, refreshBookmarkIcon, verifyInstanceUrl, normalizeInstanceUrl, instanceLabel, type BookmarkEntry } from './bookmarks';
   import { fetchRemoteFiles, fetchRemoteWiki, probePatchApi, createLockHeartbeat, readRemoteLock, uploadRemoteFile, webdavUrl, resolveSessionId, lithUploadName, type WebdavFile } from './webdav';
   import { searchCachedWikis } from './cache-search';
+  import { computeBackupCoverage, hasBackedUpRepo, orphanedEntries, reindexFolders, type CoverageRow, type RebuildOrphan } from './backup-coverage';
   import { parseDeviceCode, parseDevicePoll, pollDelayMs, formatUserCode, generateRepoName, partitionRepos } from './github-device';
-  import { serializeJsonToLith } from './lithic-format';
+  import { serializeJsonToLith, parseLithToJSON } from './lithic-format';
   // Inlined as a base64 data URL (assetsInlineLimit: Infinity) so the brand
   // mark survives when launcher.html is bundled into the Tauri app.
   import mstile150 from './mstile-150x150.png';
@@ -148,6 +149,48 @@
   let gitRepoInput = '';
   let gitTokenInput = '';
 
+  /** What `git_sync_setup` returns: the modal line plus the folder's wikis. */
+  interface GitSyncSetupResult { summary: string; recents: string[] }
+
+  // Connect is a few long blocking git calls inside Rust (fetch, rescue writes,
+  // commit, push). The stage it reports plus a live seconds counter is what
+  // keeps a slow first sync from looking like a hung app.
+  let gitSyncStage = '';
+  let gitSyncElapsed = 0;
+  let gitSyncProgressTimer: ReturnType<typeof setInterval> | null = null;
+
+  function startGitSyncProgress(): void {
+    stopGitSyncProgressTimer();
+    gitSyncStage = 'Starting…';
+    gitSyncElapsed = 0;
+    gitSyncProgressTimer = setInterval(() => { gitSyncElapsed += 1; }, 1000);
+  }
+
+  function stopGitSyncProgressTimer(): void {
+    if (gitSyncProgressTimer) clearInterval(gitSyncProgressTimer);
+    gitSyncProgressTimer = null;
+  }
+
+  function endGitSyncProgress(): void {
+    stopGitSyncProgressTimer();
+    gitSyncStage = '';
+    gitSyncElapsed = 0;
+  }
+
+  /**
+   * A first connect hands back the folder's wikis (plus whatever was rescued
+   * from GitHub). They are already on disk by then, so they belong in recents
+   * the moment the connection lands — the point of connecting a folder is to
+   * have its wikis in front of you, not to go hunting for them through Mount.
+   * Rust returns them newest-first and `remember` unshifts, so walk backwards.
+   */
+  async function adoptSyncedWikis(paths: string[] | undefined): Promise<void> {
+    if (!paths || paths.length === 0) return;
+    for (const path of [...paths].reverse()) {
+      await remember({ name: path.split(/[\\/]/).pop() || path, path });
+    }
+  }
+
   function openGitSyncModal() {
     gitSyncMessage = '';
     gitSyncError = '';
@@ -166,6 +209,9 @@
   function closeGitSyncModal() {
     showGitSyncModal = false;
     gitPollAborted = true;
+    // Focus is per-visit: leaving it set would silently retarget the header
+    // icon and the next open at a folder the user only looked at once.
+    gitSyncFocus = null;
   }
 
   function resetGitSyncFlow() {
@@ -177,18 +223,99 @@
     gitSyncError = '';
     gitSyncMessage = '';
     gitSyncBusy = false;
+    endGitSyncProgress();
     void refreshGitSyncStatus(true);
   }
 
+  /**
+   * A folder the user asked to back up from the recent list, as a path inside
+   * it. Cleared when the modal closes, so the header icon keeps meaning "the
+   * folder of my current Lith" while a row can act on its own folder.
+   */
+  let gitSyncFocus: string | null = null;
+
+  /** Wiki path -> the backed-up folder covering it; absent when none does. */
+  let backupRoots: Record<string, string> = {};
+  let rebuildBusy = false;
+  let localOnlyPaths: Set<string> = new Set();
+
+  /**
+   * The folder the sync targets: the open file, else the newest recent row that
+   * records a disk path. `recentDiskPath` is what makes the second case work at
+   * all — a Lith saved from inside the wiki records its path as `tauriPath`, so
+   * a row-shape check for `path` alone concluded nothing was open and greyed the
+   * sync icon out right after a save.
+   */
   function gitSyncTargetPath(): string | null {
     if (filePath) return filePath;
-    const withPath = recentFiles.find((item) => Boolean((item as any).path));
-    return withPath ? ((withPath as any).path as string) : null;
+    for (const item of recentFiles) {
+      const path = recentDiskPath(item);
+      if (path) return path;
+    }
+    return null;
+  }
+
+  /**
+   * The path the modal and its commands act on: the focused folder when a
+   * recent row asked for one, otherwise the usual target. The header icon
+   * deliberately keeps using the unfocused target, so connecting somebody
+   * else's folder never repaints the icon for the Lith you have open.
+   */
+  function gitSyncActivePath(): string | null {
+    if (mode === 'tauri' && gitSyncFocus) return gitSyncFocus;
+    return gitSyncTargetPath();
+  }
+
+  /** Recent rows reduced to the name/path pair coverage is computed from. */
+  function recentRows(): CoverageRow[] {
+    return recentFiles.map((item) => ({ name: getEntryName(item), path: recentDiskPath(item as any) }));
+  }
+
+  /**
+   * Which of the recent Liths sit inside a backed-up folder. One Rust call for
+   * the whole list: the backend walks each file's ancestors itself, so a wiki
+   * nested in a synced folder is covered by that folder's repository rather
+   * than reported as un-backup-up because only the root holds the `.git`.
+   */
+  async function refreshBackupCoverage(): Promise<void> {
+    if (mode !== 'tauri') return;
+    const paths = recentRows().map((row) => row.path).filter((path): path is string => Boolean(path));
+    if (paths.length === 0) {
+      backupRoots = {};
+      return;
+    }
+    try {
+      backupRoots = await tauriInvoke<Record<string, string>>('git_sync_coverage', { paths });
+    } catch {
+      backupRoots = {};
+    }
+  }
+
+  $: backupCoverage = computeBackupCoverage(recentRows(), backupRoots);
+  $: localOnlyPaths = new Set(backupCoverage.localOnlyPaths);
+  // Coverage only means something once something is backed up: with nothing,
+  // every row is un-backed-up and the marks would say nothing about any of them.
+  $: showBackupStatus = mode === 'tauri' && hasBackedUpRepo(backupRoots);
+  // Where the list is derived rather than authored — the desktop app's synced
+  // folders, and self-host's server — rebuilding beats clearing.
+  $: showRebuildControl = isSelfHost() || showBackupStatus;
+
+  /** Whether this row sits in a folder with no managed repository. */
+  function isLocalOnly(file: RecentEntry | { name?: string; path?: string; text?: string; handle?: any }): boolean {
+    if (!showBackupStatus) return false;
+    const path = recentDiskPath(file as any);
+    return Boolean(path) && localOnlyPaths.has(path as string);
+  }
+
+  /** Back up the folder a recent row points at, rather than the open file's. */
+  function backUpFolder(path: string): void {
+    gitSyncFocus = path;
+    openGitSyncModal();
   }
 
   /** Ask Rust whether the target folder is a Lithic-managed sync repo. */
   async function refreshGitSyncStatus(applyView: boolean): Promise<void> {
-    const target = gitSyncTargetPath();
+    const target = gitSyncActivePath();
     let connected: { repo: string } | null = null;
     if (target) {
       try {
@@ -287,53 +414,59 @@
 
   /** Legacy flow, step 4: (optionally create the repo and) set up the sync. */
   async function finalizeGitSync() {
-    const target = gitSyncTargetPath();
+    const target = gitSyncActivePath();
     const repo = gitRepoSelection();
     if (!target || !repo || !gitDeviceToken || gitSyncBusy) return;
     gitSyncBusy = true;
     gitSyncError = '';
     gitSyncMessage = '';
+    startGitSyncProgress();
     try {
       if (gitRepoChoice === '__create__') {
         const created = await tauriInvoke<{ full_name: string }>('github_create_repo', { token: gitDeviceToken, name: repo });
         gitSyncMessage = `Created ${created.full_name} — `;
       }
-      const result = await tauriInvoke<string>('git_sync_setup', { path: target, repo, token: gitDeviceToken });
-      gitSyncMessage += result || 'Synced';
+      const result = await tauriInvoke<GitSyncSetupResult>('git_sync_setup', { path: target, repo, token: gitDeviceToken });
+      gitSyncMessage += result?.summary || 'Synced';
       gitDeviceToken = null;
       gitSyncView = 'connected';
       markGitSyncActivity();
       void refreshGitSyncStatus(false);
+      await adoptSyncedWikis(result?.recents);
     } catch (error) {
       gitSyncError = error instanceof Error ? error.message : String(error);
     } finally {
       gitSyncBusy = false;
+      endGitSyncProgress();
     }
   }
 
   /** Advanced fallback: direct token entry (original MVP path). */
   async function connectGitSync() {
-    const target = gitSyncTargetPath();
+    const target = gitSyncActivePath();
     if (!target || gitSyncBusy) return;
     gitSyncBusy = true;
     gitSyncError = '';
     gitSyncMessage = '';
+    startGitSyncProgress();
     try {
-      const result = await tauriInvoke<string>('git_sync_setup', { path: target, repo: gitRepoInput, token: gitTokenInput });
-      gitSyncMessage = result || 'Synced';
+      const result = await tauriInvoke<GitSyncSetupResult>('git_sync_setup', { path: target, repo: gitRepoInput, token: gitTokenInput });
+      gitSyncMessage = result?.summary || 'Synced';
       gitTokenInput = '';
       gitSyncView = 'connected';
       markGitSyncActivity();
       void refreshGitSyncStatus(false);
+      await adoptSyncedWikis(result?.recents);
     } catch (error) {
       gitSyncError = error instanceof Error ? error.message : String(error);
     } finally {
       gitSyncBusy = false;
+      endGitSyncProgress();
     }
   }
 
   async function disconnectGitSync() {
-    const target = gitSyncTargetPath();
+    const target = gitSyncActivePath();
     if (!target || gitSyncBusy) return;
     if (!window.confirm('Disconnect this folder from GitHub? Automatic sync on save will stop.')) return;
     gitSyncBusy = true;
@@ -341,6 +474,8 @@
       await tauriInvoke('git_sync_disconnect', { path: target });
       gitSyncConnectedRepo = '';
       gitSyncView = 'disconnected';
+      gitSyncFocus = null;
+      void refreshBackupCoverage();
     } catch (error) {
       gitSyncError = error instanceof Error ? error.message : String(error);
     } finally {
@@ -479,6 +614,14 @@
   let dirtyInfo: DirtyInfo | null = null;
   let dirtyResolver: ((decision: 'merge' | 'discard' | 'later') => void) | null = null;
   let dirtyEntries: Record<string, number> = {};
+
+  /**
+   * Rows a rebuild is about to drop because their file is not where the list
+   * says it is, held while the user decides. Each carries the list's own
+   * history/download button, so a real file can be written before proceeding.
+   */
+  let rebuildOrphans: RebuildOrphan[] = [];
+  let rebuildOrphanResolver: ((proceed: boolean) => void) | null = null;
 
   function positionCachePreview(node: HTMLElement) {
     let frame = 0;
@@ -628,6 +771,7 @@
     }
     if (mode === 'tauri') {
       await mergeRecentsSidecar();
+      await refreshBackupCoverage();
     }
     // Dirty-state rows are keyed off the recent list (plus caches), so refresh
     // the unsaved-edit indicator once recents are known — a blank lith edited
@@ -647,7 +791,7 @@
     try {
       const sidecarPaths = await tauriInvoke<string[]>('read_recents_sidecar');
       if (sidecarPaths.length > 0) {
-        const existing = new Set(recentFiles.map((item) => ((item as any).path as string | undefined) ?? getEntryName(item)));
+        const existing = new Set(recentFiles.map((item) => recentDiskPath(item) ?? getEntryName(item)));
         const merged = [...recentFiles];
         for (const path of [...sidecarPaths].reverse()) {
           if (existing.has(path)) continue;
@@ -660,13 +804,19 @@
     }
   }
 
-  /** Mirror the current recents into the sidecar (fire-and-forget). */
+  /**
+   * Mirror the current recents into the sidecar (fire-and-forget). The command
+   * takes `paths` and `dismissed` together — the flag rides the same file — so
+   * omitting the second argument makes Tauri reject the call as a missing
+   * field, which is how the mirror stayed silently dead.
+   */
   function persistRecentsSidecar() {
     if (mode !== 'tauri') return;
     const paths = recentFiles
-      .map((item) => (item as any).path as string | undefined)
+      .map((item) => recentDiskPath(item))
       .filter((path): path is string => Boolean(path));
-    void tauriInvoke('write_recents_sidecar', { paths }).catch(() => { /* best effort */ });
+    void tauriInvoke('write_recents_sidecar', { paths, dismissed: installDismissed })
+      .catch(() => { /* best effort */ });
   }
 
   async function remember(file: { name: string; path?: string; text?: string; handle?: any }) {
@@ -679,6 +829,10 @@
       localStorage.setItem(RECENT_KEY, JSON.stringify(recentFiles.map(({ name, path, text }) => ({ name, path, text }))));
       persistRecentsSidecar();
     }
+    // A save can land in a folder never seen before, which is the moment its
+    // coverage answer changes. Fire-and-forget so a batch of remember() calls
+    // (adopting a whole folder) does not serialize behind it.
+    void refreshBackupCoverage();
   }
 
   function normalizeLithName(name: string): string {
@@ -713,6 +867,29 @@
     return new Promise((resolve) => {
       dirtyResolver = resolve;
     });
+  }
+
+  /**
+   * Ask before a rebuild drops rows whose file has gone missing.
+   *
+   * Nothing on disk is touched — the cached copy and the version history both
+   * survive, and both stay reachable through search. What goes away is the row,
+   * and finding that wiki again afterwards means knowing to search for it. A
+   * missing file is usually a move or an unmounted drive, so the decision is
+   * surfaced rather than taken silently.
+   */
+  function promptRebuildOrphans(orphans: RebuildOrphan[]): Promise<boolean> {
+    rebuildOrphans = orphans;
+    return new Promise((resolve) => {
+      rebuildOrphanResolver = resolve;
+    });
+  }
+
+  function resolveRebuildOrphans(proceed: boolean) {
+    const resolver = rebuildOrphanResolver;
+    rebuildOrphanResolver = null;
+    rebuildOrphans = [];
+    resolver?.(proceed);
   }
 
   function resolveDirtyModal(decision: 'merge' | 'discard' | 'later') {
@@ -865,15 +1042,8 @@
     busy = true;
     status = 'Opening recent Lith…';
     try {
-      // Tauri: path-backed recents (sidecar merges, save-dialog entries, and
-      // legacy rows polluted with a Tauri pseudo-handle) all re-open through
-      // the disk — browser file handles don't exist there.
       const rawHandle = (recent as any).handle;
-      const tauriPath = (recent as any).tauriPath
-        ?? (recent as any).path
-        ?? rawHandle?.__lithicTauriPath__
-        // Legacy polluted shape: { handle: { handle: null, name, tauriPath } }
-        ?? rawHandle?.handle?.__lithicTauriPath__;
+      const tauriPath = recentDiskPath(recent);
       if (mode === 'tauri') {
         if (tauriPath) {
           await mountTauriPath(tauriPath);
@@ -896,21 +1066,21 @@
         }
         const file = await handle.getFile();
         const text = await file.text();
-        await mountWiki(text, file.name, (recent as any).tauriPath ?? undefined, handle);
+        await mountWiki(text, file.name, recentDiskPath(recent) ?? undefined, handle);
         status = `Mounted ${file.name}`;
         return;
       }
       if ((recent as any).text !== undefined) {
         lithText = (recent as any).text;
         fileName = (recent as any).name || 'untitled.lith';
-        filePath = (recent as any).path;
+        filePath = recentDiskPath(recent) ?? undefined;
         status = `Mounted ${fileName}`;
         await mountWiki(lithText, fileName, filePath);
-      } else if ((recent as any).path && mode === 'tauri') {
+      } else if (recentDiskPath(recent) && mode === 'tauri') {
         // Tauri recents opened through the save dialog carry only a disk
         // path (no cached text) — read fresh from disk so in-place edits
         // made outside the app are picked up.
-        await mountTauriPath((recent as any).path);
+        await mountTauriPath(recentDiskPath(recent) as string);
         return;
       }
     } catch (error) {
@@ -1354,19 +1524,50 @@
         historyError = 'That version could not be materialized from the history chain.';
         return;
       }
-      const text = version.text.trim().startsWith('[') ? serializeJsonToLith(version.text) : version.text;
-      const blob = new Blob([text], { type: 'application/x-lith' });
-      const url = URL.createObjectURL(blob);
-      const anchor = document.createElement('a');
-      anchor.href = url;
-      anchor.download = version.fileName;
-      document.body.appendChild(anchor);
-      anchor.click();
-      anchor.remove();
-      setTimeout(() => URL.revokeObjectURL(url), 0);
+      saveBlobAs(version.fileName, version.text);
       status = `Recovered ${version.fileName}`;
     } catch (error) {
       historyError = error instanceof Error ? error.message : String(error);
+    }
+  }
+
+  /**
+   * Write cached tiddler text out as a `.lith` the user can keep. Cached text is
+   * the serialized tiddler array, not the on-disk format, so it is converted
+   * back the same way a version download is.
+   */
+  function saveBlobAs(fileName: string, text: string) {
+    const lith = text.trim().startsWith('[') ? serializeJsonToLith(text) : text;
+    const blob = new Blob([lith], { type: 'application/x-lith' });
+    const url = URL.createObjectURL(blob);
+    const anchor = document.createElement('a');
+    anchor.href = url;
+    anchor.download = fileName;
+    document.body.appendChild(anchor);
+    anchor.click();
+    anchor.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 0);
+  }
+
+  /**
+   * Save the newest cached copy of a wiki as a real file. The rebuild warning
+   * needs this to be unconditional: a Lith can hold a cached snapshot with no
+   * versioned history behind it (legacy caches predate the diff chain), so
+   * "download a copy first" cannot depend on the history modal having anything
+   * to show.
+   */
+  async function downloadCachedSnapshot(name: string) {
+    try {
+      const cached = await getSearchCacheText(name);
+      if (!cached) {
+        status = `No cached copy of ${name} to download`;
+        return;
+      }
+      const fileName = `${name.replace(/\.lith$/i, '')}_cached.lith`;
+      saveBlobAs(fileName, cached);
+      status = `Saved ${fileName}`;
+    } catch (error) {
+      mountError = `Download failed: ${error instanceof Error ? error.message : String(error)}`;
     }
   }
 
@@ -1377,6 +1578,156 @@
     cacheSearchMatches = {};
     localStorage.removeItem(RECENT_KEY);
     persistRecentsSidecar();
+    void refreshBackupCoverage();
+  }
+
+  /** The on-disk text of one wiki, read through Rust. */
+  async function readDiskWikiText(path: string): Promise<string> {
+    const result = await tauriInvoke<{ name: string; path: string; text: string }>('read_lith_path', { path });
+    return result?.text ?? '';
+  }
+
+  /** One wiki's text from the self-host server, patch API or plain WebDAV. */
+  async function readRemoteWikiText(name: string): Promise<string> {
+    if (patchApiAvailable) return (await fetchRemoteWiki(name)).text;
+    const response = await fetch(webdavUrl(name));
+    if (!response.ok) throw new Error(`GET failed: ${response.status}`);
+    return response.text();
+  }
+
+  /**
+   * Re-index instead of forgetting.
+   *
+   * Where the recent list is derived rather than authored — the desktop app's
+   * backed-up folders, and self-host's server — clearing it throws away a
+   * reconstruction, so rebuilding is the honest operation and the only one that
+   * heals a list that has drifted from the files. Two passes, because they cost
+   * wildly different things: re-listing is one folder walk or one PROPFIND,
+   * while re-indexing content reads every wiki, so the second reports progress
+   * as it goes rather than holding the window still.
+   *
+   * The list it produces is a fresh view, so this is the one control that both
+   * forgets a stale list and rebuilds it. Anything the fresh listing cannot
+   * account for is surfaced first and deleted only on confirmation: a cache
+   * nothing lists is still findable by search, which looks like a file and
+   * cannot be opened, so leaving one behind would trade a stale list for a
+   * quieter discongruity.
+   */
+  async function rebuildRecents(): Promise<void> {
+    if (rebuildBusy) return;
+    rebuildBusy = true;
+    mountError = '';
+    status = 'Re-indexing recent liths…';
+    try {
+      // Pass 1: re-list, replacing the list rather than patching it. That is
+      // what lets one button do the job: the recent list is a *view* of what
+      // is really there, so a stale row is removed by rebuilding instead of by
+      // a separate destructive control.
+      const folders = mode === 'tauri' ? reindexFolders(recentRows(), backupRoots) : [];
+      const discovered: Array<{ name: string; path?: string }> = [];
+      let orphans: RebuildOrphan[] = [];
+
+      if (isSelfHost()) {
+        // The server *is* the list here, so rebuilding means re-reading it.
+        // Writing the server's names into the local recents would list every
+        // wiki twice.
+        patchApiAvailable = await probePatchApi();
+        remoteFiles = await fetchRemoteFiles();
+        // The server is the source of truth here, so a cached copy it doesn't
+        // hold — and that no local row can open either — is a ghost. Local rows
+        // are untouched, so only caches without one are candidates.
+        const serverNames = new Set(remoteFiles.map((file) => file.name.toLowerCase()));
+        const localNames = new Set(recentFiles.map((item) => getEntryName(item).toLowerCase()));
+        orphans = orphanedEntries(
+          [],
+          Object.keys(cachedEntries).filter((name) => !localNames.has(name.toLowerCase())),
+          new Set(),
+          serverNames
+        );
+      } else if (mode === 'tauri') {
+        // Backed-up roots first, then each known row's own folder, so a Lith
+        // that isn't backed up yet still finds its siblings.
+        for (const folder of folders) {
+          const found = await tauriInvoke<string[]>('list_folder_liths', { path: folder }).catch(() => [] as string[]);
+          for (const path of found) discovered.push({ name: path.split(/[\\/]/).pop() || path, path });
+        }
+
+        // Rows the fresh list will not contain. Detection is by listing rather
+        // than by stat: a row missing from its own folder's listing is
+        // genuinely gone from there.
+        const listed = new Set(discovered.map((entry) => entry.path).filter(Boolean) as string[]);
+        const listedNames = new Set(discovered.map((entry) => entry.name.toLowerCase()));
+        orphans = orphanedEntries(recentRows(), Object.keys(cachedEntries), listed, listedNames);
+      }
+
+      // Asked before anything is replaced, in either mode: a missing file is
+      // usually a move or an unmounted drive, so it gets a say rather than a
+      // silent disappearance.
+      if (orphans.length > 0 && !(await promptRebuildOrphans(orphans))) {
+        status = 'Rebuild cancelled';
+        return;
+      }
+      // Confirmed: nothing about them is kept — not the row, not the cached
+      // copy, not the history.
+      for (const orphan of orphans) {
+        await forgetWikiCache(orphan.name);
+        delete cachedEntries[orphan.name];
+        delete cacheSearchMatches[orphan.name];
+        delete dirtyEntries[orphan.name];
+        delete historyAvailable[orphan.name];
+      }
+      cachedEntries = cachedEntries;
+      cacheSearchMatches = cacheSearchMatches;
+      dirtyEntries = dirtyEntries;
+      historyAvailable = historyAvailable;
+
+      if (mode === 'tauri') {
+        recentFiles = discovered;
+        localStorage.setItem(RECENT_KEY, JSON.stringify(discovered.map(({ name, path }) => ({ name, path }))));
+        persistRecentsSidecar();
+      }
+
+      // Pass 2: rebuild each wiki's searchable cache from the file itself.
+      // Sequential on purpose: each read is small and awaiting between them is
+      // what keeps the window responsive.
+      const targets: CoverageRow[] = [];
+      const seen = new Set<string>();
+      const addTarget = (entry: CoverageRow) => {
+        const key = entry.name.toLowerCase();
+        if (!entry.name || seen.has(key)) return;
+        seen.add(key);
+        targets.push(entry);
+      };
+      if (isSelfHost()) for (const file of remoteFiles) addTarget({ name: file.name, path: null });
+      else for (const row of recentRows()) if (row.path) addTarget(row);
+
+      let indexed = 0;
+      for (const [position, entry] of targets.entries()) {
+        status = `Re-indexing ${position + 1} of ${targets.length} · ${entry.name}`;
+        try {
+          const text = entry.path
+            ? mode === 'tauri' ? await readDiskWikiText(entry.path) : ''
+            : mode === 'self-host' ? await readRemoteWikiText(entry.name) : '';
+          if (text) {
+            await saveSearchCache(entry.name, JSON.stringify(parseLithToJSON(text)));
+            indexed += 1;
+          }
+        } catch {
+          // One unreadable Lith must not abort the rest of the rebuild.
+        }
+      }
+
+      await updateCacheMatches(search);
+      await refreshBackupCoverage();
+      status = indexed > 0
+        ? `Re-indexed ${indexed} lith${indexed === 1 ? '' : 's'}`
+        : 'Nothing new to index';
+    } catch (error) {
+      status = '';
+      mountError = `Re-index failed: ${error instanceof Error ? error.message : String(error)}`;
+    } finally {
+      rebuildBusy = false;
+    }
   }
 
   /** Latest live cache entry text for a file (empty when none). */
@@ -1455,22 +1806,30 @@
     }
   }
 
+  /**
+   * Drop one row and everything remembered about its wiki.
+   *
+   * Removing a row while keeping its cache left an entry only a search could
+   * find, and the two branches disagreed about it: handle rows were cleaned up,
+   * path rows — which is every row the desktop app writes — were not.
+   */
   async function removeRecent(file: RecentEntry | { name?: string; handle?: any }) {
+    const name = getEntryName(file);
     if ((file as any).handle) {
       recentFiles = await removeRecentFile((file as any).handle);
-      const name = (file as any).handle.name;
-      await idb.del('search_cache_' + name);
-      await deleteWikiHistory(name);
-      delete cachedEntries[name];
-      delete cacheSearchMatches[name];
-      cachedEntries = cachedEntries;
-      cacheSearchMatches = cacheSearchMatches;
-      persistRecentsSidecar();
     } else {
       recentFiles = recentFiles.filter((item) => item !== file);
       localStorage.setItem(RECENT_KEY, JSON.stringify(recentFiles.map((f: any) => ({ name: f.name, path: f.path, text: f.text }))));
-      persistRecentsSidecar();
     }
+    await forgetWikiCache(name);
+    delete cachedEntries[name];
+    delete cacheSearchMatches[name];
+    delete dirtyEntries[name];
+    cachedEntries = cachedEntries;
+    cacheSearchMatches = cacheSearchMatches;
+    dirtyEntries = dirtyEntries;
+    persistRecentsSidecar();
+    void refreshBackupCoverage();
   }
 
   onMount(() => {
@@ -1489,6 +1848,12 @@
     // every 15s; 10s keeps the icon honest across mounts and disconnects).
     refreshGitSyncIcon();
     gitSyncPollTimer = setInterval(refreshGitSyncIcon, 10000);
+    // Rust reports each stage of a connect; the modal renders the latest line so
+    // the wait shows what is happening instead of a frozen button.
+    const stopGitSyncProgressEvents = tauriListen<{ stage: string; detail: string }>(
+      'git-sync-progress',
+      (payload) => { if (payload?.detail) gitSyncStage = payload.detail; }
+    );
     const onGitSyncSaved = (event: Event) => markGitSyncActivity();
     window.addEventListener('lithic-git-sync-saved', onGitSyncSaved);
     // The poll is a real `git` spawn per tick, so refresh on the way back to a
@@ -1562,6 +1927,8 @@
       // wiki is not held for the full staleness window.
       stopLockHeartbeat();
       if (gitSyncPollTimer) clearInterval(gitSyncPollTimer);
+      stopGitSyncProgressEvents?.();
+      stopGitSyncProgressTimer();
       window.removeEventListener('lithic-git-sync-saved', onGitSyncSaved);
       document.removeEventListener('visibilitychange', onVisibilityChange);
       gitPollAborted = true;
@@ -1603,7 +1970,7 @@
       {#if status}<div class="status-line" role="status"><span class="status-label">{status.replace(/[…\.\s]+$/, '')}</span><span class="activity-dots" aria-hidden="true"><i></i><i></i><i></i></span></div>{/if}
       {#if mountError}<div class="status-line error" role="alert">{mountError}</div>{/if}
     </div>
-    {#if mode === 'webapp'}<button class="help-button" aria-label="View Introduction" title="View Introduction" on:click={openIntro}>{introBusy ? '…' : '?'}</button>{:else if mode === 'tauri'}<button class="sync-button {gitSyncIconState}" aria-label="GitHub Sync" title={gitSyncIconTitle} on:click={openGitSyncModal}><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 17.6A5 5 0 0 0 18 8h-1.3A8 8 0 1 0 4 16.3"/><path d="M12 12v9"/><path d="m8.5 15.5 3.5-3.5 3.5 3.5"/></svg></button>{/if}
+    {#if mode === 'webapp'}<button class="help-button" aria-label="View Introduction" title="View Introduction" on:click={openIntro}>{introBusy ? '…' : '?'}</button>{:else if mode === 'tauri'}<button class="sync-button {gitSyncIconState}" aria-label="GitHub Sync" title={gitSyncIconTitle} on:click={() => { gitSyncFocus = null; openGitSyncModal(); }}><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 17.6A5 5 0 0 0 18 8h-1.3A8 8 0 1 0 4 16.3"/><path d="M12 12v9"/><path d="m8.5 15.5 3.5-3.5 3.5 3.5"/></svg></button>{/if}
   </header>
   {#if pendingImports.length > 0}
     <div class="pending-imports" role="status" aria-label="Pending imports">
@@ -1620,19 +1987,20 @@
   {/if}
   {#if showGitSyncModal}
     <div class="modal-overlay" role="presentation" on:click={(event) => event.currentTarget === event.target && closeGitSyncModal()}>
-      <div class="launcher-modal" role="dialog" aria-modal="true" aria-labelledby="gitsync-title">
-        <button class="modal-close" aria-label="Close GitHub sync dialog" on:click={closeGitSyncModal}>×</button>
+      <div class="launcher-modal" role="dialog" aria-modal="true" aria-labelledby="gitsync-title">          <button class="modal-close" aria-label="Close GitHub sync dialog" on:click={closeGitSyncModal}>×</button>
         <h2 id="gitsync-title">GitHub Sync</h2>
-        {#if !gitSyncTargetPath()}
-          <p class="status-line error" role="alert">Open a file from disk first — the sync targets its folder.</p>
+        {#if !gitSyncActivePath()}
+          <p class="status-line error" role="alert">Open or save a Lith to disk first — the sync backs up the folder it lives in.</p>
         {:else if gitSyncView === 'disconnected'}
-          <p>Back up the folder containing <strong>{clipFilename(gitSyncTargetPath() ?? '')}</strong> to a GitHub repository. Saves commit and push automatically, like self-host.</p>
+          <p>Back up the folder containing <strong>{clipFilename(gitSyncActivePath() ?? '')}</strong> to a GitHub repository. Saves commit and push automatically, like self-host.</p>
           {#if gitSyncError}<p class="status-line error" role="alert">{gitSyncError}</p>{/if}
+          {#if gitSyncBusy}<p class="sync-progress" role="status"><span class="sync-spinner" aria-hidden="true"></span><span>{gitSyncStage || 'Working…'}</span><span class="sync-elapsed">{gitSyncElapsed}s</span></p>{/if}
           <div class="modal-actions"><button class="modal-action" disabled={gitSyncBusy} on:click={startDeviceAuth}>{gitSyncBusy ? '…' : 'Connect to GitHub'}</button></div>
           <details class="git-sync-advanced">
             <summary>Advanced: connect with a personal access token</summary>
             <input bind:value={gitRepoInput} aria-label="GitHub repository (owner/name)" placeholder="owner/repository" on:keydown={(event) => event.key === 'Enter' && connectGitSync()} />
             <input bind:value={gitTokenInput} type="password" aria-label="GitHub token" placeholder="Fine-grained or classic token with push access" on:keydown={(event) => event.key === 'Enter' && connectGitSync()} />
+            {#if gitSyncBusy}<p class="sync-progress" role="status"><span class="sync-spinner" aria-hidden="true"></span><span>{gitSyncStage || 'Working…'}</span><span class="sync-elapsed">{gitSyncElapsed}s</span></p>{/if}
             <div class="modal-actions"><button class="modal-action" disabled={!gitRepoInput || !gitTokenInput || gitSyncBusy} on:click={connectGitSync}>{gitSyncBusy ? 'Connecting…' : 'Connect & Push'}</button></div>
           </details>
         {:else if gitSyncView === 'connecting'}
@@ -1675,6 +2043,7 @@
           {/if}
           {#if gitSyncError}<p class="status-line error" role="alert">{gitSyncError}</p>{/if}
           {#if gitSyncMessage}<p class="status-line" role="status">{gitSyncMessage}</p>{/if}
+          {#if gitSyncBusy}<p class="sync-progress" role="status"><span class="sync-spinner" aria-hidden="true"></span><span>{gitSyncStage || 'Working…'}</span><span class="sync-elapsed">{gitSyncElapsed}s</span></p>{/if}
           <div class="modal-actions">
             <button class="modal-action" disabled={gitSyncBusy || !gitRepoSelection()} on:click={finalizeGitSync}>{gitSyncBusy ? 'Syncing…' : 'Start Sync'}</button>
             <button class="modal-action secondary" on:click={resetGitSyncFlow}>Back</button>
@@ -1744,6 +2113,53 @@
         <div class="modal-actions">
           <button class="modal-action" disabled={emojiBusy || !emojiChoice} on:click={confirmEmojiIcon}>{emojiBusy ? 'Saving…' : 'Save Icon'}</button>
           <button class="modal-action secondary" disabled={emojiBusy} on:click={restoreDefaultInstanceIcon} title="Delete custom.ico so the instance serves the shipped Lithic icon again">Restore Default</button>
+        </div>
+      </div>
+    </div>
+  {/if}
+  {#if rebuildOrphans.length > 0}
+    <div class="modal-overlay" role="presentation">
+      <div class="launcher-modal orphan-modal" role="dialog" aria-modal="true" aria-labelledby="orphan-title">
+        <h2 id="orphan-title">{isSelfHost() ? 'Not on this server' : 'Not found on disk'}</h2>
+        <p>
+          {#if isSelfHost()}
+            {rebuildOrphans.length} cached cop{rebuildOrphans.length === 1 ? 'y' : 'ies'} on this device {rebuildOrphans.length === 1 ? 'is' : 'are'} no longer on this
+            server. Rebuilding deletes {rebuildOrphans.length === 1 ? 'it' : 'them'}. Nothing on the server is touched.
+            Download a copy first if you want to keep one.
+          {:else}
+            {rebuildOrphans.length} entr{rebuildOrphans.length === 1 ? 'y' : 'ies'} can't be traced to a file on disk — moved, renamed, or on a drive that isn't
+            mounted. Rebuilding removes {rebuildOrphans.length === 1 ? 'it' : 'them'} and deletes {rebuildOrphans.length === 1 ? 'its cached copy and version history' : 'their cached copies and version history'}.
+            Files on disk are untouched. Download a copy first if you want to keep one.
+          {/if}
+        </p>
+        {#if rebuildOrphans.some((orphan) => dirtyEntries[orphan.name])}
+          <p class="orphan-warning" role="alert">
+            Unsaved edits captured for {rebuildOrphans.filter((orphan) => dirtyEntries[orphan.name]).length} of them are deleted too.
+            A downloaded copy holds the last saved state, not those edits.
+          </p>
+        {/if}
+        <ul class="orphan-list">
+          {#each rebuildOrphans as orphan (orphan.name)}
+            <li class="orphan-row">
+              <span class="orphan-name" title={orphan.path ?? 'No file on disk — a cached copy only'}>{orphan.name}</span>
+              {#if !orphan.path}<span class="orphan-tag">cached only</span>{/if}
+              {#if dirtyEntries[orphan.name]}<span class="orphan-tag dirty" title={`Unsaved edits captured ${new Date(dirtyEntries[orphan.name]).toLocaleString()}`}>unsaved edits</span>{/if}
+              {#if cachedEntries[orphan.name]}
+                <button class="recent-icon-button" type="button" aria-label={`Download a copy of ${orphan.name}`} title="Save a copy of the cached snapshot now" on:click={() => downloadCachedSnapshot(orphan.name)}>
+                  <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 4v11"></path><path d="m7.5 10.5 4.5 4.5 4.5-4.5"></path><path d="M5 19h14"></path></svg>
+                </button>
+              {/if}
+              {#if historyAvailable[orphan.name]}
+              <button class="recent-icon-button cache-history-button" type="button" aria-label={`Show version history for ${orphan.name}`} title="Browse and download older versions before the row is dropped" on:click={() => openHistoryModal(orphan.name)}>
+                <svg class="history-download-icon" viewBox="56 108 33 36" aria-hidden="true"><path class="history-icon-shape" d="m 73.595508,109.76746 c -7.198235,0 -13.103617,5.58342 -13.647229,12.64471 h -0.0072 V 138.2696 H 58.61606 l 2.32389,4.02559 2.324405,-4.02559 h -1.323433 v -15.85123 c 0.530186,-5.97937 5.534806,-10.65103 11.654586,-10.65103 6.474618,0 11.703161,5.22855 11.703161,11.70316 0,6.47462 -5.228543,11.70161 -11.703161,11.70161 -2.644513,0 -5.080809,-0.87232 -7.037814,-2.34508 v 2.39572 c 2.058162,1.23707 4.46633,1.94924 7.037814,1.94924 7.555498,0 13.703556,-6.14599 13.703556,-13.70149 0,-7.5555 -6.148058,-13.70304 -13.703556,-13.70304 z m -2.108915,7.49825 v 8.05016 h 7.125663 v -1.59836 h -5.527311 v -6.4518 z"></path></svg>
+              </button>
+              {/if}
+            </li>
+          {/each}
+        </ul>
+        <div class="modal-actions">
+          <button class="modal-action secondary" on:click={() => resolveRebuildOrphans(false)}>Cancel</button>
+          <button class="modal-action" on:click={() => resolveRebuildOrphans(true)}>Proceed Anyway</button>
         </div>
       </div>
     </div>
@@ -1862,6 +2278,11 @@
               <svg class="history-download-icon" viewBox="56 108 33 36" aria-hidden="true"><path class="history-icon-shape" d="m 73.595508,109.76746 c -7.198235,0 -13.103617,5.58342 -13.647229,12.64471 h -0.0072 V 138.2696 H 58.61606 l 2.32389,4.02559 2.324405,-4.02559 h -1.323433 v -15.85123 c 0.530186,-5.97937 5.534806,-10.65103 11.654586,-10.65103 6.474618,0 11.703161,5.22855 11.703161,11.70316 0,6.47462 -5.228543,11.70161 -11.703161,11.70161 -2.644513,0 -5.080809,-0.87232 -7.037814,-2.34508 v 2.39572 c 2.058162,1.23707 4.46633,1.94924 7.037814,1.94924 7.555498,0 13.703556,-6.14599 13.703556,-13.70149 0,-7.5555 -6.148058,-13.70304 -13.703556,-13.70304 z m -2.108915,7.49825 v 8.05016 h 7.125663 v -1.59836 h -5.527311 v -6.4518 z"></path></svg>
             </button>
             {/if}
+            {#if isLocalOnly(file)}
+              <button class="recent-icon-button local-only-button" type="button" aria-label={`Back up the folder containing ${name}`} title={`Local only — ${name} isn't in a backed-up folder yet. Click to back up its folder.`} on:click={() => backUpFolder(recentDiskPath(file as any) as string)}>
+                <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8.5"></circle><path d="M12 7.5v5.5"></path><path d="M12 16.2h.01"></path></svg>
+              </button>
+            {/if}
             {#if cacheSearchMatches[name]?.preview}
               <div
                 use:positionCachePreview
@@ -1899,7 +2320,18 @@
           </div>
         {/each}
       </div>
-      <button class="reset-cache" on:click={clearRecent}>Clear All Recent Files</button>
+      {#if showBackupStatus && backupCoverage.localOnlyPaths.length > 0}
+        <p class="backup-status" role="status">{backupCoverage.backedUp} of {backupCoverage.tracked} recent liths backed up</p>
+      {/if}
+      {#if showRebuildControl}
+        <button class="reset-cache" on:click={rebuildRecents} disabled={rebuildBusy} title={isSelfHost()
+          ? 'Re-read this server and rebuild the searchable index from the files themselves'
+          : 'Rebuild this list and the searchable index from the files on disk. Unsaved-edit backups, and cached copies of Liths whose files have moved, are kept.'}>{
+          rebuildBusy ? 'Re-indexing…' : 'Rebuild Recents'
+        }</button>
+      {:else}
+        <button class="reset-cache" on:click={clearRecent}>Clear All Recent Files</button>
+      {/if}
     </section>
   {/if}
   <footer>{#if mode === 'webapp'}<a class="github-link" href="https://github.com/Lithic-UK/Lithic" target="_blank" rel="noreferrer">Github</a>{#if $pwaInstall.installable && !(installDismissed && installState !== 'stale')}<span class="install-offer"><button class="install-button" on:click={installPwa}>Install App</button><button class="install-dismiss" on:click={dismissInstallOffer} title="Hide the install offer. Restore it later by clearing site data." aria-label="Dismiss install offer">dismiss ✕</button></span>{/if}{:else if mode === 'tauri' && installState !== 'current' && !(installDismissed && installState === 'uninstalled')}<span class="install-offer"><button class="install-button" on:click={installMonolith} disabled={installBusy} title={installStatus || 'Copy this app to a stable per-user location and register file associations'}>{installBusy ? 'Installing…' : installState === 'stale' ? 'Update Install' : 'Install'}</button><button class="install-dismiss" on:click={dismissInstallOffer} title="Hide the install offer. Restore it later by deleting recents.txt beside the app." aria-label="Dismiss install offer">dismiss ✕</button></span>{/if}</footer>

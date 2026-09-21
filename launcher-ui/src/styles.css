@@ -309,6 +309,30 @@ h1 { flex: none; min-width: 0; margin: 0; color: #f4edf5; font-size: 1.8rem; fon
   line-height: 1.2;
 }
 .status-line.error { color: #ff8888; }
+/* Sync progress: stage line from Rust plus a live seconds count, so a first
+ * connect (fetch + rescue writes + commit + push) never reads as a hung app. */
+.sync-progress {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  margin: 10px 0 0;
+  color: #ddd;
+  font-size: 0.8rem;
+  line-height: 1.3;
+}
+.sync-elapsed { margin-left: auto; color: #9a9a9a; font-variant-numeric: tabular-nums; }
+.sync-spinner {
+  flex: 0 0 auto;
+  width: 12px;
+  height: 12px;
+  border: 2px solid #555;
+  border-top-color: #8ab4f8;
+  border-radius: 50%;
+  animation: sync-spin 0.9s linear infinite;
+}
+@keyframes sync-spin {
+  to { transform: rotate(360deg); }
+}
 .activity-dots { display: inline-flex; gap: 2px; margin-left: 3px; vertical-align: baseline; }
 .activity-dots i {
   display: inline-block;
@@ -326,6 +350,8 @@ h1 { flex: none; min-width: 0; margin: 0; color: #f4edf5; font-size: 1.8rem; fon
 }
 @media (prefers-reduced-motion: reduce) {
   .activity-dots i { animation: none; }
+  .install-dismiss { animation: none; }
+  .sync-spinner { animation-duration: 2.5s; }
 }
 
 code { color: #8ab4f8; }
@@ -349,27 +375,29 @@ footer > * { pointer-events: auto; }
 /* Keep the install affordance pinned right even when it's the only footer
  * child (tauri mode has no Github link; webapp hides it post-install). */
 .install-button { margin-left: auto; }
-/* "dismiss ✕" sits at the upper-right of the install button; neutral by
- * default, colored on hover. The idle nudge animation draws the eye and
- * enlarges the clickable area so small-target misses are rare. */
+/* "dismiss ✕": small bare white text in the install button's upper-right
+ * corner, no pill or background, sitting in the button's top padding band so it
+ * never lands on the label's glyphs. The faint shadow is what keeps white
+ * legible on the light button face; without it the text washes out. Dark red on
+ * hover. Padding is invisible (no background) and only widens the hit target. */
 .install-dismiss {
   position: absolute;
-  top: -9px;
-  right: -10px;
-  padding: 3px 6px;
+  top: 0;
+  right: 0;
+  padding: 2px 5px 1px;
   border: 0;
-  border-radius: 9px;
-  background: transparent;
-  color: #9a9a9a;
-  font: 0.68rem 'Vollkorn', Georgia, serif;
+  background: none;
+  color: #fff;
+  font: 0.6rem/1 'Vollkorn', Georgia, serif;
+  text-shadow: 0 1px 1px rgb(0 0 0 / 45%);
   cursor: pointer;
   animation: dismiss-nudge 2.8s ease-in-out 1.2s 3;
 }
-.install-dismiss:hover { color: #ff8a80; background: rgb(255 138 128 / 12%); }
+.install-dismiss:hover { color: #b3261e; }
 .install-dismiss:focus-visible { outline: 1px solid #ffb74d; }
 @keyframes dismiss-nudge {
   0%, 100% { transform: scale(1); }
-  50% { transform: scale(1.18); }
+  50% { transform: scale(1.08); }
 }
 .modal-overlay { position: fixed; inset: 0; display: grid; place-items: center; padding: 20px; background: rgb(0 0 0 / 72%); z-index: 10; }
 .launcher-modal { position: relative; width: min(100%, 460px); max-height: 80vh; overflow-x: hidden; overflow-y: auto; padding: 22px; border: 1px solid #454545; border-radius: 10px; background: #252525; box-shadow: 0 12px 40px #000; }
@@ -501,6 +529,14 @@ footer > * { pointer-events: auto; }
 .recent-icon-button:disabled { opacity: 0.25; cursor: default; }
 .recent-icon-button svg { width: 21px; height: 21px; fill: none; stroke: currentColor; stroke-width: 1.55; stroke-linecap: round; stroke-linejoin: round; }
 .cache-history-button { color: #bcbcbc; }
+/*
+ * Local-only mark: a Lith outside any backed-up folder. Muted on purpose — the
+ * file is safe where the user put it, so this reads as information with an
+ * action attached rather than a fault. It only renders once a folder *is*
+ * backed up, which is what gives the contrast meaning.
+ */
+.local-only-button { color: #8a8a8a; }
+.local-only-button:hover { color: #f0c674; }
 .history-download-icon { width: 19px !important; height: 21px !important; overflow: visible; }
 .history-icon-shape { fill: currentColor; stroke: none; }
 .cache-preview {
@@ -531,8 +567,13 @@ footer > * { pointer-events: auto; }
 .remove-recent:hover { color: #ff7777; }
 .empty { padding: 20px; color: #999; text-align: center; }
 .reset-cache { width: 100%; padding: 11px; border: 1px dashed #454545; border-radius: 7px; background: transparent; color: #ddd; cursor: pointer; }
+.reset-cache:disabled { color: #8a8a8a; cursor: default; }
+/* Coverage is a count, not a warning: how much of the list is backed up. */
+.backup-status { margin: 8px 2px 0; color: #9a9a9a; font-size: 0.8rem; text-align: center; }
 .github-link, .install-button { padding: 10px 15px; border: 1px solid #494949; border-radius: 7px; background: #333; color: #ddd; font: 0.85rem 'Vollkorn', Georgia, serif; text-decoration: none; }
-.install-button { border: 0; background: #8ab4f8; color: #121212; font-size: 1rem; font-weight: 600; cursor: pointer; }
+/* A little extra room up top: the dismiss chip lives in that band, so it stays
+ * clear of the label's glyphs instead of sitting on the first letter's cap. */
+.install-button { padding: 13px 15px 10px; border: 0; background: #8ab4f8; color: #121212; font-size: 1rem; font-weight: 600; cursor: pointer; }
 
 /*
  * On wide windows each control fits in the side margin of the 600px launcher
@@ -653,6 +694,22 @@ body.drag-over::after {
   background: #2c2c2c; color: #ccc; font-size: 0.85em; max-height: 30vh; overflow: auto;
 }
 .dirty-tiddler-list .dirty-more { color: #888; list-style: none; margin-left: -14px; }
+/*
+ * Rebuild confirmation: the rows it is about to drop because their file has
+ * gone missing. Each keeps the list's history/download button, so a real file
+ * can be written before proceeding instead of after noticing it is gone.
+ */
+.orphan-modal { width: min(100%, 520px); }
+.orphan-list {
+  margin: 12px 0 0; padding: 4px 10px; border: 1px solid #3a3a3a; border-radius: 7px;
+  background: #2c2c2c; max-height: 34vh; overflow-y: auto;
+}
+.orphan-row { display: flex; align-items: center; gap: 8px; padding: 4px 0; border-top: 1px solid #383838; }
+.orphan-row:first-child { border-top: 0; }
+.orphan-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: #ddd; font-size: 0.88rem; }
+.orphan-tag { padding: 1px 6px; border-radius: 999px; background: #3a3a3a; color: #a8a8a8; font-size: 0.7rem; white-space: nowrap; }
+.orphan-tag.dirty { background: rgb(255 157 128 / 16%); color: #ff9d80; }
+.orphan-warning { margin: 10px 0 0; color: #ff9d80; font-size: 0.82rem; }
 /* Unsaved edits are signaled by a red history/download icon instead of an
    inline text badge (hover shows the capture timestamp via the title). */
 .cache-history-button.dirty,

@@ -139,6 +139,35 @@ function normalizeRecentEntry(f: any): RecentEntry {
   return { handle: f, tauriPath: null } as RecentEntry;
 }
 
+/**
+ * Loose recent row. The launcher writes `path`; the wiki's own saver writes
+ * `tauriPath` or a Tauri pseudo-handle instead, and older data nests the handle
+ * one level deeper. All of these turn up in the same recents store.
+ */
+export type RecentRow =
+  | { name?: string; path?: string; tauriPath?: string | null; handle?: any; text?: string }
+  | RecentEntry;
+
+/**
+ * The disk path behind a recent row, whatever shape it arrived in.
+ *
+ * Saves made from *inside* a Lith — a brand-new blank one included — are
+ * recorded by the engine's saver, which stores `tauriPath` (or a pseudo-handle)
+ * rather than `path`. Opening a row has always understood every one of those
+ * shapes; anything else that needs the row's folder has to ask the same
+ * question the same way, or it concludes no file is open for a Lith that was
+ * just saved. Browser file handles have no path, so those return null.
+ */
+export function recentDiskPath(entry: RecentRow): string | null {
+  const rawHandle = (entry as any)?.handle;
+  const path =
+    (entry as any)?.tauriPath ??
+    (entry as any)?.path ??
+    rawHandle?.__lithicTauriPath__ ??
+    rawHandle?.handle?.__lithicTauriPath__;
+  return typeof path === 'string' && path ? path : null;
+}
+
 export async function getRecentFiles(): Promise<RecentEntry[]> {
   try {
     const raw = (await idb.get<any[]>('recentFiles')) || [];
@@ -245,6 +274,37 @@ export async function saveSearchCache(fileName: string, text: string): Promise<v
 /** Delete every history key (meta, bases, deltas) for one wiki. */
 export async function deleteWikiHistory(name: string, store: CacheStore = idb): Promise<void> {
   await new KeyvalWikiHistory(store).deleteHistory(name);
+}
+
+/**
+ * Forget everything remembered *about* one wiki on this device: its searchable
+ * cache, the legacy launcher's bk1/bk2 deep copies, its versioned history, and
+ * any unsaved-edit backup.
+ *
+ * Used wherever a wiki is deliberately dropped — the row's own remove button,
+ * or a rebuild the user confirmed. Leaving any of it behind produces an entry
+ * that no list shows and only a search can find: it looks like a file, cannot
+ * be opened, and belongs to nothing. Deleting is the honest half of dropping.
+ */
+export async function forgetWikiCache(name: string, store: CacheStore = idb): Promise<void> {
+  const keys = [
+    dirtyKey(name),
+    `search_cache_${name}`,
+    `search_cache_bk1_${name}`,
+    `search_cache_bk2_${name}`
+  ];
+  for (const key of keys) {
+    try {
+      await store.del(key);
+    } catch {
+      // Best effort: one unreadable key must not strand the rest.
+    }
+  }
+  try {
+    await deleteWikiHistory(name, store);
+  } catch {
+    // Best effort.
+  }
 }
 
 /* ---

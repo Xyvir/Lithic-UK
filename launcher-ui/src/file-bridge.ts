@@ -30,6 +30,47 @@ function tauriApi(): TauriApi | null {
   return null;
 }
 
+type TauriEventApi = {
+  listen: (event: string, handler: (message: { payload: unknown }) => void) => Promise<unknown>;
+};
+
+function tauriEventApi(): TauriEventApi | null {
+  const root = (globalThis as typeof globalThis & {
+    __TAURI__?: { event?: TauriEventApi; tauri?: { event?: TauriEventApi } };
+  }).__TAURI__;
+  if (root?.event?.listen) return root.event;
+  if (root?.tauri?.event?.listen) return root.tauri.event;
+  return null;
+}
+
+/**
+ * Subscribe to an event emitted from Rust (tauri v1 `Window::emit`), returning
+ * an unsubscribe function — or null outside Tauri, so callers can register
+ * unconditionally. `listen` is async, so an unsubscribe that arrives before the
+ * subscription resolves cancels it on arrival instead of leaking the handler.
+ */
+export function tauriListen<T>(event: string, handler: (payload: T) => void): (() => void) | null {
+  const api = tauriEventApi();
+  if (!api) return null;
+  let disposed = false;
+  let unlisten: (() => void) | null = null;
+  void api
+    .listen(event, (message) => handler(message.payload as T))
+    .then((stop) => {
+      if (disposed) {
+        (stop as () => void)?.();
+        return;
+      }
+      unlisten = (stop as () => void) ?? null;
+    })
+    .catch(() => { /* event bridge missing: progress lines are best effort */ });
+  return () => {
+    disposed = true;
+    unlisten?.();
+    unlisten = null;
+  };
+}
+
 async function fetchText(url: string): Promise<string> {
   const response = await fetch(url);
   if (!response.ok) throw new Error(`Unable to load wiki engine (${response.status})`);

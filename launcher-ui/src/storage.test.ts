@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { KeyvalStore, addRecentFile, getRecentFiles, removeRecentFile, clearAllRecentFiles, saveSearchCache, purgeOldestCachesIfNeeded, isWikiDriftedFromHead, type CacheStore } from './storage.ts';
+import { KeyvalStore, addRecentFile, getRecentFiles, removeRecentFile, clearAllRecentFiles, forgetWikiCache, saveSearchCache, purgeOldestCachesIfNeeded, isWikiDriftedFromHead, recentDiskPath, type CacheStore } from './storage.ts';
 import { KeyvalWikiHistory } from './wiki-history.ts';
 
 // In Node environment without native indexedDB, we mock indexedDB or test logic
@@ -125,6 +125,29 @@ test('purge tolerates a failing estimate and malformed timestamps', async () => 
   assert.equal((await store.keys()).length, 2);
 });
 
+test('forgetWikiCache removes one wiki entirely and leaves the others alone', async () => {
+  const store = new MemoryIdb([
+    cache('a.lith', 'text-a', '2026-01-01T00:00:00Z'),
+    ['search_cache_bk1_a.lith', cacheEntry('bk1', '2025-12-01T00:00:00Z')],
+    ['search_cache_bk2_a.lith', cacheEntry('bk2', '2025-11-01T00:00:00Z')],
+    ['dirty_state_a.lith', { ts: 1, tiddlers: [{ title: 'Unsaved edit' }] }],
+    cache('b.lith', 'text-b', '2026-01-02T00:00:00Z'),
+    ['unrelated-key', 'keep me']
+  ]);
+  // A versioned history writes its own meta/base/delta keys; all of them go.
+  await new KeyvalWikiHistory(store).saveVersion('a.lith', '[{"title":"A","text":"one"}]', 1);
+
+  await forgetWikiCache('a.lith', store);
+
+  assert.deepEqual((await store.keys()).sort(), ['search_cache_b.lith', 'unrelated-key']);
+});
+
+test('forgetWikiCache tolerates a wiki with nothing stored', async () => {
+  const store = new MemoryIdb([['unrelated-key', 'keep me']]);
+  await forgetWikiCache('never-saved.lith', store);
+  assert.deepEqual(await store.keys(), ['unrelated-key']);
+});
+
 test('clearAllRecentFiles drops orphaned search caches and backups', async () => {
   const store = new MemoryIdb([
     ['recentFiles', [{ handle: { name: 'a.lith' }, tauriPath: null }]],
@@ -174,4 +197,22 @@ test('listDirtyRecoveries reports only wikis with unsaved edits', async () => {
   ]);
   const recoveries = await listDirtyRecoveries(['a.lith', 'empty.lith', 'ghost.lith'], store);
   assert.deepEqual(recoveries, { 'a.lith': 7 });
+});
+
+test('recentDiskPath finds the path in every row shape the recents store holds', () => {
+  // Launcher-written row (save dialog, sidecar merge).
+  assert.equal(recentDiskPath({ name: 'a.lith', path: 'C:\\Lithic\\a.lith' }), 'C:\\Lithic\\a.lith');
+  // Engine-written row: every save from inside a Lith lands like this, which is
+  // how a freshly saved blank Lith ended up invisible to the sync target.
+  assert.equal(recentDiskPath({ name: 'b.lith', tauriPath: 'C:\\Lithic\\b.lith', handle: null }), 'C:\\Lithic\\b.lith');
+  assert.equal(recentDiskPath({ handle: { name: 'c.lith', __lithicTauriPath__: 'C:\\Lithic\\c.lith' } }), 'C:\\Lithic\\c.lith');
+  // Legacy double-wrapped shape seen in older stores.
+  assert.equal(
+    recentDiskPath({ handle: { handle: null, name: 'd.lith', __lithicTauriPath__: 'C:\\Lithic\\d.lith' } }),
+    'C:\\Lithic\\d.lith'
+  );
+  // Browser rows have no path, and neither do half-built ones.
+  assert.equal(recentDiskPath({ handle: { name: 'e.lith' } }), null);
+  assert.equal(recentDiskPath({ name: 'f.lith', path: '' }), null);
+  assert.equal(recentDiskPath({ handle: 'g.lith' }), null);
 });
