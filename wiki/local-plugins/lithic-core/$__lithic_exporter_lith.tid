@@ -1,13 +1,11 @@
 description: Lithic Monolith (.lith)
 extension: .lith
+filename: {{{ [all[tiddlers+shadows]prefix[$:/config/TiddlyTools/Filters/]field:filter<exportFilter>get[description]first[]splitregexp[\s+]join[_]] ~[[export]] }}}
 tags: $:/tags/Exporter
 title: $:/lithic/exporter/lith
 
-<$list filter="[subfilter<exportFilter>!is[image]!type[application/tldr]!type[application/pdf]] [subfilter<exportFilter>is[image]] [subfilter<exportFilter>type[application/tldr]] [subfilter<exportFilter>type[application/pdf]]" counter="counter">
-{{{ [<currentTiddler>] ||$:/core/templates/tid-tiddler }}}
-<$reveal default=<<counter-last>> type="nomatch" text="yes">
-
+<$list filter="[subfilter<exportFilter>!is[image]!type[application/tldr]!type[application/pdf]] [subfilter<exportFilter>is[image]] [subfilter<exportFilter>type[application/tldr]] [subfilter<exportFilter>type[application/pdf]] -[all[tiddlers+shadows]prefix[~]] -[all[tiddlers+shadows]prefix[$:/plugins/lithic/ephemeral/]] -[all[tiddlers+shadows]prefix[$:/boot/]] -[all[tiddlers+shadows]prefix[$:/core]] -[all[tiddlers+shadows]prefix[$:/themes]] -[all[tiddlers+shadows]prefix[$:/temp]] -[all[tiddlers+shadows]prefix[$:/state]] -[all[tiddlers+shadows]prefix[$:/HistoryList]] -[[$:/StoryList]] -[[$:/isEncrypted]] -[[$:/library/sjcl.js]] -[[$:/status/RequireReloadDueToPluginChange]] -[[$:/config/OfficialPluginLibrary]]" counter="counter"><$fields exclude="text bag" template="$name$: $value$
+"></$fields>
+<$view field="text" format="text"/><$reveal default=<<counter-last>> type="nomatch" text="yes">
 ⁂⁂⁂
-
-</$reveal>
-</$list>
+</$reveal></$list>
