@@ -55,7 +55,7 @@ jobs:
       - name: Install Dependencies
         run: |
           npm install
-          npm --prefix launcher-ui install --no-package-lock
+          npm --prefix launcher-ui ci
 
       - name: Run Launcher UI Tests
         run: npm --prefix launcher-ui test
