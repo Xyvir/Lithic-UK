@@ -44,6 +44,8 @@ the publisher.
     --lithic-c-code-warn: <<colour dirty-indicator>>;
     --lithic-c-code-select-bg: <<colour primary>>;
     --lithic-c-code-select-fg: <<colour foreground>>;
+    --lithic-c-notify-bg: <<colour notification-background>>;
+    --lithic-c-notify-fg: <<colour message-foreground>>;
     --lithic-c-caret: <<colour primary>>;
     --lithic-c-menu-bg: <<colour dropdown-background>>;
     --lithic-c-menu-fg: <<colour foreground>>;

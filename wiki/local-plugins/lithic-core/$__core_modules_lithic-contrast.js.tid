@@ -25,6 +25,9 @@ and `derive` turns it into a role map guaranteed to hit contrast targets:
                     / primary, selection band + fg >=4.5:1, caret >=3:1
   menu-*            popup surfaces: items >=4.5:1, icons >=3.5:1, hover
                     band + fg >=4.5:1, border >=1.8:1
+  notify-bg/-fg     notification/highlight band: the palette's own
+                    notification-background, ink contrast-locked >=4.5:1
+                    (shared with the streams patch's highlight band)
   caret             editor caret, >=3:1 vs code background
   scale-1..8        categorical accents spun off primary
   dark              "1" on dark palettes, "0" on light
@@ -182,7 +185,13 @@ Derived from the validated "Contrast-locked" Mermaid theme (Lithic 2026-09).
             altFg: pick("muted-foreground", [120, 120, 120]),
             dropdownBg: pick("dropdown-background", bg),
             msgBg: pick("message-background", pick("notification-background", mix(bg, [0, 0, 0], 0.03))),
-            msgBorder: pick("message-border", pick("table-border", [180, 180, 180]))
+            msgBorder: pick("message-border", pick("table-border", [180, 180, 180])),
+            // The palette's OWN notification/highlight pair. The streams patch's
+            // highlight band ($:/lithic/streams/styles/ctx-preview) hard-binds to these
+            // two fields, so deriving from the same source keeps the context-menu
+            // target band impossible to drift from it.
+            notifyBg: pick("notification-background", pick("message-background", mix(bg, [0, 0, 0], 0.03))),
+            notifyFg: pick("message-foreground", pick("foreground", [32, 32, 32]))
         };
     }
 
@@ -257,6 +266,13 @@ Derived from the validated "Contrast-locked" Mermaid theme (Lithic 2026-09).
             menuHoverFg = hoverInk;
         }
         var menuBorder = lumAdjust(p.msgBorder, menuBg, 1.8);
+        // Notification/highlight band (streams node highlight, context-menu target).
+        // The band itself is the palette's notification-background VERBATIM -- no mixing,
+        // so it matches the streams patch pixel-for-pixel -- while the ink is
+        // contrast-locked, because message-foreground is not guaranteed readable on
+        // notification-background across arbitrary user palettes.
+        var notify = p.notifyBg;
+        var notifyTxt = lumAdjust(p.notifyFg, notify, 4.5);
         var out = {
             "surface": toHex(p.bg),
             "page": toHex(p.pageBg),
@@ -290,6 +306,8 @@ Derived from the validated "Contrast-locked" Mermaid theme (Lithic 2026-09).
             "menu-hover-bg": toHex(menuHover),
             "menu-hover-fg": toHex(menuHoverFg),
             "menu-border": toHex(menuBorder),
+            "notify-bg": toHex(notify),
+            "notify-fg": toHex(notifyTxt),
             "menu-selected-fg": toHex(menuHoverFg)
         };
         for (var i = 0; i < 8; i++) out["scale-" + (i + 1)] = toHex(scale[i]);

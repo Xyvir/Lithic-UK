@@ -80,11 +80,15 @@ ul .menu-separator {
 }
 
 /* Context Menu Highlight Patch - applies when right-clicking a stream node or link.
-   Intentionally matches the streams-specific highlight green from the default
-   notebook palette -- do NOT swap to the contrast hover pair. */
+   Palette-aware and live: the notify-bg/-fg contrast roles are derived from the SAME
+   palette fields as the streams patch's own highlight band
+   ($:/lithic/streams/styles/ctx-preview), so the two can never drift -- on the
+   notebook dark palette that is the green band. Static fallbacks live in
+   lithic-core/lithic-contrast.css. Do NOT hardcode these, and do NOT swap in the
+   contrast hover pair (that drift is what turned the band purple). */
 .lithic-context-menu-active,
 .lithic-context-menu-active-children {
-	background: #3a5e39 !important;
-	color: #d5e2f1 !important;
+	background: var(--lithic-c-notify-bg) !important;
+	color: var(--lithic-c-notify-fg) !important;
 	border-radius: 4px;
 }
