@@ -1,4 +1,35 @@
-@import url('https://fonts.googleapis.com/css2?family=Vollkorn:wght@400;600&display=swap');
+/*
+ * Lithic Serif: Vollkorn's letters with Computer Modern numerals, the same
+ * amalgam the wiki renders in. Built by scripts/build-launcher-font.py and
+ * inlined into launcher.html by the Vite build (assetsInlineLimit: Infinity),
+ * so the launcher never fetches a font at runtime and the desktop app has its
+ * typography offline. Served under the "Vollkorn" handle, so every rule below
+ * keeps working unchanged.
+ *
+ * All three weights are real instanced faces because :root sets
+ * font-synthesis: none -- an absent weight is not faked, it falls back.
+ */
+@font-face {
+  font-family: 'Vollkorn';
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url('./fonts/lithic-serif-400.woff2') format('woff2');
+}
+@font-face {
+  font-family: 'Vollkorn';
+  font-style: normal;
+  font-weight: 600;
+  font-display: swap;
+  src: url('./fonts/lithic-serif-600.woff2') format('woff2');
+}
+@font-face {
+  font-family: 'Vollkorn';
+  font-style: normal;
+  font-weight: 700;
+  font-display: swap;
+  src: url('./fonts/lithic-serif-700.woff2') format('woff2');
+}
 
 :root {
   font-family: 'Vollkorn', serif;
