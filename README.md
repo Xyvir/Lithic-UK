@@ -46,6 +46,16 @@ The GitHub button in the launcher links the folder holding your wikis to a repos
 * **First connect merges both ways.** Wikis that exist only on GitHub are downloaded into the folder, and everything in the folder is pushed up.
 * **Deletions do not propagate.** Removing a wiki from the folder leaves it on GitHub, and removing it on GitHub does not delete your local copy.
 
+The button reports what the backup is doing, and green is the only state that means *verified*:
+
+* **Grey** — this folder is not synced.
+* **Amber** — the folder is synced and Lithic is checking that GitHub still accepts it.
+* **Green** — the repository answers and the saved token can push to it.
+* **Pulsing purple** — a save is being committed and pushed.
+* **Red** — the backup is not landing. The tooltip names the reason, and **Reconnect** in the dialog refreshes the saved credential without re-uploading or moving anything.
+
+Green needs an answer from GitHub because the failures it hides leave nothing behind locally: a revoked token, a deleted repository and a token that can read but not write all keep the folder's sync configuration intact. A save that fails to upload also turns the icon red until a later save lands.
+
 # Roadmap
 1. Version 1 Released: 
 - Lithic is packaged as a plugin

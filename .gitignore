@@ -30,7 +30,11 @@ wiki/tiddlywiki.log
 # Tauri build output
 /src-tauri/target/
 
-# Generated single-file launcher intermediates
+# Generated single-file launcher intermediates.
+# NOTE: /src/launcher.html is deliberately NOT ignored. It is generated, but it is
+# also PUBLISHED: deploy/autoupdate.sh fetches it from raw.githubusercontent.com at
+# runtime, and deploy/Dockerfile does `COPY src/launcher.html`. Ignoring it would
+# break every deployed server's launcher update path and the Docker image build.
 /src/index.html
 /src/launcher.js
 /src/launcher.css
@@ -38,6 +42,11 @@ wiki/tiddlywiki.log
 
 # Root dependency install
 /node_modules/
+
+# Scratch space for local/agent tooling and one-off harnesses: screenshots,
+# generated comparison images, throwaway scripts. Never tracked, nothing in the
+# repo reads it.
+/tmp/
 
 # Local preview and browser-test artifacts
 /.launcher-preview.log

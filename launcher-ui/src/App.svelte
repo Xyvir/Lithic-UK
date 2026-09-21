@@ -12,6 +12,7 @@
   import { searchCachedWikis } from './cache-search';
   import { computeBackupCoverage, hasBackedUpRepo, orphanedEntries, reindexFolders, type CoverageRow, type RebuildOrphan } from './backup-coverage';
   import { parseDeviceCode, parseDevicePoll, pollDelayMs, formatUserCode, generateRepoName, partitionRepos } from './github-device';
+  import { syncIndicator, shouldHeartbeat, healthFailure, SYNC_PULSE_MS, type SyncIndicator, type HealthState } from './git-sync-health';
   import { serializeJsonToLith, parseLithToJSON } from './lithic-format';
   // Inlined as a base64 data URL (assetsInlineLimit: Infinity) so the brand
   // mark survives when launcher.html is bundled into the Tauri app.
@@ -149,6 +150,27 @@
   let gitRepoInput = '';
   let gitTokenInput = '';
 
+  // Sync health. The marker poll answers "is this folder wired to a
+  // repository"; only the heartbeat answers "is the backup still working", and
+  // only one of those costs a network round trip.
+  let gitSyncHealth: HealthState | null = null;
+  let gitSyncHealthDetail = '';
+  let gitSyncHealthAt = 0;
+  let gitSyncHeartbeatInFlight = false;
+  let gitSyncHeartbeatAttemptAt = 0;
+  let gitSyncHeartbeatFailures = 0;
+  let gitSyncLastPushError: string | null = null;
+  /** Which folder the current verdict describes, so a change can void it. */
+  let gitSyncHealthTarget = '';
+  /**
+   * Whether the open dialog is looking at the folder the verdict describes.
+   * The icon always means "the Lith I have open", so a dialog opened on some
+   * other recent row must not wear that folder's health as if it were its own.
+   */
+  let gitSyncHealthApplies = false;
+  /** Reconnect reuses the device flow but lands on the existing remote. */
+  let gitReconnectMode = false;
+
   /** What `git_sync_setup` returns: the modal line plus the folder's wikis. */
   interface GitSyncSetupResult { summary: string; recents: string[] }
 
@@ -203,12 +225,18 @@
       gitUserCode = '';
     }
     showGitSyncModal = true;
+    gitSyncHealthApplies = healthAppliesToActive();
     void refreshGitSyncStatus(true);
+    // Opening the dialog is the user asking "is this working?" — worth a check
+    // even inside the throttle floor.
+    void runGitSyncHeartbeat(true);
   }
 
   function closeGitSyncModal() {
     showGitSyncModal = false;
+    gitSyncHealthApplies = false;
     gitPollAborted = true;
+    gitReconnectMode = false;
     // Focus is per-visit: leaving it set would silently retarget the header
     // icon and the next open at a folder the user only looked at once.
     gitSyncFocus = null;
@@ -217,6 +245,7 @@
   function resetGitSyncFlow() {
     gitPollAborted = true;
     gitAuthActive = false;
+    gitReconnectMode = false;
     gitDeviceToken = null;
     gitUserCode = '';
     gitSyncView = 'disconnected';
@@ -316,6 +345,11 @@
   /** Ask Rust whether the target folder is a Lithic-managed sync repo. */
   async function refreshGitSyncStatus(applyView: boolean): Promise<void> {
     const target = gitSyncActivePath();
+    // A verdict describes one folder: re-pointing at another makes it
+    // meaningless, and showing it would be worse than showing nothing. Keyed on
+    // the icon's folder, because that is the one the verdict is always about.
+    syncHealthTarget(gitSyncTargetPath());
+    gitSyncHealthApplies = healthAppliesToActive();
     let connected: { repo: string } | null = null;
     if (target) {
       try {
@@ -325,6 +359,7 @@
       }
     }
     gitSyncConnectedRepo = connected ? connected.repo : '';
+    if (!connected) forgetGitSyncHealth();
     if (applyView && gitSyncView !== 'connecting' && gitSyncView !== 'selecting') {
       gitSyncView = connected ? 'connected' : 'disconnected';
     }
@@ -366,6 +401,12 @@
         if (decision.kind === 'authorized') {
           gitAuthActive = false;
           gitDeviceToken = decision.token;
+          // Reconnecting knows its repository already, so it skips discovery
+          // entirely instead of asking the user to pick one again.
+          if (gitReconnectMode) {
+            await finishGitReconnect();
+            return;
+          }
           await loadRepoDiscovery();
           return;
         }
@@ -483,32 +524,183 @@
     }
   }
 
+  /**
+   * Reconnect an already-synced folder: the same device flow, but the fresh
+   * token lands on the remote the folder already has instead of re-running the
+   * first-connect merge (which would re-fetch and re-merge a folder that is
+   * already merged, to fix nothing but the credential).
+   */
+  async function reconnectGitSync() {
+    if (gitSyncBusy || gitAuthActive) return;
+    gitReconnectMode = true;
+    gitSyncError = '';
+    gitSyncMessage = '';
+    await startDeviceAuth();
+  }
+
+  /** The last step of a reconnect: land the token on the existing remote. */
+  async function finishGitReconnect(): Promise<void> {
+    const target = gitSyncActivePath();
+    const repo = gitSyncConnectedRepo;
+    const token = gitDeviceToken;
+    gitReconnectMode = false;
+    if (!target || !repo || !token) {
+      gitSyncError = 'Could not resolve the folder or repository to reconnect.';
+      gitSyncView = 'disconnected';
+      return;
+    }
+    gitSyncBusy = true;
+    gitSyncError = '';
+    startGitSyncProgress();
+    try {
+      await tauriInvoke('git_sync_reauth', { path: target, repo, token });
+      gitDeviceToken = null;
+      gitSyncMessage = `Reconnected github.com/${repo}`;
+      gitSyncView = 'connected';
+      // Proven by construction: the token that just authenticated is the one
+      // now sitting in the remote, so the next save has somewhere to go.
+      markGitSyncVerified();
+      void runGitSyncHeartbeat(true);
+    } catch (error) {
+      gitSyncError = error instanceof Error ? error.message : String(error);
+      gitSyncView = 'disconnected';
+    } finally {
+      gitSyncBusy = false;
+      endGitSyncProgress();
+    }
+  }
+
   // --- Status-reactive icon (legacy #github-sync-btn parity) ---
-  // grey = not set up, green = connected, purple pulsing = syncing,
-  // red = git error. One shared reactive instead of per-call bookkeeping.
-  let gitSyncIconState: 'idle' | 'connected' | 'syncing' | 'error' = 'idle';
+  // grey = not synced, amber = verifying, green = verified, purple pulsing =
+  // syncing, red = the backup is not landing. The precedence lives in
+  // git-sync-health.ts, where it is testable instead of buried in markup.
+  let gitSyncIconState: SyncIndicator = 'idle';
   let gitSyncIconTitle = 'GitHub Sync';
   let gitSyncPollTimer: ReturnType<typeof setInterval> | null = null;
   let gitSyncSyncingUntil = 0;
   let gitSyncTick = 0;
-  let gitSyncErrored = false;
 
   $: {
     void gitSyncTick;
+    const indicator = syncIndicator({
+      hasMarker: Boolean(gitSyncConnectedRepo),
+      health: gitSyncHealth,
+      syncingUntil: gitSyncSyncingUntil,
+      lastPushError: gitSyncLastPushError,
+      repo: gitSyncConnectedRepo || null,
+      verifiedAt: gitSyncHealthAt || null,
+      now: Date.now()
+    });
+    gitSyncIconState = indicator.state;
+    gitSyncIconTitle = indicator.title;
+  }
+
+  /** Whether the dialog should offer a way out of the current state. */
+  $: gitSyncHealthBroken =
+    gitSyncHealthApplies &&
+    (Boolean(gitSyncLastPushError) || healthFailure(gitSyncHealth) !== null);
+
+  /** The dialog's one line about health, matching the icon's tooltip. */
+  $: gitSyncHealthNote = !gitSyncHealthApplies
+    ? ''
+    : gitSyncLastPushError
+      ? `The last save did not reach GitHub — ${gitSyncLastPushError}.`
+      : gitSyncHealthDetail;
+
+  /**
+   * Void a verdict that belongs to a different folder, because a stale green
+   * carried over from the previous one is worse than admitting nothing is known.
+   */
+  function syncHealthTarget(path: string | null): void {
+    const key = path ?? '';
+    if (gitSyncHealthTarget === key) return;
+    gitSyncHealthTarget = key;
+    forgetGitSyncHealth();
+  }
+
+  function forgetGitSyncHealth(): void {
+    gitSyncHealth = null;
+    gitSyncHealthDetail = '';
+    gitSyncHealthAt = 0;
+    gitSyncLastPushError = null;
+    gitSyncHeartbeatAttemptAt = 0;
+    gitSyncHeartbeatFailures = 0;
+    gitSyncHealthApplies = healthAppliesToActive();
+  }
+
+  /** Whether the subject of the open dialog is the folder the verdict covers. */
+  function healthAppliesToActive(): boolean {
+    return Boolean(gitSyncConnectedRepo) && gitSyncActivePath() === gitSyncHealthTarget;
+  }
+
+  /** Something proved the backup works: a landed push, a reconnect, a heartbeat. */
+  function markGitSyncVerified(): void {
+    gitSyncHealth = 'ok';
+    gitSyncHealthAt = Date.now();
+    gitSyncHeartbeatFailures = 0;
+    gitSyncLastPushError = null;
+    gitSyncHealthApplies = healthAppliesToActive();
+  }
+
+  /**
+   * Ask GitHub whether this folder's backup still works.
+   *
+   * The marker poll says the folder is wired up; this is the only thing that can
+   * tell a revoked token, a deleted repository and a read-only token apart from
+   * a healthy backup, because all three leave the marker intact. Throttled, and
+   * never while the window is hidden: nobody can see the answer.
+   */
+  async function runGitSyncHeartbeat(force = false): Promise<void> {
+    if (mode !== 'tauri') return;
+    const target = gitSyncTargetPath();
+    syncHealthTarget(target);
+    if (!target || gitSyncHeartbeatInFlight) return;
+    const hidden = typeof document !== 'undefined' && document.hidden;
     const now = Date.now();
-    const syncing = now < gitSyncSyncingUntil;
-    if (syncing) {
-      gitSyncIconState = 'syncing';
-      gitSyncIconTitle = 'Syncing to GitHub…';
-    } else if (gitSyncErrored) {
-      gitSyncIconState = 'error';
-      gitSyncIconTitle = 'GitHub Sync: last sync failed (offline?)';
-    } else if (gitSyncConnectedRepo) {
-      gitSyncIconState = 'connected';
-      gitSyncIconTitle = `GitHub Sync: ${gitSyncConnectedRepo}`;
-    } else {
-      gitSyncIconState = 'idle';
-      gitSyncIconTitle = 'GitHub Sync';
+    const due = shouldHeartbeat({
+      lastAttemptAt: gitSyncHeartbeatAttemptAt,
+      failures: gitSyncHeartbeatFailures,
+      now,
+      hidden,
+      force
+    });
+    if (!due) return;
+    gitSyncHeartbeatInFlight = true;
+    gitSyncHeartbeatAttemptAt = now;
+    try {
+      const health = await tauriInvoke<{ state: HealthState; repo: string; detail: string; last_commit_error?: string | null }>('git_sync_heartbeat', { path: target });
+      if (!health || health.state === 'unmanaged') {
+        // The marker is gone: there is no verdict left to hold, and keeping the
+        // old one would paint a failure over a folder that is simply not synced.
+        gitSyncHealth = null;
+        gitSyncHealthDetail = '';
+        gitSyncLastPushError = null;
+        gitSyncHealthApplies = healthAppliesToActive();
+        return;
+      }
+      gitSyncHealth = health.state;
+      gitSyncHealthDetail = health.detail || '';
+      gitSyncHealthAt = Date.now();
+      // Rust remembers the last save that failed to reach GitHub, which is the
+      // only way a push that died inside the engine document is ever visible:
+      // the event has nowhere to land once the wiki has replaced the page.
+      gitSyncLastPushError = health.last_commit_error || null;
+      gitSyncHealthApplies = healthAppliesToActive();
+      // Rust reads the repository out of the folder's own remote, so it is the
+      // better authority on the name when the two disagree.
+      if (health.repo) gitSyncConnectedRepo = health.repo;
+      if (health.state === 'ok') gitSyncHeartbeatFailures = 0;
+      else gitSyncHeartbeatFailures += 1;
+    } catch {
+      // The command itself did not answer: say unreachable rather than invent a
+      // verdict, and let the backoff stretch the next attempt out.
+      gitSyncHealth = 'offline';
+      gitSyncHealthDetail = '';
+      gitSyncHealthAt = Date.now();
+      gitSyncHeartbeatFailures += 1;
+      gitSyncHealthApplies = healthAppliesToActive();
+    } finally {
+      gitSyncHeartbeatInFlight = false;
     }
   }
 
@@ -516,33 +708,40 @@
     // Purple pulse for a few seconds after each save-commit, mirroring the
     // legacy "synced in the last 5 seconds" heuristic. The tick re-runs the
     // reactive block when the pulse expires (Svelte reacts to assignments).
-    gitSyncSyncingUntil = Date.now() + 4000;
+    gitSyncSyncingUntil = Date.now() + SYNC_PULSE_MS;
     setTimeout(() => {
       gitSyncTick += 1;
-    }, 4100);
+    }, SYNC_PULSE_MS + 100);
   }
 
   function refreshGitSyncIcon() {
     if (mode !== 'tauri') return;
     const target = gitSyncTargetPath();
+    syncHealthTarget(target);
     if (!target) {
       gitSyncConnectedRepo = '';
       return;
     }
-    // Each poll spawns a real `git`; while the window is hidden nobody can see
-    // the icon, so skip the work until it is shown again (visibilitychange
-    // triggers an immediate refresh below).
+    // Reading the marker is in-process libgit2, but while the window is hidden
+    // nobody can see the icon, so skip the work until it is shown again
+    // (visibilitychange triggers an immediate refresh below).
     if (typeof document !== 'undefined' && document.hidden) return;
     tauriInvoke<{ connected: boolean; repo: string } | null>('git_sync_status', { path: target })
       .then((connected) => {
         gitSyncConnectedRepo = connected ? connected.repo : '';
-        gitSyncErrored = false;
+        // Nothing synced here any more: a verdict about a repository that is no
+        // longer wired up would only paint a warning over nothing.
+        if (!connected) forgetGitSyncHealth();
       })
       .catch((error) => {
-        // Git spawn failures surface red; a plain-browser preview (no Tauri
-        // API at all) must not — the icon isn't real there anyway.
+        // Failing to read the state is not a failed backup, but it is not a
+        // green light either. A plain-browser preview (no Tauri API at all) is
+        // exempt: the icon is not real there anyway.
         if (!(error instanceof Error && error.message === 'Tauri API unavailable')) {
-          gitSyncErrored = true;
+          gitSyncHealth = 'offline';
+          gitSyncHealthDetail = '';
+          gitSyncHealthAt = Date.now();
+          gitSyncHealthApplies = healthAppliesToActive();
         }
       });
   }
@@ -1854,17 +2053,43 @@
     // every 15s; 10s keeps the icon honest across mounts and disconnects).
     refreshGitSyncIcon();
     gitSyncPollTimer = setInterval(refreshGitSyncIcon, 10000);
+    // The icon is only as honest as its last verification, so ask GitHub once on
+    // the way up. Cheap: one request, throttled, and it explains a RED icon
+    // before the user has a save to be confused by.
+    void runGitSyncHeartbeat();
     // Rust reports each stage of a connect; the modal renders the latest line so
     // the wait shows what is happening instead of a frozen button.
     const stopGitSyncProgressEvents = tauriListen<{ stage: string; detail: string }>(
       'git-sync-progress',
       (payload) => { if (payload?.detail) gitSyncStage = payload.detail; }
     );
-    const onGitSyncSaved = (event: Event) => markGitSyncActivity();
+    // The engine reports what the save's backup did, not just that it happened:
+    // a push that never landed has to reach the icon, or a green cloud sits over
+    // a repository that stopped receiving saves.
+    const onGitSyncSaved = (event: Event) => {
+      markGitSyncActivity();
+      const detail = (event as CustomEvent<{ ok?: boolean; managed?: boolean; error?: string | null }>).detail;
+      if (!detail) return;
+      if (detail.error === 'Tauri API unavailable') return;
+      if (detail.ok) {
+        // A landed push is the strongest evidence there is, but only for a
+        // folder Lithic actually syncs: "nothing to do" must not read as proof.
+        if (detail.managed) markGitSyncVerified();
+        return;
+      }
+      gitSyncLastPushError = detail.error || 'the backup did not reach GitHub';
+      void refreshBackupCoverage();
+      // Ask why: a revoked token, a deleted repository, or simply no network.
+      void runGitSyncHeartbeat(true);
+    };
     window.addEventListener('lithic-git-sync-saved', onGitSyncSaved);
-    // The poll is a real `git` spawn per tick, so refresh on the way back to a
-    // visible window instead of staying stale until the next tick.
-    const onVisibilityChange = () => { if (!document.hidden) refreshGitSyncIcon(); };
+    // The marker read is local, but a window that just came back may also have
+    // been without a network for hours, so refresh both.
+    const onVisibilityChange = () => {
+      if (document.hidden) return;
+      refreshGitSyncIcon();
+      void runGitSyncHeartbeat();
+    };
     document.addEventListener('visibilitychange', onVisibilityChange);
     void purgeOldestCachesIfNeeded().catch(() => { /* best effort */ });
     const closeOnEscape = (event: KeyboardEvent) => {
@@ -1976,7 +2201,7 @@
       {#if status}<div class="status-line" role="status"><span class="status-label">{status.replace(/[…\.\s]+$/, '')}</span><span class="activity-dots" aria-hidden="true"><i></i><i></i><i></i></span></div>{/if}
       {#if mountError}<div class="status-line error" role="alert">{mountError}</div>{/if}
     </div>
-    {#if mode === 'webapp'}<button class="help-button" aria-label="View Introduction" title="View Introduction" on:click={openIntro}>{introBusy ? '…' : '?'}</button>{:else if mode === 'tauri'}<button class="sync-button {gitSyncIconState}" aria-label="GitHub Sync" title={gitSyncIconTitle} on:click={() => { gitSyncFocus = null; openGitSyncModal(); }}><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 17.6A5 5 0 0 0 18 8h-1.3A8 8 0 1 0 4 16.3"/><path d="M12 12v9"/><path d="m8.5 15.5 3.5-3.5 3.5 3.5"/></svg></button>{/if}
+    {#if mode === 'webapp'}<button class="help-button" aria-label="View Introduction" title="View Introduction" on:click={openIntro}>{introBusy ? '…' : '?'}</button>{:else if mode === 'tauri'}<button class="sync-button {gitSyncIconState}" aria-label="GitHub Sync" title={gitSyncIconTitle} on:click={() => { gitSyncFocus = null; openGitSyncModal(); }}><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 17.6A5 5 0 0 0 18 8h-1.3A8 8 0 1 0 4 16.3"/><path d="M12 12v9"/><path d="m8.5 15.5 3.5-3.5 3.5 3.5"/></svg>{#if gitSyncIconState === 'checking'}<span class="sync-glyph ring" aria-hidden="true"></span>{:else if gitSyncIconState === 'error'}<span class="sync-glyph alert" aria-hidden="true">!</span>{:else if gitSyncIconState === 'connected'}<span class="sync-glyph dot" aria-hidden="true"></span>{/if}</button>{/if}
   </header>
   {#if pendingImports.length > 0}
     <div class="pending-imports" role="status" aria-label="Pending imports">
@@ -2057,12 +2282,20 @@
         {:else}
           <p>Connected repository</p>
           <p class="user-code-display" style="font-size:1.05rem; letter-spacing:0.02em;">{gitSyncConnectedRepo || '—'}</p>
-          <p class="git-sync-note">Every save of a file in this folder commits and pushes to main automatically.</p>
+          {#if gitSyncHealthNote}
+            <p class="status-line {gitSyncHealthBroken ? 'error' : ''}" role={gitSyncHealthBroken ? 'alert' : 'status'}>{gitSyncHealthNote}</p>
+          {:else}
+            <p class="git-sync-note">Every save of a file in this folder commits and pushes to main automatically.</p>
+          {/if}
           {#if gitSyncError}<p class="status-line error" role="alert">{gitSyncError}</p>{/if}
           {#if gitSyncMessage}<p class="status-line" role="status">{gitSyncMessage}</p>{/if}
+          {#if gitSyncBusy}<p class="sync-progress" role="status"><span class="sync-spinner" aria-hidden="true"></span><span>{gitSyncStage || 'Working…'}</span><span class="sync-elapsed">{gitSyncElapsed}s</span></p>{/if}
           <div class="modal-actions">
+            {#if gitSyncHealthBroken}
+              <button class="modal-action" disabled={gitSyncBusy || gitAuthActive} on:click={reconnectGitSync}>{gitAuthActive ? 'Waiting for GitHub…' : 'Reconnect'}</button>
+            {/if}
             <button class="modal-action secondary" disabled={gitSyncBusy} on:click={disconnectGitSync}>Disconnect</button>
-            <button class="modal-action" on:click={closeGitSyncModal}>Done</button>
+            <button class="modal-action secondary" on:click={closeGitSyncModal}>Done</button>
           </div>
         {/if}
       </div>

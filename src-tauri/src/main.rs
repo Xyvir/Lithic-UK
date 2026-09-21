@@ -599,7 +599,7 @@ async fn git_sync_setup(
     }
 
     let outcome = tauri::async_runtime::spawn_blocking(move || -> Result<GitSyncSetup, String> {
-        let url = format!("https://oauth2:{}@github.com/{}.git", token.trim(), repo);
+        let url = sync_remote_url(&repo, token.trim());
         let merge = sync_with_remote(&dir, &url, &|stage, detail| report(&window, stage, detail))?;
 
         let mut summary = format!("Backed up to github.com/{}", repo);
@@ -718,40 +718,203 @@ fn managed_remote_url(dir: &Path) -> Option<String> {
     url.contains("oauth2:").then_some(url)
 }
 
-/// Best-effort auto-commit of one saved file: stage it, commit with the
-/// given message, and push when the folder is a git repo with an origin.
-/// Skips silently for non-synced folders so plain saves never error.
-/// Async so network pushes never block the window's main thread.
-#[tauri::command]
-async fn git_sync_commit(path: String, message: String) -> Result<(), String> {
+/// Lithic's remote shape: the token is embedded in the URL, exactly as
+/// self-host's github-sync.sh writes it, and it doubles as the marker that
+/// tells us a folder is ours to commit into. One function builds it so the
+/// connect path and the reconnect path cannot drift apart.
+fn sync_remote_url(repo: &str, token: &str) -> String {
+    format!("https://oauth2:{}@github.com/{}.git", token, repo)
+}
+
+/// A managed remote taken apart. The embedded token is what marks the folder
+/// as ours; owner/name are what a health check needs to address the repository.
+#[derive(Debug, PartialEq, Eq)]
+struct ManagedRemote {
+    owner: String,
+    name: String,
+    token: String,
+}
+
+/// Split `https://oauth2:<token>@github.com/<owner>/<name>.git` back into its
+/// parts, for the callers that need the repository and the credential rather
+/// than the raw URL.
+///
+/// Lenient about the path — a missing `.git` or a trailing slash still parses —
+/// because this also reads remotes an older Lithic or self-host may have
+/// written. A URL that carries the marker but cannot be read reports as
+/// malformed to the user, which is a state reconnect can repair.
+fn parse_managed_remote(url: &str) -> Option<ManagedRemote> {
+    let (userinfo, host_and_path) = url.split_once("://")?.1.split_once('@')?;
+    let token = userinfo.strip_prefix("oauth2:")?.trim();
+    if token.is_empty() {
+        return None;
+    }
+    let path = host_and_path.split_once('/')?.1.trim_end_matches('/');
+    let path = path.strip_suffix(".git").unwrap_or(path);
+    let (owner, name) = path.split_once('/')?;
+    if owner.is_empty() || name.is_empty() || name.contains('/') {
+        return None;
+    }
+    Some(ManagedRemote {
+        owner: owner.to_string(),
+        name: name.to_string(),
+        token: token.to_string(),
+    })
+}
+
+/// What one save's backup did.
+///
+/// `pushed: false` with no error means there was nothing for Lithic to do — the
+/// folder is not a managed sync repository. With an error it means the copy on
+/// GitHub is now behind. Either way the save itself succeeded, which is why a
+/// failed push is reported here rather than returned as a failure: an offline
+/// save must still work.
+#[derive(serde::Serialize)]
+struct GitSyncCommit {
+    /// The folder is a Lithic-managed repository, so this save was a backup.
+    /// Told apart from "nothing to do" because only a real push proves the
+    /// connection works, and the launcher must not read silence as success.
+    managed: bool,
+    pushed: bool,
+    error: Option<String>,
+}
+
+impl GitSyncCommit {
+    fn nothing() -> Self {
+        Self { managed: false, pushed: false, error: None }
+    }
+
+    fn ok() -> Self {
+        Self { managed: true, pushed: true, error: None }
+    }
+
+    fn failed(error: String) -> Self {
+        Self { managed: true, pushed: false, error: Some(error) }
+    }
+}
+
+/// Why the last backup of each folder failed, if it did.
+///
+/// The save that fails happens inside the engine document, which is a rewrite of
+/// the launcher page — so the event it fires has nowhere to land, and the icon
+/// only learns about it when the launcher comes back. Remembering the outcome
+/// here is what makes a backup that stopped landing visible at all, instead of a
+/// log line nobody reads.
+#[derive(Default)]
+struct CommitLog(Mutex<std::collections::HashMap<String, String>>);
+
+impl CommitLog {
+    /// `None` clears the folder: a push that landed is the fix, so there is
+    /// nothing left to warn about.
+    fn record(&self, folder: &str, error: Option<String>) {
+        let Ok(mut log) = self.0.lock() else { return };
+        match error {
+            Some(error) => {
+                log.insert(folder.to_string(), error);
+            }
+            None => {
+                log.remove(folder);
+            }
+        }
+    }
+
+    fn last_error(&self, folder: &str) -> Option<String> {
+        self.0.lock().ok()?.get(folder).cloned()
+    }
+}
+
+/// The log's key for a folder: separators normalized, because the same folder
+/// arrives here from the engine's own saver and from the launcher's recent list,
+/// and those two do not have to spell it with the same slash. A key that missed
+/// would silently drop the one signal that a backup stopped landing.
+fn folder_key(dir: &Path) -> String {
+    dir.to_string_lossy().replace('\\', "/")
+}
+
+/// Process-wide on purpose: this is process-scoped truth about what this app has
+/// done since it started, and the commands that read and write it are stateless
+/// by design (an async command holding a managed `State` borrow cannot span an
+/// await, which is exactly what a heartbeat does).
+static COMMIT_LOG: std::sync::OnceLock<CommitLog> = std::sync::OnceLock::new();
+
+fn commit_log() -> &'static CommitLog {
+    COMMIT_LOG.get_or_init(CommitLog::default)
+}
+
+/// The synchronous half: stage the file, commit it, and push.
+fn commit_saved_file(
+    dir: &Path,
+    file: &Path,
+    url: &str,
+    message: &str,
+) -> Result<GitSyncCommit, String> {
+    let repo = gitcore::open(dir)?;
+    gitcore::ensure_identity(&repo);
+
+    let Some(file_name) = file.file_name().and_then(|name| name.to_str()) else {
+        return Ok(GitSyncCommit::nothing());
+    };
+    gitcore::stage_path(&repo, file_name)?;
+    gitcore::commit(&repo, message, false)?;
+    // Push best-effort: offline saves must still succeed locally. The failure
+    // travels back to the launcher instead of only into a log line, so a green
+    // icon can never sit over a backup that stopped landing.
+    match gitcore::push_main(&repo, url, false) {
+        Ok(()) => Ok(GitSyncCommit::ok()),
+        Err(error) => {
+            eprintln!("git push skipped: {}", error);
+            Ok(GitSyncCommit::failed(error))
+        }
+    }
+}
+
+/// Auto-commit of one saved file, recording what the backup did so the launcher
+/// can report it later. Skips non-synced folders so plain saves never error, and
+/// runs the git work — including a network push — on the blocking pool rather
+/// than holding an async worker for the length of a round trip.
+async fn git_sync_commit_inner(
+    path: String,
+    message: String,
+    log: &CommitLog,
+) -> Result<GitSyncCommit, String> {
     let file = PathBuf::from(&path);
     let dir = match file.parent().filter(|parent| parent.is_dir()) {
-        Some(dir) => dir,
-        None => return Ok(()),
+        Some(dir) => dir.to_path_buf(),
+        None => return Ok(GitSyncCommit::nothing()),
     };
     if !dir.join(".git").is_dir() {
-        return Ok(());
+        return Ok(GitSyncCommit::nothing());
     }
     // Only auto-commit in repos Lithic configured itself: its remotes embed
     // the oauth2 token, mirroring self-host, so a git folder the user opened a
     // file from is never touched by saves.
-    let Some(url) = managed_remote_url(dir) else {
-        return Ok(());
+    let Some(url) = managed_remote_url(&dir) else {
+        return Ok(GitSyncCommit::nothing());
     };
-    let repo = gitcore::open(dir)?;
-    gitcore::ensure_identity(&repo);
+    let folder = folder_key(&dir);
+    let outcome = tauri::async_runtime::spawn_blocking(move || {
+        commit_saved_file(&dir, &file, &url, &message)
+    })
+    .await
+    .map_err(|error| error.to_string())?;
 
-    let file_name = match file.file_name().and_then(|name| name.to_str()) {
-        Some(name) => name.to_string(),
-        None => return Ok(()),
-    };
-    gitcore::stage_path(&repo, &file_name)?;
-    gitcore::commit(&repo, &message, false)?;
-    // Push best-effort: offline saves must still succeed locally.
-    if let Err(error) = gitcore::push_main(&repo, &url, false) {
-        eprintln!("git push skipped: {}", error);
+    match outcome {
+        Ok(commit) => {
+            log.record(&folder, commit.error.clone());
+            Ok(commit)
+        }
+        Err(error) => {
+            // A stage or commit failure is just as much a backup that did not
+            // happen as a rejected push.
+            log.record(&folder, Some(error.clone()));
+            Err(error)
+        }
     }
-    Ok(())
+}
+
+#[tauri::command]
+async fn git_sync_commit(path: String, message: String) -> Result<GitSyncCommit, String> {
+    git_sync_commit_inner(path, message, commit_log()).await
 }
 
 // --- GitHub OAuth device flow ------------------------------------------------
@@ -962,6 +1125,241 @@ fn git_sync_disconnect(path: String) -> Result<(), String> {
     gitcore::remove_remote(&repo, "origin")
 }
 
+// --- Sync health -------------------------------------------------------------
+// The marker check above answers "is this folder wired to a repository". It
+// cannot answer "is the backup still working": a revoked token, a repository
+// that was deleted or renamed, and a token that can read but not write all
+// leave the marker perfectly intact. One authenticated request answers those,
+// which is what lets the launcher paint green only when it is telling the truth.
+
+/// What one heartbeat learned about the connection.
+#[derive(Debug, PartialEq, Eq, Clone, Copy)]
+enum Health {
+    Ok,
+    ReadOnly,
+    Auth,
+    Missing,
+    Throttled,
+    Offline,
+}
+
+/// Map one `GET /repos/{owner}/{name}` response to a verdict.
+///
+/// Pure, because the cases that matter are exactly the ones that decide whether
+/// a green icon is honest, and they are otherwise only reachable with a real
+/// expired token in hand.
+///
+/// GitHub answers 404 both for a repository that was deleted and for a private
+/// one this token cannot see, so `Missing` is reported as "deleted, renamed, or
+/// no longer shared" rather than asserting which of the two happened.
+fn verdict_for(status: u16, push_allowed: Option<bool>, rate_limited: bool) -> Health {
+    match status {
+        // 409 is a repository with no commits yet: the repository and the token
+        // are fine, the branch simply does not exist until the first push lands.
+        200..=299 | 409 => match push_allowed {
+            Some(false) => Health::ReadOnly,
+            _ => Health::Ok,
+        },
+        401 => Health::Auth,
+        403 if rate_limited => Health::Throttled,
+        403 => Health::Auth,
+        404 => Health::Missing,
+        _ => Health::Offline,
+    }
+}
+
+/// The launcher's view of a heartbeat: a machine-readable verdict plus the one
+/// sentence the icon's tooltip and the sync dialog both show.
+#[derive(serde::Serialize)]
+struct GitSyncHealth {
+    state: &'static str,
+    repo: String,
+    detail: String,
+    /// Why this folder's most recent save did not reach GitHub, if it did not.
+    /// Kept separate from `state` because the two answer different questions:
+    /// the repository can be perfectly reachable while a push is still failing.
+    last_commit_error: Option<String>,
+}
+
+impl GitSyncHealth {
+    fn unmanaged() -> Self {
+        Self {
+            state: "unmanaged",
+            repo: String::new(),
+            detail: "This folder is not synced.".to_string(),
+            last_commit_error: None,
+        }
+    }
+
+    fn malformed() -> Self {
+        Self {
+            state: "malformed",
+            repo: String::new(),
+            detail: "The folder's saved remote is not readable — reconnect to repair it.".to_string(),
+            last_commit_error: None,
+        }
+    }
+
+    fn offline(repo: String, reason: &str) -> Self {
+        Self {
+            state: "offline",
+            repo,
+            detail: format!(
+                "Cannot reach github.com ({reason}) — saves stay on this device until the connection is back."
+            ),
+            last_commit_error: None,
+        }
+    }
+
+    fn with_last_commit_error(mut self, error: Option<String>) -> Self {
+        self.last_commit_error = error;
+        self
+    }
+
+    fn new(health: Health, repo: String, status: u16) -> Self {
+        let state = match health {
+            Health::Ok => "ok",
+            Health::ReadOnly => "readonly",
+            Health::Auth => "auth",
+            Health::Missing => "missing",
+            Health::Throttled => "throttled",
+            Health::Offline => "offline",
+        };
+        let detail = match health {
+            // A freshly created repository has no commits until the first push
+            // lands, which is a first backup waiting to happen, not a fault.
+            Health::Ok if status == 409 => {
+                format!("github.com/{} has no commits yet — the next save pushes the first one.", repo)
+            }
+            Health::Ok => format!("Backed up to github.com/{}.", repo),
+            Health::ReadOnly => format!(
+                "The saved token can read github.com/{} but not push to it — reconnect to grant write access.",
+                repo
+            ),
+            Health::Auth => "GitHub rejected the saved token — reconnect to sign in again.".to_string(),
+            Health::Missing => format!(
+                "github.com/{} is not visible to the saved token — deleted, renamed, or access was revoked.",
+                repo
+            ),
+            Health::Throttled => {
+                "GitHub is rate-limiting this device — saves stay local and retry shortly.".to_string()
+            }
+            Health::Offline => {
+                "Cannot reach github.com — saves are saved locally and push when the connection is back."
+                    .to_string()
+            }
+        };
+        Self {
+            state,
+            repo,
+            detail,
+            last_commit_error: None,
+        }
+    }
+}
+
+/// One authenticated GET, reporting the raw status and the two things a verdict
+/// needs (the token's push permission, and whether GitHub is rate-limiting us).
+///
+/// Time-boxed: a heartbeat that can hang would leave the icon reading "checking"
+/// forever, which is worse than the wrong colour. Errors here are transport
+/// errors — being unreachable is a verdict, not a failed command.
+async fn github_api_probe(url: &str, token: &str) -> Result<(u16, bool, Option<bool>), String> {
+    let client = tauri::api::http::ClientBuilder::new()
+        .max_redirections(2)
+        .build()
+        .map_err(|error| error.to_string())?;
+    let request = tauri::api::http::HttpRequestBuilder::new("GET", url)
+        .map_err(|error| error.to_string())?
+        .header("Authorization", format!("Bearer {}", token))
+        .map_err(|error| error.to_string())?
+        .header("Accept", "application/vnd.github+json")
+        .map_err(|error| error.to_string())?
+        .header("User-Agent", "Lithic-Sync")
+        .map_err(|error| error.to_string())?
+        .timeout(std::time::Duration::from_secs(8));
+    let response = client.send(request).await.map_err(|error| error.to_string())?;
+    let status = response.status().as_u16();
+    let rate_limited = response
+        .headers()
+        .get("x-ratelimit-remaining")
+        .and_then(|value| value.to_str().ok())
+        .map(|value| value.trim() == "0")
+        .unwrap_or(false);
+    // Read after the headers: `read` consumes the response.
+    let push_allowed = response
+        .read()
+        .await
+        .ok()
+        .and_then(|payload| payload.data.get("permissions")?.get("push")?.as_bool());
+    Ok((status, rate_limited, push_allowed))
+}
+
+/// Is the sync to GitHub actually working?
+///
+/// One authenticated request against the repository the folder's own remote
+/// names, so the answer covers what the marker check cannot: a revoked token, a
+/// repository that was deleted or renamed, and a token that can read but not
+/// push. Never returns an error — "cannot reach github.com" is a verdict the
+/// launcher renders, not a failed command.
+#[tauri::command]
+async fn git_sync_heartbeat(path: String) -> Result<GitSyncHealth, String> {
+    let folder = PathBuf::from(&path).parent().map(Path::to_path_buf);
+    // Read first: a save that failed in the engine document leaves its reason
+    // here, and that is the only way the launcher ever finds out.
+    let last_error = folder
+        .as_deref()
+        .and_then(|dir| commit_log().last_error(&folder_key(dir)));
+    let Some(dir) = folder else {
+        return Ok(GitSyncHealth::unmanaged());
+    };
+    let Some(url) = managed_remote_url(&dir) else {
+        return Ok(GitSyncHealth::unmanaged());
+    };
+    let Some(remote) = parse_managed_remote(&url) else {
+        return Ok(GitSyncHealth::malformed().with_last_commit_error(last_error));
+    };
+    let repo = format!("{}/{}", remote.owner, remote.name);
+    let endpoint = format!("https://api.github.com/repos/{}", repo);
+    let health = match github_api_probe(&endpoint, &remote.token).await {
+        Ok((status, rate_limited, push_allowed)) => {
+            GitSyncHealth::new(verdict_for(status, push_allowed, rate_limited), repo, status)
+        }
+        Err(reason) => GitSyncHealth::offline(repo, &reason),
+    };
+    Ok(health.with_last_commit_error(last_error))
+}
+
+/// Re-point a synced folder at the same repository with a fresh token, and do
+/// nothing else.
+///
+/// The remedy for a token GitHub no longer accepts. Going through the full
+/// connect again would re-fetch and re-merge a folder that has already been
+/// merged, which is a lot of work and a chance to touch files for no reason.
+#[tauri::command]
+fn git_sync_reauth(path: String, repo: String, token: String) -> Result<String, String> {
+    let file = PathBuf::from(&path);
+    let dir = file
+        .parent()
+        .filter(|parent| parent.is_dir())
+        .ok_or_else(|| format!("Cannot resolve a folder for {}", path))?;
+    if !dir.join(".git").is_dir() {
+        return Err("This folder is not a git repository".to_string());
+    }
+    // Only a folder Lithic already manages may be re-pointed: the marker is what
+    // proves the remote is ours to rewrite.
+    if managed_remote_url(dir).is_none() {
+        return Err("This folder is not a Lithic-managed sync folder".to_string());
+    }
+    let repo = repo.trim().trim_end_matches(".git").trim().to_string();
+    if repo.is_empty() || token.trim().is_empty() {
+        return Err("Both repository (owner/name) and token are required".to_string());
+    }
+    let handle = gitcore::open(dir)?;
+    gitcore::set_remote(&handle, "origin", &sync_remote_url(&repo, token.trim()))?;
+    Ok(repo)
+}
+
 /// Folder the running exe lives in — the root all sidecar-relative paths
 /// resolve against (the process CWD is unreliable on Windows).
 fn exe_dir() -> Option<PathBuf> {
@@ -1127,6 +1525,8 @@ fn main() {
             github_create_repo,
             git_sync_status,
             git_sync_disconnect,
+            git_sync_heartbeat,
+            git_sync_reauth,
             git_sync_coverage,
             list_folder_liths
         ])
@@ -1598,5 +1998,183 @@ mod tests {
         assert_eq!(names, vec!["other.lith".to_string(), "top.lith".to_string()]);
 
         let _ = fs::remove_dir_all(&root);
+    }
+
+    /// The remote URL is written by the connect path and read by the health
+    /// check, so the two halves have to agree — a drift here would show up as a
+    /// user whose sync is fine but whose heartbeat insists it is malformed.
+    #[test]
+    fn a_managed_remote_round_trips_through_its_parts() {
+        let url = sync_remote_url("owner/lithic-sync-ab2d", "gho_token");
+        assert_eq!(
+            parse_managed_remote(&url),
+            Some(ManagedRemote {
+                owner: "owner".to_string(),
+                name: "lithic-sync-ab2d".to_string(),
+                token: "gho_token".to_string(),
+            })
+        );
+
+        // Lenient about the path, because these remotes outlive the code that
+        // wrote them: no `.git`, or a trailing slash, still addresses the repo.
+        let no_suffix = parse_managed_remote("https://oauth2:tok@github.com/owner/name").unwrap();
+        assert_eq!(no_suffix.name, "name");
+        let trailing = parse_managed_remote("https://oauth2:tok@github.com/owner/name/").unwrap();
+        assert_eq!(trailing.name, "name");
+
+        // A remote the user configured themselves is never ours to read.
+        assert_eq!(parse_managed_remote("https://github.com/owner/name.git"), None);
+        // Nor is the marker without a token to use.
+        assert_eq!(parse_managed_remote("https://oauth2:@github.com/owner/name.git"), None);
+        // Nor a path that is only half a repository.
+        assert_eq!(parse_managed_remote("https://oauth2:tok@github.com/owner"), None);
+    }
+
+    /// The mapping that decides whether a green icon is honest. A revoked token,
+    /// a deleted repository and a read-only token all leave the marker intact,
+    /// so this is the only thing between the user and a silent failure.
+    #[test]
+    fn a_heartbeat_verdict_says_which_failure_it_is() {
+        assert_eq!(verdict_for(200, Some(true), false), Health::Ok);
+        // A token that can read but not push would otherwise look healthy right
+        // up until a save failed to upload.
+        assert_eq!(verdict_for(200, Some(false), false), Health::ReadOnly);
+        // Permissions absent (an older API shape) still counts as healthy.
+        assert_eq!(verdict_for(200, None, false), Health::Ok);
+        assert_eq!(verdict_for(401, None, false), Health::Auth);
+        // 403 is GitHub's rate limit *and* its forbidden, told apart by header.
+        assert_eq!(verdict_for(403, None, true), Health::Throttled);
+        assert_eq!(verdict_for(403, None, false), Health::Auth);
+        // GitHub answers 404 for a private repository the token cannot see.
+        assert_eq!(verdict_for(404, None, false), Health::Missing);
+        // A repository with no commits yet is a first push waiting to happen.
+        assert_eq!(verdict_for(409, Some(true), false), Health::Ok);
+        assert_eq!(verdict_for(500, None, false), Health::Offline);
+    }
+
+    /// A plain save in a folder Lithic does not manage must never look like a
+    /// failed backup — that is the whole reason the outcome is reported rather
+    /// than thrown.
+    #[test]
+    fn a_save_outside_a_managed_folder_reports_nothing_to_do() {
+        let root = scratch("commitoutcome");
+        let local = root.join("local");
+        init_repo(&local);
+        write(&local, "wiki.lith", "local\n");
+
+        let log = CommitLog::default();
+        let outcome = tauri::async_runtime::block_on(git_sync_commit_inner(
+            local.join("wiki.lith").to_string_lossy().into_owned(),
+            "save".to_string(),
+            &log,
+        ))
+        .expect("a save must never fail because there is nothing to sync");
+        assert!(!outcome.managed);
+        assert!(!outcome.pushed);
+        assert_eq!(outcome.error, None);
+
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    /// Reconnecting re-points the credential and nothing else: the folder was
+    /// already merged, so a re-auth that re-fetched would be slow and a chance
+    /// to touch files for no reason.
+    #[test]
+    fn a_reauth_repoints_the_credential_without_touching_the_work_tree() {
+        let root = scratch("reauth");
+        let local = root.join("local");
+        init_repo(&local);
+        write(&local, "wiki.lith", "keep me\n");
+        run_git(&local, &["add", "."]);
+        run_git(&local, &["commit", "-m", "local"]);
+        run_git(
+            &local,
+            &["remote", "add", "origin", &sync_remote_url("owner/name", "old_token")],
+        );
+        let before = run_git(&local, &["rev-parse", "HEAD"]);
+
+        let wiki = local.join("wiki.lith").to_string_lossy().into_owned();
+        let repo = git_sync_reauth(wiki.clone(), "owner/name.git".to_string(), "new_token".to_string())
+            .expect("a managed folder can be re-pointed");
+        assert_eq!(repo, "owner/name");
+        assert_eq!(
+            managed_remote_url(&local).as_deref(),
+            Some(sync_remote_url("owner/name", "new_token").as_str())
+        );
+        assert_eq!(fs::read_to_string(&wiki).unwrap(), "keep me\n");
+        assert_eq!(run_git(&local, &["rev-parse", "HEAD"]), before);
+
+        // A folder Lithic does not manage is not ours to re-point.
+        run_git(
+            &local,
+            &["remote", "set-url", "origin", "https://github.com/owner/name.git"],
+        );
+        assert!(git_sync_reauth(wiki, "owner/name".to_string(), "tok".to_string()).is_err());
+
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    /// A rejected push has to come back as a failed backup with its reason,
+    /// not as a log line: this is the case the icon turns red about, and a
+    /// report that swallowed the message would leave a red cloud with nothing
+    /// to say about it.
+    #[test]
+    fn a_rejected_push_is_reported_as_a_failed_backup() {
+        let root = scratch("pushreject");
+        let remote = seed_remote(&root, &[("wiki.lith", "theirs\n")]);
+        let local = root.join("local");
+        // An unrelated history cannot fast-forward, which is how a real remote
+        // rejects a real push without needing the network.
+        init_repo(&local);
+        write(&local, "wiki.lith", "mine\n");
+        run_git(&local, &["add", "."]);
+        run_git(&local, &["commit", "-m", "unrelated"]);
+        run_git(&local, &["remote", "add", "origin", remote.to_str().unwrap()]);
+
+        let outcome = commit_saved_file(
+            &local,
+            &local.join("wiki.lith"),
+            &sync_remote_url("owner/name", "tok"),
+            "save",
+        )
+        .expect("a rejected push is not a failed save");
+        assert!(outcome.managed);
+        assert!(!outcome.pushed);
+        assert!(
+            outcome.error.is_some(),
+            "a rejected push must carry the reason it was rejected"
+        );
+
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    /// The log is how a failed backup reaches the icon at all: the save happens
+    /// inside the engine document, so nothing else carries the reason back to
+    /// the launcher, and a record that outlived its fix would be a permanent
+    /// red cloud.
+    #[test]
+    fn the_commit_log_remembers_a_failure_until_a_push_lands() {
+        let log = CommitLog::default();
+        let folder = "/documents/lithic";
+        assert_eq!(log.last_error(folder), None);
+
+        log.record(folder, Some("not authorized".to_string()));
+        assert_eq!(log.last_error(folder).as_deref(), Some("not authorized"));
+        // Another folder's failure is not this folder's problem.
+        assert_eq!(log.last_error("/documents/work"), None);
+
+        log.record(folder, None);
+        assert_eq!(log.last_error(folder), None);
+    }
+
+    /// The engine's saver and the launcher's recent list both report a folder,
+    /// and the two do not have to agree on the separator. A key that missed
+    /// would drop the only signal that a backup stopped landing.
+    #[test]
+    fn the_commit_log_key_ignores_separator_style() {
+        assert_eq!(
+            folder_key(Path::new("C:\\Lithic\\work")),
+            folder_key(Path::new("C:/Lithic/work"))
+        );
     }
 }

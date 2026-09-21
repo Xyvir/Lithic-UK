@@ -751,23 +751,39 @@ function injectSaverBootstrap(
         }
         // Git-synced file (Tauri): auto-commit the save best-effort — never
         // blocks or fails the save itself, and Rust skips non-Lithic repos.
-        // Fires lithic-git-sync-saved on success so the launcher's sync icon
-        // can pulse (the engine document is a rewrite of the launcher page,
-        // so a direct reference back into the launcher UI is impossible).
+        // Reports what the backup did, not just that it ran, so the launcher's
+        // icon can show a push that never landed instead of pulsing green over
+        // it (the engine document is a rewrite of the launcher page, so a
+        // direct reference back into the launcher UI is impossible).
         var savedPath = handle && handle.__lithicTauriPath__;
         if (tauriInvoke && savedPath) {
+          var announce = function(outcome) {
+            var payload = {
+              type: 'lithic-git-sync-saved',
+              ok: !outcome.error,
+              // "Nothing to do" is not proof of a healthy backup, so the launcher
+              // is told whether this folder is one Lithic actually syncs.
+              managed: Boolean(outcome.managed),
+              error: outcome.error || null
+            };
+            try {
+              window.parent.postMessage(payload, '*');
+            } catch (e) { /* same-window dispatch below still fires */ }
+            try {
+              window.dispatchEvent(new CustomEvent('lithic-git-sync-saved', { detail: payload }));
+            } catch (e) { /* best effort */ }
+          };
           try {
             tauriInvoke('git_sync_commit', {
               path: savedPath,
               message: 'Save ' + (handle.name || 'file') + ' from Lithic'
-            }).then(function() {
-              try {
-                window.parent.postMessage({ type: 'lithic-git-sync-saved' }, '*');
-              } catch (e) { /* same-window dispatch below still fires */ }
-              try {
-                window.dispatchEvent(new CustomEvent('lithic-git-sync-saved'));
-              } catch (e) { /* best effort */ }
-            }).catch(function() { /* sync is opportunistic */ });
+            }).then(function(result) {
+              announce(result || {});
+            }).catch(function(error) {
+              // The save is on disk either way; the backup is what did not
+              // happen, and a managed folder is the only place that matters.
+              announce({ managed: true, error: (error && error.message) || 'the sync backend did not answer' });
+            });
           } catch (e) { /* sync is opportunistic */ }
         }
         callback(null);
