@@ -20,10 +20,23 @@
 }
 
 :8080 {
-	# Protect everything with BasicAuth
-	basicauth * {
+	# Protect everything with BasicAuth, except the PWA installation assets and
+	# the healthcheck, which a browser fetches before any credential exists.
+	@protected {
+		not path /manifest.json /site.webmanifest /offline-service-worker.js /android-chrome-* /apple-touch-icon.png /favicon* /health
+	}
+
+	basicauth @protected {
 		admin $2a$14$EXAMPLE_BCRYPT_HASH_HERE
 	}
+
+	# Public slots, readable cross-origin so a DIFFERENT Lithic instance (the
+	# desktop/PWA meta-launcher) can bookmark this one: the manifest is what
+	# verifies it, and the icons are what let its list tell instances apart.
+	# Without Access-Control-Allow-Origin the browser withholds both, so
+	# bookmarking a perfectly good instance is reported as not a Lithic instance.
+	@publicFiles path /manifest.json /site.webmanifest /favicon.ico /favicon-16x16.png /favicon-32x32.png /apple-touch-icon.png /android-chrome-192x192.png /android-chrome-512x512.png
+	header @publicFiles Access-Control-Allow-Origin "*"
 
 	# WebDAV endpoint for .lith file sync
 	route /sync/* {

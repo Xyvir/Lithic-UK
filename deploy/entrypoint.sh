@@ -172,10 +172,12 @@ ${CADDY_SITE_ADDRESS} {
         ${LITHIC_USER} ${HASHED_PASSWORD}
     }
 
-    # 1b. Public icon slots: served without auth and readable cross-origin so a
-    # DIFFERENT Lithic instance (the desktop/PWA meta-launcher) can fetch and
-    # cache this instance's custom emoji icon for its bookmark list.
-    @publicIcons path /favicon.ico /favicon-16x16.png /favicon-32x32.png /apple-touch-icon.png /android-chrome-192x192.png /android-chrome-512x512.png
+    # 1b. Public slots, readable cross-origin so a DIFFERENT Lithic instance (the
+    # desktop/PWA meta-launcher) can bookmark this one: the manifest is what
+    # verifies it, and the icons are what let its list tell instances apart.
+    # Without the header the browser withholds both, and a bookmark attempt on a
+    # perfectly good instance is reported as "not a Lithic instance".
+    @publicIcons path /manifest.json /site.webmanifest /favicon.ico /favicon-16x16.png /favicon-32x32.png /apple-touch-icon.png /android-chrome-192x192.png /android-chrome-512x512.png
     header @publicIcons Access-Control-Allow-Origin "*"
 
     # 2a. Git-backed patch save API: the launcher sends only the changed lines
@@ -271,9 +273,11 @@ auth.require = ( "" => (
     "require" => "valid-user"
 ))
 
-# Public icon slots: readable cross-origin so a different Lithic instance (the
-# desktop/PWA meta-launcher) can cache this instance's custom emoji icon.
-\$HTTP["url"] =~ "^/(favicon.*\.(ico|png)|apple-touch-icon\.png|android-chrome-.*\.png)$" {
+# Public slots, readable cross-origin so a different Lithic instance (the
+# desktop/PWA meta-launcher) can bookmark this one: the manifest verifies it, and
+# the icons let its list tell instances apart. Without the header the browser
+# withholds both, so a bookmark attempt on a good instance looks like a failure.
+\$HTTP["url"] =~ "^/(manifest\.json|site\.webmanifest|favicon.*\.(ico|png)|apple-touch-icon\.png|android-chrome-.*\.png)$" {
     setenv.add-response-header = ( "Access-Control-Allow-Origin" => "*" )
 }
 
