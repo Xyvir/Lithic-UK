@@ -23,9 +23,13 @@ jobs:
         uses: actions/setup-node@v5
         with:
           node-version: '24'
+          cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            launcher-ui/package-lock.json
 
       - name: Install repository dependencies
-        run: npm install
+        run: npm ci
 
       - name: Test launcher logic
         run: npm test

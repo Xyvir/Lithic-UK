@@ -36,11 +36,13 @@ jobs:
           node-version: 22
 
 
+      # Keyed on the lockfiles, not package.json: the pins are what decide which
+      # toolchain emits the artifacts, so a pin change has to invalidate the cache.
       - name: Cache NPM dependencies
         uses: actions/cache@v5
         with:
           path: ~/.npm
-          key: ${{ runner.os }}-node-${{ hashFiles('**/package.json') }}
+          key: ${{ runner.os }}-node-${{ hashFiles('package-lock.json', 'launcher-ui/package-lock.json') }}
           restore-keys: |
             ${{ runner.os }}-node-
 
@@ -54,7 +56,7 @@ jobs:
 
       - name: Install Dependencies
         run: |
-          npm install
+          npm ci
           npm --prefix launcher-ui ci
 
       - name: Run Launcher UI Tests
