@@ -215,13 +215,44 @@ sources.forEach(source => {
                     }
 
                     if (updateSuccess) {
-                        lockData[source.name] = {
+                        // Only a changed revision may touch the lockfile.
+                        //
+                        // Because wiki/external is a gitignored cache, a fresh
+                        // checkout (every CI run, every fresh clone) re-downloads
+                        // sources whose etag never moved — so restamping
+                        // updatedAt here marked the lockfile dirty on every
+                        // build, and a file that is always modified stops
+                        // meaning anything. A re-fetch of identical bytes now
+                        // leaves the entry exactly as it was.
+                        const probed = Boolean(remoteInfo && (remoteInfo.etag || remoteInfo.lastModified));
+                        if (!probed && lockEntry) {
+                            // A failed header probe must not erase a revision we
+                            // already know: keeping the old pin is strictly safer
+                            // than writing null, which forgets what we had.
+                            log(`⚠️ No revision headers for ${source.name} — keeping the revision already in the lockfile.`);
+                        }
+                        const etag = probed ? remoteInfo.etag : (lockEntry ? lockEntry.etag : null);
+                        const lastModified = probed
+                            ? remoteInfo.lastModified
+                            : (lockEntry ? lockEntry.lastModified : null);
+                        const sameRevision = Boolean(lockEntry)
+                            && lockEntry.etag === etag
+                            && lockEntry.lastModified === lastModified;
+                        const entry = {
                             url: source.url,
-                            etag: remoteInfo ? remoteInfo.etag : null,
-                            lastModified: remoteInfo ? remoteInfo.lastModified : null,
-                            updatedAt: new Date().toISOString()
+                            etag,
+                            lastModified,
+                            updatedAt: sameRevision && lockEntry.updatedAt
+                                ? lockEntry.updatedAt
+                                : new Date().toISOString()
                         };
-                        changesMade = true;
+                        // Compare before assigning: re-deriving an unchanged
+                        // entry must not schedule a write, so the lockfile stays
+                        // byte-identical when nothing actually moved.
+                        if (JSON.stringify(lockEntry) !== JSON.stringify(entry)) {
+                            lockData[source.name] = entry;
+                            changesMade = true;
+                        }
                     }
                 }
                 if (fs.existsSync(tempFile)) fs.unlinkSync(tempFile);
