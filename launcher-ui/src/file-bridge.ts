@@ -71,6 +71,69 @@ export function tauriListen<T>(event: string, handler: (payload: T) => void): ((
   };
 }
 
+export type SaveOutcome = 'saved' | 'started' | 'cancelled';
+
+interface FilePickerHandle {
+  createWritable: () => Promise<{ write: (text: string) => Promise<void>; close: () => Promise<void> }>;
+}
+
+/**
+ * Save text to a file, reporting whether the platform could confirm the write.
+ *
+ * The distinction is the whole point: the desktop app writes through Rust and
+ * the Chromium file picker resolves after `close()`, so both prove the bytes
+ * landed. The legacy `<a download>` fallback cannot — the browser never reports
+ * whether a download finished — so it reports `started`, and callers must not
+ * present that as a file that exists.
+ */
+export async function saveTextVerifiably(fileName: string, text: string): Promise<SaveOutcome> {
+  const api = tauriApi();
+  if (api) {
+    try {
+      // The native dialog *and* the write happen in Rust, so a returned path is
+      // evidence the file is on disk.
+      const result = (await api.invoke('save_lith_file', { text, suggestedName: fileName })) as
+        | { name?: string; path?: string }
+        | null;
+      return result?.path ? 'saved' : 'started';
+    } catch (error) {
+      if (error instanceof Error && /cancel/i.test(error.message)) return 'cancelled';
+      throw error;
+    }
+  }
+
+  const picker = (globalThis as { showSaveFilePicker?: (options: unknown) => Promise<unknown> })
+    .showSaveFilePicker;
+  if (typeof picker === 'function') {
+    try {
+      const handle = (await picker({
+        suggestedName: fileName,
+        types: [{ description: 'Lithic Monolith', accept: { 'application/x-lith': ['.lith'] } }]
+      })) as FilePickerHandle;
+      const writable = await handle.createWritable();
+      await writable.write(text);
+      await writable.close();
+      return 'saved';
+    } catch (error) {
+      if (error && typeof error === 'object' && (error as { name?: string }).name === 'AbortError') {
+        return 'cancelled';
+      }
+      // Any other picker failure falls through to the legacy path.
+    }
+  }
+
+  const blob = new Blob([text], { type: 'application/x-lith' });
+  const url = URL.createObjectURL(blob);
+  const anchor = document.createElement('a');
+  anchor.href = url;
+  anchor.download = fileName;
+  document.body.appendChild(anchor);
+  anchor.click();
+  anchor.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 0);
+  return 'started';
+}
+
 async function fetchText(url: string): Promise<string> {
   const response = await fetch(url);
   if (!response.ok) throw new Error(`Unable to load wiki engine (${response.status})`);

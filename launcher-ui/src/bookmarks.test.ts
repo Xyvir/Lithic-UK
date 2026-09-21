@@ -11,6 +11,7 @@ import {
   setBookmarkIcon,
   shouldRefreshIcon,
   fetchInstanceIcon,
+  fetchInstanceIconNative,
   refreshBookmarkIcon,
   verifyInstanceUrl
 } from './bookmarks.ts';
@@ -147,14 +148,73 @@ test('verifyInstanceUrl accepts a Lithic manifest', async () => {
   assert.deepEqual(await verifyInstanceUrl('https://example.test', fetcher), { verified: true });
 });
 
-test('verifyInstanceUrl rejects non-Lithic manifests and network failures', async () => {
+test('verifyInstanceUrl rejects non-Lithic manifests', async () => {
   const wrongManifest = async () => new Response(JSON.stringify({ name: 'Other' }), { status: 200 });
   assert.deepEqual(await verifyInstanceUrl('https://example.test', wrongManifest), { verified: false });
+});
+
+test('a host that answers nothing is reported as unreachable, not as a wrong instance', async () => {
   const networkFailure = async () => { throw new Error('network'); };
-  assert.deepEqual(await verifyInstanceUrl('https://example.test', networkFailure), { verified: false });
+  assert.deepEqual(await verifyInstanceUrl('https://example.test', networkFailure), {
+    verified: false,
+    unreachable: true
+  });
 });
 
 test('verifyInstanceUrl flags protected instances for manual confirmation', async () => {
   const protectedResponse = async () => new Response('', { status: 401 });
   assert.deepEqual(await verifyInstanceUrl('https://example.test', protectedResponse), { verified: true, requiresManualConfirm: true });
+});
+
+test('a blocked-but-answering instance is confirmed by hand, not refused', async () => {
+  // The measured case: a self-hosted instance serves /manifest.json with 200 and
+  // no Access-Control-Allow-Origin, which the browser withholds entirely, so the
+  // readable fetch rejects exactly like a dead host would. The opaque probe is
+  // the one bit that tells them apart, and without it a working instance is
+  // reported as "not a Lithic instance".
+  const modes: Array<string | undefined> = [];
+  const blockedButAlive: typeof fetch = async (_input, init) => {
+    modes.push(init?.mode);
+    if (init?.mode === 'no-cors') return new Response('', { status: 200 });
+    throw new TypeError('Failed to fetch');
+  };
+  assert.deepEqual(await verifyInstanceUrl('https://personal.example', blockedButAlive), {
+    verified: true,
+    requiresManualConfirm: true
+  });
+  assert.deepEqual(modes, [undefined, 'no-cors'], 'the readable fetch is tried first');
+});
+
+test('the native icon loader caches bytes as a data URL', async () => {
+  const png = [137, 80, 78, 71, 13, 10, 26, 10];
+  const dataUrl = await fetchInstanceIconNative('https://example.test', async () => ({
+    content_type: 'image/png',
+    bytes: png
+  }));
+  assert.match(dataUrl ?? '', /^data:image\/png;base64,/);
+  assert.equal(
+    Buffer.from((dataUrl ?? '').split(',')[1], 'base64').subarray(0, 4).toString('hex'),
+    '89504e47'
+  );
+  // Nothing fetched, nothing oversized, and a failure all land on null rather
+  // than a broken image in the list.
+  assert.equal(await fetchInstanceIconNative('https://example.test', async () => null), null);
+  assert.equal(await fetchInstanceIconNative('https://example.test', async () => ({ bytes: [] })), null);
+  assert.equal(await fetchInstanceIconNative('https://example.test', async () => { throw new Error('no'); }), null);
+});
+
+test('a bookmark icon is fetched through Rust when the desktop app offers it', async () => {
+  const store = storage();
+  saveBookmark('https://work.test', store);
+  let browserCalls = 0;
+  const fetcher = async () => {
+    browserCalls += 1;
+    return new Response('', { status: 200 });
+  };
+  const entries = await refreshBookmarkIcon('https://work.test', fetcher, store, 1000, async () => ({
+    content_type: 'image/png',
+    bytes: [1, 2, 3]
+  }));
+  assert.match(entries[0].icon ?? '', /^data:image\/png;base64,/);
+  assert.equal(browserCalls, 0, 'the native loader is preferred: the browser cannot read a CORS-less host');
 });

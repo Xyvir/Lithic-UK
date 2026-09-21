@@ -17,6 +17,13 @@
  * push overrules it, and a folder with no verdict yet shows amber rather than
  * assuming the best.
  *
+ * The same reasoning applies to grey, one step earlier. Grey means "nothing is
+ * synced here", which the launcher cannot say until the marker read comes back
+ * — so the first paint asks the question in amber instead of asserting there is
+ * nothing to ask about. Returning to the launcher from a wiki makes this
+ * visible: a reload discards the marker state, and the icon used to spend that
+ * window grey, reading as "not set up" for a folder that is synced.
+ *
  * Everything here is pure, so the truth table is testable without Tauri, a
  * network, or a real expired token.
  */
@@ -45,37 +52,53 @@ export const SYNC_PULSE_MS = 4_000;
 /**
  * Why a verdict means the backup is not working, or null when it is fine.
  *
+ * One short sentence each, and the action where there is one. The Rust-side
+ * details say the same things for the dialog, so the two are deliberately
+ * near-identical: the same fault has no business reading two different ways
+ * depending on where the user looks.
+ *
  * `unmanaged` is not a failure — it is the marker check reporting that nothing
  * is synced here, which the caller renders as idle.
  */
 export function healthFailure(health: HealthState | null | undefined): string | null {
   switch (health) {
     case 'readonly':
-      return 'the saved token can read the repository but not push to it — reconnect to grant write access';
+      return 'this token can only read the repository. Reconnect to allow pushes.';
     case 'auth':
-      return 'GitHub rejected the saved token — reconnect to sign in again';
+      return 'GitHub rejected this token. Reconnect to sign in again.';
     case 'missing':
-      return 'the repository is not visible to the saved token (deleted, renamed, or access revoked?)';
+      return 'the repository is missing or not shared with this token.';
     case 'throttled':
-      return 'GitHub is rate-limiting this device — saves stay local and retry shortly';
+      return 'GitHub is rate-limiting this device. Saves stay local for now.';
     case 'offline':
-      return "can't reach github.com — saves stay on this device until the connection is back";
+      return 'cannot reach github.com. Saves stay on this device.';
     case 'malformed':
-      return "the folder's saved remote is not readable — reconnect to repair it";
+      return "this folder's saved remote is unreadable. Reconnect to repair it.";
     default:
       return null;
   }
 }
 
 export interface SyncIndicatorInput {
-  /** The marker check found a Lithic-managed remote for the focused folder. */
-  hasMarker: boolean;
+  /**
+   * The marker check found a Lithic-managed remote for the focused folder;
+   * `null` while that read is still outstanding, which is the state to report
+   * as amber rather than as grey.
+   */
+  hasMarker: boolean | null;
   /**
    * The last heartbeat verdict. Absent until one has landed, which is the only
    * situation that shows amber: re-checking a folder whose verdict is already
    * known must not flicker.
    */
   health?: HealthState | null;
+  /**
+   * Rust has a backup of this folder running right now. Authoritative and
+   * independent of the marker: the command only reports in-flight for a folder
+   * it is already syncing, so this outranks even an unknown marker. That is the
+   * case of leaving a wiki whose save is still being pushed.
+   */
+  backupInFlight?: boolean;
   /** Epoch the pulse from a save lasts until; 0 when none. */
   syncingUntil?: number;
   /** Why the most recent save's push did not land; cleared once one does. */
@@ -93,17 +116,37 @@ export interface SyncIndicatorResult {
 }
 
 /**
- * The icon's state and tooltip. Precedence is syncing → error → checking →
- * connected → idle, and each rule exists for a reason:
+ * The icon's state and tooltip. Precedence is in-flight backup → unknown marker
+ * → idle → save pulse → error → checking → connected, and each rule exists for a
+ * reason:
  *
- * - an operation in flight is the more specific truth while it lasts, and it
- *   self-corrects the moment it ends;
+ * - a backup Rust says is running is the most specific truth there is, and the
+ *   only thing that can be said before the marker read answers;
+ * - an unknown marker is amber: grey is a claim ("nothing is synced here") that
+ *   has not been earned yet;
+ * - a save pulse needs a marker, or saving an ordinary folder would flash purple;
  * - a push that failed is first-hand evidence that the backup is behind, so it
  *   outranks a "the repository is reachable" verdict;
  * - amber is only for a folder whose verdict is genuinely unknown.
  */
 export function syncIndicator(input: SyncIndicatorInput): SyncIndicatorResult {
-  const { hasMarker, health = null, syncingUntil = 0, lastPushError = null, now } = input;
+  const {
+    hasMarker,
+    health = null,
+    backupInFlight = false,
+    syncingUntil = 0,
+    lastPushError = null,
+    now
+  } = input;
+
+  // A backup that is running right now, reported by the side that is doing it.
+  // Above the marker check because the launcher reloads into this state: the
+  // wiki that was just left is the one whose push is still going.
+  if (backupInFlight) return { state: 'syncing', title: 'GitHub Sync: syncing…' };
+
+  // The marker read has not answered yet. This is the window that used to be
+  // grey, which said "not set up" about a folder nobody had looked at yet.
+  if (hasMarker === null) return { state: 'checking', title: 'GitHub Sync: checking…' };
 
   // Nothing is synced here: a stale verdict or a stale failure would put a
   // warning on a folder that is simply not part of any backup.
@@ -112,10 +155,7 @@ export function syncIndicator(input: SyncIndicatorInput): SyncIndicatorResult {
   if (now < syncingUntil) return { state: 'syncing', title: 'GitHub Sync: syncing…' };
 
   if (lastPushError) {
-    return {
-      state: 'error',
-      title: `GitHub Sync: the last save did not reach GitHub — ${lastPushError}`
-    };
+    return { state: 'error', title: `GitHub Sync: the last save did not upload (${lastPushError})` };
   }
 
   const failure = healthFailure(health);
@@ -125,7 +165,7 @@ export function syncIndicator(input: SyncIndicatorInput): SyncIndicatorResult {
 
   const age = verifiedAge(input.verifiedAt, now);
   const target = input.repo ? `github.com/${input.repo}` : 'connected';
-  return { state: 'connected', title: `GitHub Sync: ${target}${age ? ` — verified ${age} ago` : ''}` };
+  return { state: 'connected', title: `GitHub Sync: ${target}${age ? `, verified ${age} ago` : ''}` };
 }
 
 /** "45s" / "3m" / "2h" — how long ago the verdict was obtained. */

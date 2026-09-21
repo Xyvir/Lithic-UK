@@ -97,6 +97,31 @@ When adding new features to Lithic, follow these principles:
 **CSS variables in stylesheets — always use `type: text/css`:** stylesheets that consume `var(--lithic-c-*)` must be typed `text/css` and must NOT embed `<<colour ...>>` macros inside `var()` fallbacks. TW's `text/vnd.tiddlywiki` parser mangles CSS custom-property double-hyphens into en-dashes at render time (the dash rule), which silently kills every `var(...)` declaration, and it also parses `<<` inside CSS comments as broken macros. Sheets that still need `<<colour>>` transclusion (e.g. palette-key fallbacks unrelated to vars) must stay `text/vnd.tiddlywiki` — but then keep `--` out of CSS custom properties and `<<>>` out of comments.
 7. **Author-declared diagram styling is authoritative:** when a diagram or widget declares its own styling (Mermaid `%%{init}` directives, `style`/`classDef` statements, per-widget attributes), default theming must stand down rather than compete on CSS specificity. The mermaid wrapper tags self-styled containers `mm-user` and default rules are scoped to `:not(.mm-user)`.
 
+## In-App Copy: Terse, Non-Technical, No Em Dashes
+
+**CONTEXT:**
+The launcher explains itself through the UI, not through prose. Every string a user can read — modal text, tooltips, button labels, status lines, empty states, Rust-side `detail` strings — follows one rule:
+
+**One short sentence. 10-15 words. No em dashes. Nothing restated.**
+
+1. **Terse and curt.** The icon, the row and the button label already carry the meaning; the sentence orients the user to what the UI is for, and stops. If a sentence needs "which means that", either it is too long or the UI is unclear.
+2. **Non-technical.** No git, cache, index, token or file-format vocabulary unless the user has to act on it. "Saves push to GitHub automatically." beats "Every save of a file in this folder commits and pushes to main."
+3. **No em dashes or en dashes.** They read as editorializing, wrap badly in tooltips and modals, and are the single clearest sign a string was written by an agent rather than trimmed by hand. Use a period, or rewrite.
+4. **No restatement.** State the consequence once. A warning names what is happening and what the button will do — not why, and not twice.
+5. **Mechanics live in `README.md`.** The launcher is meant to be understood without explanation; anyone who wants the machinery reads the README, never a modal.
+6. **Diagnostics are data, not prose.** A raw error string appended after a short clause is fine: `Last save did not upload: not authorized`. Do not editorialize around it.
+7. **Both sides of the bridge count.** Rust `detail` strings render in the sync dialog, so they obey the same rule and stay word-for-word in step with the matching entry in `launcher-ui/src/git-sync-health.ts` (`healthFailure`). The same fault must not read two different ways depending on where the user looks.
+
+Worked examples:
+
+| Too long | Terse |
+| --- | --- |
+| "Rebuilding drops it and deletes its cached copy and history. Files on disk are untouched." | "3 liths have no file on disk, so rebuilding deletes their cached copies and history." |
+| "Every download is a complete, working copy of the wiki as it was at that moment — your history is never modified." | "Downloads are complete copies. This wiki is never changed." |
+| "Pick the icon this instance is known by. It becomes the browser tab, taskbar and phone-home-screen icon, so your instances stay distinguishable at a glance." | "This icon identifies the instance in your tab and taskbar." |
+
+When a string has to carry a count, a filename or a timestamp, keep those as data and let the sentence stay short; do not grow the prose to accommodate them.
+
 # What is a `*.lith` File?
 A `.lith` file is an extension of the vanilla TiddlyWiki `*.tid` file format, which is based on an HTTP RFC format for headers and body.
 

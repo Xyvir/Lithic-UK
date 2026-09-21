@@ -153,11 +153,12 @@ function svgDataUrl(text: string): string | null {
 /**
  * Fetch the instance's current icon as a cacheable data URL.
  *
- * Cross-origin, so the instance must allow it (the deployment sends
- * `Access-Control-Allow-Origin` for the icon paths). A null result is normal
- * and non-fatal: protected instances, offline servers, and hosts that never
- * customized their icon all land here, and the UI falls back to the remote URL
- * or a plain label.
+ * Cross-origin, so the instance must allow it (this repo's deployment sends
+ * `Access-Control-Allow-Origin` for the icon paths, though a hand-rolled server
+ * often does not — see `fetchInstanceIconNative`, which the desktop app uses for
+ * exactly that case). A null result is normal and non-fatal: protected
+ * instances, offline servers, and hosts that never customized their icon all
+ * land here, and the UI falls back to the remote URL or a plain label.
  */
 export async function fetchInstanceIcon(url: string, fetcher: typeof fetch = fetch): Promise<string | null> {
   for (const path of ICON_PATHS) {
@@ -176,33 +177,101 @@ export async function fetchInstanceIcon(url: string, fetcher: typeof fetch = fet
   return null;
 }
 
+/** One icon fetched through Rust, where CORS does not apply. */
+export type NativeIconLoader = (
+  url: string
+) => Promise<{ content_type?: string; bytes?: number[] } | null>;
+
+/**
+ * The same icon, fetched natively and turned into the same kind of data URL.
+ *
+ * This is what makes the meta-launcher's disambiguation work against a real
+ * deployment: the emoji favicon is what tells a personal instance from a work
+ * one, and a self-hosted server that sends no `Access-Control-Allow-Origin`
+ * cannot be read by the browser at all.
+ */
+export async function fetchInstanceIconNative(url: string, loader: NativeIconLoader): Promise<string | null> {
+  try {
+    const result = await loader(url);
+    const bytes = result?.bytes;
+    if (!Array.isArray(bytes) || bytes.length === 0) return null;
+    const blob = new Blob([new Uint8Array(bytes)], { type: result?.content_type || 'image/png' });
+    if (blob.size > ICON_MAX_BYTES) return null;
+    // An SVG served as bytes still needs the inline form, so the data URL stays
+    // legible in storage and renders in the list.
+    if (/svg/i.test(blob.type)) return svgDataUrl(await blob.text());
+    return blobToDataUrl(blob);
+  } catch {
+    return null;
+  }
+}
+
 /**
  * Refresh one bookmark's icon if it is missing or stale. Returns the entry list
  * so callers can assign it straight back to their reactive state.
+ *
+ * `native` is the desktop app's Rust fetch, preferred when present because it
+ * succeeds against instances the browser cannot read.
  */
 export async function refreshBookmarkIcon(
   url: string,
   fetcher: typeof fetch = fetch,
   storage: Storage = localStorage,
-  now: number = Date.now()
+  now: number = Date.now(),
+  native?: NativeIconLoader
 ): Promise<BookmarkEntry[]> {
   const entry = readBookmarkEntries(storage).find((item) => item.url === url);
   if (!entry || !shouldRefreshIcon(entry, now)) return readBookmarkEntries(storage);
-  const icon = await fetchInstanceIcon(url, fetcher);
+  const icon = native ? await fetchInstanceIconNative(url, native) : await fetchInstanceIcon(url, fetcher);
   if (!icon) return readBookmarkEntries(storage);
   return setBookmarkIcon(url, icon, storage, now);
 }
 
 export type InstanceVerification = {
   verified: boolean;
-  /** 401/403 responses: the instance is protected, so the user confirms manually. */
+  /**
+   * The host answered, but Lithic could not read what it answered: a 401/403, or
+   * a response the browser withheld because the instance sends no
+   * `Access-Control-Allow-Origin`. The user confirms by hand rather than being
+   * refused, because from here those two are indistinguishable from a refusal
+   * that has nothing to do with whether the instance is real.
+   */
   requiresManualConfirm?: boolean;
+  /** Nothing answered at all: wrong address, offline, or a host that is down. */
+  unreachable?: boolean;
 };
+
+/**
+ * Did anything answer, when the response itself may not be read?
+ *
+ * `mode: 'no-cors'` resolves with an opaque response for any HTTP reply and
+ * rejects only when there is no reply, which is precisely the one bit `fetch`
+ * can still give us about a cross-origin host that sends no CORS headers. A
+ * self-hosted instance is the normal case for that: it serves its manifest
+ * without them, so the readable fetch fails on a perfectly good instance.
+ */
+async function answeredOpaquely(target: string, fetcher: typeof fetch): Promise<boolean> {
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 5000);
+  try {
+    await fetcher(target, { mode: 'no-cors', cache: 'no-store', signal: controller.signal });
+    return true;
+  } catch {
+    return false;
+  } finally {
+    clearTimeout(timeoutId);
+  }
+}
 
 /**
  * Verify a self-hosted instance by fetching its manifest.json (legacy launcher
  * parity). Aborts after 5s so an unreachable host fails fast instead of
  * hanging the bookmark dialog.
+ *
+ * In the desktop app this is the fallback: `probe_instance` in Rust sees the
+ * same response without CORS in the way, so it can verify an instance this
+ * cannot even read. Here, an unreadable answer becomes a confirmation rather
+ * than a refusal.
  */
 export async function verifyInstanceUrl(url: string, fetcher: typeof fetch = fetch): Promise<InstanceVerification> {
   const controller = new AbortController();
@@ -221,7 +290,9 @@ export async function verifyInstanceUrl(url: string, fetcher: typeof fetch = fet
     }
     return { verified: false };
   } catch {
-    return { verified: false };
+    return (await answeredOpaquely(`${url}/manifest.json`, fetcher))
+      ? { verified: true, requiresManualConfirm: true }
+      : { verified: false, unreachable: true };
   } finally {
     clearTimeout(timeoutId);
   }

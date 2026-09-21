@@ -46,7 +46,7 @@ export function parseDevicePoll(raw: unknown): DevicePollResult {
   if (record.pending === true) {
     return { kind: 'pending', slowDown: record.slow_down === true };
   }
-  return { kind: 'failed', message: 'Authorization failed or expired — generate a new code.' };
+  return { kind: 'failed', message: 'Authorization failed or expired. Generate a new code.' };
 }
 
 /** GitHub's slow_down directive adds 5 seconds to every subsequent interval (RFC 8628 §3.5). */

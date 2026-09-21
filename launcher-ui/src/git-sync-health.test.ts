@@ -27,6 +27,48 @@ test('a synced folder with no verdict yet asks the question in amber', () => {
   assert.equal(indicator.state, 'checking');
 });
 
+test('an unanswered marker check is amber, because grey claims nothing is synced', () => {
+  // Returning to the launcher from a wiki reloads the page, so the marker state
+  // starts empty. Grey there reads as "GitHub Sync is not set up at all" about a
+  // folder the user has synced for months.
+  const indicator = syncIndicator({ hasMarker: null, now: T0 });
+  assert.equal(indicator.state, 'checking');
+  assert.match(indicator.title, /checking/);
+  // And it does not wait for a verdict to say so: no verdict exists yet either.
+  assert.equal(syncIndicator({ hasMarker: null, health: null, now: T0 }).state, 'checking');
+});
+
+test('a backup that is running right now is purple even before the marker answers', () => {
+  // Leaving a wiki reloads the launcher while that wiki's exit save is still
+  // being pushed, so the most specific truth available is "a backup is running".
+  const indicator = syncIndicator({ hasMarker: null, backupInFlight: true, now: T0 });
+  assert.equal(indicator.state, 'syncing');
+});
+
+test('the in-flight backup outranks a stale failure and a known-healthy verdict', () => {
+  const base = { syncingUntil: 0, now: T0, backupInFlight: true } as const;
+  assert.equal(syncIndicator({ ...base, hasMarker: true, health: 'auth' }).state, 'syncing');
+  assert.equal(
+    syncIndicator({ ...base, hasMarker: true, health: 'ok', lastPushError: 'boom' }).state,
+    'syncing'
+  );
+  // Once the backup finishes, the verdict underneath is back.
+  assert.equal(
+    syncIndicator({ hasMarker: true, health: 'auth', backupInFlight: false, now: T0 }).state,
+    'error'
+  );
+});
+
+test('a save pulse needs a marker, so saving an ordinary folder never flashes purple', () => {
+  // The engine fires its saved event for every save, synced folder or not.
+  const unpulsed = syncIndicator({ hasMarker: true, syncingUntil: T0 + 1, now: T0 });
+  assert.equal(unpulsed.state, 'syncing');
+  assert.equal(
+    syncIndicator({ hasMarker: false, syncingUntil: T0 + 1, now: T0 }).state,
+    'idle'
+  );
+});
+
 test('a verified folder is green, and the tooltip says what and when', () => {
   const indicator = syncIndicator({
     hasMarker: true,
@@ -42,12 +84,12 @@ test('a verified folder is green, and the tooltip says what and when', () => {
 
 test('a verdict that is not ok turns the icon red with its own reason', () => {
   for (const [health, expected] of [
-    ['auth', /rejected the saved token/],
-    ['missing', /not visible to the saved token/],
-    ['readonly', /not push to it/],
-    ['offline', /can't reach github.com/],
+    ['auth', /rejected this token/],
+    ['missing', /missing or not shared/],
+    ['readonly', /only read the repository/],
+    ['offline', /cannot reach github.com/],
     ['throttled', /rate-limiting/],
-    ['malformed', /not readable/]
+    ['malformed', /unreadable/]
   ] as const) {
     const indicator = syncIndicator({ hasMarker: true, health, now: T0 });
     assert.equal(indicator.state, 'error', `${health} must be an error`);
@@ -72,7 +114,7 @@ test('a push that failed outranks a healthy verdict', () => {
     now: T0
   });
   assert.equal(indicator.state, 'error');
-  assert.match(indicator.title, /not authorized/);
+  assert.match(indicator.title, /did not upload \(not authorized\)/);
 });
 
 test('an in-flight sync outranks both a failure and the amber check', () => {

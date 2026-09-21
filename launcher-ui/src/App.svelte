@@ -1,13 +1,14 @@
 <script lang="ts">
   import { onMount } from 'svelte';
   import type { LauncherMode } from './mode';
-  import { createFileBridge, tauriInvoke, tauriListen } from './file-bridge';
+  import { createFileBridge, tauriInvoke, tauriListen, saveTextVerifiably } from './file-bridge';
+  import { orphanPill, orphanDownloadNote, type OrphanDownloadState } from './orphan-download';
   import { isScratchFileName, resolveScratchKind, type ScratchKind } from './scratch-editor';
   import { pwaInstall, promptPwaInstall } from './pwa-install';
   import { bootLegacyWiki, bootLegacyHtml, type RemoteTarget } from './legacy-launcher-runtime';
   import { EMOJI_LIST, uploadInstanceIcon, clearInstanceIcon, emojiFaviconUrl, applyFavicon, bustIconCache, readInstanceEmoji, saveInstanceEmoji, clearInstanceEmoji } from './instance-icon';
   import { getRecentFiles, addRecentFile, removeRecentFile, clearAllRecentFiles, purgeOldestCachesIfNeeded, saveSearchCache, forgetWikiCache, idb, getSearchCacheText, listWikiVersions, wikiHasHistory, downloadWikiVersion, getDirtyState, clearDirtyState, listDirtyRecoveries, isWikiDriftedFromHead, isInstallDismissed, setInstallDismissed, recentDiskPath, type RecentEntry } from './storage';
-  import { readBookmarkEntries, saveBookmark, removeBookmark, setBookmarkIcon, refreshBookmarkIcon, verifyInstanceUrl, normalizeInstanceUrl, instanceLabel, type BookmarkEntry } from './bookmarks';
+  import { readBookmarkEntries, saveBookmark, removeBookmark, setBookmarkIcon, refreshBookmarkIcon, verifyInstanceUrl, normalizeInstanceUrl, instanceLabel, type BookmarkEntry, type InstanceVerification } from './bookmarks';
   import { fetchRemoteFiles, fetchRemoteWiki, probePatchApi, createLockHeartbeat, readRemoteLock, uploadRemoteFile, webdavUrl, resolveSessionId, lithUploadName, type WebdavFile } from './webdav';
   import { searchCachedWikis } from './cache-search';
   import { computeBackupCoverage, hasBackedUpRepo, orphanedEntries, reindexFolders, type CoverageRow, type RebuildOrphan } from './backup-coverage';
@@ -153,6 +154,27 @@
   // Sync health. The marker poll answers "is this folder wired to a
   // repository"; only the heartbeat answers "is the backup still working", and
   // only one of those costs a network round trip.
+  /**
+   * Whether the marker read has answered for the focused folder. False only for
+   * the moment between the page painting and that read landing, which is amber:
+   * grey is reserved for "nothing is synced here", and claiming that before
+   * asking is what made returning from a wiki look like sync was never set up.
+   */
+  let gitSyncMarkerKnown = false;
+  /**
+   * Whether the recent list has loaded. It decides what the icon is even about:
+   * with no Lith open, the icon describes the most recent one, so an empty list
+   * at boot is not evidence that nothing is synced — it is evidence that the
+   * question cannot be asked yet.
+   */
+  let gitSyncRecentsReady = false;
+  /**
+   * Rust has a backup of the focused folder running right now — usually the exit
+   * save of the wiki the user just came back from, still pushing. Reported by the
+   * side doing the work, so it outranks even an unknown marker.
+   */
+  let gitSyncBackupInFlight = false;
+  let gitSyncBackupTimer: ReturnType<typeof setInterval> | null = null;
   let gitSyncHealth: HealthState | null = null;
   let gitSyncHealthDetail = '';
   let gitSyncHealthAt = 0;
@@ -173,6 +195,12 @@
 
   /** What `git_sync_setup` returns: the modal line plus the folder's wikis. */
   interface GitSyncSetupResult { summary: string; recents: string[] }
+
+  /**
+   * What `git_sync_status` returns. `in_flight` is optional so a launcher built
+   * ahead of the desktop app still reads the answer instead of throwing.
+   */
+  interface GitSyncStatus { connected: boolean; repo: string; in_flight?: boolean }
 
   // Connect is a few long blocking git calls inside Rust (fetch, rescue writes,
   // commit, push). The stage it reports plus a live seconds counter is what
@@ -342,6 +370,80 @@
     openGitSyncModal();
   }
 
+  /**
+   * Fold one `git_sync_status` answer into the icon's state, so the modal's read
+   * and the background poll cannot drift apart.
+   *
+   * `failed` is the distinction that matters: a read that did not answer is not
+   * news about the folder, so it must not be folded in as "nothing is synced
+   * here". It does end the amber "still checking" phase either way, because the
+   * caller reports the failure itself.
+   */
+  function foldGitSyncStatus(status: GitSyncStatus | null, failed = false): void {
+    const wasKnown = gitSyncMarkerKnown;
+    const wasInFlight = gitSyncBackupInFlight;
+    if (!failed) {
+      gitSyncConnectedRepo = status && status.connected ? status.repo : '';
+      gitSyncBackupInFlight = Boolean(status?.in_flight);
+      gitSyncMarkerKnown = true;
+      // Nothing synced here any more: a verdict about a repository that is no
+      // longer wired up would only paint a warning over nothing.
+      if (!status) forgetGitSyncHealth();
+    } else {
+      gitSyncMarkerKnown = true;
+    }
+    if (gitSyncBackupInFlight && !wasInFlight) watchGitSyncBackup();
+    // Ask for a verdict the moment one is missing and the folder is there — on
+    // the marker's first answer, and again when a backup that was running has
+    // finished, since a landed push is exactly when green becomes true. Forced
+    // because it is a transition, not a poll: the throttle would otherwise hold
+    // the icon amber for up to a minute.
+    const wanted = !failed && Boolean(gitSyncConnectedRepo) && gitSyncHealth === null;
+    if (wanted && (!wasKnown || (wasInFlight && !gitSyncBackupInFlight))) {
+      void runGitSyncHeartbeat(true);
+    }
+  }
+
+  /**
+   * Re-read the marker every 1.5s while a backup is running, so the purple
+   * "syncing" state ends when the push does instead of at the next 10s poll.
+   * Self-clearing: it exists for the few seconds a push takes, not as a second
+   * poll loop.
+   */
+  function watchGitSyncBackup(): void {
+    if (gitSyncBackupTimer) return;
+    gitSyncBackupTimer = setInterval(() => {
+      if (!gitSyncBackupInFlight) {
+        if (gitSyncBackupTimer) clearInterval(gitSyncBackupTimer);
+        gitSyncBackupTimer = null;
+        return;
+      }
+      void refreshGitSyncStatus(false);
+    }, 1500);
+  }
+
+  /** A `git_sync_status` call that did not answer at all. */
+  function noteGitSyncStatusFailure(error: unknown): void {
+    // Failing to read the state is not a failed backup, but it is not a green
+    // light either. A plain-browser preview (no Tauri API at all) is exempt:
+    // the icon is not real there anyway.
+    if (error instanceof Error && error.message === 'Tauri API unavailable') return;
+    gitSyncHealth = 'offline';
+    gitSyncHealthDetail = '';
+    gitSyncHealthAt = Date.now();
+    gitSyncHealthApplies = healthAppliesToActive();
+  }
+
+  /**
+   * No folder to ask about. Only an answer once the recents have loaded: before
+   * that the fallback target simply is not known yet, and painting grey would
+   * claim "nothing is synced here" about a list nobody has read. This is the
+   * grey the icon used to show on every return from a wiki.
+   */
+  function noteNoGitSyncTarget(): void {
+    if (gitSyncRecentsReady) foldGitSyncStatus(null);
+  }
+
   /** Ask Rust whether the target folder is a Lithic-managed sync repo. */
   async function refreshGitSyncStatus(applyView: boolean): Promise<void> {
     const target = gitSyncActivePath();
@@ -350,18 +452,18 @@
     // the icon's folder, because that is the one the verdict is always about.
     syncHealthTarget(gitSyncTargetPath());
     gitSyncHealthApplies = healthAppliesToActive();
-    let connected: { repo: string } | null = null;
-    if (target) {
-      try {
-        connected = await tauriInvoke<{ connected: boolean; repo: string } | null>('git_sync_status', { path: target });
-      } catch {
-        connected = null;
-      }
+    if (!target) {
+      noteNoGitSyncTarget();
+      return;
     }
-    gitSyncConnectedRepo = connected ? connected.repo : '';
-    if (!connected) forgetGitSyncHealth();
+    try {
+      foldGitSyncStatus(await tauriInvoke<GitSyncStatus | null>('git_sync_status', { path: target }));
+    } catch (error) {
+      foldGitSyncStatus(null, true);
+      noteGitSyncStatusFailure(error);
+    }
     if (applyView && gitSyncView !== 'connecting' && gitSyncView !== 'selecting') {
-      gitSyncView = connected ? 'connected' : 'disconnected';
+      gitSyncView = gitSyncConnectedRepo ? 'connected' : 'disconnected';
     }
   }
 
@@ -465,7 +567,7 @@
     try {
       if (gitRepoChoice === '__create__') {
         const created = await tauriInvoke<{ full_name: string }>('github_create_repo', { token: gitDeviceToken, name: repo });
-        gitSyncMessage = `Created ${created.full_name} — `;
+        gitSyncMessage = `Created ${created.full_name}. `;
       }
       const result = await tauriInvoke<GitSyncSetupResult>('git_sync_setup', { path: target, repo, token: gitDeviceToken });
       gitSyncMessage += result?.summary || 'Synced';
@@ -509,7 +611,12 @@
   async function disconnectGitSync() {
     const target = gitSyncActivePath();
     if (!target || gitSyncBusy) return;
-    if (!window.confirm('Disconnect this folder from GitHub? Automatic sync on save will stop.')) return;
+    const confirmed = await askConfirmation({
+      title: 'Disconnect GitHub Sync?',
+      body: 'Saves in this folder stop syncing to GitHub.',
+      confirmLabel: 'Disconnect'
+    });
+    if (!confirmed) return;
     gitSyncBusy = true;
     try {
       await tauriInvoke('git_sync_disconnect', { path: target });
@@ -583,8 +690,11 @@
   $: {
     void gitSyncTick;
     const indicator = syncIndicator({
-      hasMarker: Boolean(gitSyncConnectedRepo),
+      // null while the marker read is outstanding: the icon says "checking"
+      // rather than "nothing is synced here" before it has asked.
+      hasMarker: gitSyncMarkerKnown ? Boolean(gitSyncConnectedRepo) : null,
       health: gitSyncHealth,
+      backupInFlight: gitSyncBackupInFlight,
       syncingUntil: gitSyncSyncingUntil,
       lastPushError: gitSyncLastPushError,
       repo: gitSyncConnectedRepo || null,
@@ -604,7 +714,7 @@
   $: gitSyncHealthNote = !gitSyncHealthApplies
     ? ''
     : gitSyncLastPushError
-      ? `The last save did not reach GitHub — ${gitSyncLastPushError}.`
+      ? `Last save did not upload: ${gitSyncLastPushError}`
       : gitSyncHealthDetail;
 
   /**
@@ -719,30 +829,18 @@
     const target = gitSyncTargetPath();
     syncHealthTarget(target);
     if (!target) {
-      gitSyncConnectedRepo = '';
+      noteNoGitSyncTarget();
       return;
     }
     // Reading the marker is in-process libgit2, but while the window is hidden
     // nobody can see the icon, so skip the work until it is shown again
     // (visibilitychange triggers an immediate refresh below).
     if (typeof document !== 'undefined' && document.hidden) return;
-    tauriInvoke<{ connected: boolean; repo: string } | null>('git_sync_status', { path: target })
-      .then((connected) => {
-        gitSyncConnectedRepo = connected ? connected.repo : '';
-        // Nothing synced here any more: a verdict about a repository that is no
-        // longer wired up would only paint a warning over nothing.
-        if (!connected) forgetGitSyncHealth();
-      })
+    tauriInvoke<GitSyncStatus | null>('git_sync_status', { path: target })
+      .then((status) => foldGitSyncStatus(status))
       .catch((error) => {
-        // Failing to read the state is not a failed backup, but it is not a
-        // green light either. A plain-browser preview (no Tauri API at all) is
-        // exempt: the icon is not real there anyway.
-        if (!(error instanceof Error && error.message === 'Tauri API unavailable')) {
-          gitSyncHealth = 'offline';
-          gitSyncHealthDetail = '';
-          gitSyncHealthAt = Date.now();
-          gitSyncHealthApplies = healthAppliesToActive();
-        }
+        foldGitSyncStatus(null, true);
+        noteGitSyncStatusFailure(error);
       });
   }
 
@@ -754,13 +852,9 @@
       const result = await tauriInvoke<{ path: string; start_menu: string | null }>('install_monolith');
       // The Start Menu entry is the part worth mentioning: it is what makes the
       // app launchable (and pinnable) instead of a file in Documents.
-      installStatus = result.start_menu
-        ? `${result.path} — Start Menu shortcut added. Pin it from Apps > All.`
-        : result.path;
+      installStatus = result.start_menu ? `${result.path}. Start Menu shortcut added.` : result.path;
       installState = 'current';
-      status = result.start_menu
-        ? `Installed to ${result.path} — added a Start Menu shortcut`
-        : `Installed to ${result.path}`;
+      status = `Installed to ${result.path}`;
       // The status line animates while it has text; retire the message
       // once it has had a moment to be read.
       setTimeout(() => { if (status.startsWith('Installed to ')) status = ''; }, 6000);
@@ -827,6 +921,34 @@
    */
   let rebuildOrphans: RebuildOrphan[] = [];
   let rebuildOrphanResolver: ((proceed: boolean) => void) | null = null;
+
+  /**
+   * The launcher's own confirmation, in place of `window.confirm`. In the desktop
+   * app that call renders as an OS message box: another typeface, the OS accent
+   * colour, and window chrome belonging to no part of the app it interrupts, with
+   * nothing that can be styled. This is the same overlay as every other dialog,
+   * so a confirmation looks like it came from the launcher it is about.
+   */
+  interface ConfirmationRequest { title: string; body: string; confirmLabel: string }
+  let confirmation: ConfirmationRequest | null = null;
+  let confirmationResolver: ((ok: boolean) => void) | null = null;
+  let confirmationButton: HTMLButtonElement | null = null;
+
+  /** Ask, and resolve once the user answers. Escape and Cancel both decline. */
+  function askConfirmation(request: ConfirmationRequest): Promise<boolean> {
+    // One at a time: a second ask would strand the first promise forever.
+    confirmationResolver?.(false);
+    confirmation = request;
+    setTimeout(() => confirmationButton?.focus(), 0);
+    return new Promise((resolve) => { confirmationResolver = resolve; });
+  }
+
+  function resolveConfirmation(ok: boolean): void {
+    const resolve = confirmationResolver;
+    confirmationResolver = null;
+    confirmation = null;
+    resolve?.(ok);
+  }
 
   function positionCachePreview(node: HTMLElement) {
     let frame = 0;
@@ -982,6 +1104,10 @@
     // the unsaved-edit indicator once recents are known — a blank lith edited
     // but never saved has no cache, so the cache path alone never sees it.
     void refreshDirtyBadges();
+    // The mount-time sync check had no subject; this is the list that gives it
+    // one, so ask now instead of leaving the icon amber until the next poll.
+    gitSyncRecentsReady = true;
+    refreshGitSyncIcon();
   }
 
   /**
@@ -1085,6 +1211,8 @@
    */
   function promptRebuildOrphans(orphans: RebuildOrphan[]): Promise<boolean> {
     rebuildOrphans = orphans;
+    // A fresh warning starts with no downloads claimed.
+    orphanDownloads = {};
     return new Promise((resolve) => {
       rebuildOrphanResolver = resolve;
     });
@@ -1094,6 +1222,7 @@
     const resolver = rebuildOrphanResolver;
     rebuildOrphanResolver = null;
     rebuildOrphans = [];
+    orphanDownloads = {};
     resolver?.(proceed);
   }
 
@@ -1257,7 +1386,7 @@
         // A handle-less or pseudo-handle row with no path can't be opened:
         // browser handles don't exist in this WebView.
         if (!rawHandle?.getFile) {
-          status = 'This entry has no disk path recorded; open the file once via Mount to re-link it.';
+          status = 'No file path recorded. Open it once via Mount to re-link it.';
           return;
         }
       }
@@ -1350,7 +1479,7 @@
       if (navigator.onLine) {
         window.open('https://lithic.uk/intro.html', '_blank');
       } else {
-        mountError = 'Could not load introduction. You appear to be offline and the local intro file is missing.';
+        mountError = 'Could not load the introduction.';
       }
     } finally {
       introBusy = false;
@@ -1508,10 +1637,10 @@
       activeRemote = { name, digest, api: patchApiAvailable && Boolean(digest) };
       if (readOnly) {
         stopLockHeartbeat();
-        status = `Mounted ${name} read-only — the other session keeps the lock`;
+        status = `Mounted ${name} read-only`;
       } else {
         await startLockHeartbeat(name);
-        status = activeRemote.api ? `Mounted ${name} — saves send only the changed lines` : `Mounted ${name}`;
+        status = activeRemote.api ? `Mounted ${name}. Saves send only the changes.` : `Mounted ${name}`;
       }
       await mountWiki(text, name, undefined, undefined, [], {
         fileName: name,
@@ -1619,10 +1748,10 @@
       }
     });
     if (result.ok) {
-      emojiStatus = `✓ Saved — this instance now shows ${emojiChoice} in its tab and app icons.`;
+      emojiStatus = `✓ Saved. This instance now uses ${emojiChoice}.`;
       bustIconCache();
     } else {
-      emojiStatus = `Saved on this device only — the server write failed (${result.error ?? 'unknown error'}).`;
+      emojiStatus = `Saved on this device only. The server write failed (${result.error ?? 'unknown error'}).`;
     }
     emojiBusy = false;
   }
@@ -1639,11 +1768,50 @@
    * launcher boot and must not stampede several instances at once. Only
    * missing or stale icons are actually fetched.
    */
+  /** One instance icon, fetched through Rust, where CORS does not apply. */
+  function nativeIconLoader(url: string): Promise<{ content_type?: string; bytes?: number[] } | null> {
+    return tauriInvoke<{ content_type?: string; bytes?: number[] } | null>('fetch_instance_icon', { url });
+  }
+
   async function refreshBookmarkIcons(): Promise<void> {
     for (const entry of readBookmarkEntries()) {
-      await refreshBookmarkIcon(entry.url);
+      // The desktop app fetches through Rust: a self-hosted instance normally
+      // serves its favicon without `Access-Control-Allow-Origin`, and a response
+      // the browser withholds cannot be cached as this entry's icon. That icon
+      // is the point of the list — it is what tells a personal instance from a
+      // work one at a glance.
+      await refreshBookmarkIcon(
+        entry.url,
+        fetch,
+        localStorage,
+        Date.now(),
+        mode === 'tauri' ? nativeIconLoader : undefined
+      );
     }
     bookmarks = readBookmarkEntries();
+  }
+
+  /**
+   * Ask Rust whether this address is a Lithic instance.
+   *
+   * Preferred in the desktop app, because the probe is cross-origin and a
+   * self-hosted instance normally sends no `Access-Control-Allow-Origin`: the
+   * browser is handed nothing at all, so its verdict is "could not verify" about
+   * an instance that is answering perfectly well. Rust sees the real status.
+   */
+  async function verifyInstanceNatively(url: string): Promise<InstanceVerification> {
+    try {
+      const probe = await tauriInvoke<{ state: string; status: number }>('probe_instance', { url });
+      if (probe.state === 'lithic') return { verified: true };
+      // There, but asking for credentials: the user decides.
+      if (probe.state === 'protected') return { verified: true, requiresManualConfirm: true };
+      if (probe.state === 'unreachable') return { verified: false, unreachable: true };
+      return { verified: false };
+    } catch {
+      // A desktop build older than the command: the browser path still verifies
+      // instances that do send CORS headers.
+      return verifyInstanceUrl(url);
+    }
   }
 
   function openBookmarkModal() {
@@ -1667,13 +1835,20 @@
       return;
     }
     try {
-      const result = await verifyInstanceUrl(normalized);
+      const result = mode === 'tauri' ? await verifyInstanceNatively(normalized) : await verifyInstanceUrl(normalized);
       if (!result.verified) {
-        bookmarkError = 'The provided URL could not be verified as a Lithic instance.';
+        bookmarkError = result.unreachable
+          ? 'Could not reach this address.'
+          : 'That address is not a Lithic instance.';
         return;
       }
-      if (result.requiresManualConfirm && !window.confirm(`We couldn't verify the manifest (it appears to be protected by Basic Authentication or Forbidden).\n\nAre you sure you want to bookmark ${normalized}?`)) {
-        return;
+      if (result.requiresManualConfirm) {
+        const confirmed = await askConfirmation({
+          title: 'Bookmark this instance?',
+          body: 'Lithic could not verify this address.',
+          confirmLabel: 'Bookmark Anyway'
+        });
+        if (!confirmed) return;
       }
       bookmarks = saveBookmark(normalized);
       // Cache the instance's own icon so the meta-launcher list can tell
@@ -1760,21 +1935,52 @@
    * versioned history behind it (legacy caches predate the diff chain), so
    * "download a copy first" cannot depend on the history modal having anything
    * to show.
+   *
+   * The reported outcome is the point of the row's pill. "Saved" means the
+   * platform confirmed the write, which is what lets the user press Proceed
+   * knowing exactly what they are giving up; a started-but-unconfirmed download
+   * says so instead of borrowing the green check.
    */
-  async function downloadCachedSnapshot(name: string) {
+  async function downloadCachedSnapshot(name: string): Promise<void> {
+    setOrphanDownload(name, 'saving');
     try {
       const cached = await getSearchCacheText(name);
       if (!cached) {
+        setOrphanDownload(name, 'failed');
         status = `No cached copy of ${name} to download`;
         return;
       }
       const fileName = `${name.replace(/\.lith$/i, '')}_cached.lith`;
-      saveBlobAs(fileName, cached);
-      status = `Saved ${fileName}`;
+      const outcome = await saveTextVerifiably(fileName, cached);
+      if (outcome === 'cancelled') {
+        // The user backed out of the save dialog: leave the row as they found it.
+        setOrphanDownload(name, 'idle');
+        return;
+      }
+      setOrphanDownload(name, outcome === 'saved' ? 'saved' : 'unverified');
+      status = outcome === 'saved' ? `Saved ${fileName}` : `Downloading ${fileName}`;
     } catch (error) {
+      setOrphanDownload(name, 'failed');
       mountError = `Download failed: ${error instanceof Error ? error.message : String(error)}`;
     }
   }
+
+  /** Per-row download state for the rebuild warning, keyed by wiki name. */
+  let orphanDownloads: Record<string, OrphanDownloadState> = {};
+
+  function setOrphanDownload(name: string, state: OrphanDownloadState): void {
+    orphanDownloads = { ...orphanDownloads, [name]: state };
+  }
+
+  /** Rows with their pill resolved, so the markup stays a plain loop. */
+  $: orphanRows = rebuildOrphans.map((orphan) => ({
+    orphan,
+    pill: orphanPill(orphanDownloads[orphan.name] ?? 'idle')
+  }));
+
+  $: orphanNote = orphanDownloadNote(
+    rebuildOrphans.map((orphan) => orphanDownloads[orphan.name] ?? 'idle')
+  );
 
   async function clearRecent() {
     await clearAllRecentFiles();
@@ -2094,6 +2300,12 @@
     void purgeOldestCachesIfNeeded().catch(() => { /* best effort */ });
     const closeOnEscape = (event: KeyboardEvent) => {
       if (event.key === 'Escape') {
+        // The confirmation is the top of the stack, so it takes the Escape and
+        // the dialog underneath it stays open behind.
+        if (confirmation) {
+          resolveConfirmation(false);
+          return;
+        }
         if (showDirtyModal) resolveDirtyModal('later');
         if (showHistoryModal) closeHistoryModal();
         closeBookmarkModal();
@@ -2158,6 +2370,7 @@
       // wiki is not held for the full staleness window.
       stopLockHeartbeat();
       if (gitSyncPollTimer) clearInterval(gitSyncPollTimer);
+      if (gitSyncBackupTimer) clearInterval(gitSyncBackupTimer);
       stopGitSyncProgressEvents?.();
       stopGitSyncProgressTimer();
       window.removeEventListener('lithic-git-sync-saved', onGitSyncSaved);
@@ -2178,7 +2391,7 @@
       class:pickable={isSelfHost()}
       disabled={!isSelfHost()}
       aria-label={isSelfHost() ? 'Set this instance’s icon' : undefined}
-      title={isSelfHost() ? 'Set this instance’s icon — the emoji shows in the browser tab and app icons, so you can tell your instances apart' : undefined}
+      title={isSelfHost() ? 'Set this instance’s icon' : undefined}
       on:click={() => openEmojiPicker()}
     >
       {#if brandEmoji}
@@ -2221,9 +2434,9 @@
       <div class="launcher-modal" role="dialog" aria-modal="true" aria-labelledby="gitsync-title">          <button class="modal-close" aria-label="Close GitHub sync dialog" on:click={closeGitSyncModal}>×</button>
         <h2 id="gitsync-title">GitHub Sync</h2>
         {#if !gitSyncActivePath()}
-          <p class="status-line error" role="alert">Open or save a Lith to disk first — the sync backs up the folder it lives in.</p>
+          <p class="status-line error" role="alert">Save a Lith to disk first, since sync backs up its folder.</p>
         {:else if gitSyncView === 'disconnected'}
-          <p>Back up the folder containing <strong>{clipFilename(gitSyncActivePath() ?? '')}</strong> to a GitHub repository. Saves commit and push automatically, like self-host.</p>
+          <p>Back up the folder of <strong>{clipFilename(gitSyncActivePath() ?? '')}</strong> to GitHub. Saves push automatically.</p>
           {#if gitSyncError}<p class="status-line error" role="alert">{gitSyncError}</p>{/if}
           {#if gitSyncBusy}<p class="sync-progress" role="status"><span class="sync-spinner" aria-hidden="true"></span><span>{gitSyncStage || 'Working…'}</span><span class="sync-elapsed">{gitSyncElapsed}s</span></p>{/if}
           <div class="modal-actions"><button class="modal-action" disabled={gitSyncBusy} on:click={startDeviceAuth}>{gitSyncBusy ? '…' : 'Connect to GitHub'}</button></div>
@@ -2236,10 +2449,10 @@
           </details>
         {:else if gitSyncView === 'connecting'}
           <p>1. Open <a href="https://github.com/login/device" target="_blank" rel="noreferrer">github.com/login/device</a></p>
-          <p>2. Enter the code shown below (installs the Lithic Sync GitHub App if you haven't already):</p>
+          <p>2. Enter this code (installs Lithic Sync on first use):</p>
           {#if gitUserCode}
             <div class="user-code-display">{formatUserCode(gitUserCode)}</div>
-            <p class="git-sync-note">Waiting for authorization… this dialog closes when you're connected.</p>
+            <p class="git-sync-note">Waiting for authorization…</p>
           {:else}
             <p class="git-sync-note">Requesting a code from GitHub…</p>
           {/if}
@@ -2264,7 +2477,7 @@
             </ul>
           {/if}
           <p class="repo-group-label">Advanced: your other repositories</p>
-          <input bind:value={gitCustomRepoInput} class="repo-filter" aria-label="Custom repository (owner/name)" placeholder="Type an owner/name to use a specific repo" on:input={() => (gitRepoChoice = gitCustomRepoInput.trim() ? '__custom__' : gitRepoChoice)} />
+          <input bind:value={gitCustomRepoInput} class="repo-filter" aria-label="Custom repository (owner/name)" placeholder="owner/name" on:input={() => (gitRepoChoice = gitCustomRepoInput.trim() ? '__custom__' : gitRepoChoice)} />
           {#if gitOtherRepos.length > 0}
             <ul class="repo-list">
               {#each gitOtherRepos.filter((repo) => !gitCustomRepoInput || repo.toLowerCase().includes(gitCustomRepoInput.toLowerCase())) as repo (repo)}
@@ -2285,7 +2498,7 @@
           {#if gitSyncHealthNote}
             <p class="status-line {gitSyncHealthBroken ? 'error' : ''}" role={gitSyncHealthBroken ? 'alert' : 'status'}>{gitSyncHealthNote}</p>
           {:else}
-            <p class="git-sync-note">Every save of a file in this folder commits and pushes to main automatically.</p>
+            <p class="git-sync-note">Saves in this folder push to GitHub automatically.</p>
           {/if}
           {#if gitSyncError}<p class="status-line error" role="alert">{gitSyncError}</p>{/if}
           {#if gitSyncMessage}<p class="status-line" role="status">{gitSyncMessage}</p>{/if}
@@ -2306,7 +2519,7 @@
       <div class="launcher-modal" role="dialog" aria-modal="true" aria-labelledby="bookmark-title">
         <button class="modal-close" aria-label="Close bookmark dialog" on:click={closeBookmarkModal}>×</button>
         <h2 id="bookmark-title">Bookmark Remote Instance</h2>
-        <p>Save the address of a self-hosted Lithic instance for quick access from this launcher.</p>
+        <p>Save a self-hosted instance for quick access.</p>
         <input bind:this={bookmarkInputElement} bind:value={bookmarkInput} aria-label="Self-hosted instance URL" placeholder="https://..." on:keydown={(event) => event.key === 'Enter' && addInstanceBookmark()} />
         {#if bookmarkError}<p class="status-line error" role="alert">{bookmarkError}</p>{/if}
         <div class="modal-actions"><button class="modal-action" on:click={addInstanceBookmark}>Save Bookmark</button><button class="modal-action secondary" on:click={closeBookmarkModal}>Cancel</button></div>      </div>
@@ -2316,8 +2529,8 @@
     <div class="modal-overlay" role="presentation">
       <div class="launcher-modal" role="dialog" aria-modal="true" aria-labelledby="collision-title">
         <h2 id="collision-title">Active Session Detected</h2>
-        <p>{remoteCollision.who || 'Someone else'} is editing <strong>{remoteCollision.name}</strong> on this server right now. Lithic has no collaboration — the last writer wins.</p>
-        <p class="git-sync-note">Open it read-only to look without touching their copy, or ignore the lock if you know they are gone.</p>
+        <p>{remoteCollision.who || 'Someone else'} has <strong>{remoteCollision.name}</strong> open on this server. Last writer wins.</p>
+        <p class="git-sync-note">Open read-only, or ignore the lock.</p>
         <div class="modal-actions">
           <button class="modal-action" on:click={() => resolveRemoteCollision('read-only')}>Open Read-Only</button>
           <button class="modal-action secondary" on:click={() => resolveRemoteCollision('ignore')}>Ignore Lock and Open</button>
@@ -2331,10 +2544,7 @@
       <div class="launcher-modal emoji-modal" role="dialog" aria-modal="true" aria-labelledby="emoji-title">
         <button class="modal-close" aria-label="Close icon picker" on:click={closeEmojiPicker}>×</button>
         <h2 id="emoji-title">Instance Icon</h2>
-        <p>
-          Pick the icon this instance is known by. It becomes the browser tab, taskbar and
-          phone-home-screen icon, so your instances stay distinguishable at a glance.
-        </p>
+        <p>This icon identifies the instance in your tab and taskbar.</p>
         <div class="emoji-preview" aria-hidden="true">{emojiChoice || '🎨'}</div>
         <div class="emoji-grid" role="listbox" aria-label="Choose an instance icon">
           {#each EMOJI_LIST as emoji}
@@ -2351,7 +2561,7 @@
         {#if emojiStatus}<p class="status-line" role="status">{emojiStatus}</p>{/if}
         <div class="modal-actions">
           <button class="modal-action" disabled={emojiBusy || !emojiChoice} on:click={confirmEmojiIcon}>{emojiBusy ? 'Saving…' : 'Save Icon'}</button>
-          <button class="modal-action secondary" disabled={emojiBusy} on:click={restoreDefaultInstanceIcon} title="Delete custom.ico so the instance serves the shipped Lithic icon again">Restore Default</button>
+          <button class="modal-action secondary" disabled={emojiBusy} on:click={restoreDefaultInstanceIcon} title="Use the shipped Lithic icon">Restore Default</button>
         </div>
       </div>
     </div>
@@ -2362,40 +2572,37 @@
         <h2 id="orphan-title">{isSelfHost() ? 'Not on this server' : 'Not found on disk'}</h2>
         <p>
           {#if isSelfHost()}
-            {rebuildOrphans.length} cached cop{rebuildOrphans.length === 1 ? 'y' : 'ies'} on this device {rebuildOrphans.length === 1 ? 'is' : 'are'} no longer on this
-            server. Rebuilding deletes {rebuildOrphans.length === 1 ? 'it' : 'them'}. Nothing on the server is touched.
-            Download a copy first if you want to keep one.
+            {rebuildOrphans.length} cached {rebuildOrphans.length === 1 ? 'copy is' : 'copies are'} missing from the server, so rebuilding deletes {rebuildOrphans.length === 1 ? 'it' : 'them'} from this device.
           {:else}
-            {rebuildOrphans.length} entr{rebuildOrphans.length === 1 ? 'y' : 'ies'} can't be traced to a file on disk — moved, renamed, or on a drive that isn't
-            mounted. Rebuilding removes {rebuildOrphans.length === 1 ? 'it' : 'them'} and deletes {rebuildOrphans.length === 1 ? 'its cached copy and version history' : 'their cached copies and version history'}.
-            Files on disk are untouched. Download a copy first if you want to keep one.
+            {rebuildOrphans.length} {rebuildOrphans.length === 1 ? 'lith has' : 'liths have'} no file on disk, so rebuilding deletes {rebuildOrphans.length === 1 ? 'its' : 'their'} cached copies and history.
           {/if}
         </p>
         {#if rebuildOrphans.some((orphan) => dirtyEntries[orphan.name])}
           <p class="orphan-warning" role="alert">
-            Unsaved edits captured for {rebuildOrphans.filter((orphan) => dirtyEntries[orphan.name]).length} of them are deleted too.
-            A downloaded copy holds the last saved state, not those edits.
+            {rebuildOrphans.filter((orphan) => dirtyEntries[orphan.name]).length} of them have unsaved edits, which no download can recover.
           </p>
         {/if}
         <ul class="orphan-list">
-          {#each rebuildOrphans as orphan (orphan.name)}
+          {#each orphanRows as row (row.orphan.name)}
             <li class="orphan-row">
-              <span class="orphan-name" title={orphan.path ?? 'No file on disk — a cached copy only'}>{orphan.name}</span>
-              {#if !orphan.path}<span class="orphan-tag">cached only</span>{/if}
-              {#if dirtyEntries[orphan.name]}<span class="orphan-tag dirty" title={`Unsaved edits captured ${new Date(dirtyEntries[orphan.name]).toLocaleString()}`}>unsaved edits</span>{/if}
-              {#if cachedEntries[orphan.name]}
-                <button class="recent-icon-button" type="button" aria-label={`Download a copy of ${orphan.name}`} title="Save a copy of the cached snapshot now" on:click={() => downloadCachedSnapshot(orphan.name)}>
+              <span class="orphan-name" title={row.orphan.path ?? 'No file on disk'}>{row.orphan.name}</span>
+              {#if !row.orphan.path}<span class="orphan-tag">cached only</span>{/if}
+              {#if dirtyEntries[row.orphan.name]}<span class="orphan-tag dirty" title={`Unsaved edits captured ${new Date(dirtyEntries[row.orphan.name]).toLocaleString()}`}>unsaved edits</span>{/if}
+              {#if cachedEntries[row.orphan.name]}
+                <button class="recent-icon-button" type="button" aria-label={`Download a copy of ${row.orphan.name}`} title="Download a copy" on:click={() => downloadCachedSnapshot(row.orphan.name)}>
                   <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 4v11"></path><path d="m7.5 10.5 4.5 4.5 4.5-4.5"></path><path d="M5 19h14"></path></svg>
                 </button>
+                {#if row.pill}<span class="orphan-pill {row.pill.tone}" role="status" title={row.pill.title}>{row.pill.label}</span>{/if}
               {/if}
-              {#if historyAvailable[orphan.name]}
-              <button class="recent-icon-button cache-history-button" type="button" aria-label={`Show version history for ${orphan.name}`} title="Browse and download older versions before the row is dropped" on:click={() => openHistoryModal(orphan.name)}>
+              {#if historyAvailable[row.orphan.name]}
+              <button class="recent-icon-button cache-history-button" type="button" aria-label={`Show version history for ${row.orphan.name}`} title="Older versions" on:click={() => openHistoryModal(row.orphan.name)}>
                 <svg class="history-download-icon" viewBox="56 108 33 36" aria-hidden="true"><path class="history-icon-shape" d="m 73.595508,109.76746 c -7.198235,0 -13.103617,5.58342 -13.647229,12.64471 h -0.0072 V 138.2696 H 58.61606 l 2.32389,4.02559 2.324405,-4.02559 h -1.323433 v -15.85123 c 0.530186,-5.97937 5.534806,-10.65103 11.654586,-10.65103 6.474618,0 11.703161,5.22855 11.703161,11.70316 0,6.47462 -5.228543,11.70161 -11.703161,11.70161 -2.644513,0 -5.080809,-0.87232 -7.037814,-2.34508 v 2.39572 c 2.058162,1.23707 4.46633,1.94924 7.037814,1.94924 7.555498,0 13.703556,-6.14599 13.703556,-13.70149 0,-7.5555 -6.148058,-13.70304 -13.703556,-13.70304 z m -2.108915,7.49825 v 8.05016 h 7.125663 v -1.59836 h -5.527311 v -6.4518 z"></path></svg>
               </button>
               {/if}
             </li>
           {/each}
         </ul>
+        {#if orphanNote}<p class="orphan-progress" role="status">{orphanNote}</p>{/if}
         <div class="modal-actions">
           <button class="modal-action secondary" on:click={() => resolveRebuildOrphans(false)}>Cancel</button>
           <button class="modal-action" on:click={() => resolveRebuildOrphans(true)}>Proceed Anyway</button>
@@ -2411,22 +2618,22 @@
         {#if historyBusy}
           <p class="history-empty">Loading versions…</p>
         {:else if historyEntries.length === 0}
-          <p class="history-empty">{historyError || 'No versioned history is available for this wiki yet.'}</p>
+          <p class="history-empty">{historyError || 'No versions saved yet.'}</p>
         {:else}
           <ul class="history-list">
             {#each historyEntries as entry (entry.id)}
               <li class="history-entry">
-                {#if entry.isBase && entry.external}<span class="history-badge sync" title="This full copy was created after the file changed outside this device.">sync</span>{:else if entry.isBase}<span class="history-badge" title="This version is a complete copy of the wiki at this time.">full</span>{:else}<span class="history-badge delta" title="This version stores only the edits made since the previous save — it rebuilds into a complete copy when you download it.">step</span>{/if}
+                {#if entry.isBase && entry.external}<span class="history-badge sync" title="Saved after a change outside this device.">sync</span>{:else if entry.isBase}<span class="history-badge" title="Complete copy from this save.">full</span>{:else}<span class="history-badge delta" title="Edits since the previous save.">step</span>{/if}
                 <span class="history-time">{entry.lastModified}</span>
                 <span class="history-size">{formatCacheSize(entry.sizeBytes)}</span>
-                <button class="recent-icon-button history-download-button" type="button" aria-label={`Download a copy of the version from ${entry.lastModified}`} title="Download a non-destructive copy of this version" on:click={() => downloadHistoryVersion(entry.id)}>
+                <button class="recent-icon-button history-download-button" type="button" aria-label={`Download a copy of the version from ${entry.lastModified}`} title="Download a copy" on:click={() => downloadHistoryVersion(entry.id)}>
                   <svg class="history-download-icon" viewBox="56 108 33 36" aria-hidden="true"><path class="history-icon-shape" d="m 73.595508,109.76746 c -7.198235,0 -13.103617,5.58342 -13.647229,12.64471 h -0.0072 V 138.2696 H 58.61606 l 2.32389,4.02559 2.324405,-4.02559 h -1.323433 v -15.85123 c 0.530186,-5.97937 5.534806,-10.65103 11.654586,-10.65103 6.474618,0 11.703161,5.22855 11.703161,11.70316 0,6.47462 -5.228543,11.70161 -11.703161,11.70161 -2.644513,0 -5.080809,-0.87232 -7.037814,-2.34508 v 2.39572 c 2.058162,1.23707 4.46633,1.94924 7.037814,1.94924 7.555498,0 13.703556,-6.14599 13.703556,-13.70149 0,-7.5555 -6.148058,-13.70304 -13.703556,-13.70304 z m -2.108915,7.49825 v 8.05016 h 7.125663 v -1.59836 h -5.527311 v -6.4518 z"></path></svg>
                 </button>
               </li>
             {/each}
           </ul>
           {#if historyError}<p class="status-line error" role="alert">{historyError}</p>{/if}
-          <p class="history-note">Every download is a complete, working copy of the wiki as it was at that moment — your history is never modified. Import a copy under a new name to inspect it.</p>
+          <p class="history-note">Reverting is manual. Download a version, then replace the wiki with it.</p>
         {/if}
       </div>
     </div>
@@ -2436,8 +2643,7 @@
       <div class="launcher-modal dirty-modal" role="dialog" aria-modal="true" aria-labelledby="dirty-title">
         <h2 id="dirty-title">Unsaved edits found</h2>
         <p>
-          {dirtyInfo.name} has {dirtyInfo.tiddlers.length} unsaved edit{dirtyInfo.tiddlers.length === 1 ? '' : 's'}
-          captured {new Date(dirtyInfo.ts).toLocaleString()} from a previous session that was never saved to disk.
+          {dirtyInfo.name} has {dirtyInfo.tiddlers.length} edit{dirtyInfo.tiddlers.length === 1 ? '' : 's'} never saved to disk, captured {new Date(dirtyInfo.ts).toLocaleString()}.
         </p>
         <ul class="dirty-tiddler-list">
           {#each dirtyInfo.tiddlers.slice(0, 8) as tiddler (tiddler.title)}
@@ -2449,6 +2655,18 @@
           <button class="modal-action" on:click={() => resolveDirtyModal('merge')}>Recover edits</button>
           <button class="modal-action secondary" on:click={() => resolveDirtyModal('later')}>Decide later</button>
           <button class="modal-action secondary" on:click={() => resolveDirtyModal('discard')}>Discard</button>
+        </div>
+      </div>
+    </div>
+  {/if}
+  {#if confirmation}
+    <div class="modal-overlay" role="presentation">
+      <div class="launcher-modal confirm-modal" role="dialog" aria-modal="true" aria-labelledby="confirm-title">
+        <h2 id="confirm-title">{confirmation.title}</h2>
+        <p>{confirmation.body}</p>
+        <div class="modal-actions">
+          <button bind:this={confirmationButton} class="modal-action" on:click={() => resolveConfirmation(true)}>{confirmation.confirmLabel}</button>
+          <button class="modal-action secondary" on:click={() => resolveConfirmation(false)}>Cancel</button>
         </div>
       </div>
     </div>
@@ -2492,7 +2710,7 @@
           {#each filteredRemote as file (file.name)}
             <div class="recent-row remote-row">
               <span class="remote-dot" aria-hidden="true"></span>
-              <button class="recent-name" title="Open {file.name} from this server" on:click={() => openRemoteFile(file.name)}>{file.name}{#if file.lastModified}<span class="cached-size">{file.lastModified.toLocaleDateString()}</span>{/if}</button>
+              <button class="recent-name" title="Open from this server" on:click={() => openRemoteFile(file.name)}>{file.name}{#if file.lastModified}<span class="cached-size">{file.lastModified.toLocaleDateString()}</span>{/if}</button>
             </div>
           {/each}
         {/if}
@@ -2508,17 +2726,17 @@
             <button class="recent-icon-button remove-recent" type="button" aria-label={`Remove bookmark ${entry.url}`} on:click={() => removeInstanceBookmark(entry.url)}><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m7 7 10 10M17 7 7 17"></path></svg></button>
           </div>
         {/each}
-        {#if filteredRecent.length === 0 && filteredCached.length === 0 && filteredRemote.length === 0 && bookmarks.filter((entry) => entry.label.toLowerCase().includes(search.toLowerCase()) || entry.url.toLowerCase().includes(search.toLowerCase())).length === 0}<p class="empty">{isSelfHost() && remoteFiles.length === 0 ? 'No Liths on this server yet — use New Blank Lith to start one.' : 'No matching Liths.'}</p>{/if}
+        {#if filteredRecent.length === 0 && filteredCached.length === 0 && filteredRemote.length === 0 && bookmarks.filter((entry) => entry.label.toLowerCase().includes(search.toLowerCase()) || entry.url.toLowerCase().includes(search.toLowerCase())).length === 0}<p class="empty">{isSelfHost() && remoteFiles.length === 0 ? 'No Liths on this server yet.' : 'No matching Liths.'}</p>{/if}
         {#each filteredRecent as file}
           {@const name = getEntryName(file)}
           <div class="recent-row">
             <button class="recent-name" on:click={() => openRecent(file)}>{name}{#if cachedEntries[name]}<span class="cached-size">{formatCacheSize(cachedEntries[name].sizeBytes)}</span>{/if}</button>
-            {#if dirtyEntries[name] || historyAvailable[name]}<button class="recent-icon-button cache-history-button" class:dirty={dirtyEntries[name]} type="button" disabled={!cachedEntries[name] && !dirtyEntries[name]} aria-label={dirtyEntries[name] ? `${name} has unsaved edits; open to recover` : `Show version history for ${name}`} title={dirtyEntries[name] ? `Unsaved edits from ${new Date(dirtyEntries[name]).toLocaleString()}; click the name to open and recover` : (cachedEntries[name] ? 'Show version history' : 'No cached history available')} on:click={() => openHistoryModal(name)}>
+            {#if dirtyEntries[name] || historyAvailable[name]}<button class="recent-icon-button cache-history-button" class:dirty={dirtyEntries[name]} type="button" disabled={!cachedEntries[name] && !dirtyEntries[name]} aria-label={dirtyEntries[name] ? `${name} has unsaved edits; open to recover` : `Show version history for ${name}`} title={dirtyEntries[name] ? `Unsaved edits from ${new Date(dirtyEntries[name]).toLocaleString()}` : (cachedEntries[name] ? 'Show version history' : 'No cached history')} on:click={() => openHistoryModal(name)}>
               <svg class="history-download-icon" viewBox="56 108 33 36" aria-hidden="true"><path class="history-icon-shape" d="m 73.595508,109.76746 c -7.198235,0 -13.103617,5.58342 -13.647229,12.64471 h -0.0072 V 138.2696 H 58.61606 l 2.32389,4.02559 2.324405,-4.02559 h -1.323433 v -15.85123 c 0.530186,-5.97937 5.534806,-10.65103 11.654586,-10.65103 6.474618,0 11.703161,5.22855 11.703161,11.70316 0,6.47462 -5.228543,11.70161 -11.703161,11.70161 -2.644513,0 -5.080809,-0.87232 -7.037814,-2.34508 v 2.39572 c 2.058162,1.23707 4.46633,1.94924 7.037814,1.94924 7.555498,0 13.703556,-6.14599 13.703556,-13.70149 0,-7.5555 -6.148058,-13.70304 -13.703556,-13.70304 z m -2.108915,7.49825 v 8.05016 h 7.125663 v -1.59836 h -5.527311 v -6.4518 z"></path></svg>
             </button>
             {/if}
             {#if isLocalOnly(file)}
-              <button class="recent-icon-button local-only-button" type="button" aria-label={`Back up the folder containing ${name}`} title={`Local only — ${name} isn't in a backed-up folder yet. Click to back up its folder.`} on:click={() => backUpFolder(recentDiskPath(file as any) as string)}>
+              <button class="recent-icon-button local-only-button" type="button" aria-label={`Back up the folder containing ${name}`} title={`Local only. ${name} is not in a backed-up folder yet.`} on:click={() => backUpFolder(recentDiskPath(file as any) as string)}>
                 <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8.5"></circle><path d="M12 7.5v5.5"></path><path d="M12 16.2h.01"></path></svg>
               </button>
             {/if}
@@ -2529,7 +2747,7 @@
                 role="button"
                 tabindex="0"
                 aria-label={cacheSearchMatches[name].title ? `Open ${name} and pin “${cacheSearchMatches[name].title}” to top` : `Open ${name}`}
-                title="Click to open and pin this tiddler to the top of the story river"
+                title="Open and pin this tiddler"
                 on:click={() => pinFromPreview(name)}
                 on:keydown={(event) => (event.key === 'Enter' || event.key === ' ') && pinFromPreview(name)}
               >{@html cacheSearchMatches[name].preview}</div>
@@ -2540,7 +2758,7 @@
         {#each filteredCached as entry}
           <div class="recent-row cached-only-row">
             <div class="recent-name cached-result" role="note">{entry.name}<span class="cached-size">{formatCacheSize(entry.sizeBytes)}</span><span class="cached-label">Cached locally</span></div>
-            {#if dirtyEntries[entry.name] || historyAvailable[entry.name]}<button class="recent-icon-button cache-history-button" class:dirty={dirtyEntries[entry.name]} type="button" aria-label={`Show version history for ${entry.name}`} title={dirtyEntries[entry.name] ? `Unsaved edits from ${new Date(dirtyEntries[entry.name]).toLocaleString()}; click the name to open and recover` : 'Show version history'} on:click={() => openHistoryModal(entry.name)}>
+            {#if dirtyEntries[entry.name] || historyAvailable[entry.name]}<button class="recent-icon-button cache-history-button" class:dirty={dirtyEntries[entry.name]} type="button" aria-label={`Show version history for ${entry.name}`} title={dirtyEntries[entry.name] ? `Unsaved edits from ${new Date(dirtyEntries[entry.name]).toLocaleString()}` : 'Show version history'} on:click={() => openHistoryModal(entry.name)}>
               <svg class="history-download-icon" viewBox="56 108 33 36" aria-hidden="true"><path class="history-icon-shape" d="m 73.595508,109.76746 c -7.198235,0 -13.103617,5.58342 -13.647229,12.64471 h -0.0072 V 138.2696 H 58.61606 l 2.32389,4.02559 2.324405,-4.02559 h -1.323433 v -15.85123 c 0.530186,-5.97937 5.534806,-10.65103 11.654586,-10.65103 6.474618,0 11.703161,5.22855 11.703161,11.70316 0,6.47462 -5.228543,11.70161 -11.703161,11.70161 -2.644513,0 -5.080809,-0.87232 -7.037814,-2.34508 v 2.39572 c 2.058162,1.23707 4.46633,1.94924 7.037814,1.94924 7.555498,0 13.703556,-6.14599 13.703556,-13.70149 0,-7.5555 -6.148058,-13.70304 -13.703556,-13.70304 z m -2.108915,7.49825 v 8.05016 h 7.125663 v -1.59836 h -5.527311 v -6.4518 z"></path></svg>
             </button>
             {/if}
@@ -2551,7 +2769,7 @@
                 role="button"
                 tabindex="0"
                 aria-label={cacheSearchMatches[entry.name].title ? `Open ${entry.name} and pin “${cacheSearchMatches[entry.name].title}” to top` : `Open ${entry.name}`}
-                title="Click to open and pin this tiddler to the top of the story river"
+                title="Open and pin this tiddler"
                 on:click={() => pinFromPreview(entry.name)}
                 on:keydown={(event) => (event.key === 'Enter' || event.key === ' ') && pinFromPreview(entry.name)}
               >{@html cacheSearchMatches[entry.name].preview}</div>
@@ -2564,14 +2782,14 @@
       {/if}
       {#if showRebuildControl}
         <button class="reset-cache" on:click={rebuildRecents} disabled={rebuildBusy} title={isSelfHost()
-          ? 'Re-read this server and rebuild the searchable index from the files themselves'
-          : 'Rebuild this list and the searchable index from the files on disk. Unsaved-edit backups, and cached copies of Liths whose files have moved, are kept.'}>{
+          ? 'Rebuild this list from the server'
+          : 'Rebuild this list from the files on disk'}>{
           rebuildBusy ? 'Re-indexing…' : 'Rebuild Recents'
         }</button>
       {:else}
-        <button class="reset-cache" on:click={clearRecent}>Clear All Recent Files</button>
+        <button class="reset-cache" on:click={clearRecent} title="Clears this list and its local history. Your files stay.">Reset Recents</button>
       {/if}
     </section>
   {/if}
-  <footer>{#if mode === 'webapp'}<a class="github-link" href="https://github.com/Lithic-UK/Lithic" target="_blank" rel="noreferrer">Github</a>{#if $pwaInstall.installable && !(installDismissed && installState !== 'stale')}<span class="install-offer"><button class="install-button" on:click={installPwa}>Install App</button><button class="install-dismiss" on:click={dismissInstallOffer} title="Hide the install offer. Restore it later by clearing site data." aria-label="Dismiss install offer">dismiss ✕</button></span>{/if}{:else if mode === 'tauri' && installState !== 'current' && !(installDismissed && installState === 'uninstalled')}<span class="install-offer"><button class="install-button" on:click={installMonolith} disabled={installBusy} title={installStatus || 'Copy this app to a stable per-user location, register file associations, and add a Start Menu shortcut'}>{installBusy ? 'Installing…' : installState === 'stale' ? 'Update Install' : 'Install'}</button><button class="install-dismiss" on:click={dismissInstallOffer} title="Hide the install offer. Restore it later by deleting recents.txt beside the app." aria-label="Dismiss install offer">dismiss ✕</button></span>{/if}</footer>
+  <footer>{#if mode === 'webapp'}<a class="github-link" href="https://github.com/Lithic-UK/Lithic" target="_blank" rel="noreferrer">Github</a>{#if $pwaInstall.installable && !(installDismissed && installState !== 'stale')}<span class="install-offer"><button class="install-button" on:click={installPwa}>Install App</button><button class="install-dismiss" on:click={dismissInstallOffer} title="Hide the install offer" aria-label="Dismiss install offer">dismiss ✕</button></span>{/if}{:else if mode === 'tauri' && installState !== 'current' && !(installDismissed && installState === 'uninstalled')}<span class="install-offer"><button class="install-button" on:click={installMonolith} disabled={installBusy} title={installStatus || 'Copy to Documents and add a Start Menu shortcut'}>{installBusy ? 'Installing…' : installState === 'stale' ? 'Update Install' : 'Install'}</button><button class="install-dismiss" on:click={dismissInstallOffer} title="Hide the install offer" aria-label="Dismiss install offer">dismiss ✕</button></span>{/if}</footer>
 </main>

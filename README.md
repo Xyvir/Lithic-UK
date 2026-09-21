@@ -49,12 +49,21 @@ The GitHub button in the launcher links the folder holding your wikis to a repos
 The button reports what the backup is doing, and green is the only state that means *verified*:
 
 * **Grey** — this folder is not synced.
-* **Amber** — the folder is synced and Lithic is checking that GitHub still accepts it.
+* **Amber** — Lithic does not have an answer yet: it is reading the folder, or checking that GitHub still accepts it.
 * **Green** — the repository answers and the saved token can push to it.
-* **Pulsing purple** — a save is being committed and pushed.
+* **Pulsing purple** — a save is being committed and pushed. This includes the moment you return to the launcher from a wiki, while that wiki's save is still being pushed.
 * **Red** — the backup is not landing. The tooltip names the reason, and **Reconnect** in the dialog refreshes the saved credential without re-uploading or moving anything.
 
 Green needs an answer from GitHub because the failures it hides leave nothing behind locally: a revoked token, a deleted repository and a token that can read but not write all keep the folder's sync configuration intact. A save that fails to upload also turns the icon red until a later save lands.
+
+## Restoring an Earlier Version
+
+The launcher keeps a version history for every wiki you open, so a bad edit is recoverable. It lives on the device, not on a server and not in GitHub.
+
+* **The clock icon lists saved versions.** An entry is marked `full` (a complete copy from that save), `step` (the edits since the previous save) or `sync` (a save that arrived from outside this device). Downloading any entry writes a complete `<name>_recover_<timestamp>.lith`, whichever kind it is.
+* **Downloads never change your wiki.** There is no revert button. To go back, download the version and replace the wiki with it: save the download over the original file in the desktop app, or upload it under the same name on a self-hosted instance.
+* **History is pruned, not permanent.** When a device's storage crosses roughly 80% of its quota, the oldest-modified wikis lose their caches and history first, and never the last one. Keep a downloaded copy of anything you cannot lose.
+* **A cached copy can outlive its file.** If a wiki is moved, renamed or left on an unmounted drive, the launcher still lists it, marked as having no file on disk. Rebuilding Recents deletes those entries and their history, and offers to download them first.
 
 # Roadmap
 1. Version 1 Released: 

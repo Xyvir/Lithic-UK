@@ -11,6 +11,22 @@
 html, body, #app { height: 100%; margin: 0; }
 body { overflow: hidden; background: #181818; }
 
+/* Thin dark scrollbars, ported from the legacy launcher: a 6px rounded thumb on
+ * a transparent track. The engine default is a light grey slab with arrow
+ * buttons, which was the brightest thing on a #252525 panel.
+ *
+ * Both spellings are here on purpose. `scrollbar-width`/`scrollbar-color` are
+ * the standard pair (Firefox, and Chromium 121+), and they *inherit*, so one
+ * rule reaches every scroll region — the recent list, the history and orphan
+ * lists, the pending-imports tray, code blocks scrolling sideways. Safari and
+ * older Chromium ignore both and only read the ::-webkit- pseudo-elements,
+ * which do not inherit, hence the universal selector. */
+* { scrollbar-width: thin; scrollbar-color: #454545 transparent; }
+*::-webkit-scrollbar { width: 6px; height: 6px; }
+*::-webkit-scrollbar-track { background: transparent; }
+*::-webkit-scrollbar-thumb { background-color: #454545; border-radius: 20px; }
+*::-webkit-scrollbar-thumb:hover { background-color: #5c5c5c; }
+
 .container {
   position: relative;
   display: flex;
@@ -385,11 +401,18 @@ h1 { flex: none; min-width: 0; margin: 0; color: #f4edf5; font-size: 1.8rem; fon
 }
 
 code { color: #8ab4f8; }
+/* Pinned to the window corners, the way the legacy launcher's Github link and
+ * install button were (`bottom/left/right: 15px` there; 22px is our own gutter
+ * and matches the bottom band). The band spans the whole window so the two
+ * controls bracket the column rather than hugging it on a wide screen. The band
+ * used to be a fixed 800px wide, which put each control just outside the 600px
+ * column — and put the 115px install button 15px *over* the column's right
+ * edge, on top of the recent rows' own controls. */
 footer {
   position: fixed;
-  right: max(22px, calc(50vw - 400px));
+  right: 22px;
   bottom: 20px;
-  left: max(22px, calc(50vw - 400px));
+  left: 22px;
   display: flex;
   justify-content: space-between;
   align-items: center;
@@ -406,19 +429,19 @@ footer > * { pointer-events: auto; }
  * child (tauri mode has no Github link; webapp hides it post-install). */
 .install-button { margin-left: auto; }
 /* "dismiss ✕": small bare white text in the install button's upper-right
- * corner, no pill or background, sitting in the button's top padding band so it
- * never lands on the label's glyphs. The faint shadow is what keeps white
- * legible on the light button face; without it the text washes out. Dark red on
- * hover. Padding is invisible (no background) and only widens the hit target. */
+ * corner, no pill or background, sitting above the label's line box so it never
+ * lands on the glyphs. The faint shadow is what keeps white legible on the light
+ * button face; without it the text washes out. Dark red on hover. Padding is
+ * invisible (no background) and only widens the hit target. */
 .install-dismiss {
   position: absolute;
-  top: 0;
-  right: 0;
-  padding: 2px 5px 1px;
+  top: 2px;
+  right: 6px;
+  padding: 0 6px;
   border: 0;
   background: none;
   color: #fff;
-  font: 0.6rem/1 'Vollkorn', Georgia, serif;
+  font: 0.55rem/1 'Vollkorn', Georgia, serif;
   text-shadow: 0 1px 1px rgb(0 0 0 / 45%);
   cursor: pointer;
   animation: dismiss-nudge 2.8s ease-in-out 1.2s 3;
@@ -516,7 +539,12 @@ footer > * { pointer-events: auto; }
 .recent-search { width: 100%; height: 52px; padding: 12px 42px;
   border: 1px solid #454545; border-radius: 7px; background: #333; color: #eee; font: inherit; }
 .recent-search:focus { outline: none; border-color: #ffb74d; }
-.recent-list { flex: 1 1 auto; min-height: 0; max-height: none; margin: 10px 0; overflow-y: auto; padding-right: 0; padding-bottom: 60px; }
+/* The 5px right padding is the scrollbar's gutter: without it the thumb sits on
+ * the row's remove button. Legacy did the same.
+ * `scrollbar-gutter: stable` reserves that gutter even when the list is short
+ * enough not to scroll, so typing in the search box — which filters rows out and
+ * removes the scrollbar — no longer makes every row jump 11px wider. */
+.recent-list { flex: 1 1 auto; min-height: 0; max-height: none; margin: 10px 0; overflow-y: auto; scrollbar-gutter: stable; padding-right: 5px; padding-bottom: 60px; }
 .recent-row {
   position: relative;
   display: flex;
@@ -600,23 +628,44 @@ footer > * { pointer-events: auto; }
 .reset-cache:disabled { color: #8a8a8a; cursor: default; }
 /* Coverage is a count, not a warning: how much of the list is backed up. */
 .backup-status { margin: 8px 2px 0; color: #9a9a9a; font-size: 0.8rem; text-align: center; }
-.github-link, .install-button { padding: 10px 15px; border: 1px solid #494949; border-radius: 7px; background: #333; color: #ddd; font: 0.85rem 'Vollkorn', Georgia, serif; text-decoration: none; }
-/* A little extra room up top: the dismiss chip lives in that band, so it stays
- * clear of the label's glyphs instead of sitting on the first letter's cap. */
-.install-button { padding: 13px 15px 10px; border: 0; background: #8ab4f8; color: #121212; font-size: 1rem; font-weight: 600; cursor: pointer; }
+/* One box for both footer controls, so the row reads symmetrical: same height,
+ * same side padding, same radius, same label size — only the face differs,
+ * because the install offer is the primary action.
+ *
+ * The height comes from min-height with no vertical padding, and the line height
+ * is pinned, so the box cannot be pushed around by font metrics: before this the
+ * two controls were 4px apart in height (37 vs 41px) and the install label sat
+ * 1.5px below centre, purely because one had a border and the other had
+ * asymmetric top/bottom padding. */
+.github-link, .install-button {
+  box-sizing: border-box;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 48px;
+  padding: 0 16px;
+  border: 1px solid #494949;
+  border-radius: 8px;
+  background: #333;
+  color: #ddd;
+  font: 1rem/1.15 'Vollkorn', Georgia, serif;
+  text-decoration: none;
+}
+/* Same 1px border, in the button's own colour: dropping it would make the
+ * primary action 2px shorter than the link beside it. */
+.install-button { border-color: #8ab4f8; background: #8ab4f8; color: #121212; font-weight: 600; cursor: pointer; }
 
 /*
- * On wide windows each control fits in the side margin of the 600px launcher
- * column, so the Recent panel can use the full height. On narrower windows the
- * footer must sit over the launcher column; reserve a bottom band to keep it
- * from covering the clear-recent control.
+ * On wide windows each control clears the 600px launcher column entirely, so
+ * the Recent panel can use the full height. Narrower than that the footer sits
+ * over the launcher column, so reserve a bottom band to keep it from covering
+ * the clear-recent control. The threshold is the measured one: the widest
+ * control (install, 115px) plus a 22px gutter either side of a 600px column is
+ * 874px, rounded up to leave the column a few px of clearance for font
+ * metrics differing from the developer's machine.
  */
-@media (max-width: 799px) {
+@media (max-width: 899px) {
   .container { padding-bottom: 76px; }
-  footer {
-    right: 22px;
-    left: 22px;
-  }
 }
 
 @media (max-width: 950px) {
@@ -717,6 +766,11 @@ body.drag-over::after {
 .history-download-button:hover { background: rgb(138 180 248 / 16%); color: #8ab4f8; }
 .history-note { margin-top: 14px; color: #888; font-size: 0.8em; line-height: 1.45; }
 
+/* The launcher's own confirmation, replacing `window.confirm`, which the desktop
+ * app renders as an OS message box with no styling hook. Sized like the other
+ * short-decision dialogs so it reads as the same object. */
+.confirm-modal { width: min(100%, 420px); }
+
 /* --- Transient (dirty) recovery --- */
 .dirty-modal { width: min(100%, 480px); }
 .dirty-tiddler-list {
@@ -740,6 +794,15 @@ body.drag-over::after {
 .orphan-tag { padding: 1px 6px; border-radius: 999px; background: #3a3a3a; color: #a8a8a8; font-size: 0.7rem; white-space: nowrap; }
 .orphan-tag.dirty { background: rgb(255 157 128 / 16%); color: #ff9d80; }
 .orphan-warning { margin: 10px 0 0; color: #ff9d80; font-size: 0.82rem; }
+/* A row's download result. Only `.saved` may claim the copy is on this device:
+ * the fallback save path cannot confirm a browser download finished, so it gets
+ * the amber tone and a different label rather than a green check it has not
+ * earned. */
+.orphan-pill { padding: 1px 7px; border-radius: 999px; font-size: 0.7rem; white-space: nowrap; }
+.orphan-pill.saved { background: rgb(91 158 92 / 22%); color: #9ede94; }
+.orphan-pill.unverified { background: rgb(224 179 65 / 16%); color: #e6c46a; }
+/* "2 of 5 saved" — the line that says when Proceed is safe. */
+.orphan-progress { margin: 10px 0 0; color: #9ede94; font-size: 0.8rem; text-align: center; }
 /* Unsaved edits are signaled by a red history/download icon instead of an
    inline text badge (hover shows the capture timestamp via the title). */
 .cache-history-button.dirty,

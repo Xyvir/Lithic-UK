@@ -793,21 +793,32 @@ impl GitSyncCommit {
     }
 }
 
-/// Why the last backup of each folder failed, if it did.
+/// What this app has done about backups since it started: why each folder's last
+/// backup failed, if it did, and which backups are running right now.
 ///
 /// The save that fails happens inside the engine document, which is a rewrite of
 /// the launcher page — so the event it fires has nowhere to land, and the icon
 /// only learns about it when the launcher comes back. Remembering the outcome
 /// here is what makes a backup that stopped landing visible at all, instead of a
 /// log line nobody reads.
+///
+/// "Running right now" is recorded for the same reason in reverse: coming back
+/// from a wiki reloads the launcher, and the push triggered by that wiki's exit
+/// save is still in progress in Rust. Without this the icon would look idle
+/// while a backup is genuinely under way.
 #[derive(Default)]
-struct CommitLog(Mutex<std::collections::HashMap<String, String>>);
+struct CommitLog {
+    failures: Mutex<std::collections::HashMap<String, String>>,
+    /// Counted rather than flagged, so two backups of one folder cannot clear the
+    /// mark when only the first of them finishes.
+    in_flight: Mutex<std::collections::HashMap<String, u32>>,
+}
 
 impl CommitLog {
     /// `None` clears the folder: a push that landed is the fix, so there is
     /// nothing left to warn about.
     fn record(&self, folder: &str, error: Option<String>) {
-        let Ok(mut log) = self.0.lock() else { return };
+        let Ok(mut log) = self.failures.lock() else { return };
         match error {
             Some(error) => {
                 log.insert(folder.to_string(), error);
@@ -819,7 +830,33 @@ impl CommitLog {
     }
 
     fn last_error(&self, folder: &str) -> Option<String> {
-        self.0.lock().ok()?.get(folder).cloned()
+        self.failures.lock().ok()?.get(folder).cloned()
+    }
+
+    /// A backup of this folder has started. Called before the git work, because
+    /// the push — the long part — is what the launcher can come back and ask
+    /// about.
+    fn begin(&self, folder: &str) {
+        let Ok(mut map) = self.in_flight.lock() else { return };
+        *map.entry(folder.to_string()).or_insert(0) += 1;
+    }
+
+    /// That backup finished, however it finished.
+    fn finish(&self, folder: &str) {
+        let Ok(mut map) = self.in_flight.lock() else { return };
+        match map.get_mut(folder) {
+            Some(count) if *count > 1 => *count -= 1,
+            _ => {
+                map.remove(folder);
+            }
+        }
+    }
+
+    fn in_flight(&self, folder: &str) -> bool {
+        self.in_flight
+            .lock()
+            .map(|map| map.contains_key(folder))
+            .unwrap_or(false)
     }
 }
 
@@ -892,11 +929,17 @@ async fn git_sync_commit_inner(
         return Ok(GitSyncCommit::nothing());
     };
     let folder = folder_key(&dir);
-    let outcome = tauri::async_runtime::spawn_blocking(move || {
+    // Bracket the whole git call, push included: this is what lets the launcher
+    // show "syncing" for a backup that outlives the wiki page that started it.
+    log.begin(&folder);
+    let joined = tauri::async_runtime::spawn_blocking(move || {
         commit_saved_file(&dir, &file, &url, &message)
     })
-    .await
-    .map_err(|error| error.to_string())?;
+    .await;
+    // Cleared before the join is inspected, so a task that died cannot leave the
+    // icon pulsing forever.
+    log.finish(&folder);
+    let outcome = joined.map_err(|error| error.to_string())?;
 
     match outcome {
         Ok(commit) => {
@@ -1088,6 +1131,9 @@ async fn github_create_repo(token: String, name: String) -> Result<ManagedRepo, 
 struct GitSyncStatus {
     connected: bool,
     repo: String,
+    /// A backup of this folder is running right now, so the launcher can say so
+    /// instead of showing an idle icon over work in progress.
+    in_flight: bool,
 }
 
 /// Status for the reactive sync icon: connected only when the file's folder
@@ -1105,7 +1151,8 @@ fn git_sync_status(path: String) -> Option<GitSyncStatus> {
         .nth(1)
         .map(|tail| tail.trim_end_matches(".git").trim().to_string())
         .unwrap_or_else(|| "github repository".to_string());
-    Some(GitSyncStatus { connected: true, repo })
+    let in_flight = commit_log().in_flight(&folder_key(&dir));
+    Some(GitSyncStatus { connected: true, repo, in_flight })
 }
 
 /// Disconnect: drop the managed origin remote. Refuses to touch repos the
@@ -1123,6 +1170,133 @@ fn git_sync_disconnect(path: String) -> Result<(), String> {
         return Err("This folder is not a Lithic-managed sync folder".to_string());
     }
     gitcore::remove_remote(&repo, "origin")
+}
+
+// --- Bookmarked instances (the meta-launcher) --------------------------------
+// A self-hosted instance usually serves its manifest and favicon without
+// `Access-Control-Allow-Origin` unless its operator added one, and a browser
+// cannot tell a blocked-but-fine instance from a dead host: both reject the
+// fetch, because a CORS-blocked response is withheld from the script entirely.
+// Measured against a stock self-host deployment: `/manifest.json` answers 200
+// with no such header, so the launcher's own probe reported "not a Lithic
+// instance" about a perfectly good one. The desktop app asks from Rust instead,
+// where the real status and the real bytes are visible, which is what makes
+// bookmarking work at all.
+
+/// What a cross-origin probe of another instance learned.
+#[derive(serde::Serialize)]
+struct InstanceProbe {
+    /// `lithic` | `other` | `protected` | `unreachable`.
+    state: &'static str,
+    /// The HTTP status, or 0 when nothing answered.
+    status: u16,
+}
+
+/// Classify `/manifest.json`.
+///
+/// Pure, because the cases that decide whether the user is let through are the
+/// ones a real deployment produces, and they are otherwise only reachable with a
+/// protected server in hand. `protected` is not a failure: 401 and 403 mean
+/// something is there and asking for credentials, which the user confirms by
+/// hand rather than being refused.
+fn classify_manifest(status: u16, body: &[u8]) -> &'static str {
+    if status == 401 || status == 403 {
+        return "protected";
+    }
+    if !(200..=299).contains(&status) {
+        return "other";
+    }
+    let lithic = serde_json::from_slice::<serde_json::Value>(body)
+        .ok()
+        .map(|manifest| {
+            manifest.get("name").and_then(|value| value.as_str()) == Some("Lithic")
+                || manifest.get("short_name").and_then(|value| value.as_str()) == Some("Lithic")
+        })
+        .unwrap_or(false);
+    if lithic {
+        "lithic"
+    } else {
+        "other"
+    }
+}
+
+fn instance_http_client() -> Option<tauri::api::http::Client> {
+    tauri::api::http::ClientBuilder::new()
+        .max_redirections(2)
+        .build()
+        .ok()
+}
+
+/// Is this address a Lithic instance, in a way the browser cannot check?
+#[tauri::command]
+async fn probe_instance(url: String) -> InstanceProbe {
+    let unreachable = InstanceProbe { state: "unreachable", status: 0 };
+    let Some(client) = instance_http_client() else {
+        return unreachable;
+    };
+    let Ok(request) = tauri::api::http::HttpRequestBuilder::new("GET", format!("{url}/manifest.json"))
+    else {
+        return unreachable;
+    };
+    let Ok(response) = client
+        .send(request.timeout(std::time::Duration::from_secs(6)))
+        .await
+    else {
+        return unreachable;
+    };
+    let status = response.status().as_u16();
+    // Read only when there is a body to classify: a protected or missing
+    // manifest is decided by its status alone.
+    let body = match response.bytes().await {
+        Ok(raw) => raw.data,
+        Err(_) => Vec::new(),
+    };
+    InstanceProbe { state: classify_manifest(status, &body), status }
+}
+
+/// One instance icon, as bytes for the launcher to cache as a data URL.
+#[derive(serde::Serialize)]
+struct InstanceIcon {
+    content_type: String,
+    bytes: Vec<u8>,
+}
+
+/// Icons live in localStorage, so refuse anything too large to be one.
+const INSTANCE_ICON_MAX_BYTES: usize = 128 * 1024;
+
+/// Fetch the instance's current icon through Rust, for the same reason as the
+/// probe: the response is cross-origin, and a deployment that sends no
+/// `Access-Control-Allow-Origin` is unreadable to the browser and perfectly
+/// readable here. `None` when nothing usable answered.
+#[tauri::command]
+async fn fetch_instance_icon(url: String) -> Option<InstanceIcon> {
+    let client = instance_http_client()?;
+    for path in ["/favicon-32x32.png", "/favicon.ico"] {
+        let Ok(request) = tauri::api::http::HttpRequestBuilder::new("GET", format!("{url}{path}")) else {
+            continue;
+        };
+        let Ok(response) = client
+            .send(request.timeout(std::time::Duration::from_secs(6)))
+            .await
+        else {
+            continue;
+        };
+        if !response.status().is_success() {
+            continue;
+        }
+        let content_type = response
+            .headers()
+            .get("content-type")
+            .and_then(|value| value.to_str().ok())
+            .unwrap_or("image/png")
+            .to_string();
+        let Ok(raw) = response.bytes().await else { continue };
+        if raw.data.is_empty() || raw.data.len() > INSTANCE_ICON_MAX_BYTES {
+            continue;
+        }
+        return Some(InstanceIcon { content_type, bytes: raw.data });
+    }
+    None
 }
 
 // --- Sync health -------------------------------------------------------------
@@ -1195,18 +1369,19 @@ impl GitSyncHealth {
         Self {
             state: "malformed",
             repo: String::new(),
-            detail: "The folder's saved remote is not readable — reconnect to repair it.".to_string(),
+            detail: "This folder's saved remote is unreadable. Reconnect to repair it.".to_string(),
             last_commit_error: None,
         }
     }
 
     fn offline(repo: String, reason: &str) -> Self {
+        // The launcher shows one short line, so the transport error goes to the
+        // log where it is useful for diagnosis rather than into the sentence.
+        eprintln!("heartbeat offline: {reason}");
         Self {
             state: "offline",
             repo,
-            detail: format!(
-                "Cannot reach github.com ({reason}) — saves stay on this device until the connection is back."
-            ),
+            detail: "Cannot reach github.com. Saves stay on this device.".to_string(),
             last_commit_error: None,
         }
     }
@@ -1229,25 +1404,22 @@ impl GitSyncHealth {
             // A freshly created repository has no commits until the first push
             // lands, which is a first backup waiting to happen, not a fault.
             Health::Ok if status == 409 => {
-                format!("github.com/{} has no commits yet — the next save pushes the first one.", repo)
+                format!("github.com/{} is empty, so the next save starts it.", repo)
             }
             Health::Ok => format!("Backed up to github.com/{}.", repo),
             Health::ReadOnly => format!(
-                "The saved token can read github.com/{} but not push to it — reconnect to grant write access.",
+                "This token can only read github.com/{}. Reconnect to allow pushes.",
                 repo
             ),
-            Health::Auth => "GitHub rejected the saved token — reconnect to sign in again.".to_string(),
+            Health::Auth => "GitHub rejected this token. Reconnect to sign in again.".to_string(),
             Health::Missing => format!(
-                "github.com/{} is not visible to the saved token — deleted, renamed, or access was revoked.",
+                "github.com/{} is missing or not shared with this token.",
                 repo
             ),
             Health::Throttled => {
-                "GitHub is rate-limiting this device — saves stay local and retry shortly.".to_string()
+                "GitHub is rate-limiting this device. Saves stay local for now.".to_string()
             }
-            Health::Offline => {
-                "Cannot reach github.com — saves are saved locally and push when the connection is back."
-                    .to_string()
-            }
+            Health::Offline => "Cannot reach github.com. Saves stay on this device.".to_string(),
         };
         Self {
             state,
@@ -1528,7 +1700,9 @@ fn main() {
             git_sync_heartbeat,
             git_sync_reauth,
             git_sync_coverage,
-            list_folder_liths
+            list_folder_liths,
+            probe_instance,
+            fetch_instance_icon
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
@@ -2165,6 +2339,66 @@ mod tests {
 
         log.record(folder, None);
         assert_eq!(log.last_error(folder), None);
+    }
+
+    /// A backup is "running" only between begin and finish, which is the window
+    /// in which the launcher, freshly reloaded from a wiki, asks.
+    /// The bookmark probe's whole job is telling "not a Lithic instance" apart
+    /// from "there, but asking for credentials", and the second case is exactly
+    /// the one a CORS-bound browser fetch cannot see.
+    #[test]
+    fn a_manifest_response_is_classified_by_status_then_content() {
+        let lithic = br#"{"name":"Lithic","short_name":"Lithic"}"#;
+        assert_eq!(classify_manifest(200, lithic), "lithic");
+        // Either field is enough: the launcher checks both.
+        assert_eq!(classify_manifest(200, br#"{"short_name":"Lithic"}"#), "lithic");
+        assert_eq!(classify_manifest(200, br#"{"name":"Lithic"}"#), "lithic");
+
+        assert_eq!(classify_manifest(401, b""), "protected");
+        assert_eq!(classify_manifest(403, b""), "protected");
+        // Answered, but not one of ours.
+        assert_eq!(classify_manifest(404, b"not found"), "other");
+        assert_eq!(classify_manifest(500, b"boom"), "other");
+        assert_eq!(classify_manifest(200, br#"{"name":"Something Else"}"#), "other");
+        // A JSON parser error is not a crash: an instance behind an auth proxy
+        // can answer 200 with a login page.
+        assert_eq!(classify_manifest(200, b"<html>login</html>"), "other");
+        assert_eq!(classify_manifest(200, b""), "other");
+    }
+
+    #[test]
+    fn the_commit_log_tracks_a_backup_while_it_runs() {
+        let log = CommitLog::default();
+        let folder = "/documents/lithic";
+        assert!(!log.in_flight(folder));
+
+        log.begin(folder);
+        assert!(log.in_flight(folder));
+        // Another folder's backup is not this folder's.
+        assert!(!log.in_flight("/documents/work"));
+
+        log.finish(folder);
+        assert!(!log.in_flight(folder));
+    }
+
+    /// Two in-flight backups of one folder must not clear the mark when the
+    /// first finishes, or the icon would go idle while the second is still
+    /// pushing.
+    #[test]
+    fn overlapping_backups_hold_the_mark_until_the_last_one_finishes() {
+        let log = CommitLog::default();
+        let folder = "/documents/lithic";
+
+        log.begin(folder);
+        log.begin(folder);
+        log.finish(folder);
+        assert!(log.in_flight(folder));
+
+        log.finish(folder);
+        assert!(!log.in_flight(folder));
+        // A finish without a matching begin is harmless, not a panic.
+        log.finish(folder);
+        assert!(!log.in_flight(folder));
     }
 
     /// The engine's saver and the launcher's recent list both report a folder,
