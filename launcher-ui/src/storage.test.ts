@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { KeyvalStore, addRecentFile, getRecentFiles, removeRecentFile, clearAllRecentFiles, forgetWikiCache, saveSearchCache, purgeOldestCachesIfNeeded, isWikiDriftedFromHead, recentDiskPath, type CacheStore } from './storage.ts';
+import { KeyvalStore, addRecentFile, getRecentFiles, removeRecentFile, clearAllRecentFiles, forgetWikiCache, saveSearchCache, purgeOldestCachesIfNeeded, isWikiDriftedFromHead, recentDiskPath, isFlatCacheKey, cachedWikiNames, type CacheStore } from './storage.ts';
 import { KeyvalWikiHistory } from './wiki-history.ts';
 
 // In Node environment without native indexedDB, we mock indexedDB or test logic
@@ -48,6 +48,40 @@ function cacheEntry(text: string, lastModified: string) {
 
 const cache = (name: string, text: string, lastModified: string): [string, any] =>
   [`search_cache_${name}`, cacheEntry(text, lastModified)];
+
+test('a history snapshot is not a cached wiki', () => {
+  // A wiki saved from inside itself writes a base snapshot, which carries a
+  // `text` field exactly like a cache does. Counting those as wikis invented
+  // entries like `base_recipes.lith_3f2a`: no row (cached rows only render
+  // while searching), unopenable, and enough on its own to keep the Recent
+  // panel on screen after the last real row was removed.
+  const keys: IDBValidKey[] = [
+    'search_cache_recipes.lith',
+    'search_cache_meta_recipes.lith',
+    'search_cache_base_recipes.lith_3f2a',
+    'search_cache_delta_recipes.lith_9c11',
+    'search_cache_bk1_recipes.lith',
+    'search_cache_bk2_recipes.lith',
+    'dirty_state_recipes.lith',
+    'recentFiles'
+  ];
+  assert.deepEqual(cachedWikiNames(keys), ['recipes.lith']);
+  assert.equal(isFlatCacheKey('search_cache_recipes.lith'), true);
+  assert.equal(isFlatCacheKey('search_cache_base_recipes.lith_3f2a'), false);
+  assert.equal(isFlatCacheKey('search_cache_delta_recipes.lith_9c11'), false);
+  assert.equal(isFlatCacheKey('search_cache_meta_recipes.lith'), false);
+  assert.equal(isFlatCacheKey('search_cache_bk1_recipes.lith'), false);
+});
+
+test('a wiki named after a history prefix is invisible to the cache list', () => {
+  // Known, accepted limitation of the key scheme: a flat cache key and a base
+  // snapshot key are told apart by prefix alone, so a wiki whose own name
+  // starts with `meta_`, `base_` or `delta_` reads as history. It still appears
+  // in the list through its own recent row; only its cached copy goes
+  // unlisted. Fixing this properly means a key scheme that cannot collide.
+  assert.deepEqual(cachedWikiNames(['search_cache_base_notes.lith']), []);
+  assert.equal(isFlatCacheKey('search_cache_base_notes.lith'), false);
+});
 
 test('purge does nothing when usage is below the threshold', async () => {
   const store = new MemoryIdb([

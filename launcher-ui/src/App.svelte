@@ -7,7 +7,7 @@
   import { pwaInstall, promptPwaInstall } from './pwa-install';
   import { bootLegacyWiki, bootLegacyHtml, type RemoteTarget } from './legacy-launcher-runtime';
   import { EMOJI_LIST, uploadInstanceIcon, clearInstanceIcon, emojiFaviconUrl, applyFavicon, bustIconCache, readInstanceEmoji, saveInstanceEmoji, clearInstanceEmoji } from './instance-icon';
-  import { getRecentFiles, addRecentFile, removeRecentFile, clearAllRecentFiles, purgeOldestCachesIfNeeded, saveSearchCache, forgetWikiCache, idb, getSearchCacheText, listWikiVersions, wikiHasHistory, downloadWikiVersion, getDirtyState, clearDirtyState, listDirtyRecoveries, isWikiDriftedFromHead, isInstallDismissed, setInstallDismissed, recentDiskPath, type RecentEntry } from './storage';
+  import { getRecentFiles, addRecentFile, removeRecentFile, clearAllRecentFiles, purgeOldestCachesIfNeeded, saveSearchCache, forgetWikiCache, cachedWikiNames, idb, getSearchCacheText, listWikiVersions, wikiHasHistory, downloadWikiVersion, getDirtyState, clearDirtyState, listDirtyRecoveries, isWikiDriftedFromHead, isInstallDismissed, setInstallDismissed, recentDiskPath, type RecentEntry } from './storage';
   import { readBookmarkEntries, saveBookmark, removeBookmark, setBookmarkIcon, refreshBookmarkIcon, verifyInstanceUrl, normalizeInstanceUrl, instanceLabel, type BookmarkEntry, type InstanceVerification } from './bookmarks';
   import { fetchRemoteFiles, fetchRemoteWiki, probePatchApi, createLockHeartbeat, readRemoteLock, uploadRemoteFile, webdavUrl, resolveSessionId, lithUploadName, type WebdavFile } from './webdav';
   import { searchCachedWikis } from './cache-search';
@@ -1050,19 +1050,19 @@
     const request = ++cacheSearchRequest;
     const entries: Record<string, CacheSearchEntry> = {};
     try {
-      const keys = await idb.keys();
-      const cacheKeys = keys.filter((key): key is string =>
-        typeof key === 'string' && key.startsWith('search_cache_') && !key.startsWith('search_cache_bk')
-      );
-      await Promise.all(cacheKeys.map(async (key) => {
+      // `cachedWikiNames` owns the which-keys-are-wikis rule: history snapshots
+      // share the cache prefix, and a base snapshot carries text too, so a
+      // prefix test alone lists wikis that do not exist under names like
+      // `base_recipes.lith_3f2a` — enough to keep the panel on screen with
+      // nothing in it, and findable only by a search that cannot open them.
+      for (const name of cachedWikiNames(await idb.keys())) {
         try {
-          const cache = await idb.get<{ text?: string }>(key);
+          const cache = await idb.get<{ text?: string }>('search_cache_' + name);
           if (typeof cache?.text === 'string') {
-            const name = key.slice('search_cache_'.length);
             entries[name] = { name, text: cache.text, sizeBytes: new Blob([cache.text]).size };
           }
         } catch { /* cached search is best effort */ }
-      }));
+      }
     } catch { /* IndexedDB may be unavailable */ }
 
     if (request !== cacheSearchRequest) return;
@@ -2726,7 +2726,7 @@
             <button class="recent-icon-button remove-recent" type="button" aria-label={`Remove bookmark ${entry.url}`} on:click={() => removeInstanceBookmark(entry.url)}><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m7 7 10 10M17 7 7 17"></path></svg></button>
           </div>
         {/each}
-        {#if filteredRecent.length === 0 && filteredCached.length === 0 && filteredRemote.length === 0 && bookmarks.filter((entry) => entry.label.toLowerCase().includes(search.toLowerCase()) || entry.url.toLowerCase().includes(search.toLowerCase())).length === 0}<p class="empty">{isSelfHost() && remoteFiles.length === 0 ? 'No Liths on this server yet.' : 'No matching Liths.'}</p>{/if}
+        {#if filteredRecent.length === 0 && filteredCached.length === 0 && filteredRemote.length === 0 && bookmarks.filter((entry) => entry.label.toLowerCase().includes(search.toLowerCase()) || entry.url.toLowerCase().includes(search.toLowerCase())).length === 0}<p class="empty">{isSelfHost() && remoteFiles.length === 0 ? 'No Liths on this server yet.' : (search.trim() ? 'No matching Liths.' : 'No recent Liths.')}</p>{/if}
         {#each filteredRecent as file}
           {@const name = getEntryName(file)}
           <div class="recent-row">

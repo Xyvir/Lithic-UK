@@ -271,6 +271,29 @@ export async function saveSearchCache(fileName: string, text: string): Promise<v
   }
 }
 
+/**
+ * True only for the key holding a wiki's whole current text.
+ *
+ * History snapshots and deltas share the `search_cache_` prefix, and a base
+ * snapshot carries a `text` field just like a cache does — so a reader that
+ * filters on the prefix alone invents a wiki named after the key's suffix,
+ * e.g. `base_recipes.lith_3f2a`. Such an entry is invisible in the list (cached
+ * rows only render while a search is active), cannot be opened, and is enough
+ * on its own to keep the Recent panel on screen. Every reader of "which wikis
+ * are cached" has to agree on this predicate, which is why it lives here rather
+ * than being spelled out at each call site.
+ */
+export function isFlatCacheKey(key: string): boolean {
+  return key.startsWith('search_cache_') && !key.startsWith('search_cache_bk') && !isHistoryKey(key);
+}
+
+/** Names of the wikis with a cached copy, given a raw IndexedDB key list. */
+export function cachedWikiNames(keys: IDBValidKey[]): string[] {
+  return keys
+    .filter((key): key is string => typeof key === 'string' && isFlatCacheKey(key))
+    .map((key) => key.slice('search_cache_'.length));
+}
+
 /** Delete every history key (meta, bases, deltas) for one wiki. */
 export async function deleteWikiHistory(name: string, store: CacheStore = idb): Promise<void> {
   await new KeyvalWikiHistory(store).deleteHistory(name);
@@ -478,11 +501,6 @@ export async function purgeOldestCachesIfNeeded(
     return 0;
   }
   if (!quota || usage / quota < threshold) return 0;
-
-  const isFlatCacheKey = (key: string) =>
-    key.startsWith('search_cache_') &&
-    !key.startsWith('search_cache_bk') &&
-    !isHistoryKey(key);
 
   const dirtyKeys = ((await store.keys()) as IDBValidKey[])
     .filter((key): key is string => typeof key === 'string' && key.startsWith('dirty_state_'));
