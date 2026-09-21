@@ -45,18 +45,32 @@ export const DEFAULT_PLUGINS: string[] = [
   'xyvir/lithic-patch-calendar',
   'xyvir/lithic-patch-comptext',
   'xyvir/lithic-patch-markdown',
+  'xyvir/lithic-patch-mermaid',
   'xyvir/lithic-patch-streams',
   'xyvir/lithic-patch-whiteboard',
   'xyvir/lithic-import-handler',
   'xyvir/lithic-python-codeblocks',
   'xyvir/lithic-richlinks',
+  'xyvir/lithic-save',
   'xyvir/lithic-tweaks',
   'xyvir/lithic-wikitext-highlight',
   'xyvir/tw-jspython'
 ];
 
+/**
+ * Tiddlers the launcher itself puts into every mounted wiki: the shared widget
+ * override and the Ephemeral API integration, plus the plugin-library flag the
+ * engine bootstrap sets. They are part of how Lithic runs, not the user's
+ * content, so a save must not write them into a .lith — the next mount injects
+ * them again on top, and the copy in the file goes stale. `~` is the launcher's
+ * own marking for an injected override, which is why a prefix rule covers the
+ * whole class.
+ */
+export const LITHIC_INJECTED_EXCLUSIONS =
+  '-[prefix[~]] -[prefix[$:/plugins/lithic/ephemeral/]] -[[$:/config/OfficialPluginLibrary]]';
+
 export const LITHIC_BASE_FILTER =
-  '[all[tiddlers]!is[system]] [all[tiddlers]is[system]!prefix[$:/core]!prefix[$:/themes]!prefix[$:/temp]!prefix[$:/state]!prefix[$:/HistoryList]] [is[shadow]] -[prefix[$:/boot/]] -[[$:/isEncrypted]] -[[$:/library/sjcl.js]] -[[$:/status/RequireReloadDueToPluginChange]] -[[$:/StoryList]] -[[$:/config/PageControlButtons/Visibility/$:/core/ui/Buttons/new-journal]] -[[$:/lithic/startup/webdav-utils.js]]';
+  `[all[tiddlers]!is[system]] [all[tiddlers]is[system]!prefix[$:/core]!prefix[$:/themes]!prefix[$:/temp]!prefix[$:/state]!prefix[$:/HistoryList]] [is[shadow]] -[prefix[$:/boot/]] -[[$:/isEncrypted]] -[[$:/library/sjcl.js]] -[[$:/status/RequireReloadDueToPluginChange]] -[[$:/StoryList]] -[[$:/config/PageControlButtons/Visibility/$:/core/ui/Buttons/new-journal]] -[[$:/lithic/startup/webdav-utils.js]] ${LITHIC_INJECTED_EXCLUSIONS}`;
 
 export function getLithicUserFilter(): string {
   const pluginExclusions = DEFAULT_PLUGINS.map((p) => `-[[$:/plugins/${p}]]`).join(' ');

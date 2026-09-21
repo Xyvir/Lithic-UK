@@ -17,6 +17,25 @@ test('parses CRLF blocks', () => {
   ]);
 });
 
+// Regression: the in-wiki exporter prefixes its first block with a blank line,
+// and taking the first blank line as the field separator turned that whole
+// field section into body text. The result was a tiddler with no title, which
+// the engine refuses to boot around — the file looked corrupted rather than
+// carrying one stray newline.
+test('a leading blank line does not swallow the first block of fields', () => {
+  const source = '\n\ntitle: First\ntype: text/markdown\n\nlith body\n⁂⁂⁂\n\n\ntitle: Second\n\nsecond body';
+  assert.deepEqual(parseLithToJSON(source), [
+    { title: 'First', type: 'text/markdown', text: 'lith body' },
+    { title: 'Second', text: 'second body' }
+  ]);
+});
+
+test('leading CRLF blank lines are tolerated too', () => {
+  assert.deepEqual(parseLithToJSON('\r\n\r\ntitle: A\r\n\r\nbody'), [
+    { title: 'A', text: 'body' }
+  ]);
+});
+
 test('serializes fields in sorted order and tiddlers by title', () => {
   const result = serializeJsonToLith(JSON.stringify([
     { title: 'Zed', z: 'last', a: 'first', text: 'z text' },

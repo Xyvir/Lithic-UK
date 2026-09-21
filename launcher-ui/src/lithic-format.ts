@@ -4,8 +4,16 @@ export function parseLithToJSON(lithText: string): LithicTiddler[] {
   const blocks = lithText.split(/(?:\r?\n)*⁂⁂⁂(?:\r?\n)*/);
   const tiddlers: LithicTiddler[] = [];
 
-  for (const block of blocks) {
-    if (!block.trim()) continue;
+  for (const rawBlock of blocks) {
+    if (!rawBlock.trim()) continue;
+
+    // A block can open with blank lines and still be a well-formed tiddler: the
+    // in-wiki exporter emits one before its first block. Searching from the raw
+    // start would take that blank line as the field separator, swallow the whole
+    // field section into the body, and produce a tiddler with no title — which
+    // the engine will not boot around, so the mount died on what looked like a
+    // mangled file rather than a stray newline.
+    const block = rawBlock.replace(/^[\r\n]+/, '');
 
     let delimiterIdx = block.indexOf('\n\n');
     let delimiterLen = 2;

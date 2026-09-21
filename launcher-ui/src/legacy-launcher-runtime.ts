@@ -916,7 +916,13 @@ export function buildEngineHtml(
   // File tiddlers first, then queued pending imports (payload, Ephemeral
   // integration, etc.) so later entries win on title conflicts — mirrors the
   // legacy launcher, which appends window.pendingImports after the store.
-  const tiddlers = [...imported, ...extraTiddlers];
+  // An entry without a title is dropped rather than injected: TiddlyWiki cannot
+  // store an unnamed tiddler, and handing it one aborts the boot into a blank
+  // page with no error form. A malformed file should cost the user the tiddler
+  // it mangled, not the whole mount.
+  const tiddlers = [...imported, ...extraTiddlers].filter(
+    (tiddler) => typeof tiddler.title === 'string' && tiddler.title.trim() !== ''
+  );
   // The engine's journal stub creates the today entry at boot, so blank
   // liths no longer need a pre-hydrated journal tiddler here. Saver and
   // plugin-library defaults are still injected before the store.

@@ -27,6 +27,22 @@ function readStore(html: string): Array<Record<string, string>> {
   return JSON.parse(match[1]);
 }
 
+// Regression: a file exported from the in-wiki exporter opened with a blank
+// line, which the parser read as the field separator, so the first tiddler
+// arrived with no title. Injecting an unnamed tiddler aborts the boot into a
+// blank page with no error form — the whole mount was lost to one stray
+// newline. A tiddler with no title is now dropped instead.
+test('a title-less tiddler is dropped instead of bricking the boot', () => {
+  const html = buildEngineHtml(
+    ENGINE_STUB,
+    { name: 'x.lith', text: 'title: Real\n\nkept' },
+    [{ text: 'no title at all' }, { title: '   ', text: 'blank title' }]
+  );
+  const titles = readStore(html).map((tiddler) => tiddler.title);
+  assert.ok(titles.includes('Real'), 'the real tiddler still mounts');
+  assert.equal(readStore(html).length, titles.filter((title) => typeof title === 'string' && title.trim() !== '').length);
+});
+
 test('buildEngineHtml injects handoff tiddlers then pending imports', () => {
   const html = buildEngineHtml(ENGINE_STUB, { name: 'x.lith', text: 'title: FileTiddler\n\nfile body' }, [{ title: 'PendingTiddler', text: 'queued' }]);
   const titles = readStore(html).map((tiddler) => tiddler.title);
