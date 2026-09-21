@@ -10,6 +10,10 @@ tauri-build = { version = "1", features = [] }
 
 [target.'cfg(windows)'.dependencies]
 winreg = "0.52"
+# A Start Menu entry on install, written through the shell's own IShellLink.
+# Microsoft's bindings, and 0.61 is already in the tree via tauri, so this adds
+# features to a build that already exists rather than a new dependency.
+windows = { version = "0.61", features = ["Win32_Foundation", "Win32_System_Com", "Win32_UI_Shell"] }
 
 [dependencies]
 tauri = { version = "1", features = ["api-all"] }

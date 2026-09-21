@@ -124,6 +124,89 @@ fn install_target() -> Option<PathBuf> {
         .map(|dir| dir.join("Lithic.exe"))
 }
 
+/// What an install did, so the launcher can say where the program went and
+/// whether it also picked up a Start Menu entry.
+#[derive(serde::Serialize)]
+struct InstallResult {
+    path: String,
+    start_menu: Option<String>,
+}
+
+/// Write a Windows shell link.
+///
+/// Through the shell's own `IShellLink`, rather than by hand-rolling the binary
+/// format or scripting a launcher: Windows owns the format, so the result is
+/// exactly what "Create shortcut" would have made and behaves like it —
+/// pinnable, renameable, movable, and readable by Explorer and the taskbar.
+#[cfg(windows)]
+fn write_shell_link(link: &Path, exe: &Path) -> Result<(), String> {
+    use windows::core::{HSTRING, Interface};
+    use windows::Win32::System::Com::{
+        CoCreateInstance, CoInitializeEx, CoUninitialize, IPersistFile, CLSCTX_INPROC_SERVER,
+        COINIT_APARTMENTTHREADED,
+    };
+    use windows::Win32::UI::Shell::{IShellLinkW, ShellLink};
+
+    let exe_text = exe.to_string_lossy().into_owned();
+    let working_dir = exe
+        .parent()
+        .map(|parent| parent.to_string_lossy().into_owned())
+        .unwrap_or_default();
+
+    // SAFETY: COM is initialized on this thread before the objects are created,
+    // and every HSTRING outlives the call that reads it.
+    unsafe {
+        // Anything other than success means COM could not be started here. The
+        // usual case is RPC_E_CHANGED_MODE — this thread already owns a
+        // different apartment model — which is fine: every apartment can build
+        // a shell link, and that state is the caller's to unwind, not ours.
+        let owned_apartment = CoInitializeEx(None, COINIT_APARTMENTTHREADED).is_ok();
+        let written = (|| -> Result<(), String> {
+            let shell_link: IShellLinkW = CoCreateInstance(&ShellLink, None, CLSCTX_INPROC_SERVER)
+                .map_err(|error| error.to_string())?;
+            shell_link
+                .SetPath(&HSTRING::from(exe_text.as_str()))
+                .map_err(|error| error.to_string())?;
+            shell_link
+                .SetWorkingDirectory(&HSTRING::from(working_dir.as_str()))
+                .map_err(|error| error.to_string())?;
+            shell_link
+                .SetDescription(&HSTRING::from("Lithic — local-first wiki launcher"))
+                .map_err(|error| error.to_string())?;
+            // Index 0 of the exe's own icon, so the entry is recognisably Lithic
+            // in the Start Menu and on the taskbar once pinned.
+            shell_link
+                .SetIconLocation(&HSTRING::from(exe_text.as_str()), 0)
+                .map_err(|error| error.to_string())?;
+            let file: IPersistFile = shell_link.cast().map_err(|error| error.to_string())?;
+            // Save writes or overwrites; a stale link would keep pointing at a
+            // previous install location after the app is moved.
+            file.Save(&HSTRING::from(link.to_string_lossy().as_ref()), true)
+                .map_err(|error| error.to_string())
+        })();
+        if owned_apartment {
+            CoUninitialize();
+        }
+        written
+    }
+}
+
+/// The user's Start Menu entry for the installed copy.
+///
+/// Documents\Lithic is on nobody's Start Menu, so without this the app can only
+/// be launched by finding the exe. This is what makes it appear under Apps > All
+/// so it can be pinned to the taskbar like any other program.
+#[cfg(windows)]
+fn create_start_menu_shortcut(exe: &Path) -> Result<PathBuf, String> {
+    let programs = dirs::data_dir()
+        .map(|roaming| roaming.join("Microsoft").join("Windows").join("Start Menu").join("Programs"))
+        .ok_or_else(|| "Could not resolve the Start Menu folder".to_string())?;
+    fs::create_dir_all(&programs).map_err(|error| error.to_string())?;
+    let link = programs.join("Lithic.lnk");
+    write_shell_link(&link, exe)?;
+    Ok(link)
+}
+
 /// Install state for the launcher's PWA-style button: hidden once an
 /// installed copy exists and matches the running exe; shown as an update
 /// when the installed copy differs (older build).
@@ -160,7 +243,7 @@ fn install_status() -> InstallStatus {
 /// Registration is deliberately non-destructive: it adds Lithic to each
 /// extension's Open With list without stealing any default association.
 #[tauri::command]
-fn install_monolith() -> Result<String, String> {
+fn install_monolith() -> Result<InstallResult, String> {
     let exe = std::env::current_exe().map_err(|error| error.to_string())?;
 
     // Documents\Lithic\Lithic.exe: user-visible and statically reachable.
@@ -198,6 +281,19 @@ fn install_monolith() -> Result<String, String> {
         eprintln!("Open With registration failed: {}", error);
     }
 
+    // Best effort like the associations: the copy already succeeded, and a
+    // missing shortcut should not turn a working install into a failure.
+    #[cfg(windows)]
+    let start_menu = match create_start_menu_shortcut(&target) {
+        Ok(link) => Some(link.to_string_lossy().into_owned()),
+        Err(error) => {
+            eprintln!("Start Menu shortcut failed: {}", error);
+            None
+        }
+    };
+    #[cfg(not(windows))]
+    let start_menu: Option<String> = None;
+
     // Reveal the installed exe in Explorer so the user sees where it went.
     #[cfg(windows)]
     let _ = std::process::Command::new("explorer")
@@ -205,7 +301,10 @@ fn install_monolith() -> Result<String, String> {
         .arg(&target)
         .spawn();
 
-    Ok(target.to_string_lossy().into_owned())
+    Ok(InstallResult {
+        path: target.to_string_lossy().into_owned(),
+        start_menu,
+    })
 }
 
 /// Extensions the desktop app opens, with their Open With descriptions.
@@ -1365,6 +1464,39 @@ mod tests {
                 stages
             );
         }
+
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    /// A shortcut has to be a real shell link, not merely a file with a `.lnk`
+    /// name: Windows reads the header, and a malformed one shows up as a broken
+    /// Start Menu entry. Written into a scratch folder — a test has no business
+    /// putting an entry in the developer's real Start Menu.
+    #[cfg(windows)]
+    #[test]
+    fn a_shell_link_is_a_real_link_to_the_installed_exe() {
+        let root = scratch("shortcut");
+        let exe = root.join("Lithic.exe");
+        write(&root, "Lithic.exe", "not really an executable");
+
+        let link = root.join("Lithic.lnk");
+        write_shell_link(&link, &exe).expect("the shell link should be written");
+
+        let bytes = fs::read(&link).expect("the shortcut file should exist");
+        // A shell link opens with a 76-byte header, little-endian, so a wrong
+        // or truncated format fails here rather than in Explorer.
+        assert_eq!(&bytes[..4], &[0x4c, 0x00, 0x00, 0x00]);
+        // The target's name is stored as UTF-16 inside the link, which is how
+        // this shows it points at the exe it was asked for and not merely that
+        // some bytes were written.
+        let target_name: Vec<u8> = "Lithic.exe"
+            .encode_utf16()
+            .flat_map(|unit| unit.to_le_bytes())
+            .collect();
+        assert!(
+            bytes.windows(target_name.len()).any(|window| window == target_name),
+            "the link should hold the target's name in UTF-16"
+        );
 
         let _ = fs::remove_dir_all(&root);
     }

@@ -552,10 +552,16 @@
     installBusy = true;
     installStatus = '';
     try {
-      const target = await tauriInvoke<string>('install_monolith');
-      installStatus = target;
+      const result = await tauriInvoke<{ path: string; start_menu: string | null }>('install_monolith');
+      // The Start Menu entry is the part worth mentioning: it is what makes the
+      // app launchable (and pinnable) instead of a file in Documents.
+      installStatus = result.start_menu
+        ? `${result.path} — Start Menu shortcut added. Pin it from Apps > All.`
+        : result.path;
       installState = 'current';
-      status = `Installed to ${target}`;
+      status = result.start_menu
+        ? `Installed to ${result.path} — added a Start Menu shortcut`
+        : `Installed to ${result.path}`;
       // The status line animates while it has text; retire the message
       // once it has had a moment to be read.
       setTimeout(() => { if (status.startsWith('Installed to ')) status = ''; }, 6000);
@@ -2334,5 +2340,5 @@
       {/if}
     </section>
   {/if}
-  <footer>{#if mode === 'webapp'}<a class="github-link" href="https://github.com/Lithic-UK/Lithic" target="_blank" rel="noreferrer">Github</a>{#if $pwaInstall.installable && !(installDismissed && installState !== 'stale')}<span class="install-offer"><button class="install-button" on:click={installPwa}>Install App</button><button class="install-dismiss" on:click={dismissInstallOffer} title="Hide the install offer. Restore it later by clearing site data." aria-label="Dismiss install offer">dismiss ✕</button></span>{/if}{:else if mode === 'tauri' && installState !== 'current' && !(installDismissed && installState === 'uninstalled')}<span class="install-offer"><button class="install-button" on:click={installMonolith} disabled={installBusy} title={installStatus || 'Copy this app to a stable per-user location and register file associations'}>{installBusy ? 'Installing…' : installState === 'stale' ? 'Update Install' : 'Install'}</button><button class="install-dismiss" on:click={dismissInstallOffer} title="Hide the install offer. Restore it later by deleting recents.txt beside the app." aria-label="Dismiss install offer">dismiss ✕</button></span>{/if}</footer>
+  <footer>{#if mode === 'webapp'}<a class="github-link" href="https://github.com/Lithic-UK/Lithic" target="_blank" rel="noreferrer">Github</a>{#if $pwaInstall.installable && !(installDismissed && installState !== 'stale')}<span class="install-offer"><button class="install-button" on:click={installPwa}>Install App</button><button class="install-dismiss" on:click={dismissInstallOffer} title="Hide the install offer. Restore it later by clearing site data." aria-label="Dismiss install offer">dismiss ✕</button></span>{/if}{:else if mode === 'tauri' && installState !== 'current' && !(installDismissed && installState === 'uninstalled')}<span class="install-offer"><button class="install-button" on:click={installMonolith} disabled={installBusy} title={installStatus || 'Copy this app to a stable per-user location, register file associations, and add a Start Menu shortcut'}>{installBusy ? 'Installing…' : installState === 'stale' ? 'Update Install' : 'Install'}</button><button class="install-dismiss" on:click={dismissInstallOffer} title="Hide the install offer. Restore it later by deleting recents.txt beside the app." aria-label="Dismiss install offer">dismiss ✕</button></span>{/if}</footer>
 </main>
