@@ -80,11 +80,11 @@ ul .menu-separator {
 }
 
 /* Context Menu Highlight Patch - applies when right-clicking a stream node or link.
-   The band/fg pair is the contrast-checked menu hover pair, so the highlight
-   stays readable on every palette. */
+   Intentionally matches the streams-specific highlight green from the default
+   notebook palette -- do NOT swap to the contrast hover pair. */
 .lithic-context-menu-active,
 .lithic-context-menu-active-children {
-	background: var(--lithic-c-menu-hover-bg, #3a5e39) !important;
-	color: var(--lithic-c-menu-hover-fg, #d5e2f1) !important;
+	background: #3a5e39 !important;
+	color: #d5e2f1 !important;
 	border-radius: 4px;
 }

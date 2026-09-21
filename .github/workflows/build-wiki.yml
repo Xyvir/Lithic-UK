@@ -94,6 +94,16 @@ jobs:
             echo "::error::flibbles/uglify plugin leaked into the published artifact — the lithic-save save/all override is not being applied."
             exit 1
           fi
+          # The WIKITEXT uglifier must stay OFF ($:/config/flibbles/uglify/text/vnd.tiddlywiki
+          # = 'no'): it collapses load-bearing whitespace between SVG attributes and
+          # after macro params, which mangles every $:/core/images/* SVG (context menus
+          # render empty) and shifts the caret-pos offsets of the slashcommand tiddlers.
+          # Both patterns below are unambiguous fingerprints of that pass.
+          WIKITEXT_DAMAGE=$(grep -o -F -e 'size>>height=' -e '\parameters(size:' wiki/output/index.html | wc -l | tr -d ' ')
+          if [ "$WIKITEXT_DAMAGE" -ne 0 ]; then
+            echo "::error::wikitext uglifier damaged $WIKITEXT_DAMAGE tiddler sites (collapsed attribute/macro whitespace) - \$:/config/flibbles/uglify/text/vnd.tiddlywiki must be 'no'. See agents.md."
+            exit 1
+          fi
 
       - name: Rename Output
         run: mv wiki/output/index.html wiki/output/lith.html
