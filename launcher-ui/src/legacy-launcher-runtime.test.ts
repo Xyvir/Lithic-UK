@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { resolveEngineCandidates, bootLegacyWiki, buildEngineHtml } from './legacy-launcher-runtime.ts';
+import { resolveEngineCandidates, bootLegacyHtml, bootLegacyWiki, buildEngineHtml } from './legacy-launcher-runtime.ts';
 
 test('resolves lithic.html as a sibling for file URLs', () => {
   assert.deepEqual(resolveEngineCandidates('file:///C:/Lithic/src/launcher.html'), [
@@ -157,6 +157,22 @@ test('engine bootstrap arms the realtime dirty watcher for lith mode', () => {
 test('engine bootstrap keeps the dirty watcher inert for HTML monolith mode', () => {
   const html = buildEngineHtml(ENGINE_STUB, { name: 'x.html', text: '' }, [], {}, { isHtmlMode: true });
   assert.ok(html.includes('__LITHIC_ACTIVE_FILE_NAME__ = "";'), 'HTML monoliths leave the active file key empty');
+});
+
+// A monolith opts out of unsaved-edit recovery because the page may keep its own,
+// which leaves saved history as the only way that mount is findable or
+// recoverable. Dropping it too would make an edited monolith invisible to search
+// and its row's history button permanently dead.
+test('HTML monolith saves record the same searchable history as a lith', () => {
+  const html = buildEngineHtml(ENGINE_STUB, { name: 'x.html', text: '' }, [], {}, { isHtmlMode: true });
+  const start = html.indexOf('writable.write(_text)');
+  // Anchor on the NEXT `var lithText` — the saver emits one earlier, inside
+  // saveRemote, which would otherwise put the slice's end before its start.
+  const end = html.indexOf('var lithText', start);
+  assert.ok(start >= 0 && end > start, 'the monolith save branch is present');
+  const branch = html.slice(start, end);
+  assert.match(branch, /saveSearchCache\(handle\.name, jsonText\)/, 'records the cache and version chain');
+  assert.doesNotMatch(branch, /dirty_state_/, 'but never writes an unsaved-edit backup');
 });
 
 test('scratch mode injects the flat-text serializers and publishes the root title', () => {
@@ -320,6 +336,34 @@ test('instances without the patch API still mount, but save whole files', () => 
   // routes everything to the legacy whole-file PUT.
   assert.match(html, /if \(!remote\.api \|\| !patchApi \|\| !digest\) \{ remotePut\(tw, lithText, jsonText, callback\); return; \}/);
   assertInjectedScriptsParse(html, 'legacy self-host');
+});
+
+// The injected saver resolves its write target from sessionStorage, and the
+// engine mount is what writes that entry. A monolith mount did not, so it
+// adopted whatever handoff the previously mounted wiki had left behind and
+// wrote this page over that file.
+test('mounting an HTML monolith records its own file as the save target', () => {
+  const store = new Map<string, string>([
+    ['lithic-active-file', JSON.stringify({ name: 'previous.lith', path: 'C:/docs/previous.lith' })]
+  ]);
+  const globals = globalThis as unknown as { sessionStorage: unknown; document: unknown };
+  const original = { sessionStorage: globals.sessionStorage, document: globals.document };
+  globals.sessionStorage = {
+    setItem: (key: string, value: string) => store.set(key, value),
+    getItem: (key: string) => store.get(key) ?? null,
+    removeItem: (key: string) => store.delete(key)
+  };
+  globals.document = { open() {}, write() {}, close() {} };
+  try {
+    bootLegacyHtml('<html></html>', 'page.html', 'C:/docs/page.html');
+  } finally {
+    globals.sessionStorage = original.sessionStorage;
+    globals.document = original.document;
+  }
+  assert.deepEqual(JSON.parse(store.get('lithic-active-file') ?? 'null'), {
+    name: 'page.html',
+    path: 'C:/docs/page.html'
+  });
 });
 
 test('ipynb scratch mode injects the notebook runtime and parses notebook cells', () => {

@@ -11,6 +11,7 @@
  */
 
 import { parseLithToJSON } from './lithic-format.ts';
+import { normalizeLithName } from './legacy-saver.ts';
 import { parseScratchText, scratchTiddlers, parseTidFile } from './scratch-wiki.ts';
 import { ipynbTiddlers } from './ipynb.ts';
 
@@ -28,6 +29,46 @@ export const SCRATCH_EXTENSIONS = ['md', 'txt', 'tid', 'json', 'ipynb'] as const
 /** True when this file name opens as an in-place scratch editor document. */
 export function isScratchFileName(name: string): boolean {
   return resolveScratchKind(name) !== null;
+}
+
+/**
+ * A file that is a complete wiki page rather than a Lithic document: mounted
+ * as-is, carrying its own tiddler store and its own save behavior. This is the
+ * shipped engine (lithic.html) or a modified build of it, and it is the one
+ * mount kind the launcher does not manage.
+ */
+export function isHtmlMonolithName(name: string): boolean {
+  return /\.(?:html?|htm)$/i.test(name);
+}
+
+/**
+ * Whether the mounted engine streams this file's unsaved edits into the
+ * launcher's `dirty_state_<name>` recovery backup.
+ *
+ * Every local file does, including scratch documents — the engine keys their
+ * backup on the same file name the launcher mounts, so a mount that skipped
+ * recovery would take the file on disk and silently drop the edits captured
+ * since the last save. An HTML monolith does not: a page may carry its own
+ * recovery mechanism through add-ons or plugins (a browser-storage saver, for
+ * instance), and the launcher must not interpose on what the page does with its
+ * own edits. Version history is a separate question and monoliths get it: it is
+ * a copy of what was saved, so it touches nothing the page owns.
+ */
+export function tracksUnsavedEdits(name: string): boolean {
+  return !isHtmlMonolithName(name);
+}
+
+/**
+ * The one name a mount files everything under: its recent row, its flat search
+ * cache, its version history and its dirty-state key. Getting this wrong is not
+ * cosmetic — a mount whose cache name differs from its row name shows a row with
+ * a dead history button and lists a cached wiki no file corresponds to.
+ *
+ * Scratch documents and HTML monoliths save back in place as themselves, so they
+ * keep the file's own name; a Lithic document is normalized to its `.lith` name.
+ */
+export function resolveMountName(name: string, kind: { scratch?: boolean; htmlMonolith?: boolean } = {}): string {
+  return kind.scratch || kind.htmlMonolith ? name : normalizeLithName(name);
 }
 
 /** Resolve the scratch kind for a file name; null when not editable as scratch. */

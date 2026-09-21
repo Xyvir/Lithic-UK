@@ -3,13 +3,14 @@
   import type { LauncherMode } from './mode';
   import { createFileBridge, tauriInvoke, tauriListen, saveTextVerifiably } from './file-bridge';
   import { orphanPill, orphanDownloadNote, type OrphanDownloadState } from './orphan-download';
-  import { isScratchFileName, resolveScratchKind, type ScratchKind } from './scratch-editor';
+  import { isScratchFileName, isHtmlMonolithName, tracksUnsavedEdits, resolveMountName, resolveScratchKind, type ScratchKind } from './scratch-editor';
   import { pwaInstall, promptPwaInstall } from './pwa-install';
   import { bootLegacyWiki, bootLegacyHtml, type RemoteTarget } from './legacy-launcher-runtime';
   import { EMOJI_LIST, uploadInstanceIcon, clearInstanceIcon, emojiFaviconUrl, applyFavicon, bustIconCache, readInstanceEmoji, saveInstanceEmoji, clearInstanceEmoji } from './instance-icon';
   import { getRecentFiles, addRecentFile, removeRecentFile, clearAllRecentFiles, purgeOldestCachesIfNeeded, saveSearchCache, forgetWikiCache, cachedWikiNames, idb, getSearchCacheText, listWikiVersions, wikiHasHistory, downloadWikiVersion, getDirtyState, clearDirtyState, listDirtyRecoveries, isWikiDriftedFromHead, isInstallDismissed, setInstallDismissed, recentDiskPath, type RecentEntry } from './storage';
   import { readBookmarkEntries, saveBookmark, removeBookmark, setBookmarkIcon, refreshBookmarkIcon, verifyInstanceUrl, normalizeInstanceUrl, instanceLabel, type BookmarkEntry, type InstanceVerification } from './bookmarks';
   import { fetchRemoteFiles, fetchRemoteWiki, probePatchApi, createLockHeartbeat, readRemoteLock, uploadRemoteFile, webdavUrl, resolveSessionId, lithUploadName, type WebdavFile } from './webdav';
+  import { normalizeLithName } from './legacy-saver';
   import { searchCachedWikis } from './cache-search';
   import { computeBackupCoverage, hasBackedUpRepo, orphanedEntries, reindexFolders, type CoverageRow, type RebuildOrphan } from './backup-coverage';
   import { parseDeviceCode, parseDevicePoll, pollDelayMs, formatUserCode, generateRepoName, partitionRepos } from './github-device';
@@ -1166,11 +1167,6 @@
     void refreshBackupCoverage();
   }
 
-  function normalizeLithName(name: string): string {
-    const withoutKnownExtension = name.replace(/\.(?:html?|lith|json)$/i, '');
-    return `${withoutKnownExtension || 'untitled'}.lith`;
-  }
-
   /**
    * Transient-recovery gate: if this wiki has unsaved edits captured by the
    * realtime dirty watcher, ask the user what to do before booting. Returns
@@ -1255,20 +1251,26 @@
     remote: RemoteTarget | null = null
   ) {
     mountError = '';
-    const isHtmlMonolith = /\.(?:html?|htm)$/i.test(name);
+    // A complete wiki page rather than a Lithic document: served as-is, with
+    // its own tiddler store and its own save behavior.
+    const isHtmlMonolith = isHtmlMonolithName(name);
     // A .json file holding a top-level tiddler array is a wiki backup and
     // mounts as a lith; other .json files are verbatim scratch documents.
     const isJsonBackup = /\.json$/i.test(name) && contents.trim().startsWith('[');
     const isScratch = isScratchFileName(name) && !isJsonBackup;
-    const safeName = isScratch ? name : normalizeLithName(name);
-    await remember({ name: isHtmlMonolith ? name : safeName, path, text: contents, handle });
+    // One name for the recent row, the flat cache, the version history and the
+    // dirty-state key — see resolveMountName for why they must not diverge.
+    const safeName = resolveMountName(name, { scratch: isScratch, htmlMonolith: isHtmlMonolith });
+    await remember({ name: safeName, path, text: contents, handle });
+    // Drift compares the file against the tiddler chain, and only a .lith file
+    // holds a tiddler store to compare — a scratch document is flat text and a
+    // monolith is a page — so the SYNC marker stays lith-only. Unsaved-edit
+    // recovery is the one thing a monolith opts out of: it may already keep its
+    // own recovery through add-ons or plugins, and the launcher must not
+    // interpose on what the page does with its own edits. Saved history is not
+    // interposition, so monoliths keep it like every other mount.
     const driftedFromHead = !isHtmlMonolith && !isScratch && await isWikiDriftedFromHead(safeName, contents);
-    if (!isHtmlMonolith && !isScratch) {
-      // HTML monoliths bypass the lith cache chain entirely; lith wikis get
-      // the transient-recovery prompt before anything boots. Drift is detected
-      // quietly here and becomes a SYNC marker on the next successful save.
-      // Scratch documents keep their original file name and skip the lith
-      // cache chain — they save in place to the original file, not a .lith.
+    if (tracksUnsavedEdits(name)) {
       if ((await prepareDirtyRecovery(safeName)) === 'later') {
         busy = false;
         status = 'Unsaved edits kept for later';
@@ -1284,8 +1286,10 @@
     }
     if (isHtmlMonolith) {
       // HTML monoliths are complete wiki pages — serve them as-is, with an
-      // HTML-mode Save As saver injected (legacy parity).
-      await bootLegacyHtml(contents, safeName);
+      // HTML-mode saver injected that writes the page back (legacy parity).
+      // The path travels with it so the saver targets the file the user
+      // actually opened, not a handoff left behind by an earlier mount.
+      await bootLegacyHtml(contents, safeName, path);
       return;
     }
     const handoff = { name: safeName, path, text: contents };

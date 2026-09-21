@@ -4,6 +4,9 @@ import assert from 'node:assert/strict';
 import {
   SCRATCH_EXTENSIONS,
   isScratchFileName,
+  isHtmlMonolithName,
+  tracksUnsavedEdits,
+  resolveMountName,
   resolveScratchKind,
   resolveScratchPlan,
   parseScratchSource,
@@ -19,6 +22,45 @@ test('scratch file name detection', () => {
   assert.equal(isScratchFileName('notes.html'), false);
   assert.equal(isScratchFileName('notes.htm'), false);
   assert.equal(isScratchFileName('noextension'), false);
+});
+
+// Regression: the mount gated its unsaved-edit prompt on "lith only", so a
+// scratch document with captured edits (which the injected engine records under
+// the same file name) booted straight from the file on disk and the edits were
+// lost. A monolith is the one kind that opts out, for its own reason: the page
+// may keep its own recovery mechanism.
+test('every local file except an HTML monolith tracks unsaved edits', () => {
+  for (const name of ['notes.md', 'notes.txt', 'notes.markdown', 'notes.tid', 'data.json', 'book.ipynb', 'wiki.lith']) {
+    assert.equal(tracksUnsavedEdits(name), true, `${name} must offer unsaved-edit recovery`);
+  }
+  assert.equal(tracksUnsavedEdits('wiki.html'), false);
+  assert.equal(tracksUnsavedEdits('wiki.htm'), false);
+  assert.equal(tracksUnsavedEdits('WIKI.HTML'), false);
+});
+
+test('an HTML monolith is a complete page, not a Lithic document', () => {
+  assert.equal(isHtmlMonolithName('wiki.html'), true);
+  assert.equal(isHtmlMonolithName('wiki.htm'), true);
+  assert.equal(isHtmlMonolithName('lithic.html'), true, 'the shipped engine is a monolith too');
+  assert.equal(isHtmlMonolithName('wiki.lith'), false);
+  assert.equal(isHtmlMonolithName('notes.md'), false);
+});
+
+// Regression: a monolith mount was recorded under `normalizeLithName` while its
+// recent row used the file's own name. Its cache and version history landed in
+// keys like `stock.html` -> `stock.lith`, so the row's history button stayed dead
+// (nothing was found for the row's name) and search listed a cached wiki that no
+// file corresponded to. The row name and the cache name are one value.
+test('a mount name is the one name its row, cache and history all use', () => {
+  assert.equal(resolveMountName('notes.lith'), 'notes.lith');
+  assert.equal(resolveMountName('recipes'), 'recipes.lith');
+  assert.equal(resolveMountName('stock.html', { htmlMonolith: true }), 'stock.html');
+  assert.equal(resolveMountName('stock.htm', { htmlMonolith: true }), 'stock.htm');
+  assert.equal(resolveMountName('notes.md', { scratch: true }), 'notes.md');
+  assert.equal(resolveMountName('notes.tid', { scratch: true }), 'notes.tid');
+  assert.equal(resolveMountName('book.ipynb', { scratch: true }), 'book.ipynb');
+  // A .json tiddler-array backup mounts as a lith and is normalized like one.
+  assert.equal(resolveMountName('backup.json'), 'backup.lith');
 });
 
 test('scratch kind resolves per extension (case-insensitive)', () => {

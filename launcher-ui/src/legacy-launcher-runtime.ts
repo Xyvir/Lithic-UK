@@ -126,8 +126,10 @@ function injectSaverBootstrap(
   // filename. Escape "<" so a hostile name cannot break out of the script tag.
   const suggestedNameJson = JSON.stringify(suggestedFileName || 'new.lith').replace(/</g, '\\u003c');
   // The active file name keys the transient dirty-state backup in IndexedDB.
-  // HTML monoliths bypass cache bookkeeping entirely, so they opt out by
-  // leaving the key empty (the watcher stays inert).
+  // An HTML monolith leaves it empty and opts out: a page may carry its own
+  // recovery through add-ons or plugins, and the launcher must not interpose on
+  // what the page does with its own edits. Searchable history is unaffected —
+  // the save path records that for monoliths too, from what actually lands.
   const activeFileNameJson = isHtmlMode ? '""' : JSON.stringify(suggestedFileName || 'new.lith').replace(/</g, '\\u003c');
   const saveTypes = isHtmlMode
     ? [{ description: 'Lithic HTML File', accept: { 'text/html': ['.html', '.htm'] } }]
@@ -728,10 +730,17 @@ function injectSaverBootstrap(
         return Promise.resolve(writableFactory()).then(function(writable) {
           if (${htmlModeLiteral}) {
             // HTML monolith mode: write the payload TW hands us (its own
-            // serialized page) without search-cache bookkeeping, mirroring
-            // the legacy setTwCustomSaveAsSaver(false) path.
+            // serialized page), then record the same searchable cache and
+            // version chain every other mount records, so a monolith is
+            // findable by search and its row offers history. An HTML page with
+            // no TiddlyWiki store in it has no wiki to snapshot, so nothing is
+            // recorded for it rather than an empty version; a real wiki with no
+            // user tiddlers records an empty one, exactly as a blank .lith does.
             return writable.write(_text).then(function() {
               return writable.close();
+            }).then(function() {
+              var jsonText = (tw && tw.wiki && tw.wiki.getTiddlersAsJson) ? tw.wiki.getTiddlersAsJson(userTiddlerFilter) : '';
+              return jsonText ? saveSearchCache(handle.name, jsonText) : null;
             });
           }
           var jsonText = (tw && tw.wiki && tw.wiki.getTiddlersAsJson) ? tw.wiki.getTiddlersAsJson(userTiddlerFilter) : '[]';
@@ -977,12 +986,19 @@ export async function bootLegacyWiki(
  * Disk" behavior): the file is itself a full wiki page, so it is served
  * as-is rather than injected into a fresh engine.
  */
-export function bootLegacyHtml(html: string, suggestedFileName?: string): void {
+export function bootLegacyHtml(html: string, suggestedFileName?: string, path?: string): void {
   // HTML monoliths keep their own tiddler store and are served as-is, but a
-  // raw-HTML Save As saver is injected so saves write the engine's serialized
-  // page back to a .html file instead of falling through to TiddlyWiki's
-  // built-in download behavior (legacy setTwCustomSaveAsSaver(false) parity).
+  // raw-HTML saver is injected so saves write the engine's serialized page back
+  // to a .html file instead of falling through to TiddlyWiki's built-in
+  // download behavior (legacy setTwCustomSaveAsSaver(false) parity).
   const withSaver = suggestedFileName ? injectSaverBootstrap(html, suggestedFileName, true) : html;
+  if (suggestedFileName) {
+    // Record which file this is, exactly as the engine mount does. The injected
+    // saver resolves its target from here, and without it a monolith adopted
+    // whatever handoff the previously mounted wiki had left, writing this page
+    // over an unrelated file.
+    sessionStorage.setItem('lithic-active-file', JSON.stringify({ name: suggestedFileName, path }));
+  }
   // Same in-place boot as bootLegacyWiki: the mounted HTML replaces the
   // launcher document, keeping the real launcher URL in the address bar.
   document.open();
