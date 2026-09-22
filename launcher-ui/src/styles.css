@@ -972,8 +972,8 @@ body.drag-over::after {
 .remote-line { display: flex; align-items: center; gap: 8px; margin-top: 2px; min-width: 0; }
 /* No `.remote-pill`: the mode badge that used to open this line was a
    troubleshooting aid, and the emoji icon beside it already says which launcher
-   you are looking at. The title carries the one thing that is not evident from
-   the page — whether this server applies line patches or takes whole-file PUTs. */
+   you are looking at. What is left is the open Lith's name and the refresh
+   control — the heading stays a heading. */
 .remote-file { min-width: 0; color: #bbb; font-size: 0.76rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .remote-refresh {
   flex: none; width: 24px; height: 24px; padding: 0; border: 1px solid #454545; border-radius: 6px;
