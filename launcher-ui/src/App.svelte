@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onMount } from 'svelte';
-  import type { LauncherMode } from './mode';
+  import { launcherReturn, withLauncherHandoff, type LauncherMode } from './mode';
   import { createFileBridge, tauriInvoke, tauriListen, saveTextVerifiably } from './file-bridge';
   import { orphanPill, orphanDownloadNote, type OrphanDownloadState } from './orphan-download';
   import { isScratchFileName, isHtmlMonolithName, tracksUnsavedEdits, resolveMountName, resolveScratchKind, type ScratchKind } from './scratch-editor';
@@ -1960,8 +1960,34 @@
     }
   }
 
+  /**
+   * How this page can get back to the launcher that opened it, if it was opened
+   * by one. Answered once: the document's own address (and the injected Tauri
+   * global) do not change while it is open.
+   */
+  const launcherReturnTarget = launcherReturn(window.location);
+
   function openInstance(url: string) {
     window.location.href = url;
+  }
+
+  /**
+   * Hand this window to a bookmarked instance. Unlike a recent file (whose URL
+   * already says which instance it belongs to), an instance is reached at its
+   * bare origin, so the handoff has to carry both what the destination is and
+   * how to get back here — see `withLauncherHandoff` in mode.ts.
+   */
+  function openBookmarkedInstance(url: string) {
+    window.location.href = withLauncherHandoff(url, window.location.href);
+  }
+
+  function backToLauncher() {
+    if (!launcherReturnTarget) return;
+    // Prefer the address we were handed; a marked page may have been reached
+    // without ever visiting the launcher in this window (`history.back()` would
+    // then leave the app entirely).
+    if (launcherReturnTarget.kind === 'url') window.location.href = launcherReturnTarget.url;
+    else window.history.back();
   }
 
   function removeInstanceBookmark(url: string) {
@@ -2513,7 +2539,10 @@
       {#if status}<div class="status-line" role="status"><span class="status-label">{status.replace(/[…\.\s]+$/, '')}</span><span class="activity-dots" aria-hidden="true"><i></i><i></i><i></i></span></div>{/if}
       {#if mountError}<div class="status-line error" role="alert">{mountError}</div>{/if}
     </div>
+    <div class="heading-actions">
+    {#if launcherReturnTarget}<button class="back-to-launcher" type="button" data-target={launcherReturnTarget.kind === 'url' ? launcherReturnTarget.url : 'history'} aria-label="Back to the main launcher" title="Back to the main launcher" on:click={backToLauncher}><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M19 12H5"/><path d="m11 18-6-6 6-6"/></svg></button>{/if}
     {#if mode === 'webapp'}<button class="help-button" aria-label="View Introduction" title="View Introduction" on:click={openIntro}>{introBusy ? '…' : '?'}</button>{:else if mode === 'tauri'}<button class="sync-button {gitSyncIconState}" aria-label="GitHub Sync" title={gitSyncIconTitle} on:click={openGitSyncModal}><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 17.6A5 5 0 0 0 18 8h-1.3A8 8 0 1 0 4 16.3"/><path d="M12 12v9"/><path d="m8.5 15.5 3.5-3.5 3.5 3.5"/></svg>{#if gitSyncIconState === 'checking'}<span class="sync-glyph ring" aria-hidden="true"></span>{:else if gitSyncIconState === 'error'}<span class="sync-glyph alert" aria-hidden="true">!</span>{:else if gitSyncIconState === 'connected'}<span class="sync-glyph dot" aria-hidden="true"></span>{/if}</button>{/if}
+    </div>
   </header>
   {#if pendingImports.length > 0}
     <div class="pending-imports" role="status" aria-label="Pending imports">
@@ -2826,7 +2855,7 @@
             {:else}
               <span class="bookmark-icon bookmark-icon-empty" aria-hidden="true"></span>
             {/if}
-            <button class="recent-name" title="Open {entry.url}" on:click={() => openInstance(entry.url)}>{entry.label}</button>
+            <button class="recent-name" title="Open {entry.url}" on:click={() => openBookmarkedInstance(entry.url)}>{entry.label}</button>
             <button class="recent-icon-button remove-recent" type="button" aria-label={`Remove bookmark ${entry.url}`} on:click={() => removeInstanceBookmark(entry.url)}><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m7 7 10 10M17 7 7 17"></path></svg></button>
           </div>
         {/each}

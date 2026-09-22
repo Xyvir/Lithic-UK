@@ -321,6 +321,50 @@ try {
   const hoverTargetWidth = dismissHovered.buttonWidth - dismissHovered.gapToGlyph + (dismissHovered.glyphLeft - dismissHovered.labelLeft);
   assert.ok(hoverTargetWidth >= 40, 'The dismiss control keeps a wide enough hover target with the word hidden');
 
+  // --- The way back out of a handed-over instance ---
+  // A page the launcher handed this window to is reached at an instance origin
+  // with a marker naming the launcher; that is the only state with somewhere to
+  // return to, and in the desktop app there is no browser chrome to do it with.
+  assert.equal(
+    await page.$('.back-to-launcher'),
+    null,
+    'A launcher that was not handed over shows no way back'
+  );
+  const launcherAddress = 'https://tauri.localhost/';
+  await page.goto(`file://${artifact}?lithic-from=${encodeURIComponent(launcherAddress)}`, {
+    waitUntil: 'domcontentloaded'
+  });
+  await page.waitForSelector('.back-to-launcher');
+  const backMarkup = await page.evaluate(() => {
+    const back = document.querySelector('.back-to-launcher');
+    const label = back.getAttribute('aria-label');
+    const heading = document.querySelector('.heading-actions');
+    return {
+      label,
+      target: back.getAttribute('data-target'),
+      hasArrow: Boolean(back.querySelector('svg path')),
+      inHeading: heading?.contains(back) ?? false
+    };
+  });
+  assert.equal(backMarkup.label, 'Back to the main launcher');
+  assert.ok(backMarkup.hasArrow, 'The way back renders an icon, not bare text');
+  assert.ok(backMarkup.inHeading, 'The way back sits in the heading beside the mode’s own control');
+  assert.equal(backMarkup.target, launcherAddress, 'The marker names the launcher to return to');
+  // Clicking must navigate to the launcher the marker named — not `history.back()`,
+  // which would leave the app entirely for a page opened from a bookmark.
+  const navigations = [];
+  const recordNavigation = request => {
+    if (request.isNavigationRequest()) navigations.push(request.url());
+  };
+  page.on('request', recordNavigation);
+  await page.click('.back-to-launcher');
+  await new Promise(resolve => setTimeout(resolve, 400));
+  page.off('request', recordNavigation);
+  assert.ok(
+    navigations.some(url => url.startsWith(launcherAddress)),
+    `Clicking the way back navigates to the launcher (saw ${JSON.stringify(navigations)})`
+  );
+
   assert.deepEqual(errors, []);
   console.log(`Puppeteer launcher smoke passed (${process.env.HEADED === '1' ? 'headed' : 'headless'})`);
 } finally {

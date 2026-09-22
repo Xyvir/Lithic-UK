@@ -88,6 +88,11 @@ body { overflow: hidden; background: #181818; }
   padding-bottom: 10px;
   border-bottom: 1px solid #414141;
 }
+/* The heading's trailing controls. A wrapper because there can now be two of
+   them at once (a way back plus the mode's own button) and only one of them may
+   claim the free space: two `margin-left: auto` children split it and drift
+   apart instead of sitting together. */
+.heading-actions { display: flex; align-items: center; gap: 8px; margin-left: auto; }
 .heading-copy { flex: 1; min-width: 0; }
 .heading-copy h1 { margin: 0; }
 
@@ -122,7 +127,6 @@ h1 { flex: none; min-width: 0; margin: 0; color: #f4edf5; font-size: 1.8rem; fon
   place-items: center;
   width: 38px;
   height: 38px;
-  margin-left: auto;
   padding: 0;
   border: 2px solid #393939;
   border-radius: 50%;
@@ -131,6 +135,35 @@ h1 { flex: none; min-width: 0; margin: 0; color: #f4edf5; font-size: 1.8rem; fon
   font-size: 1.35rem;
 }
 .help-button:hover { border-color: #666; background: #242424; }
+/* "Back to the main launcher". Rendered only for a page the app's window loaded
+   from elsewhere (a bookmarked instance — see launcherReturn in mode.ts), where
+   the desktop window has no browser chrome and no other control returns: without
+   it, reaching an instance's own launcher is a one-way trip. Styled as a sibling
+   of .help-button so the two read as one group. */
+.back-to-launcher {
+  display: grid;
+  place-items: center;
+  width: 38px;
+  height: 38px;
+  padding: 0;
+  border: 2px solid #393939;
+  border-radius: 50%;
+  background: transparent;
+  color: #8ab4f8;
+  cursor: pointer;
+  transition: color 0.2s, border-color 0.2s, background 0.2s;
+}
+.back-to-launcher:hover { border-color: #666; background: #242424; color: #a7c6fb; }
+.back-to-launcher:focus-visible { outline: 2px solid #8ab4f8; outline-offset: 2px; }
+.back-to-launcher svg {
+  width: 20px;
+  height: 20px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.8;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
 /* Status-reactive like the legacy #github-sync-btn: grey = not synced,
    amber = verifying, green = verified, purple pulsing = syncing, red = the
    backup is not landing. Colour alone is not the signal — the glyph below
@@ -141,7 +174,6 @@ h1 { flex: none; min-width: 0; margin: 0; color: #f4edf5; font-size: 1.8rem; fon
   place-items: center;
   width: 38px;
   height: 38px;
-  margin-left: auto;
   padding: 0;
   border: 2px solid #393939;
   border-radius: 50%;
