@@ -5,8 +5,15 @@ description = "A Tauri App"
 authors = ["you"]
 edition = "2021"
 
+# The library target is what lets the same code run on Android and iOS: Tauri 2
+# builds a mobile app from a shared library, and the desktop executable is a thin
+# caller of `app_lib::run`. Nothing about desktop behaviour depends on it.
+[lib]
+name = "app_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
 [build-dependencies]
-tauri-build = { version = "1", features = [] }
+tauri-build = { version = "2", features = [] }
 
 [target.'cfg(windows)'.dependencies]
 winreg = "0.52"
@@ -14,12 +21,37 @@ winreg = "0.52"
 # Microsoft's bindings, and 0.61 is already in the tree via tauri, so this adds
 # features to a build that already exists rather than a new dependency.
 windows = { version = "0.61", features = ["Win32_Foundation", "Win32_System_Com", "Win32_UI_Shell"] }
+# The WebView2 handler that answers the page's own Basic-auth challenges
+# (`webview_auth.rs`). 0.38 is the version tauri 2.11 already builds, so this
+# names a crate that is in the graph regardless rather than adding one — and the
+# `with_webview` handle tauri hands out is typed in this crate's interfaces, so
+# there is nothing to wrap.
+webview2-com = "0.38"
 
 [dependencies]
-tauri = { version = "1", features = ["api-all"] }
+# Tauri 2 has no `api-all`: each API moved into a plugin, and this app only ever
+# used two of them — http (now plain reqwest, below) and the file dialog.
+tauri = { version = "2", features = [] }
+# The native open/save dialog, used from Rust only: the launcher never opens one
+# from JavaScript, so no capability entry is needed for it.
+tauri-plugin-dialog = "2"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 dirs = "5"
+# Outbound HTTP: the GitHub device flow and API, the instance manifest probe, and
+# the instance icon fetch. `default-tls` is the platform stack (SChannel on
+# Windows, OpenSSL elsewhere), which is what git2's `https` transport uses too, so
+# the app ships one TLS implementation rather than two.
+reqwest = { version = "0.12", features = ["json"] }
+# The credential vault. RustCrypto, pure Rust: no C, no OpenSSL, nothing to
+# install, and it cross-compiles unchanged to the macOS, AppImage and mobile
+# targets this app is headed for. `zeroize` was already in the tree via tauri.
+argon2 = "0.5"
+chacha20poly1305 = "0.10"
+zeroize = "1"
+base64 = "0.22"
+# OsRng for the vault's salt and nonce. Already in the tree at this major.
+getrandom = "0.2"
 # In-process git for the GitHub sync. `https` maps to the platform TLS stack
 # (WinHTTP on Windows, OpenSSL elsewhere); the default features are empty, so
 # it has to be requested explicitly. `vendored-libgit2` compiles the vendored C
@@ -27,5 +59,16 @@ dirs = "5"
 # libgit2, nothing for a user to install.
 git2 = { version = "0.21.0", default-features = false, features = ["https", "vendored-libgit2"] }
 
-[features]
-custom-protocol = ["tauri/custom-protocol"]
+[profile.release]
+# The executable carries its whole frontend (the launcher and the wiki, ~8 MB of
+# HTML) and links a vendored libgit2, so the default profile — no LTO, sixteen
+# codegen units, symbols kept — leaves real weight on the table.
+#
+# `lto` and one codegen unit let the linker drop the cross-crate duplicates that
+# `codegen-units = 16` has to assume it cannot see; `strip` drops the symbol
+# table (the Windows PDB is emitted separately and kept for crash triage rather
+# than shipped). Measured against the 12.30 MB v1 binary this replaces: see the
+# release notes for the v2 figure.
+lto = true
+codegen-units = 1
+strip = true

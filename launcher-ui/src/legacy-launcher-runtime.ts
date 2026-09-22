@@ -517,9 +517,15 @@ function injectSaverBootstrap(
     // Tauri v1's WebView2 lacks the File System Access API, so in-place saves
     // go through the Rust commands instead: write_text_path overwrites an
     // existing file, save_lith_file shows the native dialog for new ones.
+    // v2 exposes the invoke on __TAURI__.core, v1 on __TAURI__.tauri; the bare
+    // __TAURI__.invoke is accepted as well, since the global's shape is the one
+    // thing that differs between the app builds this bundle is loaded into.
     var tauriInvoke = (function() {
       var tauri = root.__TAURI__;
-      return (tauri && (tauri.invoke || (tauri.tauri && tauri.tauri.invoke))) || null;
+      if (!tauri) return null;
+      if (tauri.invoke) return tauri.invoke;
+      if (tauri.core && tauri.core.invoke) return tauri.core.invoke;
+      return (tauri.tauri && tauri.tauri.invoke) || null;
     })();
 
     // Pseudo-writable mirroring FileSystemWritableFileStream for the Tauri

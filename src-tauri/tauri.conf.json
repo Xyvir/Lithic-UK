@@ -1,43 +1,46 @@
 {
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "Lithic",
+  "mainBinaryName": "Lithic",
+  "version": "0.2.0",
+  "identifier": "com.lithic.app",
   "build": {
     "beforeBuildCommand": "",
     "beforeDevCommand": "",
-    "devPath": "../src",
-    "distDir": "../src",
-    "withGlobalTauri": true
+    "frontendDist": "../src"
   },
-  "package": {
-    "productName": "Lithic",
-    "version": "0.2.0"
-  },
-  "tauri": {
-    "allowlist": {
-      "all": true
-    },
-    "bundle": {
-      "active": true,
-      "targets": "all",
-      "identifier": "com.lithic.app",
-      "icon": [
-        "icons/32x32.png",
-        "icons/128x128.png",
-        "icons/128x128@2x.png",
-        "icons/icon.icns",
-        "icons/icon.ico"
-      ]
-    },
+  "app": {
+    "withGlobalTauri": true,
     "security": {
       "csp": null
     },
     "windows": [
       {
+        "label": "main",
         "url": "launcher.html",
         "fullscreen": false,
         "height": 600,
         "resizable": true,
         "title": "Lithic",
-        "width": 800
+        "width": 800,
+        "useHttpsScheme": true
       }
     ]
+  },
+  "bundle": {
+    "active": true,
+    "targets": "all",
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.icns",
+      "icons/icon.ico"
+    ],
+    "windows": {
+      "webviewInstallMode": {
+        "type": "embedBootstrapper"
+      }
+    }
   }
 }

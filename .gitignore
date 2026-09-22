@@ -29,6 +29,10 @@ wiki/tiddlywiki.log
 
 # Tauri build output
 /src-tauri/target/
+# Tauri 2 writes its config and capability schemas here on every build. They are
+# derived from `tauri.conf.json` and `capabilities/`, both of which are tracked,
+# so the generated copies are the build's business rather than the repo's.
+/src-tauri/gen/
 
 # Generated single-file launcher intermediates.
 # NOTE: /src/launcher.html is deliberately NOT ignored. It is generated, but it is

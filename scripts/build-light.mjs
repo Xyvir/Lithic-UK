@@ -7,8 +7,13 @@
  * Steps, in order: flatten the mirrored plugin sources into the build staging
  * dirs, write wiki/tiddlywiki.info from lithic-light-tw.info, render
  * wiki/output/lithic-light.html through $:/core/save/all with --uglify, brand it,
- * copy it over the committed src/lithic-light.html, and run the guard that checks
- * it against the full artifact.
+ * copy it over the committed variants/lithic-light.html, and run the guard that
+ * checks it against the full artifact.
+ *
+ * It lands in variants/, not src/: src/ is the desktop app's frontendDist, so
+ * anything left there is embedded in the Lithic executable, and nothing loads a
+ * light build at runtime. Sibling to variants/prod.html, which is the same kind
+ * of distribution artifact.
  *
  * Needs the mirrored sources to be present (npm run mirror) — this script does not
  * hit the network. CI does that step itself before running the equivalent
@@ -22,7 +27,7 @@ import { gzipSync } from 'node:zlib';
 
 const repoRoot = process.cwd();
 const OUTPUT = path.join(repoRoot, 'wiki', 'output', 'lithic-light.html');
-const COMMITTED = path.join(repoRoot, 'src', 'lithic-light.html');
+const COMMITTED = path.join(repoRoot, 'variants', 'lithic-light.html');
 
 function step(name, args) {
   process.stdout.write(`> ${name.padEnd(30, ' ')}`);
@@ -77,7 +82,7 @@ writeFileSync(OUTPUT, branded);
 copyFileSync(OUTPUT, COMMITTED);
 const gz = gzipSync(Buffer.from(branded), { level: 9 }).length;
 console.log(
-  `\nsrc/lithic-light.html: ${(statSync(COMMITTED).size / 1048576).toFixed(2)} MB raw / ${(gz / 1048576).toFixed(2)} MB gzipped`
+  `\nvariants/lithic-light.html: ${(statSync(COMMITTED).size / 1048576).toFixed(2)} MB raw / ${(gz / 1048576).toFixed(2)} MB gzipped`
 );
 
 step('check light artifact', [path.join('scripts', 'check-light-artifact.mjs')]);

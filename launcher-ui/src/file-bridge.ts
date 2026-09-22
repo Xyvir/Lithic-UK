@@ -8,8 +8,10 @@ type TauriApi = { invoke: (command: string, args?: Record<string, unknown>) => P
 
 /**
  * Resolve the Tauri invoke function across versions: Tauri v1 exposes
- * window.__TAURI__.tauri.invoke (withGlobalTauri), while Tauri v2 exposes
- * window.__TAURI__.invoke directly. The repo's Tauri app is currently v1.
+ * window.__TAURI__.tauri.invoke and Tauri v2 exposes window.__TAURI__.core.invoke
+ * (both under withGlobalTauri), with the bare window.__TAURI__.invoke accepted
+ * too. The launcher bundle ships to all three — the desktop app, the hosted site
+ * and a portable folder — so it has to work whichever one is hosting it.
  */
 /**
  * Exposed so UI surfaces (e.g. the desktop Install button) can invoke
@@ -23,9 +25,14 @@ export function tauriInvoke<T = unknown>(command: string, args?: Record<string, 
 
 function tauriApi(): TauriApi | null {
   const root = (globalThis as typeof globalThis & {
-    __TAURI__?: { invoke?: TauriApi['invoke']; tauri?: { invoke?: TauriApi['invoke'] } }
+    __TAURI__?: {
+      invoke?: TauriApi['invoke'];
+      core?: { invoke?: TauriApi['invoke'] };
+      tauri?: { invoke?: TauriApi['invoke'] };
+    }
   }).__TAURI__;
   if (root?.invoke) return { invoke: root.invoke };
+  if (root?.core?.invoke) return { invoke: root.core.invoke };
   if (root?.tauri?.invoke) return { invoke: root.tauri.invoke };
   return null;
 }
@@ -36,15 +43,20 @@ type TauriEventApi = {
 
 function tauriEventApi(): TauriEventApi | null {
   const root = (globalThis as typeof globalThis & {
-    __TAURI__?: { event?: TauriEventApi; tauri?: { event?: TauriEventApi } };
+    __TAURI__?: {
+      event?: TauriEventApi;
+      core?: { event?: TauriEventApi };
+      tauri?: { event?: TauriEventApi };
+    };
   }).__TAURI__;
   if (root?.event?.listen) return root.event;
+  if (root?.core?.event?.listen) return root.core.event;
   if (root?.tauri?.event?.listen) return root.tauri.event;
   return null;
 }
 
 /**
- * Subscribe to an event emitted from Rust (tauri v1 `Window::emit`), returning
+ * Subscribe to an event emitted from Rust (Tauri's `emit`), returning
  * an unsubscribe function — or null outside Tauri, so callers can register
  * unconditionally. `listen` is async, so an unsubscribe that arrives before the
  * subscription resolves cancels it on arrival instead of leaking the handler.

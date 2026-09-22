@@ -93,22 +93,39 @@ jobs:
            }
            echo "date=$tag" >> $env:GITHUB_OUTPUT
            # Semver for the exe's FileVersion/ProductVersion resources:
-           # tauri-build derives them from package.version, which we patch
-           # via TAURI_CONFIG at build time. Leading zeros are stripped
-           # (semver forbids them) and a non-version tag falls back to the
-           # config version so the build never fails.
+           # tauri-build derives them from the config's top-level `version`
+           # (it moved out of `package` in Tauri 2), which we patch via
+           # TAURI_CONFIG at build time. Leading zeros are stripped (semver
+           # forbids them) and a non-version tag falls back to the config
+           # version so the build never fails.
            if ($tag -match '(\d+)\.(\d+)\.(\d+)') {
              $ver = "$($Matches[1]).$([int]$Matches[2]).$([int]$Matches[3])"
            } else {
              $ver = "0.2.0"
            }
            echo "version=$ver" >> $env:GITHUB_OUTPUT
-           echo ('tauri_config={"package":{"version":"' + $ver + '"}}') >> $env:GITHUB_OUTPUT
+           echo ('tauri_config={"version":"' + $ver + '"}') >> $env:GITHUB_OUTPUT
 
       - name: Build Offline Executable
         run: npm run tauri build
         env:
           TAURI_CONFIG: ${{ steps.tag.outputs.tauri_config }}
+
+      # Sizes on every release, in the run summary: the executable embeds the
+      # launcher and the wiki, so a stray build artifact left in src/ shows up
+      # here as a jump rather than as a surprise months later.
+      - name: Report Artifact Sizes
+        run: |
+          $files = @(Get-ChildItem -Path "src-tauri/target/release" -Filter "Lithic.exe" -ErrorAction SilentlyContinue)
+          $files += @(Get-ChildItem -Path "src-tauri/target/release/bundle" -Recurse -Include "*.exe","*.msi" -ErrorAction SilentlyContinue)
+          "### Artifact sizes" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append
+          "| artifact | size |" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append
+          "| --- | --- |" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append
+          foreach ($file in $files) {
+            $mb = [math]::Round($file.Length / 1MB, 2)
+            Write-Host "$mb MB  $($file.Name)"
+            "| $($file.Name) | $mb MB |" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append
+          }
 
       - name: Rename Offline Artifact
         run: |

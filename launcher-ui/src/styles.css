@@ -679,6 +679,37 @@ footer > * { pointer-events: auto; }
 .recent-modal { position: relative; width: min(100%, 700px); max-height: 80vh; padding: 20px; border: 1px solid #454545; border-radius: 10px; background: #252525; box-shadow: 0 12px 40px #000; }
 .recent-modal h2 { margin: 0 0 14px; font-size: 1.5rem; }
 .modal-close { position: absolute; top: 8px; right: 10px; padding: 0 8px; border: 0; background: transparent; color: #ff5555; font-size: 1.8rem; cursor: pointer; }
+/* Saved instance logins (the credential vault). A sibling of the GitHub sync
+ * button — same circle, same size, same hover — because it is the same kind of
+ * thing: app-level state the launcher can open. It goes green once the vault is
+ * open in this session, which is exactly when a protected instance stops asking
+ * for its password. */
+.vault-button { position: relative; display: grid; place-items: center; width: 38px; height: 38px; padding: 0; border: 2px solid #393939; border-radius: 50%; background: transparent; color: #8a8a8a; cursor: pointer; transition: color 0.2s, border-color 0.2s; }
+.vault-button svg { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+.vault-button:hover { border-color: #666; background: #242424; color: #bbb; }
+.vault-button.unlocked { color: #7ba86f; border-color: #5d8a52; }
+.vault-button.unlocked:hover { color: #9cc78f; }
+.vault-modal { width: min(100%, 560px); }
+.vault-modal h3.vault-subhead { margin: 18px 0 0; font-size: 1rem; color: #ddd; }
+.vault-modal .vault-field { display: block; margin: 12px 0 0; }
+.vault-modal .vault-field > span { display: block; margin-bottom: 5px; color: #a5a5a5; font-size: 0.85rem; }
+.vault-list { display: flex; flex-direction: column; gap: 6px; margin: 14px 0 0; padding: 0; list-style: none; }
+.vault-list li { display: flex; align-items: center; gap: 10px; padding: 9px 10px; border: 1px solid #3d3d3d; border-radius: 7px; background: #2e2e2e; }
+.vault-origin { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.vault-user { flex: 0 1 auto; max-width: 38%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: #a0a0a0; font-size: 0.86rem; }
+.vault-forget { flex: 0 0 auto; padding: 0 4px; border: 0; background: transparent; color: #ff5555; font-size: 1.1rem; line-height: 1; cursor: pointer; }
+.vault-forget:disabled { opacity: 0.4; cursor: default; }
+.vault-empty { color: #8f8f8f; }
+/* Every input in a modal is full width; a checkbox is not a field, and letting
+ * it stretch is the same trap the repo picker documents above. */
+.vault-reveal { display: flex; align-items: center; gap: 8px; margin-top: 10px; color: #a5a5a5; font-size: 0.88rem; cursor: pointer; }
+.vault-reveal input { width: auto; margin: 0; padding: 0; accent-color: #8ab4f8; }
+/* Amber, not red: a short secret is weighed rather than refused, and the
+ * sentence comes from Rust so the rule has one home. */
+.vault-warning { color: #e0b341; font-size: 0.86rem; line-height: 1.45; }
+.vault-notice { color: #7ba86f; font-size: 0.86rem; }
+.vault-path { margin-top: 14px; color: #7d7d7d; font-size: 0.78rem; overflow-wrap: anywhere; }
+.vault-path code { color: #9a9a9a; }
 .recent-search { width: 100%; height: 52px; padding: 12px 42px;
   border: 1px solid #454545; border-radius: 7px; background: #333; color: #eee; font: inherit; }
 .recent-search:focus { outline: none; border-color: #ffb74d; }
@@ -989,11 +1020,24 @@ body.drag-over::after {
   flex: 0 0 4px; margin: 0 0 0 6px; align-self: center; width: 4px; height: 24px;
   border-radius: 2px; background: #4d6b4d;
 }
+/* The icon lives *inside* .recent-name (see the markup): the cached instance icon
+   is part of the link, so the hover and focus highlight has to cover it rather
+   than stop beside it. Two consequences worth keeping: the inset comes from the
+   button's own padding, so the icon starts where text starts in a file row; and
+   the centring is stated rather than inherited, because a plain <button> centres
+   its content by UA style and `stretch` here would have dropped this label 3.5px
+   below the row beneath it. The icon centres on that same line, which the sibling
+   markup could not do — it was centred on the row, 3.5px lower than its label. */
+.bookmark-name { display: flex; align-items: center; gap: 10px; }
 .bookmark-icon {
-  flex: none; align-self: center; width: 24px; height: 24px; margin-left: 12px;
+  flex: none; align-self: center; width: 24px; height: 24px;
   border-radius: 5px; object-fit: contain;
 }
 .bookmark-icon-empty { border: 1px dashed #4a4a4a; background: #2c2c2c; }
+/* Truncating span rather than bare text: a flex container turns loose text into an
+   anonymous item, which cannot ellipsis, and a long host name would then push the
+   remove button out of the row. */
+.bookmark-label { min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
 
 /* --- Instance icon picker ------------------------------------------------ */
 .brand-icon-wrap.pickable { cursor: pointer; }

@@ -6,7 +6,7 @@
  *   1. launcher-ui unit tests (node --test)
  *   2. svelte-check (svelte + TS types)
  *   3. workflow YAML sanity (js-yaml parse of every .github/workflows file)
- *   4. the light distribution guard (src/lithic-light.html against
+ *   4. the light distribution guard (variants/lithic-light.html against
  *      src/lithic.html: same core, same plugin versions, still flash-sized)
  *   5. cargo check (Rust type/borrow check — catches the recent E07xx class
  *      of release-workflow failures)

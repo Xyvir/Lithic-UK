@@ -1,0 +1,7 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "default",
+  "description": "The launcher window's permissions. Only the core defaults are needed: every privileged action goes through this app's own commands, which never require a permission entry, and the file dialog is opened from Rust rather than from the page.",
+  "windows": ["main"],
+  "permissions": ["core:default"]
+}

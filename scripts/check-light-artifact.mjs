@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Guard for the committed light distribution (src/lithic-light.html).
+ * Guard for the committed light distribution (variants/lithic-light.html).
  *
  * The light artifact is built from lithic-light-tw.info — the same core and the
  * same plugin sources as the full artifact, minus the heavy optional layer — and
@@ -30,7 +30,7 @@ import process from 'node:process';
 // The committed artifact by default; pass a path to check a candidate before it is
 // committed (CI checks the fresh build with greps instead, since it has no full
 // artifact to hand at that point).
-const LIGHT = process.argv[2] ?? 'src/lithic-light.html';
+const LIGHT = process.argv[2] ?? 'variants/lithic-light.html';
 const FULL = 'src/lithic.html';
 const STORE_TAG = '<script class="tiddlywiki-tiddler-store" type="application/json">';
 /** The raw ceiling is a drift alarm; the gzipped one is the real flash budget. */
@@ -53,7 +53,7 @@ function readArtifact(file) {
   try {
     html = readFileSync(file, 'utf8');
   } catch {
-    fail(`${file} is missing — it is committed alongside src/lithic.html.`);
+    fail(`${file} is missing — the light build is committed to variants/, beside the other distributions.`);
   }
   // The store is the last such tag in the document; earlier occurrences are the
   // saver's own template source, escaped inside the core module text.

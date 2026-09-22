@@ -23,10 +23,9 @@ permissions:
 
 jobs:
   check:
-    # Pinned: tauri v1 needs webkit2gtk-4.0 (soup2), which Ubuntu 24.04
-    # dropped. The release workflow compiles on windows; this is type-check
-    # only, and 22.04 carries the right system headers.
-    runs-on: ubuntu-22.04
+    # Tauri 2 needs webkit2gtk-4.1 (soup3), which 24.04 carries — the pin to
+    # 22.04 existed only because v1 wanted the 4.0 headers Ubuntu 24.04 dropped.
+    runs-on: ubuntu-latest
     steps:
       - name: Checkout Code
         uses: actions/checkout@v5
@@ -45,7 +44,7 @@ jobs:
       - name: Install System Dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y libwebkit2gtk-4.0-dev libgtk-3-dev libayatana-appindicator3-dev librsvg2-dev libssl-dev
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libgtk-3-dev libayatana-appindicator3-dev librsvg2-dev libssl-dev
 
       - name: cargo check
         working-directory: src-tauri

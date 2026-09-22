@@ -176,7 +176,7 @@ jobs:
           mkdir -p variants
           cp wiki/output/lith.html variants/prod.html
           cp wiki/output/lith.html src/lithic.html
-          cp wiki/output/lithic-light.html src/lithic-light.html
+          cp wiki/output/lithic-light.html variants/lithic-light.html
           
           # Bump PWA version to clear service worker cache
           CURRENT_VERSION=$(grep '"version":' manifest.json | sed -E 's/.*"version": "([^"]+)".*/\1/')
@@ -188,7 +188,7 @@ jobs:
 
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add variants/prod.html src/lithic.html src/lithic-light.html src/launcher.html manifest.json offline-service-worker.js
+          git add variants/prod.html variants/lithic-light.html src/lithic.html src/launcher.html manifest.json offline-service-worker.js
           git diff --cached --quiet || git commit -m "Update src/lithic.html + variants/prod.html, and bump PWA to $NEW_VERSION (build-$(date +'%Y.%m.%d-%H%M'))"
           git push
 
@@ -198,11 +198,14 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           if [ "${{ inputs.build_config }}" = "light" ]; then
-            # The light distribution publishes to src/, next to the full artifact,
-            # because the launcher and the flash images pull it from there.
-            cp wiki/output/lithic-light.html src/lithic-light.html
-            git add src/lithic-light.html
-            git diff --cached --quiet || git commit -m "Update src/lithic-light.html from build"
+            # The light distribution publishes to variants/, beside the other
+            # distributions. It must not sit in src/: that directory is the
+            # desktop app's frontendDist, so a file there is embedded in the
+            # executable, and nothing loads a light build at runtime.
+            mkdir -p variants
+            cp wiki/output/lithic-light.html variants/lithic-light.html
+            git add variants/lithic-light.html
+            git diff --cached --quiet || git commit -m "Update variants/lithic-light.html from build"
           else
             mkdir -p variants
             cp wiki/output/lith.html variants/${{ inputs.build_config }}.html
@@ -238,7 +241,7 @@ jobs:
           files: |
             wiki/output/lith.html
             variants/prod.html
-            src/lithic-light.html
+            variants/lithic-light.html
             wiki/output/lithic-light.html.gz
             wiki.zip
             wiki/flatten-manifest.log
