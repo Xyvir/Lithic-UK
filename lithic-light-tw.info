@@ -1,0 +1,47 @@
+{
+    "description": "Lithic Light — the flash-sized subset of the full distribution, for serving a Lithic instance from a small host (an ESP32 with LittleFS, say) where the full 7.6 MB artifact will not fit. Same core as prod, same editing experience; what is missing is the heavy, optional layer: mermaid and its patch wrapper, the whiteboard and its wrapper, katex, tw-react, the import handler, jspython, richlinks, dynaview, advanced-search, and the snowwhite theme. Roughly 2.5 MB raw and ~0.6 MB gzipped; keep it that way — see the size guard in .github/workflows/build-wiki.yml.",
+    "plugins": [
+        "tiddlywiki/markdown",
+        "tiddlywiki/freelinks",
+        "tiddlywiki/highlight",
+        "xyvir/anchors-for-streams",
+        "xyvir/lithic-save",
+        "xyvir/lithic-core",
+        "xyvir/lithic-default-configs",
+        "xyvir/lithic-patch-appear",
+        "xyvir/lithic-patch-calendar",
+        "xyvir/lithic-patch-comptext",
+        "xyvir/lithic-patch-markdown",
+        "xyvir/lithic-patch-streams",
+        "xyvir/lithic-tweaks",
+        "xyvir/lithic-wikitext-highlight",
+        "xyvir/lithic-python-codeblocks",
+        "ahanniga/context-menu-plugin",
+        "bj/Calendar",
+        "bj/unieditor",
+        "flibbles/relink",
+        "flibbles/relink-markdown",
+        "flibbles/relink-titles",
+        "flibbles/uglify",
+        "kebi/relink-tweaks",
+        "kebi/tiddlystudy",
+        "kebi/tiddlystudy-references",
+        "mklauber/aliases",
+        "nico/notebook-mobile",
+        "oeyoews/notebook-theme-sidebar-resizer",
+        "snowgoon88/edit-comptext",
+        "sq/streams"
+    ],
+    "themes": [
+        "tiddlywiki/vanilla",
+        "nico/notebook"
+    ],
+    "build": {
+        "light": [
+            "--render",
+            "$:/core/save/all",
+            "lithic-light.html",
+            "text/plain"
+        ]
+    }
+}

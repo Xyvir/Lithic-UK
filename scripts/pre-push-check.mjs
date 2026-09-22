@@ -6,9 +6,11 @@
  *   1. launcher-ui unit tests (node --test)
  *   2. svelte-check (svelte + TS types)
  *   3. workflow YAML sanity (js-yaml parse of every .github/workflows file)
- *   4. cargo check (Rust type/borrow check — catches the recent E07xx class
+ *   4. the light distribution guard (src/lithic-light.html against
+ *      src/lithic.html: same core, same plugin versions, still flash-sized)
+ *   5. cargo check (Rust type/borrow check — catches the recent E07xx class
  *      of release-workflow failures)
- *   5. cargo clippy (Rust lint pass, warnings are failures)
+ *   6. cargo clippy (Rust lint pass, warnings are failures)
  *
  * Usage: npm run check:push   (or: node scripts/pre-push-check.mjs)
  * Exit 0 = safe to push; nonzero = fix before pushing.
@@ -61,6 +63,11 @@ const spawned = [
     cmd: 'npx',
     args: ['svelte-check', '--tsconfig', './tsconfig.json'],
     cwd: 'launcher-ui',
+  },
+  {
+    name: 'light artifact guard',
+    cmd: 'node',
+    args: ['scripts/check-light-artifact.mjs'],
   },
 ];
 

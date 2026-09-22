@@ -19,6 +19,7 @@ on:
         - pre
         - dev
         - all
+        - light
 
 permissions:
   contents: write
@@ -69,13 +70,17 @@ jobs:
         if: inputs.build_config == 'prod'
         run: npm run test:launcher
 
-      - name: Build TiddlyWiki (uglified for prod, plain otherwise)
+      - name: Build TiddlyWiki (uglified for prod and light, plain otherwise)
         env:
           TIDDLYWIKI_PLUGIN_PATH: '${{ github.workspace }}/wiki:${{ github.workspace }}/wiki/plugins'
           TIDDLYWIKI_THEME_PATH: '${{ github.workspace }}/wiki/themes'
         run: |
           if [ "${{ inputs.build_config }}" = "prod" ]; then
             set -o pipefail && npx tiddlywiki wiki --uglify --build index 2>&1 | tee wiki/tiddlywiki.log
+          elif [ "${{ inputs.build_config }}" = "light" ]; then
+            # A published artifact like prod, so it is uglified too; it renders
+            # through its own target so it cannot clobber the full build's output.
+            set -o pipefail && npx tiddlywiki wiki --uglify --build light 2>&1 | tee wiki/tiddlywiki.log
           else
             set -o pipefail && npx tiddlywiki wiki --build index 2>&1 | tee wiki/tiddlywiki.log
           fi
@@ -109,11 +114,61 @@ jobs:
           fi
 
       - name: Rename Output
+        if: ${{ inputs.build_config != 'light' }}
         run: mv wiki/output/index.html wiki/output/lith.html
 
       - name: Brand Output
+        if: ${{ inputs.build_config != 'light' }}
         run: |
           sed -i 's/content="TiddlyWiki"/content="Lithic PKMS"/g' wiki/output/lith.html
+
+      # The light artifact is the flash-sized distribution (lithic-light-tw.info),
+      # built the same way and shipped alongside the full one so the two can never
+      # drift apart. Built after the full build so the full build's own output is
+      # already on disk; the light target writes its own filename.
+      - name: Build Lithic Light (alongside prod)
+        if: inputs.build_config == 'prod'
+        env:
+          TIDDLYWIKI_PLUGIN_PATH: '${{ github.workspace }}/wiki:${{ github.workspace }}/wiki/plugins'
+          TIDDLYWIKI_THEME_PATH: '${{ github.workspace }}/wiki/themes'
+        run: |
+          node scripts/generate-config.js light
+          set -o pipefail && npx tiddlywiki wiki --uglify --build light 2>&1 | tee wiki/tiddlywiki.log
+
+      - name: Verify Lithic Light Artifact
+        if: ${{ inputs.build_config == 'prod' || inputs.build_config == 'light' }}
+        run: |
+          OUT=wiki/output/lithic-light.html
+          if [ ! -f "$OUT" ]; then
+            echo "::error::Lithic Light was not built ($OUT missing)"
+            exit 1
+          fi
+          sed -i 's/content="TiddlyWiki"/content="Lithic PKMS"/g' "$OUT"
+          SIZE=$(stat -c%s "$OUT")
+          gzip -9 -c "$OUT" > "$OUT.gz"
+          GZ=$(stat -c%s "$OUT.gz")
+          echo "Lithic Light: $SIZE bytes raw / $GZ bytes gzipped"
+
+          fail() { echo "::error::$1"; exit 1; }
+
+          # The whole point of this artifact is that it fits a small host's flash
+          # with room left for the wiki files beside it. Gzipped is the number that
+          # matters (an ESP32 web server can serve it with Content-Encoding: gzip),
+          # so that is the budget enforced; the raw ceiling is a drift alarm.
+          [ "$SIZE" -lt 4000000 ] || fail "light artifact is $SIZE bytes — past the 4 MB drift ceiling. Check lithic-light-tw.info for what got pulled in."
+          [ "$GZ" -lt 1048576 ] || fail "light artifact gzips to $GZ bytes — over the 1 MB flash budget."
+
+          # Same two guarantees as the full artifact: the uglify toolchain must be
+          # purged (lithic-save's save/all override), and the wikitext uglifier must
+          # stay off (lithic-default-configs) or it collapses SVG/macro whitespace.
+          grep -q '"title":"\$:/plugins/flibbles/uglify"' "$OUT" && fail "flibbles/uglify leaked into the light artifact — include xyvir/lithic-save in lithic-light-tw.info."
+          WIKITEXT_DAMAGE=$(grep -o -F -e 'size>>height=' -e '\parameters(size:' "$OUT" | wc -l | tr -d ' ')
+          [ "$WIKITEXT_DAMAGE" -eq 0 ] || fail "wikitext uglifier damaged $WIKITEXT_DAMAGE tiddler sites — \$:/config/flibbles/uglify/text/vnd.tiddlywiki must be 'no' (xyvir/lithic-default-configs)."
+
+          # Saving from a browser carries editor state along; a build must not.
+          JUNK=$(grep -o -e '"title":"\$:/temp/' -e '"title":"\$:/state/popup/' "$OUT" | wc -l | tr -d ' ')
+          [ "$JUNK" -eq 0 ] || fail "light artifact carries $JUNK editor-state tiddlers — it was not rendered through the publish override."
+          exit 0
 
       - name: Commit Built Wiki and Bump PWA (prod release)
         if: ${{ inputs.create_release == true && inputs.build_config == 'prod' }}
@@ -121,6 +176,7 @@ jobs:
           mkdir -p variants
           cp wiki/output/lith.html variants/prod.html
           cp wiki/output/lith.html src/lithic.html
+          cp wiki/output/lithic-light.html src/lithic-light.html
           
           # Bump PWA version to clear service worker cache
           CURRENT_VERSION=$(grep '"version":' manifest.json | sed -E 's/.*"version": "([^"]+)".*/\1/')
@@ -132,19 +188,27 @@ jobs:
 
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add variants/prod.html src/lithic.html src/launcher.html manifest.json offline-service-worker.js
+          git add variants/prod.html src/lithic.html src/lithic-light.html src/launcher.html manifest.json offline-service-worker.js
           git diff --cached --quiet || git commit -m "Update src/lithic.html + variants/prod.html, and bump PWA to $NEW_VERSION (build-$(date +'%Y.%m.%d-%H%M'))"
           git push
 
       - name: Commit Built Wiki to variants (non-prod)
         if: ${{ inputs.build_config != 'prod' }}
         run: |
-          mkdir -p variants
-          cp wiki/output/lith.html variants/${{ inputs.build_config }}.html
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add variants/${{ inputs.build_config }}.html
-          git diff --cached --quiet || git commit -m "Update variants/${{ inputs.build_config }}.html from build"
+          if [ "${{ inputs.build_config }}" = "light" ]; then
+            # The light distribution publishes to src/, next to the full artifact,
+            # because the launcher and the flash images pull it from there.
+            cp wiki/output/lithic-light.html src/lithic-light.html
+            git add src/lithic-light.html
+            git diff --cached --quiet || git commit -m "Update src/lithic-light.html from build"
+          else
+            mkdir -p variants
+            cp wiki/output/lith.html variants/${{ inputs.build_config }}.html
+            git add variants/${{ inputs.build_config }}.html
+            git diff --cached --quiet || git commit -m "Update variants/${{ inputs.build_config }}.html from build"
+          fi
           git push
 
       - name: Archive Wiki Folder
@@ -174,6 +238,8 @@ jobs:
           files: |
             wiki/output/lith.html
             variants/prod.html
+            src/lithic-light.html
+            wiki/output/lithic-light.html.gz
             wiki.zip
             wiki/flatten-manifest.log
 
@@ -182,7 +248,10 @@ jobs:
         uses: actions/upload-artifact@v5
         with:
           name: build-artifacts-dry-run
-          path: wiki/output/lith.html
+          path: |
+            wiki/output/lith.html
+            wiki/output/lithic-light.html
+            wiki/output/lithic-light.html.gz
 
       - name: Upload Built Launcher (prod only)
         if: inputs.build_config == 'prod'

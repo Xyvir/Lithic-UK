@@ -11,8 +11,20 @@ const OUTPUT_FILE = path.join(ROOT_DIR, 'wiki', 'tiddlywiki.info');
 // If target is 'dev', we merge prod + pre + dev.
 const HIERARCHY = ['prod', 'pre', 'dev', 'all'];
 
+// 'light' is not part of that hierarchy: it is a *subset* of prod, not prod plus
+// extras, so it is written by its own definition instead of being merged. That
+// definition is named lithic-light-tw.info rather than <env>-tiddlywiki.info
+// because it describes a distribution (the flash-sized one), not an environment
+// that layers onto prod — so it is deliberately outside the merge chain.
+const LIGHT_ENV = 'light';
+const LIGHT_CONFIG = 'lithic-light-tw.info';
+
 function loadConfig(env) {
-    const filePath = path.join(ROOT_DIR, `${env}-tiddlywiki.info`);
+    // Accepts an environment name (`prod` -> prod-tiddlywiki.info) or a full file
+    // name, which is how the light distribution's definition is addressed.
+    const filePath = env.endsWith('.info')
+        ? path.join(ROOT_DIR, env)
+        : path.join(ROOT_DIR, `${env}-tiddlywiki.info`);
     if (fs.existsSync(filePath)) {
         console.log(`Loading ${env} config from ${filePath}`);
         return JSON.parse(fs.readFileSync(filePath, 'utf8'));
@@ -57,8 +69,29 @@ function mergeConfigs(base, overlay) {
 function main() {
     console.log(`Generating tiddlywiki.info for environment: ${TARGET_ENV}`);
 
+    if (TARGET_ENV === LIGHT_ENV) {
+        // Written verbatim: the light set IS the whole story, so there is nothing
+        // to merge and no prod imports to inherit. flibbles/uglify stays in the
+        // list because light is a published artifact like prod, and light ships
+        // xyvir/lithic-save, whose save/all override is what strips the uglify
+        // tooling back out of the rendered file.
+        const lightConfig = loadConfig(LIGHT_CONFIG);
+        if (!Array.isArray(lightConfig.plugins) || lightConfig.plugins.length === 0) {
+            console.error(`Error: ${LIGHT_CONFIG} lists no plugins — refusing to write a build config from it.`);
+            process.exit(1);
+        }
+        fs.writeFileSync(OUTPUT_FILE, JSON.stringify(lightConfig, null, 4));
+        console.log(
+            `Successfully wrote ${lightConfig.plugins.length} plugins / ` +
+                `${(lightConfig.themes || []).length} themes to ${OUTPUT_FILE}`
+        );
+        return;
+    }
+
     if (!HIERARCHY.includes(TARGET_ENV)) {
-        console.error(`Error: Invalid environment '${TARGET_ENV}'. Must be one of: ${HIERARCHY.join(', ')}`);
+        console.error(
+            `Error: Invalid environment '${TARGET_ENV}'. Must be one of: ${[...HIERARCHY, LIGHT_ENV].join(', ')}`
+        );
         process.exit(1);
     }
 
