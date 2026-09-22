@@ -1,8 +1,9 @@
 {
 	"title": "$:/plugins/xyvir/lithic-patch-mermaid",
-	"description": "Lithic patch for orange/mermaid-tw5 wrapper event listeners",
+	"description": "Lithic patch for orange/mermaid-tw5: wrapper event listeners, the mermaid and pyramid stylesheets, and the Pyramid sidebar view, which renders the active stream node as a mermaid tree. Everything here needs the mermaid plugin, so it belongs behind that dependency rather than in lithic-core — a build without mermaid then loses the view instead of shipping a sidebar tab whose <$mermaid> widget does not exist.",
 	"author": "Lithic",
 	"core-version": ">=5.0.0",
+	"version": "0.1.0",
 	"plugin-type": "plugin",
 	"parent-plugin": "$:/plugins/orange/mermaid-tw5",
 	"dependents": ["$:/plugins/orange/mermaid-tw5"],
