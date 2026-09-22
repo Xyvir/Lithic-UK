@@ -489,23 +489,29 @@ fn report(window: &tauri::Window, stage: &str, detail: &str) {
     );
 }
 
-// --- Sync log ---------------------------------------------------------------
+// --- Sync log (disabled) ----------------------------------------------------
 // The modal shows one stage and no history, and on Windows this build has no
 // console at all, so a sync that stalls or fails leaves nothing to look at
-// afterwards. This file is that record: which folder, which stage, how far it
-// got, and how it ended. Append-only and rotated at a megabyte, so it cannot
-// grow without bound in someone's app data.
-
-/// Mark where the current sync began, so the log reads in offsets from one
-/// run's start — which is what a stall is measured in — instead of needing a
-/// calendar in a build that has no date library.
-static SYNC_STARTED: Mutex<Option<std::time::Instant>> = Mutex::new(None);
-
-fn sync_log_path() -> Option<PathBuf> {
-    dirs::data_local_dir().map(|dir| dir.join("Lithic").join("sync.log"))
-}
+// afterwards. This file used to be that record: which folder, which stage, how
+// far it got, and how it ended — appended per stage and rotated at a megabyte.
+// It is verbose for ordinary use, so it is commented out; uncomment the block
+// below to bring it back for troubleshooting.
+//
+// To re-enable: restore the static and `sync_log_path` here, then uncomment the
+// body of `log_sync` below (the `[+Ns]` offset comes from `SYNC_STARTED`, which
+// marks where the current run began, so a stall can be measured from one run's
+// start without needing a calendar in a build that has no date library).
+// static SYNC_STARTED: Mutex<Option<std::time::Instant>> = Mutex::new(None);
+//
+// fn sync_log_path() -> Option<PathBuf> {
+//     dirs::data_local_dir().map(|dir| dir.join("Lithic").join("sync.log"))
+// }
 
 fn log_sync(message: &str) {
+    // Body commented out; see the note above. The calls stay in place so
+    // re-enabling is a matter of uncommenting here, not rethreading them.
+    let _ = message;
+    /*
     let Some(path) = sync_log_path() else { return };
     if let Some(parent) = path.parent() {
         let _ = fs::create_dir_all(parent);
@@ -526,15 +532,12 @@ fn log_sync(message: &str) {
     if let Ok(mut file) = fs::OpenOptions::new().create(true).append(true).open(&path) {
         let _ = writeln!(file, "[+{}s] {}", elapsed, message);
     }
+    */
 }
 
 /// Start a run's log: the marker line, then the folder this run acts on.
-fn begin_sync_log(dir: &Path, repo: &str) {
-    if let Ok(mut slot) = SYNC_STARTED.lock() {
-        *slot = Some(std::time::Instant::now());
-    }
-    log_sync(&format!("--- sync start · {} · github.com/{}", dir.display(), repo));
-}
+/// No-op while verbose sync logging is commented out.
+fn begin_sync_log(_dir: &Path, _repo: &str) {}
 
 /// What the first-connect merge did, for the message the launcher shows.
 #[derive(Debug, Default, PartialEq, Eq)]
