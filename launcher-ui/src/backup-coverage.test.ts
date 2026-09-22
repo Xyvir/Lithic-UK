@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { folderOf, computeBackupCoverage, hasBackedUpRepo, folderTargets, reindexFolders, orphanedEntries } from './backup-coverage.ts';
+import { folderOf, computeBackupCoverage, hasBackedUpRepo, folderTargets, reindexFolders, orphanedEntries, syncedDirFor } from './backup-coverage.ts';
 
 test('folderOf keeps the separator and tolerates either OS', () => {
   assert.equal(folderOf('C:\\Users\\me\\Documents\\Lithic\\work.lith'), 'C:\\Users\\me\\Documents\\Lithic\\');
@@ -54,6 +54,25 @@ test('a partial answer does not mark an unanswered row as backed up', () => {
 test('hasBackedUpRepo is false while nothing is backed up', () => {
   assert.equal(hasBackedUpRepo({}), false);
   assert.equal(hasBackedUpRepo({ '/data/a.lith': '/data' }), true);
+});
+
+test('syncedDirFor picks the covered folder of the newest row that has one', () => {
+  // The newest rows are the stray ones — which is exactly the state a local-only
+  // mark appears in, so walking past them to the first covered row is the case
+  // that matters, not an edge case.
+  const rows = [
+    { name: 'tiddlers.lith', path: 'C:\\Users\\me\\Downloads\\tiddlers.lith' },
+    { name: 'stray.lith', path: 'D:\\scratch\\stray.lith' },
+    { name: 'notes.lith', path: 'C:\\Users\\me\\Documents\\Lithic\\notes.lith' },
+    { name: 'older.lith', path: 'C:\\Users\\me\\Documents\\Lithic\\older.lith' }
+  ];
+  const roots = { 'C:\\Users\\me\\Documents\\Lithic\\notes.lith': 'C:\\Users\\me\\Documents\\Lithic', 'C:\\Users\\me\\Documents\\Lithic\\older.lith': 'C:\\Users\\me\\Documents\\Lithic' };
+  assert.equal(syncedDirFor(rows, roots), 'C:\\Users\\me\\Documents\\Lithic');
+});
+
+test('syncedDirFor answers nothing while no folder is covered', () => {
+  assert.equal(syncedDirFor([{ name: 'a.lith', path: 'D:\\a.lith' }], {}), null);
+  assert.equal(syncedDirFor([{ name: 'a.lith', path: null }], { '/data/a.lith': '/data' }), null);
 });
 
 test('folderTargets yields one representative file per distinct folder', () => {

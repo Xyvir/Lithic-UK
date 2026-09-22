@@ -12,7 +12,7 @@
   import { fetchRemoteFiles, fetchRemoteWiki, probePatchApi, createLockHeartbeat, readRemoteLock, uploadRemoteFile, webdavUrl, resolveSessionId, lithUploadName, type WebdavFile } from './webdav';
   import { normalizeLithName } from './legacy-saver';
   import { searchCachedWikis } from './cache-search';
-  import { computeBackupCoverage, hasBackedUpRepo, orphanedEntries, reindexFolders, type CoverageRow, type RebuildOrphan } from './backup-coverage';
+  import { computeBackupCoverage, folderOf, hasBackedUpRepo, orphanedEntries, reindexFolders, syncedDirFor, type CoverageRow, type RebuildOrphan } from './backup-coverage';
   import { parseDeviceCode, parseDevicePoll, pollDelayMs, formatUserCode, generateRepoName, partitionRepos } from './github-device';
   import { syncIndicator, shouldHeartbeat, healthFailure, SYNC_PULSE_MS, type SyncIndicator, type HealthState } from './git-sync-health';
   import { serializeJsonToLith, parseLithToJSON } from './lithic-format';
@@ -209,6 +209,12 @@
   let gitSyncStage = '';
   let gitSyncElapsed = 0;
   let gitSyncProgressTimer: ReturnType<typeof setInterval> | null = null;
+  /**
+   * The user asked the running connect to stop. Rust's command answers at once
+   * and the work ends at its next checkpoint, so this is a request, not a fact —
+   * the modal keeps its progress line until `git_sync_setup` itself returns.
+   */
+  let gitSyncCancelling = false;
 
   function startGitSyncProgress(): void {
     stopGitSyncProgressTimer();
@@ -226,6 +232,7 @@
     stopGitSyncProgressTimer();
     gitSyncStage = '';
     gitSyncElapsed = 0;
+    gitSyncCancelling = false;
   }
 
   /**
@@ -266,14 +273,12 @@
     gitSyncHealthApplies = false;
     gitPollAborted = true;
     gitReconnectMode = false;
-    // Focus is per-visit: leaving it set would silently retarget the header
-    // icon and the next open at a folder the user only looked at once.
-    gitSyncFocus = null;
   }
 
   function resetGitSyncFlow() {
     gitPollAborted = true;
     gitAuthActive = false;
+    gitSyncCancelling = false;
     gitReconnectMode = false;
     gitDeviceToken = null;
     gitUserCode = '';
@@ -284,13 +289,6 @@
     endGitSyncProgress();
     void refreshGitSyncStatus(true);
   }
-
-  /**
-   * A folder the user asked to back up from the recent list, as a path inside
-   * it. Cleared when the modal closes, so the header icon keeps meaning "the
-   * folder of my current Lith" while a row can act on its own folder.
-   */
-  let gitSyncFocus: string | null = null;
 
   /** Wiki path -> the backed-up folder covering it; absent when none does. */
   let backupRoots: Record<string, string> = {};
@@ -305,8 +303,12 @@
    * sync icon out right after a save.
    */
   function gitSyncTargetPath(): string | null {
-    if (filePath) return filePath;
-    for (const item of recentFiles) {
+    return filePath ?? newestRecentPath(recentFiles);
+  }
+
+  /** The newest recent row that records a disk path, or nothing when none does. */
+  function newestRecentPath(items: readonly any[]): string | null {
+    for (const item of items) {
       const path = recentDiskPath(item);
       if (path) return path;
     }
@@ -314,14 +316,87 @@
   }
 
   /**
-   * The path the modal and its commands act on: the focused folder when a
-   * recent row asked for one, otherwise the usual target. The header icon
-   * deliberately keeps using the unfocused target, so connecting somebody
-   * else's folder never repaints the icon for the Lith you have open.
+   * The path the modal and its commands act on: the folder Rust prefers, else the
+   * one derived from the open Lith or the newest recent row.
+   *
+   * There is no per-row override any more: a row outside a backed-up folder is
+   * offered a copy into the covered folder rather than a second repository of its
+   * own, so the modal always means the Lith you have open or the newest one you
+   * opened — or, when a folder Lithic already backs up outranks both, that folder.
    */
   function gitSyncActivePath(): string | null {
-    if (mode === 'tauri' && gitSyncFocus) return gitSyncFocus;
-    return gitSyncTargetPath();
+    return gitSyncPreferredFolder ?? gitSyncTargetPath();
+  }
+
+  /**
+   * The folder Rust prefers: one a previous attachment already left a repository
+   * in, which outranks the folder the derived path implies.
+   *
+   * Only Rust can answer it — the question is a `.git` sitting in a folder on disk
+   * — and only the launcher knows what to fall back on, so the two halves meet
+   * here.
+   */
+  let gitSyncPreferredFolder: string | null = null;
+  /** The derived path the resolution already ran for; undefined before any. */
+  let gitSyncResolvedFor: string | null | undefined = undefined;
+  let gitSyncResolveToken = 0;
+
+  /**
+   * The derived subject, written where Svelte can see what it depends on: a
+   * reactive statement tracks the variables it *names*, and `filePath`/
+   * `recentFiles` are read inside a helper that names neither — so through
+   * `gitSyncTargetPath()` this would never re-run when the open Lith changed.
+   */
+  $: gitSyncSubject = filePath ?? newestRecentPath(recentFiles);
+  $: if (gitSyncSubject !== gitSyncResolvedFor) void resolveSyncFolder(gitSyncSubject);
+
+  async function resolveSyncFolder(derived: string | null): Promise<void> {
+    const token = ++gitSyncResolveToken;
+    gitSyncResolvedFor = derived;
+    if (mode !== 'tauri') {
+      gitSyncPreferredFolder = null;
+      return;
+    }
+    let folder: string | null = null;
+    try {
+      folder = await tauriInvoke<string | null>('git_sync_folder', { derived });
+    } catch {
+      folder = null;
+    }
+    // A newer subject is already being resolved, and its answer is the one to
+    // keep: this one describes a file nobody is looking at any more.
+    if (token !== gitSyncResolveToken) return;
+    gitSyncPreferredFolder = folder;
+    // The icon, the heartbeat and the dialog all read the resolved folder, so the
+    // answers that depend on it are only now knowable.
+    refreshGitSyncIcon();
+  }
+
+  /**
+   * The folder the modal's actions act on, named in the dialog itself.
+   *
+   * The target is *derived* — the open Lith, else the newest recent row — and a
+   * recent row can live anywhere, so the folder is not something the user chose at
+   * the moment they connect. Saying which one it is, before they press anything, is
+   * the difference between "back up these notes" and involuntarily committing a
+   * Downloads folder. Both halves are named directly here, because Svelte only
+   * tracks the variables a reactive statement reads.
+   */
+  $: gitSyncFolder = (gitSyncPreferredFolder ?? folderOf(gitSyncSubject ?? '')).replace(/[\\/]+$/, '');
+
+  /**
+   * Ask the running connect to stop. The outcome arrives as `git_sync_setup`
+   * failing, so there is nothing to report here — an unreachable backend means
+   * the run it would have stopped has already ended.
+   */
+  async function cancelGitSync(): Promise<void> {
+    if (gitSyncCancelling) return;
+    gitSyncCancelling = true;
+    try {
+      await tauriInvoke('git_sync_cancel');
+    } catch {
+      gitSyncCancelling = false;
+    }
   }
 
   /** Recent rows reduced to the name/path pair coverage is computed from. */
@@ -358,17 +433,36 @@
   // folders, and self-host's server — rebuilding beats clearing.
   $: showRebuildControl = isSelfHost() || showBackupStatus;
 
-  /** Whether this row sits in a folder with no managed repository. */
-  function isLocalOnly(file: RecentEntry | { name?: string; path?: string; text?: string; handle?: any }): boolean {
-    if (!showBackupStatus) return false;
-    const path = recentDiskPath(file as any);
-    return Boolean(path) && localOnlyPaths.has(path as string);
-  }
-
-  /** Back up the folder a recent row points at, rather than the open file's. */
-  function backUpFolder(path: string): void {
-    gitSyncFocus = path;
-    openGitSyncModal();
+  /**
+   * Offer to copy a Lith that no backup covers into the folder that is covered.
+   *
+   * The offer is the whole point: the file stays where it is, nothing is moved
+   * or deleted, and the answer to "this one is not backed up" is a single copy
+   * into the folder that already is. Setting up a repository for its own folder
+   * instead would make every stray download a backup of its own.
+   */
+  async function offerCopyToSyncedDir(name: string, path: string): Promise<void> {
+    const folder = syncedDirFor(recentRows(), backupRoots);
+    if (!folder) return;
+    const agreed = await askConfirmation({
+      title: 'Copy to Synced Dir',
+      body: `${name} is not backed up. Copy it into ${folder}?`,
+      confirmLabel: 'Copy',
+    });
+    if (!agreed) return;
+    try {
+      const copied = await tauriInvoke<{ name: string; path: string }>('copy_lith_to_synced_dir', { path, folder });
+      // The row follows the file. Same name, so the copy keeps the cached history
+      // and dirty-state keys it already had, and `remember` drops the old row.
+      await remember({ name: copied.name, path: copied.path });
+      // A copy is not a save, so nothing would commit it until the next edit.
+      // Best effort: a failure here is reported by the sync icon like any other
+      // backup that did not land, and the file is still backed up by its next save.
+      await tauriInvoke('git_sync_commit', { path: copied.path, message: `Add ${copied.name} from Lithic` }).catch(() => {});
+      status = `Copied ${copied.name} to ${folder}`;
+    } catch (error) {
+      mountError = error instanceof Error ? error.message : String(error);
+    }
   }
 
   /**
@@ -451,7 +545,7 @@
     // A verdict describes one folder: re-pointing at another makes it
     // meaningless, and showing it would be worse than showing nothing. Keyed on
     // the icon's folder, because that is the one the verdict is always about.
-    syncHealthTarget(gitSyncTargetPath());
+    syncHealthTarget(gitSyncActivePath());
     gitSyncHealthApplies = healthAppliesToActive();
     if (!target) {
       noteNoGitSyncTarget();
@@ -623,8 +717,9 @@
       await tauriInvoke('git_sync_disconnect', { path: target });
       gitSyncConnectedRepo = '';
       gitSyncView = 'disconnected';
-      gitSyncFocus = null;
       void refreshBackupCoverage();
+      // That folder is no longer attached, so what Rust prefers may have moved.
+      void resolveSyncFolder(gitSyncSubject);
     } catch (error) {
       gitSyncError = error instanceof Error ? error.message : String(error);
     } finally {
@@ -763,7 +858,7 @@
    */
   async function runGitSyncHeartbeat(force = false): Promise<void> {
     if (mode !== 'tauri') return;
-    const target = gitSyncTargetPath();
+    const target = gitSyncActivePath();
     syncHealthTarget(target);
     if (!target || gitSyncHeartbeatInFlight) return;
     const hidden = typeof document !== 'undefined' && document.hidden;
@@ -827,7 +922,7 @@
 
   function refreshGitSyncIcon() {
     if (mode !== 'tauri') return;
-    const target = gitSyncTargetPath();
+    const target = gitSyncActivePath();
     syncHealthTarget(target);
     if (!target) {
       noteNoGitSyncTarget();
@@ -2418,7 +2513,7 @@
       {#if status}<div class="status-line" role="status"><span class="status-label">{status.replace(/[…\.\s]+$/, '')}</span><span class="activity-dots" aria-hidden="true"><i></i><i></i><i></i></span></div>{/if}
       {#if mountError}<div class="status-line error" role="alert">{mountError}</div>{/if}
     </div>
-    {#if mode === 'webapp'}<button class="help-button" aria-label="View Introduction" title="View Introduction" on:click={openIntro}>{introBusy ? '…' : '?'}</button>{:else if mode === 'tauri'}<button class="sync-button {gitSyncIconState}" aria-label="GitHub Sync" title={gitSyncIconTitle} on:click={() => { gitSyncFocus = null; openGitSyncModal(); }}><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 17.6A5 5 0 0 0 18 8h-1.3A8 8 0 1 0 4 16.3"/><path d="M12 12v9"/><path d="m8.5 15.5 3.5-3.5 3.5 3.5"/></svg>{#if gitSyncIconState === 'checking'}<span class="sync-glyph ring" aria-hidden="true"></span>{:else if gitSyncIconState === 'error'}<span class="sync-glyph alert" aria-hidden="true">!</span>{:else if gitSyncIconState === 'connected'}<span class="sync-glyph dot" aria-hidden="true"></span>{/if}</button>{/if}
+    {#if mode === 'webapp'}<button class="help-button" aria-label="View Introduction" title="View Introduction" on:click={openIntro}>{introBusy ? '…' : '?'}</button>{:else if mode === 'tauri'}<button class="sync-button {gitSyncIconState}" aria-label="GitHub Sync" title={gitSyncIconTitle} on:click={openGitSyncModal}><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 17.6A5 5 0 0 0 18 8h-1.3A8 8 0 1 0 4 16.3"/><path d="M12 12v9"/><path d="m8.5 15.5 3.5-3.5 3.5 3.5"/></svg>{#if gitSyncIconState === 'checking'}<span class="sync-glyph ring" aria-hidden="true"></span>{:else if gitSyncIconState === 'error'}<span class="sync-glyph alert" aria-hidden="true">!</span>{:else if gitSyncIconState === 'connected'}<span class="sync-glyph dot" aria-hidden="true"></span>{/if}</button>{/if}
   </header>
   {#if pendingImports.length > 0}
     <div class="pending-imports" role="status" aria-label="Pending imports">
@@ -2437,18 +2532,24 @@
     <div class="modal-overlay" role="presentation" on:click={(event) => event.currentTarget === event.target && closeGitSyncModal()}>
       <div class="launcher-modal" role="dialog" aria-modal="true" aria-labelledby="gitsync-title">          <button class="modal-close" aria-label="Close GitHub sync dialog" on:click={closeGitSyncModal}>×</button>
         <h2 id="gitsync-title">GitHub Sync</h2>
+        {#if gitSyncFolder}
+          <p class="sync-folder" title={gitSyncFolder}><span class="sync-folder-label">Folder</span> {gitSyncFolder}</p>
+        {/if}
+        {#if showBackupStatus && backupCoverage.localOnlyPaths.length > 0}
+          <p class="backup-status" role="status">{backupCoverage.backedUp} of {backupCoverage.tracked} recent liths backed up</p>
+        {/if}
         {#if !gitSyncActivePath()}
           <p class="status-line error" role="alert">Save a Lith to disk first, since sync backs up its folder.</p>
         {:else if gitSyncView === 'disconnected'}
-          <p>Back up the folder of <strong>{clipFilename(gitSyncActivePath() ?? '')}</strong> to GitHub. Saves push automatically.</p>
+          <p>Back up this folder to GitHub. Saves push automatically.</p>
           {#if gitSyncError}<p class="status-line error" role="alert">{gitSyncError}</p>{/if}
-          {#if gitSyncBusy}<p class="sync-progress" role="status"><span class="sync-spinner" aria-hidden="true"></span><span>{gitSyncStage || 'Working…'}</span><span class="sync-elapsed">{gitSyncElapsed}s</span></p>{/if}
+          {#if gitSyncBusy}<p class="sync-progress" role="status"><span class="sync-spinner" aria-hidden="true"></span><span>{gitSyncStage || 'Working…'}</span><span class="sync-elapsed">{gitSyncElapsed}s</span>{#if !gitAuthActive}<button type="button" class="sync-cancel" on:click={cancelGitSync}>{gitSyncCancelling ? 'Cancelling…' : 'Cancel'}</button>{/if}</p>{/if}
           <div class="modal-actions"><button class="modal-action" disabled={gitSyncBusy} on:click={startDeviceAuth}>{gitSyncBusy ? '…' : 'Connect to GitHub'}</button></div>
           <details class="git-sync-advanced">
             <summary>Advanced: connect with a personal access token</summary>
             <input bind:value={gitRepoInput} aria-label="GitHub repository (owner/name)" placeholder="owner/repository" on:keydown={(event) => event.key === 'Enter' && connectGitSync()} />
             <input bind:value={gitTokenInput} type="password" aria-label="GitHub token" placeholder="Fine-grained or classic token with push access" on:keydown={(event) => event.key === 'Enter' && connectGitSync()} />
-            {#if gitSyncBusy}<p class="sync-progress" role="status"><span class="sync-spinner" aria-hidden="true"></span><span>{gitSyncStage || 'Working…'}</span><span class="sync-elapsed">{gitSyncElapsed}s</span></p>{/if}
+            {#if gitSyncBusy}<p class="sync-progress" role="status"><span class="sync-spinner" aria-hidden="true"></span><span>{gitSyncStage || 'Working…'}</span><span class="sync-elapsed">{gitSyncElapsed}s</span>{#if !gitAuthActive}<button type="button" class="sync-cancel" on:click={cancelGitSync}>{gitSyncCancelling ? 'Cancelling…' : 'Cancel'}</button>{/if}</p>{/if}
             <div class="modal-actions"><button class="modal-action" disabled={!gitRepoInput || !gitTokenInput || gitSyncBusy} on:click={connectGitSync}>{gitSyncBusy ? 'Connecting…' : 'Connect & Push'}</button></div>
           </details>
         {:else if gitSyncView === 'connecting'}
@@ -2491,7 +2592,7 @@
           {/if}
           {#if gitSyncError}<p class="status-line error" role="alert">{gitSyncError}</p>{/if}
           {#if gitSyncMessage}<p class="status-line" role="status">{gitSyncMessage}</p>{/if}
-          {#if gitSyncBusy}<p class="sync-progress" role="status"><span class="sync-spinner" aria-hidden="true"></span><span>{gitSyncStage || 'Working…'}</span><span class="sync-elapsed">{gitSyncElapsed}s</span></p>{/if}
+          {#if gitSyncBusy}<p class="sync-progress" role="status"><span class="sync-spinner" aria-hidden="true"></span><span>{gitSyncStage || 'Working…'}</span><span class="sync-elapsed">{gitSyncElapsed}s</span>{#if !gitAuthActive}<button type="button" class="sync-cancel" on:click={cancelGitSync}>{gitSyncCancelling ? 'Cancelling…' : 'Cancel'}</button>{/if}</p>{/if}
           <div class="modal-actions">
             <button class="modal-action" disabled={gitSyncBusy || !gitRepoSelection()} on:click={finalizeGitSync}>{gitSyncBusy ? 'Syncing…' : 'Start Sync'}</button>
             <button class="modal-action secondary" on:click={resetGitSyncFlow}>Back</button>
@@ -2506,7 +2607,7 @@
           {/if}
           {#if gitSyncError}<p class="status-line error" role="alert">{gitSyncError}</p>{/if}
           {#if gitSyncMessage}<p class="status-line" role="status">{gitSyncMessage}</p>{/if}
-          {#if gitSyncBusy}<p class="sync-progress" role="status"><span class="sync-spinner" aria-hidden="true"></span><span>{gitSyncStage || 'Working…'}</span><span class="sync-elapsed">{gitSyncElapsed}s</span></p>{/if}
+          {#if gitSyncBusy}<p class="sync-progress" role="status"><span class="sync-spinner" aria-hidden="true"></span><span>{gitSyncStage || 'Working…'}</span><span class="sync-elapsed">{gitSyncElapsed}s</span>{#if !gitAuthActive}<button type="button" class="sync-cancel" on:click={cancelGitSync}>{gitSyncCancelling ? 'Cancelling…' : 'Cancel'}</button>{/if}</p>{/if}
           <div class="modal-actions">
             {#if gitSyncHealthBroken}
               <button class="modal-action" disabled={gitSyncBusy || gitAuthActive} on:click={reconnectGitSync}>{gitAuthActive ? 'Waiting for GitHub…' : 'Reconnect'}</button>
@@ -2718,7 +2819,6 @@
             </div>
           {/each}
         {/if}
-        {#if !isSelfHost() && bookmarks.length > 0}<p class="recent-group-label">Remote instances</p>{/if}
         {#each bookmarks.filter((entry) => entry.label.toLowerCase().includes(search.toLowerCase()) || entry.url.toLowerCase().includes(search.toLowerCase())) as entry (entry.url)}
           <div class="recent-row bookmark-row">
             {#if entry.icon}
@@ -2739,8 +2839,16 @@
               <svg class="history-download-icon" viewBox="56 108 33 36" aria-hidden="true"><path class="history-icon-shape" d="m 73.595508,109.76746 c -7.198235,0 -13.103617,5.58342 -13.647229,12.64471 h -0.0072 V 138.2696 H 58.61606 l 2.32389,4.02559 2.324405,-4.02559 h -1.323433 v -15.85123 c 0.530186,-5.97937 5.534806,-10.65103 11.654586,-10.65103 6.474618,0 11.703161,5.22855 11.703161,11.70316 0,6.47462 -5.228543,11.70161 -11.703161,11.70161 -2.644513,0 -5.080809,-0.87232 -7.037814,-2.34508 v 2.39572 c 2.058162,1.23707 4.46633,1.94924 7.037814,1.94924 7.555498,0 13.703556,-6.14599 13.703556,-13.70149 0,-7.5555 -6.148058,-13.70304 -13.703556,-13.70304 z m -2.108915,7.49825 v 8.05016 h 7.125663 v -1.59836 h -5.527311 v -6.4518 z"></path></svg>
             </button>
             {/if}
-            {#if isLocalOnly(file)}
-              <button class="recent-icon-button local-only-button" type="button" aria-label={`Back up the folder containing ${name}`} title={`Local only. ${name} is not in a backed-up folder yet.`} on:click={() => backUpFolder(recentDiskPath(file as any) as string)}>
+            <!--
+              The condition is written out rather than asked of a helper: Svelte
+              re-evaluates a template condition when the variables it names
+              change, and a function call names none of them. Through a helper
+              the mark only appeared once something else rebuilt the row — which
+              is after the coverage answer landed, so a fresh list showed no
+              marks at all and the copy offer was unreachable.
+            -->
+            {#if showBackupStatus && localOnlyPaths.has(recentDiskPath(file as any) ?? '')}
+              <button class="recent-icon-button local-only-button" type="button" aria-label={`Copy ${name} to the synced folder`} title={`Local only. Copy ${name} into the backed-up folder.`} on:click={() => offerCopyToSyncedDir(name, recentDiskPath(file as any) as string)}>
                 <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8.5"></circle><path d="M12 7.5v5.5"></path><path d="M12 16.2h.01"></path></svg>
               </button>
             {/if}
@@ -2781,9 +2889,6 @@
           </div>
         {/each}
       </div>
-      {#if showBackupStatus && backupCoverage.localOnlyPaths.length > 0}
-        <p class="backup-status" role="status">{backupCoverage.backedUp} of {backupCoverage.tracked} recent liths backed up</p>
-      {/if}
       {#if showRebuildControl}
         <button class="reset-cache" on:click={rebuildRecents} disabled={rebuildBusy} title={isSelfHost()
           ? 'Rebuild this list from the server'

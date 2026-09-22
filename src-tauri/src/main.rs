@@ -113,6 +113,45 @@ fn write_text_path(path: String, text: String) -> Result<(), String> {
     fs::write(&path, text).map_err(|error| error.to_string())
 }
 
+/// Copy a Lith into a folder that is already backed up.
+///
+/// What the launcher used to offer instead — set up a second repository for
+/// whatever folder that file happens to live in — answered "this file is not
+/// backed up" with "now you maintain two backups", and made the user's folder
+/// layout decide how many repositories exist. Copying into the covered folder is
+/// the local answer: the file lands where saves are already pushed.
+///
+/// A copy, not a move. The original is the user's and stays where it is, which
+/// is also why an existing file of the same name is refused rather than
+/// overwritten: the destination may hold a different Lith with that name.
+#[tauri::command]
+fn copy_lith_to_synced_dir(path: String, folder: String) -> Result<SavedLithFile, String> {
+    let source = PathBuf::from(&path);
+    if !source.is_file() {
+        return Err(format!("{} is not a file", source.display()));
+    }
+    let target_dir = PathBuf::from(&folder);
+    if !target_dir.is_dir() {
+        return Err(format!("{} is not a folder", target_dir.display()));
+    }
+    let name = source
+        .file_name()
+        .ok_or_else(|| "The file has no name".to_string())?
+        .to_os_string();
+    let target = target_dir.join(&name);
+    if target.exists() {
+        return Err(format!(
+            "{} is already in that folder",
+            name.to_string_lossy()
+        ));
+    }
+    fs::copy(&source, &target).map_err(|error| error.to_string())?;
+    Ok(SavedLithFile {
+        name: name.to_string_lossy().into_owned(),
+        path: target.to_string_lossy().into_owned(),
+    })
+}
+
 /// Canonical per-user install target for the monolith executable: visible
 /// Documents\Lithic\Lithic.exe, falling back out of the way when Documents
 /// is unavailable. Shared by install and status queries.
@@ -425,8 +464,22 @@ struct GitSyncSetup {
     recents: Vec<String>,
 }
 
-/// Best-effort progress emit: a closed window just means nobody is watching.
+/// A staging line: the total first, then how far along it is, because "0 of
+/// 3,910" as the opening line reads like a fault rather than a beginning.
+fn stage_label(verb: &str, done: usize, total: usize) -> String {
+    if done == 0 {
+        format!("{} {} files…", verb, total)
+    } else {
+        format!("{} {} of {} files…", verb, done, total)
+    }
+}
+
+/// One stage of the sync: written to the log and emitted to the modal. The log
+/// line is why `detail` may be a running count — the modal only needs the
+/// latest, but "how far did it get" is the question afterwards. Best effort on
+/// the emit: a closed window just means nobody is watching.
 fn report(window: &tauri::Window, stage: &str, detail: &str) {
+    log_sync(&format!("{} · {}", stage, detail));
     let _ = window.emit(
         "git-sync-progress",
         SyncProgress {
@@ -434,6 +487,53 @@ fn report(window: &tauri::Window, stage: &str, detail: &str) {
             detail: detail.to_string(),
         },
     );
+}
+
+// --- Sync log ---------------------------------------------------------------
+// The modal shows one stage and no history, and on Windows this build has no
+// console at all, so a sync that stalls or fails leaves nothing to look at
+// afterwards. This file is that record: which folder, which stage, how far it
+// got, and how it ended. Append-only and rotated at a megabyte, so it cannot
+// grow without bound in someone's app data.
+
+/// Mark where the current sync began, so the log reads in offsets from one
+/// run's start — which is what a stall is measured in — instead of needing a
+/// calendar in a build that has no date library.
+static SYNC_STARTED: Mutex<Option<std::time::Instant>> = Mutex::new(None);
+
+fn sync_log_path() -> Option<PathBuf> {
+    dirs::data_local_dir().map(|dir| dir.join("Lithic").join("sync.log"))
+}
+
+fn log_sync(message: &str) {
+    let Some(path) = sync_log_path() else { return };
+    if let Some(parent) = path.parent() {
+        let _ = fs::create_dir_all(parent);
+    }
+    if fs::metadata(&path)
+        .map(|meta| meta.len() > 1_000_000)
+        .unwrap_or(false)
+    {
+        let _ = fs::remove_file(&path);
+    }
+    let elapsed = SYNC_STARTED
+        .lock()
+        .ok()
+        .and_then(|slot| *slot)
+        .map(|started| started.elapsed().as_secs())
+        .unwrap_or(0);
+    use std::io::Write;
+    if let Ok(mut file) = fs::OpenOptions::new().create(true).append(true).open(&path) {
+        let _ = writeln!(file, "[+{}s] {}", elapsed, message);
+    }
+}
+
+/// Start a run's log: the marker line, then the folder this run acts on.
+fn begin_sync_log(dir: &Path, repo: &str) {
+    if let Ok(mut slot) = SYNC_STARTED.lock() {
+        *slot = Some(std::time::Instant::now());
+    }
+    log_sync(&format!("--- sync start · {} · github.com/{}", dir.display(), repo));
 }
 
 /// What the first-connect merge did, for the message the launcher shows.
@@ -496,6 +596,12 @@ fn merge_with_remote_branch(
     let mut pulled = 0usize;
 
     for entry in files {
+        // Checked per file rather than per stage: a first connect to a repository
+        // with thousands of files spends its whole time in this loop, and
+        // Cancel has to land somewhere inside it.
+        if gitcore::cancelled() {
+            return Err("Sync cancelled.".to_string());
+        }
         let local = dir.join(&entry);
         if !local.exists() {
             if let Some(parent) = local.parent() {
@@ -540,29 +646,83 @@ fn sync_with_remote(
     remote_url: &str,
     progress: &dyn Fn(&str, &str),
 ) -> Result<SyncMerge, String> {
-    let repo = if dir.join(".git").is_dir() {
-        gitcore::open(dir)?
-    } else {
+    let created = !dir.join(".git").is_dir();
+    let repo = if created {
         gitcore::init(dir)?
+    } else {
+        gitcore::open(dir)?
     };
     gitcore::ensure_identity(&repo);
     let _ = gitcore::remove_remote(&repo, "origin");
     gitcore::set_remote(&repo, "origin", remote_url)?;
+    // Attached now, whatever a Disconnect once said about this folder.
+    gitcore::clear_detached(&repo);
+    log_sync(&format!(
+        "repository {} ({})",
+        if created { "created" } else { "opened" },
+        dir.display()
+    ));
 
     // A commit must exist before the merge can compare against the remote and
     // before a branch can be pushed.
     if !gitcore::head_exists(&repo) {
         progress("commit", "Committing the folder's files…");
-        gitcore::stage_all(&repo)?;
+        let staged = gitcore::stage_working_tree(
+            &repo,
+            Some(gitcore::FIRST_SYNC_FILE_CAP),
+            gitcore::cancelled,
+            |done, total| progress("commit", &stage_label("Committing", done, total)),
+        )?;
+        log_sync(&format!(
+            "first connect staged {} files (over_cap {} cancelled {})",
+            staged.files, staged.over_cap, staged.cancelled
+        ));
+        // Both exits leave the folder as it was found: nothing staged, nothing
+        // committed, and a repository Lithic created is removed again. A
+        // declined or cancelled first connect must not leave a `.git` sitting in
+        // somebody's Downloads folder.
+        if staged.over_cap || staged.cancelled {
+            let _ = gitcore::remove_remote(&repo, "origin");
+            drop(repo);
+            if created {
+                let _ = fs::remove_dir_all(dir.join(".git"));
+            }
+            return Err(if staged.over_cap {
+                // The count is exact, because the walk only counts here: nothing
+                // was hashed and the index is untouched.
+                format!(
+                    "This folder holds {} files. Back up the folder your liths live in.",
+                    staged.files
+                )
+            } else {
+                "Sync cancelled.".to_string()
+            });
+        }
         gitcore::commit(&repo, "Initial sync from Lithic", true)?;
     }
 
     // Everything only GitHub has comes down, the folder keeps its own version of
     // anything that exists on both sides, and then the union goes up.
     let merge = merge_with_remote_branch(dir, progress)?;
+    log_sync(&format!(
+        "merged: {} rescued, {} kept local",
+        merge.rescued.len(),
+        merge.diverged.len()
+    ));
+    if gitcore::cancelled() {
+        return Err("Sync cancelled.".to_string());
+    }
 
-    gitcore::stage_all(&repo)?;
     progress("commit", "Recording the merged state…");
+    let staged = gitcore::stage_working_tree(
+        &repo,
+        None,
+        gitcore::cancelled,
+        |done, total| progress("commit", &stage_label("Recording", done, total)),
+    )?;
+    if staged.cancelled {
+        return Err("Sync cancelled.".to_string());
+    }
     gitcore::commit(&repo, "System: finalize GitHub sync", false)?;
     gitcore::set_upstream(&repo, "origin", "main");
     progress("push", "Pushing to GitHub…");
@@ -587,12 +747,9 @@ async fn git_sync_setup(
     token: String,
     window: tauri::Window,
 ) -> Result<GitSyncSetup, String> {
-    let file = PathBuf::from(&path);
-    let dir = file
-        .parent()
-        .filter(|parent| parent.is_dir())
-        .ok_or_else(|| format!("Cannot resolve a folder for {}", path))?
-        .to_path_buf();
+    let dir = sync_dir_of(Path::new(&path))
+        .filter(|dir| dir.is_dir())
+        .ok_or_else(|| format!("Cannot resolve a folder for {}", path))?;
     let repo = repo.trim().trim_end_matches(".git").trim().to_string();
     if repo.is_empty() || token.trim().is_empty() {
         return Err("Both repository (owner/name) and token are required".to_string());
@@ -600,7 +757,23 @@ async fn git_sync_setup(
 
     let outcome = tauri::async_runtime::spawn_blocking(move || -> Result<GitSyncSetup, String> {
         let url = sync_remote_url(&repo, token.trim());
-        let merge = sync_with_remote(&dir, &url, &|stage, detail| report(&window, stage, detail))?;
+        // A request left over from a previous run would cancel this one before it
+        // did anything.
+        gitcore::clear_cancel();
+        begin_sync_log(&dir, &repo);
+        // The cancel flag belongs to this run and not to the app: left set after a
+        // cancelled connect it would abort the next save's push, which would then
+        // report a failed backup over a backup nobody asked it to stop.
+        let merge = match sync_with_remote(&dir, &url, &|stage, detail| report(&window, stage, detail)) {
+            Ok(merge) => {
+                gitcore::clear_cancel();
+                merge
+            }
+            Err(error) => {
+                gitcore::clear_cancel();
+                return Err(error);
+            }
+        };
 
         let mut summary = format!("Backed up to github.com/{}", repo);
         if !merge.rescued.is_empty() {
@@ -609,14 +782,35 @@ async fn git_sync_setup(
         if !merge.diverged.is_empty() {
             summary.push_str(&format!(" · kept {} local", merge.diverged.len()));
         }
+        log_sync(&format!("done · {}", summary));
         Ok(GitSyncSetup {
             summary,
             recents: list_lith_wikis(&dir, WIKI_LIST_LIMIT),
         })
     })
-    .await
-    .map_err(|error| error.to_string())?;
-    outcome
+    .await;
+    match outcome {
+        Ok(Ok(setup)) => Ok(setup),
+        Ok(Err(error)) => {
+            log_sync(&format!("failed · {}", error));
+            Err(error)
+        }
+        Err(error) => {
+            log_sync(&format!("failed · {}", error));
+            Err(error.to_string())
+        }
+    }
+}
+
+/// Stop the running connect at its next checkpoint.
+///
+/// Returns immediately: the work carries on to the end of whatever libgit2 call
+/// it is inside, then unwinds and reports its own outcome. The launcher must
+/// therefore keep showing progress until `git_sync_setup` itself answers rather
+/// than treating this as having finished the job.
+#[tauri::command]
+fn git_sync_cancel() {
+    gitcore::cancel();
 }
 
 /// Absolute paths of the folder's own `.lith` wikis, newest first: what a first
@@ -678,16 +872,148 @@ fn list_lith_wikis(dir: &Path, max_results: usize) -> Vec<String> {
 fn git_sync_coverage(paths: Vec<String>) -> std::collections::HashMap<String, String> {
     let mut backed: std::collections::HashMap<String, String> = std::collections::HashMap::new();
     for path in paths {
-        let mut current = PathBuf::from(&path).parent().map(|parent| parent.to_path_buf());
-        while let Some(dir) = current {
-            if dir.join(".git").is_dir() && managed_remote_url(&dir).is_some() {
-                backed.insert(path.clone(), dir.to_string_lossy().into_owned());
-                break;
-            }
-            current = dir.parent().map(|parent| parent.to_path_buf());
+        if let Some(root) = sync_dir_of(Path::new(&path)).and_then(|dir| managed_root_for(&dir)) {
+            backed.insert(path.clone(), root.to_string_lossy().into_owned());
         }
     }
     backed
+}
+
+/// The folder a sync path names: the path itself when it is a folder, else the
+/// folder holding it.
+///
+/// Commands address a Lith, but the launcher also hands over a folder once it has
+/// resolved which folder the backup acts on, and a rebuild hands over whichever of
+/// the two it holds. Accepting both keeps one command serving both callers, rather
+/// than a mode flag or a second command per subject.
+fn sync_dir_of(given: &Path) -> Option<PathBuf> {
+    if given.is_dir() {
+        return Some(given.to_path_buf());
+    }
+    given.parent().map(Path::to_path_buf)
+}
+
+/// Whether this folder is itself a repository Lithic manages.
+///
+/// The marker is an origin URL Lithic wrote, with the token embedded — the same
+/// one self-host writes — and it is what keeps a git folder the user made
+/// themselves out of every automatic commit and push.
+fn is_managed_dir(dir: &Path) -> bool {
+    dir.join(".git").is_dir() && managed_remote_url(dir).is_some()
+}
+
+/// Whether a Lithic attachment here is *finished*: the marker **and** a commit.
+///
+/// A stricter question than `is_managed_dir`, and deliberately so. A connect that
+/// was killed, or refused for the folder holding thousands of files, leaves the
+/// marker behind with no commit — measured on the user's machine, a Downloads
+/// folder carrying `remote.origin.url` and no branch at all. Treating that as an
+/// attachment is what would keep aiming the backup at the folder that failed. A save
+/// is still committed into such a folder (a save only needs the marker); what it
+/// cannot do is outrank the folder the user actually attached.
+fn is_attached(dir: &Path) -> bool {
+    is_managed_dir(dir) && has_commit(dir)
+}
+
+/// Whether Lithic has ever committed here — so a repository it made is on disk,
+/// whatever became of the remote.
+fn has_commit(dir: &Path) -> bool {
+    gitcore::open(dir)
+        .map(|repo| gitcore::head_exists(&repo))
+        .unwrap_or(false)
+}
+
+/// Whether the folder the app is installed in leaves a repository a previous
+/// attachment made, which is the one thing `is_attached` cannot tell apart from a
+/// first connect.
+///
+/// The marker is deliberately not required here, and that asymmetry is the point:
+/// `is_attached` walks up from a file the user happened to open — possibly inside a
+/// source checkout — so it demands positive proof the folder is Lithic's, while these
+/// are only ever the app's own folders. Meanwhile a remote *can* legitimately be gone
+/// while the attachment is real: a Disconnect removes it, and a stalled connect can
+/// lose it. A commit is what a previous attachment leaves behind either way — the
+/// measured case being the user's `Documents\Lithic`, whose commits survive and whose
+/// origin does not. A repository the user deliberately disconnected is not preferred
+/// again (`lithic.detached`), which is also the only way to point the backup at a
+/// different folder afterwards.
+fn is_left_repository(dir: &Path) -> bool {
+    if !dir.join(".git").is_dir() || !has_commit(dir) {
+        return false;
+    }
+    gitcore::open(dir)
+        .map(|repo| !gitcore::is_detached(&repo))
+        .unwrap_or(false)
+}
+
+/// Every folder at or above `dir`, nearest first. Walks up because that is what a
+/// commit does: staging is recursive, so a wiki in a subfolder is published by the
+/// repository at the root.
+fn walk_up(dir: &Path) -> impl Iterator<Item = PathBuf> + '_ {
+    std::iter::successors(Some(dir.to_path_buf()), |current| {
+        current.parent().map(Path::to_path_buf)
+    })
+}
+
+/// The nearest folder at or above `dir` that is a repository Lithic manages.
+fn managed_root_for(dir: &Path) -> Option<PathBuf> {
+    walk_up(dir).find(|candidate| is_managed_dir(candidate))
+}
+
+/// The nearest folder at or above `dir` that is a finished attachment.
+fn attached_root_for(dir: &Path) -> Option<PathBuf> {
+    walk_up(dir).find(|candidate| is_attached(candidate))
+}
+
+/// Where a Lithic library lives, best first.
+///
+/// `Documents\Lithic` is the folder the app installs into and the one liths are
+/// meant to live in, so it is the first candidate whether or not the app was
+/// installed from here. The running exe's own folder is the second: a portable or
+/// thumb-drive bundle keeps its liths beside the program, which is also where the
+/// mount dialog starts looking.
+fn library_folders() -> Vec<PathBuf> {
+    let mut folders: Vec<PathBuf> = Vec::new();
+    if let Some(dir) = install_target().and_then(|target| target.parent().map(Path::to_path_buf)) {
+        folders.push(dir);
+    }
+    if let Some(dir) = exe_dir() {
+        if !folders.contains(&dir) {
+            folders.push(dir);
+        }
+    }
+    folders
+}
+
+/// The folder Lithic itself prefers, given the path the launcher derived on its
+/// own. Two rules, in this order:
+///
+/// 1. the folder behind `derived`, when Lithic already backs it up — the Lith the
+///    user is looking at is the one they mean;
+/// 2. a library folder a previous attachment left a repository in.
+///
+/// The second rule is what stops a stray file from moving the backup: save one
+/// exported Lith into Downloads and it becomes the newest recent row, and the
+/// folder derived from that row would otherwise become what the next connect
+/// commits — the measured failure this exists to prevent, a first connect aimed at
+/// a Downloads folder of 3,910 files. Nothing here overrules a folder the launcher
+/// derived from the picker: `None` means the caller keeps what it chose, which is
+/// also what a Disconnect leaves behind — the folder you are working in is the next
+/// thing the dialog proposes.
+fn preferred_sync_folder(derived: Option<&Path>, libraries: &[PathBuf]) -> Option<PathBuf> {
+    if let Some(root) = derived.and_then(sync_dir_of).and_then(|dir| attached_root_for(&dir)) {
+        return Some(root);
+    }
+    libraries.iter().find(|dir| is_left_repository(dir)).cloned()
+}
+
+/// The folder the desktop app's backup should act on, given the path the launcher
+/// derived for itself. `None` means nothing is attached near either, and the
+/// launcher keeps the folder it derived — see `preferred_sync_folder`.
+#[tauri::command]
+fn git_sync_folder(derived: Option<String>) -> Option<String> {
+    preferred_sync_folder(derived.as_deref().map(Path::new), &library_folders())
+        .map(|dir| dir.to_string_lossy().into_owned())
 }
 
 /// Every `.lith` under a folder, for the launcher's re-index.
@@ -696,14 +1022,8 @@ fn git_sync_coverage(paths: Vec<String>) -> std::collections::HashMap<String, St
 /// path it uses as its sync target without knowing which it holds.
 #[tauri::command]
 fn list_folder_liths(path: String) -> Vec<String> {
-    let given = PathBuf::from(&path);
-    let dir = if given.is_dir() {
-        given
-    } else {
-        match given.parent() {
-            Some(parent) => parent.to_path_buf(),
-            None => return Vec::new(),
-        }
+    let Some(dir) = sync_dir_of(Path::new(&path)) else {
+        return Vec::new();
     };
     list_lith_wikis(&dir, REINDEX_LIST_LIMIT)
 }
@@ -922,6 +1242,10 @@ async fn git_sync_commit_inner(
     if !dir.join(".git").is_dir() {
         return Ok(GitSyncCommit::nothing());
     }
+    // A save is not the operation a Connect's Cancel was aimed at, so it starts
+    // with a clean flag: only a request that arrives while this push is in
+    // flight can stop it.
+    gitcore::clear_cancel();
     // Only auto-commit in repos Lithic configured itself: its remotes embed
     // the oauth2 token, mirroring self-host, so a git folder the user opened a
     // file from is never touched by saves.
@@ -1141,7 +1465,7 @@ struct GitSyncStatus {
 /// marker git_sync_commit uses).
 #[tauri::command]
 fn git_sync_status(path: String) -> Option<GitSyncStatus> {
-    let dir = PathBuf::from(&path).parent()?.to_path_buf();
+    let dir = sync_dir_of(Path::new(&path))?;
     if !dir.join(".git").is_dir() {
         return None;
     }
@@ -1159,17 +1483,19 @@ fn git_sync_status(path: String) -> Option<GitSyncStatus> {
 /// user configured themselves (no oauth2 marker) — those aren't ours.
 #[tauri::command]
 fn git_sync_disconnect(path: String) -> Result<(), String> {
-    let file = PathBuf::from(&path);
-    let dir = file
-        .parent()
-        .filter(|parent| parent.is_dir())
+    let dir = sync_dir_of(Path::new(&path))
+        .filter(|dir| dir.is_dir())
         .ok_or_else(|| format!("Cannot resolve a folder for {}", path))?;
-    let repo = gitcore::open(dir)?;
+    let repo = gitcore::open(&dir)?;
     let url = gitcore::remote_url(&repo, "origin").unwrap_or_default();
     if !url.contains("oauth2:") {
         return Err("This folder is not a Lithic-managed sync folder".to_string());
     }
-    gitcore::remove_remote(&repo, "origin")
+    gitcore::remove_remote(&repo, "origin")?;
+    // Recorded, because the commits stay behind: without it the launcher would keep
+    // preferring this folder and there would be no way to back up another one.
+    gitcore::mark_detached(&repo);
+    Ok(())
 }
 
 // --- Bookmarked instances (the meta-launcher) --------------------------------
@@ -1476,7 +1802,7 @@ async fn github_api_probe(url: &str, token: &str) -> Result<(u16, bool, Option<b
 /// launcher renders, not a failed command.
 #[tauri::command]
 async fn git_sync_heartbeat(path: String) -> Result<GitSyncHealth, String> {
-    let folder = PathBuf::from(&path).parent().map(Path::to_path_buf);
+    let folder = sync_dir_of(Path::new(&path));
     // Read first: a save that failed in the engine document leaves its reason
     // here, and that is the only way the launcher ever finds out.
     let last_error = folder
@@ -1510,24 +1836,22 @@ async fn git_sync_heartbeat(path: String) -> Result<GitSyncHealth, String> {
 /// merged, which is a lot of work and a chance to touch files for no reason.
 #[tauri::command]
 fn git_sync_reauth(path: String, repo: String, token: String) -> Result<String, String> {
-    let file = PathBuf::from(&path);
-    let dir = file
-        .parent()
-        .filter(|parent| parent.is_dir())
+    let dir = sync_dir_of(Path::new(&path))
+        .filter(|dir| dir.is_dir())
         .ok_or_else(|| format!("Cannot resolve a folder for {}", path))?;
     if !dir.join(".git").is_dir() {
         return Err("This folder is not a git repository".to_string());
     }
     // Only a folder Lithic already manages may be re-pointed: the marker is what
     // proves the remote is ours to rewrite.
-    if managed_remote_url(dir).is_none() {
+    if managed_remote_url(&dir).is_none() {
         return Err("This folder is not a Lithic-managed sync folder".to_string());
     }
     let repo = repo.trim().trim_end_matches(".git").trim().to_string();
     if repo.is_empty() || token.trim().is_empty() {
         return Err("Both repository (owner/name) and token are required".to_string());
     }
-    let handle = gitcore::open(dir)?;
+    let handle = gitcore::open(&dir)?;
     gitcore::set_remote(&handle, "origin", &sync_remote_url(&repo, token.trim()))?;
     Ok(repo)
 }
@@ -1683,6 +2007,7 @@ fn main() {
             open_lith_file,
             save_lith_file,
             write_text_path,
+            copy_lith_to_synced_dir,
             install_monolith,
             install_status,
             install_offer_status,
@@ -1690,6 +2015,7 @@ fn main() {
             read_recents_sidecar,
             write_recents_sidecar,
             git_sync_setup,
+            git_sync_cancel,
             git_sync_commit,
             github_device_code,
             github_device_poll,
@@ -1699,6 +2025,7 @@ fn main() {
             git_sync_disconnect,
             git_sync_heartbeat,
             git_sync_reauth,
+            git_sync_folder,
             git_sync_coverage,
             list_folder_liths,
             probe_instance,
@@ -2042,6 +2369,115 @@ mod tests {
         let _ = fs::remove_dir_all(&root);
     }
 
+    /// A copy into the covered folder is the answer to "this one is not backed
+    /// up", so it must not quietly become a move or an overwrite.
+    #[test]
+    fn copying_into_a_synced_folder_adds_the_file_and_keeps_the_original() {
+        let root = scratch("copy-to-synced");
+        let source_dir = root.join("downloads");
+        let target_dir = root.join("lithic");
+        fs::create_dir_all(&source_dir).unwrap();
+        fs::create_dir_all(&target_dir).unwrap();
+        write(&source_dir, "notes.lith", "downloaded\n");
+        let source = source_dir.join("notes.lith").to_string_lossy().into_owned();
+        let folder = target_dir.to_string_lossy().into_owned();
+
+        let copied = copy_lith_to_synced_dir(source.clone(), folder.clone()).unwrap();
+        assert_eq!(copied.name, "notes.lith");
+        assert_eq!(fs::read_to_string(target_dir.join("notes.lith")).unwrap(), "downloaded\n");
+        // A copy, not a move: the original is the user's file.
+        assert!(source_dir.join("notes.lith").is_file());
+
+        // The destination may already hold a different Lith under that name, so a
+        // second copy is refused rather than silently replacing it.
+        let again = copy_lith_to_synced_dir(source, folder);
+        assert!(again.is_err(), "a name collision must be refused");
+
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    /// The folder is the backup unit, so a first connect stages whatever is in
+    /// it — but a folder of thousands of unrelated files is the wrong unit, and
+    /// the count is only knowable before anything is hashed. The index must come
+    /// out untouched, because the caller treats a refusal as "leave no trace".
+    #[test]
+    fn a_first_connect_declines_a_folder_far_larger_than_a_backup() {
+        let dir = scratch("oversized");
+        gitcore::init(&dir).expect("the fixture repository should be created");
+        for index in 0..35 {
+            write(&dir, &format!("note-{}.lith", index), "body\n");
+        }
+        let repo = gitcore::open(&dir).unwrap();
+
+        let mut totals = Vec::new();
+        let report = gitcore::stage_working_tree(
+            &repo,
+            Some(25),
+            || false,
+            |done, total| totals.push((done, total)),
+        )
+        .expect("a refusal is an outcome, not an error");
+
+        assert!(report.over_cap);
+        assert!(!report.cancelled);
+        // The real count, not the cap: the message names the folder's size.
+        assert_eq!(report.files, 35);
+        assert_eq!(repo.index().unwrap().len(), 0, "nothing may be staged");
+        // Nothing is hashed, so the modal gets a count and no progress ticks.
+        assert_eq!(totals, Vec::<(usize, usize)>::new());
+
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// The staging walk has to be stoppable, or a first connect to the wrong
+    /// folder can only be waited out or killed.
+    #[test]
+    fn a_cancelled_first_connect_stages_nothing() {
+        let dir = scratch("cancelled");
+        gitcore::init(&dir).expect("the fixture repository should be created");
+        for index in 0..10 {
+            write(&dir, &format!("note-{}.lith", index), "body\n");
+        }
+        let repo = gitcore::open(&dir).unwrap();
+
+        let report = gitcore::stage_working_tree(&repo, None, || true, |_, _| {})
+            .expect("a cancellation is an outcome, not an error");
+
+        assert!(report.cancelled);
+        assert!(!report.over_cap);
+        assert_eq!(report.files, 10, "the count is known before the walk starts");
+        assert_eq!(repo.index().unwrap().len(), 0);
+
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// Progress is what separates a slow first connect from a frozen one, and it
+    /// has to arrive before the first file is hashed rather than after.
+    #[test]
+    fn staging_reports_its_total_before_it_starts_and_stages_every_file() {
+        let dir = scratch("staging");
+        gitcore::init(&dir).expect("the fixture repository should be created");
+        for index in 0..12 {
+            write(&dir, &format!("note-{}.lith", index), "body\n");
+        }
+        write(&dir, "ignored.lith", "skip me\n");
+        write(&dir, ".gitignore", "ignored.lith\n");
+        let repo = gitcore::open(&dir).unwrap();
+
+        let mut seen = Vec::new();
+        let report = gitcore::stage_working_tree(&repo, None, || false, |done, total| {
+            seen.push((done, total));
+        })
+        .expect("staging should succeed");
+
+        // 13 = twelve notes plus the .gitignore, and not the ignored file.
+        assert_eq!(report.files, 13);
+        assert_eq!(seen.first(), Some(&(0, 13)));
+        assert_eq!(repo.index().unwrap().len(), 13);
+
+        let _ = fs::remove_dir_all(&dir);
+    }
+
     /// A shortcut has to be a real shell link, not merely a file with a `.lnk`
     /// name: Windows reads the header, and a malformed one shows up as a broken
     /// Start Menu entry. Written into a scratch folder — a test has no business
@@ -2126,8 +2562,186 @@ mod tests {
         let _ = fs::remove_dir_all(&root);
     }
 
-    /// A rebuild hands over whichever path it holds, so the folder walk has to
-    /// work from a file inside the folder as well as from the folder itself.
+    /// Lithic's remote shape, as the connect path writes it.
+    const MANAGED_REMOTE: &str = "https://oauth2:gho_token@github.com/owner/lithic-sync-ab2d.git";
+
+    /// A repository with one commit and no remote: what a previous attachment
+    /// leaves on disk once its remote is gone. Measured on the user's own
+    /// `Documents\Lithic`, whose commits survive and whose origin does not.
+    fn commit_repo(dir: &Path) {
+        init_repo(dir);
+        write(dir, "seed.lith", "seed\n");
+        run_git(dir, &["add", "."]);
+        run_git(dir, &["commit", "-m", "Initial sync from Lithic"]);
+    }
+
+    /// A folder as a *finished* Lithic attachment: Lithic's marker on origin plus
+    /// a commit.
+    fn attach(dir: &Path) {
+        commit_repo(dir);
+        run_git(dir, &["remote", "add", "origin", MANAGED_REMOTE]);
+    }
+
+    /// The library folder outranks the folder a recent row implies. Without this,
+    /// saving one exported Lith into Downloads made the next connect commit
+    /// Downloads — the measured failure this exists to prevent.
+    #[test]
+    fn an_attached_library_outranks_the_derived_folder() {
+        let root = scratch("prefer");
+        let library = root.join("Documents/Lithic");
+        write(&library, "notes.lith", "notes\n");
+        attach(&library);
+
+        let downloads = root.join("Downloads");
+        write(&downloads, "tiddlers.lith", "stray\n");
+
+        assert_eq!(
+            preferred_sync_folder(Some(&downloads.join("tiddlers.lith")), &[library.clone()]),
+            Some(library.clone())
+        );
+
+        // With nothing attached anywhere the launcher keeps what it derived, so a
+        // first connect still works in a folder of the user's own choosing.
+        let plain = root.join("plain");
+        write(&plain, "one.lith", "one\n");
+        assert_eq!(
+            preferred_sync_folder(Some(&plain.join("one.lith")), &[plain.clone()]),
+            None
+        );
+        // No derived path at all — a fresh install with empty recents — is still
+        // enough to answer.
+        assert_eq!(preferred_sync_folder(None, &[library.clone()]), Some(library));
+
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    /// The marker is deliberately not required of the app's own folder: a remote can
+    /// be gone while the attachment is real, and the commits it left are the
+    /// evidence. The user's `Documents\Lithic` was measured in exactly this state,
+    /// so requiring the marker would have left the launcher aiming at a Downloads row.
+    #[test]
+    fn a_library_whose_remote_is_gone_is_still_the_backup_folder() {
+        let root = scratch("lostremote");
+        let library = root.join("Documents/Lithic");
+        write(&library, "notes.lith", "notes\n");
+        commit_repo(&library);
+        // Nothing would be committed here right now, and it is still the folder the
+        // launcher should be talking about.
+        assert!(!is_managed_dir(&library));
+
+        let downloads = root.join("Downloads");
+        write(&downloads, "tiddlers.lith", "stray\n");
+        assert_eq!(
+            preferred_sync_folder(Some(&downloads.join("tiddlers.lith")), &[library.clone()]),
+            Some(library)
+        );
+
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    /// A folder with a `.git` and nothing in it is not an attachment: that is what a
+    /// connect killed before its first commit leaves behind — measured on the user's
+    /// Downloads folder, which carried Lithic's remote and no branch at all.
+    #[test]
+    fn an_empty_repository_is_not_an_attachment() {
+        let root = scratch("emptyrepo");
+        let library = root.join("Lithic");
+        fs::create_dir_all(&library).unwrap();
+        init_repo(&library);
+        run_git(&library, &["remote", "add", "origin", MANAGED_REMOTE]);
+
+        assert!(!is_left_repository(&library));
+        assert_eq!(preferred_sync_folder(None, &[library.clone()]), None);
+
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    /// Disconnect has to leave a mark. The commits stay on disk either way, so
+    /// without one the folder it just detached is preferred straight back and there
+    /// is no way to point the backup at another folder — which is also why
+    /// re-attaching is what lifts it, and why this drives the real connect path.
+    #[test]
+    fn a_disconnected_library_is_not_preferred_again_until_it_is_attached() {
+        let root = scratch("disconnect");
+        let library = root.join("Lithic");
+        write(&library, "notes.lith", "notes\n");
+        attach(&library);
+        assert_eq!(preferred_sync_folder(None, &[library.clone()]), Some(library.clone()));
+
+        git_sync_disconnect(library.to_string_lossy().into_owned())
+            .expect("disconnect should succeed");
+        assert_eq!(preferred_sync_folder(None, &[library.clone()]), None);
+
+        let remote = seed_remote(&root, &[("notes.lith", "remote\n")]);
+        sync_with_remote(&library, remote.to_str().unwrap(), &|_, _| {})
+            .expect("re-attaching should succeed");
+        assert_eq!(preferred_sync_folder(None, &[library.clone()]), Some(library));
+
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    /// The folder the user is looking at wins when it is itself attached, and a
+    /// wiki nested inside an attachment resolves to the root that publishes it.
+    #[test]
+    fn an_attachment_behind_the_open_lith_outranks_the_library() {
+        let root = scratch("opened");
+        let library = root.join("Documents/Lithic");
+        write(&library, "notes.lith", "notes\n");
+        attach(&library);
+
+        let work = root.join("work");
+        write(&work, "projects/deep.lith", "deep\n");
+        attach(&work);
+
+        assert_eq!(
+            preferred_sync_folder(Some(&work.join("projects/deep.lith")), &[library]),
+            Some(work.clone())
+        );
+
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    /// A connect that dies before its first commit leaves the marker and no
+    /// commit. Preferring that is what would keep aiming the backup at the folder
+    /// that failed, so the marker alone is not an attachment.
+    #[test]
+    fn a_marker_without_a_commit_is_not_an_attachment() {
+        let root = scratch("halfwritten");
+        let half = root.join("Downloads");
+        write(&half, "tiddlers.lith", "stray\n");
+        init_repo(&half);
+        run_git(
+            &half,
+            &[
+                "remote",
+                "add",
+                "origin",
+                "https://oauth2:gho_token@github.com/owner/lithic-sync-ab2d.git",
+            ],
+        );
+        // The marker is there — it is what a save would commit through — but no
+        // commit has ever landed, so it is not something to aim at.
+        assert!(is_managed_dir(&half));
+        assert_eq!(
+            preferred_sync_folder(Some(&half.join("tiddlers.lith")), &[half.clone()]),
+            None
+        );
+
+        let library = root.join("Lithic");
+        write(&library, "notes.lith", "notes\n");
+        attach(&library);
+        assert_eq!(
+            preferred_sync_folder(Some(&half.join("tiddlers.lith")), &[library.clone()]),
+            Some(library)
+        );
+
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    /// A rebuild hands over whichever path it holds, and the launcher hands over a
+    /// folder once it has resolved which folder the backup acts on, so the folder
+    /// walk has to work from a file inside the folder as well as from the folder
+    /// itself.
     #[test]
     fn list_folder_liths_accepts_a_file_or_a_folder() {
         let root = scratch("folderlist");
@@ -2139,6 +2753,11 @@ mod tests {
         // Flat: `sub/two.lith` is a different folder's wiki, not this one's.
         assert_eq!(from_folder.len(), 1);
         assert_eq!(from_file, from_folder);
+
+        // The same resolution the sync commands use, so a resolved folder and a
+        // Lith inside it address the same place.
+        assert_eq!(sync_dir_of(&root), Some(root.clone()));
+        assert_eq!(sync_dir_of(&root.join("one.lith")), Some(root.clone()));
 
         let _ = fs::remove_dir_all(&root);
     }

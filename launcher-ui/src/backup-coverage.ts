@@ -80,6 +80,30 @@ export function folderTargets(rows: readonly CoverageRow[]): Array<{ folder: str
 }
 
 /**
+ * The folder to copy a local-only Lith into: the root of the newest recent row
+ * that already has one.
+ *
+ * Newest-first, not "the most common" or "the first alphabetically": the top of
+ * the list is the folder the user has been working in, so it is the one they
+ * mean by "the synced folder". Rows are the same order the list shows, which is
+ * also the order things are adopted in.
+ *
+ * `null` when nothing is backed up — a state the caller cannot act in, since a
+ * local-only mark only exists once some folder is covered.
+ */
+export function syncedDirFor(
+  rows: readonly CoverageRow[],
+  repoRootByPath: Readonly<Record<string, string>>
+): string | null {
+  for (const row of rows) {
+    if (!row.path) continue;
+    const root = repoRootByPath[row.path];
+    if (root) return root;
+  }
+  return null;
+}
+
+/**
  * Something a rebuild is about to remove, held for confirmation. `path` is null
  * for an entry that only ever existed as a cached copy.
  */

@@ -13,13 +13,59 @@
 //! either: the caller writes rescued file bytes directly, so what the remote
 //! holds is what lands on disk, byte for byte.
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
+use std::time::{Duration, Instant};
 
 use git2::{
-    Cred, FetchOptions, IndexAddOption, ObjectType, Oid, PushOptions, RemoteCallbacks, Repository,
-    RepositoryInitOptions, RepositoryOpenFlags, Signature, TreeWalkMode, TreeWalkResult,
+    Cred, ErrorCode, FetchOptions, ObjectType, Oid, PushOptions, RemoteCallbacks, Repository,
+    RepositoryInitOptions, RepositoryOpenFlags, Signature, StatusOptions, TreeWalkMode,
+    TreeWalkResult,
 };
+
+/// How many files one first connect may stage before Lithic declines the folder.
+///
+/// A first connect commits the folder as a unit, which is only sane when the
+/// folder is the unit the user chose. The sync target is derived from the newest
+/// recent row, so a Lith saved into `Downloads` aims the next connect at the
+/// *whole* Downloads folder: thousands of unrelated files, hours of hashing, and
+/// a repository nobody asked for. This is the backstop that turns that into one
+/// sentence instead.
+pub const FIRST_SYNC_FILE_CAP: usize = 2000;
+
+// --- Cancellation ----------------------------------------------------------
+// One flag for the process, because only one first connect runs at a time (the
+// modal drives it) and every stage has a different way to notice: the staging
+// walk returns nonzero from its callback, and a fetch or push stops when its
+// transfer callback returns false. Both are the only exits libgit2 offers mid
+// operation, and without them a large folder cannot be called off at all.
+static CANCELLED: AtomicBool = AtomicBool::new(false);
+
+/// Ask the running sync to stop at its next checkpoint.
+pub fn cancel() {
+    CANCELLED.store(true, Ordering::SeqCst);
+}
+
+/// Clear the request, at the start of a new sync. A stale flag would cancel the
+/// next connect before it began.
+pub fn clear_cancel() {
+    CANCELLED.store(false, Ordering::SeqCst);
+}
+
+pub fn cancelled() -> bool {
+    CANCELLED.load(Ordering::SeqCst)
+}
+
+/// What one staging pass did. `files` is how many paths the walk reached, which
+/// is the number the user needs to see when a folder turns out to be enormous.
+pub struct StageReport {
+    pub files: usize,
+    /// The walk stopped because this folder holds more than the cap allows.
+    pub over_cap: bool,
+    /// The walk stopped because the user asked it to.
+    pub cancelled: bool,
+}
 
 /// The branch the sync publishes, on both sides.
 pub const MAIN: &str = "refs/heads/main";
@@ -73,6 +119,37 @@ pub fn ensure_identity(repo: &Repository) {
         let _ = config.set_str("user.name", "Lithic");
         let _ = config.set_str("user.email", "lithic@local");
     }
+}
+
+/// The key that records a folder the user took out of sync by hand.
+///
+/// In the repository's own config rather than beside the app, because it is a fact
+/// about this folder: it means "a repository is here, and it is not the backup the
+/// user wants", which is what keeps a Disconnected folder from being preferred
+/// again on the next launch — the repository and its commits are still on disk, so
+/// nothing else would tell the two states apart.
+const DETACHED_KEY: &str = "lithic.detached";
+
+/// Record that the user disconnected this folder.
+pub fn mark_detached(repo: &Repository) {
+    if let Ok(mut config) = repo.config() {
+        let _ = config.set_bool(DETACHED_KEY, true);
+    }
+}
+
+/// Clear it: a folder that has just been attached is not a detached one.
+pub fn clear_detached(repo: &Repository) {
+    if let Ok(mut config) = repo.config() {
+        let _ = config.remove(DETACHED_KEY);
+    }
+}
+
+/// Whether the user disconnected this folder, and has not re-attached it since.
+pub fn is_detached(repo: &Repository) -> bool {
+    repo.config()
+        .ok()
+        .and_then(|config| config.get_bool(DETACHED_KEY).ok())
+        .unwrap_or(false)
 }
 
 fn signature(repo: &Repository) -> Result<Signature<'static>, String> {
@@ -150,6 +227,10 @@ fn callbacks(url: &str, rejected: Option<Arc<Mutex<Option<String>>>>) -> RemoteC
             Ok(())
         });
     }
+    // Cancelling between stages is not enough: a big first connect spends most
+    // of its life inside these transfers, and returning false here is the only
+    // way libgit2 lets go of one once it has started.
+    callbacks.transfer_progress(|_progress| !cancelled());
     callbacks
 }
 
@@ -210,14 +291,97 @@ pub fn head_exists(repo: &Repository) -> bool {
     repo.head().ok().and_then(|head| head.target()).is_some()
 }
 
-/// Stage every change in the working tree, honouring `.gitignore` — the
-/// equivalent of `git add .` from the repository root.
-pub fn stage_all(repo: &Repository) -> Result<(), String> {
+/// Stage the working tree while reporting progress, refusing a folder over
+/// `cap` files and stopping when the user asks.
+///
+/// Not `add_all` with its own callback, which is where this started and which
+/// segfaults: libgit2 hands that callback a NULL matched-pathspec whenever the
+/// walk has no pathspec — always, here — and git2 0.21's trampoline turns it
+/// into `CStr::from_ptr(null)`. Measured as an access violation in the connect
+/// test, not as anything a compiler would catch.
+///
+/// Enumerating the status list instead costs one walk either way, and buys
+/// everything the callback was wanted for: an exact count *before* anything is
+/// hashed, so an oversized folder is refused in milliseconds with the index
+/// untouched; progress that moves; and a cancel that lands per file. `done` and
+/// `total` are both passed because a bare running count reads as the job getting
+/// bigger rather than smaller.
+pub fn stage_working_tree<F, C>(
+    repo: &Repository,
+    cap: Option<usize>,
+    stopped: C,
+    mut progress: F,
+) -> Result<StageReport, String>
+where
+    F: FnMut(usize, usize),
+    C: Fn() -> bool,
+{
+    let mut options = StatusOptions::new();
+    options
+        .include_untracked(true)
+        .recurse_untracked_dirs(true)
+        .include_ignored(false);
+    let statuses = repo.statuses(Some(&mut options)).map_err(fail)?;
+    // (path, removed from disk). Owned, because the entries borrow the status
+    // list and the walk below needs the index, which is not shareable with it.
+    let mut work: Vec<(PathBuf, bool)> = Vec::new();
+    for entry in statuses.iter() {
+        // A non-UTF-8 path cannot be addressed by the index API here; skipping it
+        // is the same thing `add_all` does with one.
+        let Ok(path) = entry.path() else { continue };
+        work.push((PathBuf::from(path), entry.status().is_wt_deleted()));
+    }
+
+    let total = work.len();
+    if cap.map(|cap| total > cap).unwrap_or(false) {
+        return Ok(StageReport {
+            files: total,
+            over_cap: true,
+            cancelled: false,
+        });
+    }
+
     let mut index = repo.index().map_err(fail)?;
-    index
-        .add_all(std::iter::empty::<&str>(), IndexAddOption::DEFAULT, None)
-        .map_err(fail)?;
-    index.write().map_err(fail)
+    // One event up front, so the modal says how much work this is before the
+    // first file is hashed rather than after the first quarter second.
+    progress(0, total);
+    let mut last_report = Instant::now();
+    let mut done = 0usize;
+    for (path, removed) in work {
+        if stopped() {
+            return Ok(StageReport {
+                files: total,
+                over_cap: false,
+                cancelled: true,
+            });
+        }
+        let staged = if removed {
+            // Gone from disk, so it leaves the index too — the same thing
+            // `git add .` does, and what keeps a deletion out of the union push.
+            // Absent from the index already is not a failure.
+            match index.remove_path(&path) {
+                Err(error) if error.code() == ErrorCode::NotFound => Ok(()),
+                outcome => outcome,
+            }
+        } else {
+            index.add_path(&path)
+        };
+        staged.map_err(fail)?;
+        done += 1;
+        // Throttled by time, not by count: one event per file would be thousands
+        // of round trips to the window for a line that changes a few times a
+        // second anyway.
+        if last_report.elapsed() >= Duration::from_millis(400) {
+            last_report = Instant::now();
+            progress(done, total);
+        }
+    }
+    index.write().map_err(fail)?;
+    Ok(StageReport {
+        files: total,
+        over_cap: false,
+        cancelled: false,
+    })
 }
 
 /// Stage one path, for the save that commits a single file.

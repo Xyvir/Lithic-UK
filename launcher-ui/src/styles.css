@@ -397,7 +397,40 @@ h1 { flex: none; min-width: 0; margin: 0; color: #f4edf5; font-size: 1.8rem; fon
   font-size: 0.8rem;
   line-height: 1.3;
 }
+/* Which folder the dialog acts on. The target is derived rather than chosen, so
+   this line is what keeps a folder the user never picked from being backed up by
+   accident. One line, truncated rather than wrapped: the title attribute carries
+   the full path for a long one. */
+.sync-folder {
+  margin: 2px 0 10px;
+  overflow: hidden;
+  color: #b3acb5;
+  font-size: 0.78rem;
+  line-height: 1.3;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.sync-folder-label {
+  margin-right: 6px;
+  color: #8f8892;
+  font-size: 0.68rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
 .sync-elapsed { margin-left: auto; color: #9a9a9a; font-variant-numeric: tabular-nums; }
+/* Bare text, inside the progress line it stops: a first connect to a large
+   folder is minutes long, and waiting is not the only reasonable answer. */
+.sync-cancel {
+  flex: 0 0 auto;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: #8ab4f8;
+  font: inherit;
+  cursor: pointer;
+}
+.sync-cancel:hover { text-decoration: underline; }
 .sync-spinner {
   flex: 0 0 auto;
   width: 12px;
@@ -658,7 +691,10 @@ footer > * { pointer-events: auto; }
 .reset-cache { width: 100%; padding: 11px; border: 1px dashed #454545; border-radius: 7px; background: transparent; color: #ddd; cursor: pointer; }
 .reset-cache:disabled { color: #8a8a8a; cursor: default; }
 /* Coverage is a count, not a warning: how much of the list is backed up. */
-.backup-status { margin: 8px 2px 0; color: #9a9a9a; font-size: 0.8rem; text-align: center; }
+/* How much of the recent list is covered, read in the dialog about backups
+   rather than under the list itself: it is a statement about sync, and it only
+   means something next to the repository it describes. */
+.backup-status { margin: 0 0 10px; color: #b3acb5; font-size: 0.78rem; }
 /* One box for both footer controls, so the row reads symmetrical: same height,
  * same side padding, same radius, same label size — only the face differs,
  * because the install offer is the primary action.
