@@ -135,6 +135,10 @@ Tracked per-fragment in `launcher-ui/src/legacy-fragments.ts`; statuses are asse
     - [x] Add 'run code' button next to copy code (webapp/Tauri use paper-light; self-host uses its private same-origin API; Ephemeral.exe remains an invisible manual clipboard sidecar)
     - [x] Allow file associations for *.txt; *.py, *.md etc so it can act as a lightweight text editor for local files. (shipped for *.lith *.md *.txt *.html *.json *.tid *.ipynb)
     - [ ] Iroh P2P Sync
+    - [ ] Per-Lith encryption, extended from the desktop app's local encrypted credential saving (noted 2026-09-22, not started).
+        - The vault already derives one key from one user-known secret with Argon2id and seals its entries with XChaCha20-Poly1305 behind an envelope that carries its own KDF parameters; the same shape could seal a whole `.lith`, and nothing in it depends on the platform. `src-tauri/src/credentials.rs` is the working pattern, and the secret would never leave the machine.
+        - Worth deciding before building: there is deliberately no recovery from a lost secret, which is fine for a convenience vault and much heavier for a user's notes; the app is the thing that can run a KDF against a challenge, so what could the wiki trust when a `.lith` is opened by something that is not the app (the webapp, a self-host instance, a shared file); and whether the derived key should wrap a per-file key, so changing the secret re-wraps one small key instead of re-encrypting every Lith.
+        - Note this is Lith-level, not a transport: it says nothing about how a wiki is stored on a server, which stays `lithic-teams` / WebDAV territory.
 - [ ] Add local 2fa totp for backend wiki access?
     - Maybe just suggest cloudflare tunnels for this instead. Or only include in `lithic-teams` or desktop apps
 - [ ] "zoomin" doesn't play nice with Dynaview; so we need to update the storyriver viewfilter to fallback to 'normal' when using "zoomin"
