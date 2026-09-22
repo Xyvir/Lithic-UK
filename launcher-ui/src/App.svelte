@@ -52,8 +52,8 @@
 
   // --- Self-host (WebDAV listing + the git-backed patch API) ---
   // remoteFiles is the server's .lith listing; activeRemote is the wiki this
-  // tab currently has open over the network, which drives the REMOTE pill and
-  // the presence-lock heartbeat.
+  // tab currently has open over the network, which drives the file name in the
+  // heading and the presence-lock heartbeat.
   let remoteFiles: WebdavFile[] = [];
   let remoteBusy = false;
   let remoteError = '';
@@ -2528,9 +2528,13 @@
     <div class="heading-copy">
       <h1>Lithic - Launcher</h1>
       {#if isSelfHost()}
+        <!-- No mode badge here: which launcher you are in is evident from the
+             thing itself, and a pill announcing it was troubleshooting.
+             The open Lith is named instead, and its title is where the cost of
+             saving shows up — the patch API is not universal, and a server
+             without it uploads the whole wiki. -->
         <div class="remote-line">
-          <span class="remote-pill" title={patchApiAvailable ? 'Saves send only the lines that changed; the server applies them with git.' : 'This server has no patch API, so saves upload the whole wiki.'}>{patchApiAvailable ? 'REMOTE' : 'REMOTE · whole-file'}</span>
-          {#if activeRemote}<span class="remote-file">{activeRemote.name}</span>{/if}
+          {#if activeRemote}<span class="remote-file" title={patchApiAvailable ? 'Saves send only the lines that changed; the server applies them with git.' : 'This server has no patch API, so saves upload the whole wiki.'}>{activeRemote.name}</span>{/if}
           <button class="remote-refresh" type="button" on:click={refreshRemoteList} disabled={remoteBusy} title="Re-list this server’s Liths" aria-label="Refresh the server’s Lith list">{remoteBusy ? '…' : '⟳'}</button>
         </div>
       {/if}

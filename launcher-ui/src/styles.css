@@ -968,13 +968,12 @@ body.drag-over::after {
 .cache-history-button.dirty:hover { color: #ff9d80; }
 .cache-history-button.dirty:disabled { opacity: 1; }
 
-/* --- Self-host: remote pill and server-owned Lith list ------------------- */
+/* --- Self-host: the open remote Lith and the server's list ---------------- */
 .remote-line { display: flex; align-items: center; gap: 8px; margin-top: 2px; min-width: 0; }
-.remote-pill {
-  flex: none; padding: 1px 7px; border: 1px solid #4d6b4d; border-radius: 999px;
-  background: rgb(122 190 122 / 12%); color: #9ed29e; font-size: 0.62rem;
-  font-weight: 600; letter-spacing: 0.09em; text-transform: uppercase; cursor: help;
-}
+/* No `.remote-pill`: the mode badge that used to open this line was a
+   troubleshooting aid, and the emoji icon beside it already says which launcher
+   you are looking at. The title carries the one thing that is not evident from
+   the page — whether this server applies line patches or takes whole-file PUTs. */
 .remote-file { min-width: 0; color: #bbb; font-size: 0.76rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .remote-refresh {
   flex: none; width: 24px; height: 24px; padding: 0; border: 1px solid #454545; border-radius: 6px;
