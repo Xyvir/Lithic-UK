@@ -51,7 +51,7 @@ WbImageWidget.prototype.render = function(parent,nextSibling) {
     } else {
         // Fallback or error
         imgNode.setAttribute("alt", "Whiteboard image not found");
-        imgNode.style.border = "1px dashed red";
+        imgNode.style.border = "1px dashed var(--lithic-c-code-warn)";
         imgNode.style.display = "inline-block";
         if (!this.width) imgNode.style.width = "100px";
         if (!this.height) imgNode.style.height = "100px";

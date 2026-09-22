@@ -12,7 +12,7 @@ tags: $:/tags/Global
 </div>
 </$reveal>
 <$reveal state=<<trackState>> type="match" text="0" tag="div">
-<div class="tc-dynaview-track-tiddler-when-visible" style="min-height: 200px; display:flex; align-items:center; justify-content:center; color: #999; border: 1px dashed #ccc; margin-bottom: 1em;" data-dynaview-track-tiddler=<<trackState>>>
+<div class="tc-dynaview-track-tiddler-when-visible" style="min-height: 200px; display:flex; align-items:center; justify-content:center; color: <<colour muted-foreground>>; border: 1px dashed <<colour table-border>>; margin-bottom: 1em;" data-dynaview-track-tiddler=<<trackState>>>
 Loading <$text text=<<currentTiddler>>/>...
 </div>
 </$reveal>

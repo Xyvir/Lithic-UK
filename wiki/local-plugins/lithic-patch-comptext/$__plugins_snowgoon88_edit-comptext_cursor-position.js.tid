@@ -117,7 +117,7 @@ function getCaretCoordinates(element, position, options) {
   // -------------------------------
 
   if (debug) {
-    span.style.backgroundColor = '#aaa';
+    span.style.backgroundColor = 'var(--lithic-c-foreground-muted)';
   } else {
     document.body.removeChild(div);
   }

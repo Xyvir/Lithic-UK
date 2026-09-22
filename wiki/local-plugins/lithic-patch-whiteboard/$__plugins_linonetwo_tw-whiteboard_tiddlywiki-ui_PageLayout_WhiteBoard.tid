@@ -53,7 +53,7 @@ body { overflow-x: hidden; }
 			</style>
 			<$keyboard key="Escape" actions="<$action-setfield $tiddler='$:/state/Whiteboard/ComptextPopup' text='closed'/>">
 				<$keyboard key="Enter" actions="<$action-dispatch-paste tiddler='$:/temp/whiteboard-comptext-input'/><$action-setfield $tiddler='$:/state/Whiteboard/ComptextPopup' text='closed'/>">
-					<$edit-comptext tag="input" tiddler="$:/temp/whiteboard-comptext-input" field="text" class="tc-edit-texteditor lithic-floating-comptext-input" placeholder="Type command or link..." style="width: 100%; border: 1px solid #ccc; padding: 8px; font-size: 1.2em; outline: none; box-sizing: border-box; background: var(--tw-page-bg, white); box-shadow: 0 4px 10px rgba(0,0,0,0.1); border-radius: 4px;" />
+					<$edit-comptext tag="input" tiddler="$:/temp/whiteboard-comptext-input" field="text" class="tc-edit-texteditor lithic-floating-comptext-input" placeholder="Type command or link..." style="width: 100%; border: 1px solid <<colour table-border>>; padding: 8px; font-size: 1.2em; outline: none; box-sizing: border-box; background: <<colour page-background>>; box-shadow: 0 4px 10px rgba(0,0,0,0.1); border-radius: 4px;" />
 				</$keyboard>
 			</$keyboard>
 		</div>
@@ -77,7 +77,7 @@ body { overflow-x: hidden; }
 				.lithic-wb-search-input { color: <<colour muted-foreground>> !important; }
 				.lithic-wb-search-input::placeholder { color: <<colour foreground>> !important; opacity: 1; }
 				</style>
-				<div style="display:flex; border: 1px solid #ccc; background: var(--tw-page-bg, white); align-items: stretch; border-radius: 3px;">
+				<div style="display:flex; border: 1px solid <<colour table-border>>; background: <<colour page-background>>; align-items: stretch; border-radius: 3px;">
 					<$keyboard key="Enter" actions="""
 						<$let searchTerm={{{ [<searchState>get[text]] }}}>
 							<$list filter="[all[shadows+tiddlers]field:type[application/tldr]!prefix[$:/temp]search:title<searchTerm>!sort[modified]limit[1]]">
@@ -96,7 +96,7 @@ body { overflow-x: hidden; }
 							style="width: 230px; padding: 4px 6px; border: none; outline: none; background: transparent; box-shadow: none;"
 						/>
 					</$keyboard>
-					<$button class="tc-btn-invisible" style="padding: 2px 8px; border-left: 1px solid #ccc; cursor: pointer; display: flex; align-items: center; justify-content: center; fill: currentColor;">
+					<$button class="tc-btn-invisible" style="padding: 2px 8px; border-left: 1px solid <<colour table-border>>; cursor: pointer; display: flex; align-items: center; justify-content: center; fill: currentColor;">
 						<$list filter="[<dropdownState>get[text]match[open]]" emptyMessage="<$action-setfield $tiddler=<<dropdownState>> text='open'/><span style='width:1em; height:1em;'>{{$:/core/images/down-arrow}}</span>">
 							<$action-deletetiddler $tiddler=<<dropdownState>>/>
 							<span style="width:1em; height:1em;">{{$:/core/images/up-arrow}}</span>

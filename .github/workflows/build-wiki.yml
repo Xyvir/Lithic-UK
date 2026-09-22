@@ -42,6 +42,9 @@ jobs:
             package-lock.json
             launcher-ui/package-lock.json
 
+      - name: Audit Hardcoded Colors
+        run: node scripts/check-colors.js
+
       - name: Install Dependencies
         run: npm ci
 

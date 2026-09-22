@@ -2,12 +2,27 @@ title: $:/lithic/streams/styles/ctx-preview
 tags: $:/tags/Stylesheet
 type: text/vnd.tiddlywiki
 
+\rules except dash
 \whitespace trim
 \define ctx-preview-rules()
 .stream-row[data-node-title="{{!!current}}"] .stream-node-handle .stream-node-handle-inner {
 	border-color: <<colour primary>>;
 }
 \end
+/* Highlight band for the context-menu preview target.
+
+   Colors come from the contrast core (--lithic-c-notify-bg / -fg) so this band is
+   byte-identical to the context-menu target band, and its ink is contrast-locked on
+   palettes whose own notification/message pair is unreadable. Do not swap these for
+   raw palette macros: those bypass the lock and drift from the menu band.
+
+   The rule-set pragma above is load-bearing: the core dash rule rewrites a literal
+   double hyphen into an en-dash, which silently kills every var() below, so the
+   exclusion must stay. Keep this comment AFTER the define: pragmas are only
+   recognised in the leading block, so any non-pragma content ends the pragma scan
+   and leaves the define unparsed (which leaks its \end token into the CSS).
+
+   Static fallbacks live in the lithic-core contrast stylesheet. */
 
 <$vars currentTiddler={{{[prefix[$:/state/sq-context-popup]]}}}>
 <<ctx-preview-rules>>
@@ -18,8 +33,8 @@ type: text/vnd.tiddlywiki
 <$list filter="[<ctxCurrent>get[stream-list]enlist-input[]is[tiddler]count[]!match[0]]" variable="_NULL">
 <$list filter="[<ctxCurrent>get[stream-list]enlist-input[]is[tiddler]]" variable="previewNode">
 .stream-root:has(.sq-contextmenu .sq-ctx-item:hover) [data-node-title="<<previewNode>>"] {
-	background: <<colour notification-background>>;
-	color: <<colour message-foreground>>;
+	background: var(--lithic-c-notify-bg);
+	color: var(--lithic-c-notify-fg);
 }
 .stream-root:has(.sq-contextmenu .sq-ctx-item:hover) [data-node-title="<<previewNode>>"] .stream-node-handle .stream-node-handle-inner {
 	border: 5px solid <<colour primary>>;
@@ -30,8 +45,8 @@ type: text/vnd.tiddlywiki
 <$list filter="[<ctxCurrent>get[stream-list]enlist-input[]is[tiddler]count[]match[0]]" variable="_NULL">
 <$list filter="[<ctxCurrent>get[parent]get[stream-list]enlist-input[]is[tiddler]]" variable="previewNode">
 .stream-root:has(.sq-contextmenu .sq-ctx-item:hover) [data-node-title="<<previewNode>>"] {
-	background: <<colour notification-background>>;
-	color: <<colour message-foreground>>;
+	background: var(--lithic-c-notify-bg);
+	color: var(--lithic-c-notify-fg);
 }
 .stream-root:has(.sq-contextmenu .sq-ctx-item:hover) [data-node-title="<<previewNode>>"] .stream-node-handle .stream-node-handle-inner {
 	border: 5px solid <<colour primary>>;

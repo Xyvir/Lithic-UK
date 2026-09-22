@@ -13,3 +13,18 @@ type: text/css
 .tc-tiddler-frame:has(.lithic-lock-overlay) hr {
     display: none;
 }
+
+/*
+   Anchor-template select. The $select widget has no style attribute support
+   (TW core wires only class/size/multiple/disabled/tabindex/title), so an inline
+   style on it is silently dropped and the control falls back to the browser
+   default chrome -- a light UA widget on a dark palette. Its chrome therefore
+   lives here. Vars, not <<colour>>, so a live palette switch re-themes it.
+*/
+.lithic-anchor-tpl-select {
+    min-width: 250px;
+    background: var(--lithic-c-page);
+    color: var(--lithic-c-foreground);
+    border: 1px solid var(--lithic-c-line);
+    padding: 4px;
+}

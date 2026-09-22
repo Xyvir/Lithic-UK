@@ -49,7 +49,7 @@ div.unieditor > .unieditor__textarea {
    color: transparent;  
 }
 div.unieditor > .unieditor__textarea::selection {
-  background-color: var(--lithic-c-code-select-bg, rgba(245, 40, 145, 0.42));
+  background-color: var(--lithic-c-code-select-bg);
   color: var(--lithic-c-code-select-fg, inherit);
 }
 div.unieditor > .unieditor__textarea::-webkit-scrollbar {

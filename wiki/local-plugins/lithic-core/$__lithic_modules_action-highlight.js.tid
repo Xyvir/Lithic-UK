@@ -74,7 +74,7 @@ HighlightWidget.prototype.invokeAction = function(triggeringWidget,event) {
         nodesToReplace.forEach(function(n) {
             var span = document.createElement("span");
             span.className = "lithic-ephemeral-highlight-container";
-            span.innerHTML = n.nodeValue.replace(regex, "<mark class='lithic-ephemeral-highlight' style='background-color: yellow; color: black; border-radius: 2px; padding: 0 2px;'>$1</mark>");
+            span.innerHTML = n.nodeValue.replace(regex, "<mark class='lithic-ephemeral-highlight' style='background-color: var(--lithic-c-code-select-bg); color: var(--lithic-c-code-select-fg); border-radius: 2px; padding: 0 2px;'>$1</mark>");
             if(n.parentNode) {
                 n.parentNode.replaceChild(span, n);
             }

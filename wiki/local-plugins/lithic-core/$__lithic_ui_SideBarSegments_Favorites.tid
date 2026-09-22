@@ -27,7 +27,7 @@ caption: {{$:/core/images/star-filled}} Favorites
   height: 12px;
 }
 .lithic-favorite-item-tweak:hover {
-  background: rgba(128,128,128,0.2);
+  background: <<colour sidebar-tab-background-selected>>;
 }
 </style>
 

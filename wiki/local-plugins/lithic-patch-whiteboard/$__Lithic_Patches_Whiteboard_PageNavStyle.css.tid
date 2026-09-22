@@ -26,12 +26,12 @@ type: text/css
 
 .lithic-wb-page-prev:hover:not(:disabled),
 .lithic-wb-page-next:hover:not(:disabled) {
-    background-color: rgba(127, 127, 127, 0.22) !important;
+    background-color: rgba(var(--lithic-c-foreground-rgb), 0.22) !important;
 }
 
 .lithic-wb-page-prev:active:not(:disabled),
 .lithic-wb-page-next:active:not(:disabled) {
-    background-color: rgba(127, 127, 127, 0.32) !important;
+    background-color: rgba(var(--lithic-c-foreground-rgb), 0.32) !important;
 }
 
 .lithic-wb-page-prev:disabled,

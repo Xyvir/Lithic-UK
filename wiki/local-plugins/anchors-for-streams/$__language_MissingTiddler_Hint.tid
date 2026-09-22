@@ -2,12 +2,14 @@ title: $:/language/MissingTiddler/Hint
 
 //This is a placeholder due to a hanging link. Press //"+"// below to add content.//
 
-<div style="margin-top: 1.5em; padding: 0.75em; border: 1px dashed #666; border-radius: 6px; display: inline-block; background: rgba(0,0,0,0.1);">
-    <div style="font-size: 0.8em; color: #aaa; margin-bottom: 0.5em;">Or Initialize from Anchor Template:</div>
+<$vars anchor-templates="[!is[system]!is[shadow]has[stream-list]!has[cloned-from]] :filter[get[stream-list]enlist-input[]search:text[{{||$:/anchor}}]first[]]">
+<$list filter=<<anchor-templates>> limit[1] variable="__anchorTemplate" emptyMessage="">
+<div style="margin-top: 1.5em; padding: 0.75em; border: 1px dashed <<colour table-border>>; border-radius: 6px; display: inline-block; background: <<colour page-background>>;">
+    <div style="font-size: 0.8em; color: <<colour muted-foreground>>; margin-bottom: 0.5em;">Or Initialize from Anchor Template:</div>
     <$vars selectState=<<qualify "$:/state/clone-template">>>
-        <$select tiddler=<<selectState>> default="" style="min-width: 250px; background: transparent; color: inherit; border: 1px solid #666; padding: 4px;">
+        <$select tiddler=<<selectState>> default="" class="lithic-anchor-tpl-select">
             <option value="">-- Select a template --</option>
-            <$list filter="[!is[system]!is[shadow]has[stream-list]!has[cloned-from]] :filter[get[stream-list]enlist-input[]search:text[{{||$:/anchor}}]first[]]">
+            <$list filter=<<anchor-templates>>>
                 <option value=<<currentTiddler>>><$text text=<<currentTiddler>>/></option>
             </$list>
         </$select>
@@ -20,3 +22,5 @@ title: $:/language/MissingTiddler/Hint
         </$list>
     </$vars>
 </div>
+</$list>
+</$vars>

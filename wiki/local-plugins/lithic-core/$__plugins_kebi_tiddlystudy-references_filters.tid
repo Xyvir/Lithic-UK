@@ -64,7 +64,7 @@ title: $:/plugins/kebi/tiddlystudy-references/filters
 >
 <$list filter="[<prevTarget>minlength[1]] [<nextTarget>minlength[1]] +[limit[1]]" variable="ignore">
 <ul class="footer">
-<$list filter="[<prevTarget>minlength[1]]" emptyMessage="<li class='filtertag' style='background-color:gray; opacity:0.5;' title='No previous'>&lt;&lt; Prev</li>" variable="ignore">
+<$list filter="[<prevTarget>minlength[1]]" emptyMessage="<li class='filtertag' style='background-color:<<colour muted-foreground>>; opacity:0.5;' title='No previous'>&lt;&lt; Prev</li>" variable="ignore">
 <li class="filtertag" style=<<pillStyle>> title=<<prevTarget>>>
 <$button class="tc-btn-invisible tc-tiddlylink" tooltip=<<prevTarget>> style="color:inherit; cursor:pointer;">
 <$action-navigate $to=<<prevTarget>>/>
@@ -80,7 +80,7 @@ title: $:/plugins/kebi/tiddlystudy-references/filters
 <$speech-synthesis streamNode=<<currentTiddler>> />
 </li>
 <$list filter="[{$:/state/speech-synthesis}!match[playing]]" variable="ignore">
-<$list filter="[<currentTiddler>tag[Dogear]]" emptyMessage="<li class='filtertag' style='background-color:gray; opacity:0.5;' title='No active dogear'>X</li>" variable="ignore">
+<$list filter="[<currentTiddler>tag[Dogear]]" emptyMessage="<li class='filtertag' style='background-color:<<colour muted-foreground>>; opacity:0.5;' title='No active dogear'>X</li>" variable="ignore">
 <li class="filtertag" style=<<pillStyle>> title="Clear dogear">
 <$button class="tc-btn-invisible tc-tiddlylink" tooltip="Clear dogear" style="color:inherit; cursor:pointer;">
 <$action-listops $tiddler=<<currentTiddler>> $tags="-Dogear"/>
@@ -90,7 +90,7 @@ X
 </$list>
 </$list>
 
-<$list filter="[<nextTarget>minlength[1]]" emptyMessage="<li class='filtertag' style='background-color:gray; opacity:0.5;' title='No next'>Next &gt;&gt;</li>" variable="ignore">
+<$list filter="[<nextTarget>minlength[1]]" emptyMessage="<li class='filtertag' style='background-color:<<colour muted-foreground>>; opacity:0.5;' title='No next'>Next &gt;&gt;</li>" variable="ignore">
 <li class="filtertag" style=<<pillStyle>> title=<<nextTarget>>>
 <$button class="tc-btn-invisible tc-tiddlylink" tooltip=<<nextTarget>> style="color:inherit; cursor:pointer;">
 <$action-navigate $to=<<nextTarget>>/>

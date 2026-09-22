@@ -16,7 +16,7 @@ title: $:/plugins/sq/streams/templates/stream-row-body
       <$checkbox tag="done"/>
     </div>
     
-    <div style={{{ [all[current]tag[done]then[flex:1; text-decoration:line-through; color:gray;]else[flex:1;]] }}}>
+    <div style={{{ [all[current]tag[done]then[flex:1; text-decoration:line-through; opacity:0.6;]else[flex:1;]] }}}>
        <$let itemText={{{ [{!!text}removeprefix<todo1>] ~[{!!text}removeprefix<todo2>] }}}>
           <$transclude $variable="itemText"/>
        </$let>
@@ -25,7 +25,7 @@ title: $:/plugins/sq/streams/templates/stream-row-body
 </$list>
 
 <$list filter="[all[current]get[text]prefix<done1>] [all[current]get[text]prefix<done2>] [all[current]get[text]prefix<done3>] [all[current]get[text]prefix<done4>]" variable="null">
-  <div class="lithic-checkbox" style="display:flex; align-items:flex-start; color:gray;">
+  <div class="lithic-checkbox" style="display:flex; align-items:flex-start; opacity:0.6;">
     <div style="margin-right:6px; margin-top:2px;">
       <input type="checkbox" checked disabled>
     </div>

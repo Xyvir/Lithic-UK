@@ -49,7 +49,7 @@ title: $:/lithic/macros/AutoTable
 
     <$list filter="[<isDone>match[yes]]" variable="null">
       <$let itemText={{{ [<FieldText>removeprefix<done1>] ~[<FieldText>removeprefix<done2>] ~[<FieldText>removeprefix<done3>] ~[<FieldText>removeprefix<done4>] ~[<FieldText>removeprefix<done5>] ~[<FieldText>removeprefix<done6>] ~[<FieldText>removeprefix<done7>] ~[<FieldText>removeprefix<done8>] }}}>
-      <div class="lithic-checkbox" style="display:flex; align-items:flex-start; color:gray; text-align:left;">
+      <div class="lithic-checkbox" style="display:flex; align-items:flex-start; opacity:0.6; text-align:left;">
         
         <div style="margin-right:6px; margin-top:2px; position:relative; z-index:20;">
           <$vars uncheckStr="[ ] ">
@@ -111,12 +111,12 @@ title: $:/lithic/macros/AutoTable
 \define AutoTable(columns:3, headers)
 <style>
 tr.lithic-row-droppable.tc-dragover > td {
-  background-color: #d1e8ff !important;
-  border-top: 2px dashed #0078d7;
-  border-bottom: 2px dashed #0078d7;
+  background-color: <<colour notification-background>> !important;
+  border-top: 2px dashed <<colour primary>>;
+  border-bottom: 2px dashed <<colour primary>>;
 }
 tr.lithic-drag-source > td {
-  background-color: #f4f4f4 !important;
+  background-color: <<colour page-background>> !important;
   opacity: 0.5;
 }
 .lithic-primary-color {

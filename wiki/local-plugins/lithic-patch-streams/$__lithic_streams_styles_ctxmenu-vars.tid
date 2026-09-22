@@ -30,15 +30,17 @@ class above upstream so ordering does not matter.
 	color: var(--lithic-c-menu-muted);
 }
 
-/* hover / focused item */
+/* hover / focused item. The ink needs !important: the base item ink is pinned
+   !important by $:/lithic/streams-menu-fix, and an !important declaration cannot
+   be outbid by specificity, so without this the hover band keeps the base ink. */
 .tc-drop-down.sq-contextmenu .tc-menu-list-item:hover,
 .tc-drop-down.sq-contextmenu .tc-menu-list-item:focus {
 	background: var(--lithic-c-menu-hover-bg);
-	color: var(--lithic-c-menu-hover-fg);
+	color: var(--lithic-c-menu-hover-fg) !important;
 }
 .tc-drop-down.sq-contextmenu .tc-menu-list-item:hover .sq-contextmenu-itemicon,
 .tc-drop-down.sq-contextmenu .tc-menu-list-item:focus .sq-contextmenu-itemicon {
-	color: var(--lithic-c-menu-hover-fg);
+	color: var(--lithic-c-menu-hover-fg) !important;
 }
 
 /* divider */

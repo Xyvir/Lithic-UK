@@ -19,15 +19,15 @@ type: text/css
     width: 3.2em !important;
     height: 2.0em !important;
     border-radius: 1.0em !important;
-    background: #373d44 !important;
-    border: 1px solid rgba(255, 255, 255, 0.2) !important;
+    background: var(--lithic-c-menu-bg) !important;
+    border: 1px solid rgba(var(--lithic-c-menu-fg-rgb), 0.2) !important;
     cursor: pointer;
     padding: 0 !important;
     box-sizing: border-box !important;
 }
 
 .lithic-wb-save-btn button:hover {
-    background: #4a5159 !important; /* Slightly lighter on hover */
+    background: color-mix(in srgb, var(--lithic-c-menu-fg) 10%, var(--lithic-c-menu-bg)) !important; /* slightly lighter on hover */
 }
 
 /* Scale up the SVG icon inside */

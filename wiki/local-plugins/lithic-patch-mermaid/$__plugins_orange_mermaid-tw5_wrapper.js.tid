@@ -382,7 +382,7 @@ modified: E Furlan 2022-05-08; Lithic 2026-09-14 (re-applied D3 pan/zoom from xy
         // Skip rendering during static HTML generation (Node.js build).
         // Mermaid 11 requires a browser DOM (document) to render diagrams.
         if (!$tw.browser) {
-            divNode.innerHTML = '<div style="border-left:3px solid #2196F3;background:#e3f2fd;padding:8px 12px;">' +
+            divNode.innerHTML = '<div style="border-left:3px solid var(--lithic-c-accent);background:var(--lithic-c-note-bg);padding:8px 12px;">' +
                 '<strong>Mermaid diagram</strong> (interactive rendering requires a browser)' +
                 '</div>';
             parent.insertBefore(divNode, nextSibling);
@@ -393,7 +393,7 @@ modified: E Furlan 2022-05-08; Lithic 2026-09-14 (re-applied D3 pan/zoom from xy
         try {
             // Lazy-load mermaid and D3 on first render
             if (!mermaidAPI) {
-                divNode.innerHTML = '<div style="border-left:3px solid #999;background:#f5f5f5;padding:8px 12px;">Loading diagram…</div>';
+                divNode.innerHTML = '<div style="border-left:3px solid var(--lithic-c-cluster-border);background:var(--lithic-c-note-bg);padding:8px 12px;">Loading diagram…</div>';
                 var loadedLib = require('$:/plugins/orange/mermaid-tw5/mermaid.min.js');
                 mermaidModule = (loadedLib && (loadedLib.mermaid || loadedLib.default || (typeof loadedLib.initialize === 'function' ? loadedLib : null)));
                 if (!mermaidModule && typeof window !== 'undefined') {
@@ -498,9 +498,9 @@ modified: E Furlan 2022-05-08; Lithic 2026-09-14 (re-applied D3 pan/zoom from xy
                         // breaks SUBSEQUENT diagrams on the page. Restore known-good.
                         resetMermaidToSiteConfig();
                         cleanupStrayErrorSVGs();
-                        var errorHtml = '<div style="border-left:3px solid #ff4444;background:#fff0f0;padding:8px 12px;">' +
+                        var errorHtml = '<div style="border-left:3px solid var(--lithic-c-code-warn);background:var(--lithic-c-note-bg);padding:8px 12px;">' +
                             '<p><strong>Mermaid diagram could not be rendered.</strong> The diagram syntax may contain an error.</p>' +
-                            '<pre style="margin:8px 0;padding:6px;background:#ffffff;border:1px solid #ffcccc;overflow:auto;">' +
+                            '<pre style="margin:8px 0;padding:6px;background:var(--lithic-c-code-bg);border:1px solid var(--lithic-c-code-border);overflow:auto;">' +
                             escapeHtml(scriptBody) +
                             '</pre>' +
                             '<details>' +
@@ -610,9 +610,9 @@ modified: E Furlan 2022-05-08; Lithic 2026-09-14 (re-applied D3 pan/zoom from xy
 
         } catch (ex) {
             cleanupStrayErrorSVGs();
-            var errorHtml = '<div style="border-left:3px solid #ff4444;background:#fff0f0;padding:8px 12px;">' +
+            var errorHtml = '<div style="border-left:3px solid var(--lithic-c-code-warn);background:var(--lithic-c-note-bg);padding:8px 12px;">' +
                 '<p><strong>Mermaid diagram could not be rendered.</strong> The diagram syntax may contain an error.</p>' +
-                '<pre style="margin:8px 0;padding:6px;background:#ffffff;border:1px solid #ffcccc;overflow:auto;">' +
+                '<pre style="margin:8px 0;padding:6px;background:var(--lithic-c-code-bg);border:1px solid var(--lithic-c-code-border);overflow:auto;">' +
                 escapeHtml(scriptBody) +
                 '</pre>' +
                 '<details>' +

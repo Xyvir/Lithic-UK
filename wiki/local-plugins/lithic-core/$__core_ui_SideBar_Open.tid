@@ -33,7 +33,7 @@ $button$
 <div class={{{ [<isHighlighted>match[yes]then[tc-sidebar-tab-open-item lithic-active-sidebar-item]else[tc-sidebar-tab-open-item]] }}}>
    <$macrocall $name="droppable-item" button="""<$button message="tm-close-tiddler" tooltip={{$:/language/Buttons/Close/Hint}} aria-label={{$:/language/Buttons/Close/Caption}} class="tc-btn-invisible tc-btn-mini tc-small-gap-right">{{$:/core/images/close-button}}</$button><$link to={{!!title}}><$view field="title"/></$link>"""/>
    <$list filter="[<currentTiddler>has[stream-list]]">
-      <div style="margin-left: 22px; border-left: 1px solid #ddd; padding-left: 6px; font-size: 0.85em; opacity: 0.8;">
+      <div style="margin-left: 22px; border-left: 1px solid <<colour table-border>>; padding-left: 6px; font-size: 0.85em; opacity: 0.8;">
          <$list filter="[list[!!stream-list]first[4]]">
             <div class="tc-menu-item" style="white-space: nowrap; overflow: hidden; text-overflow: ellipsis; line-height: 1.4em;">
                <$link to={{!!title}}>
@@ -44,7 +44,7 @@ $button$
             </div>
          </$list>
          <$list filter="[list[!!stream-list]nth[5]]" variable="ignore">
-            <div class="tc-menu-item" style="color: #999; line-height: 1.4em;">
+            <div class="tc-menu-item" style="color: <<colour muted-foreground>>; line-height: 1.4em;">
                ...
             </div>
          </$list>
@@ -72,7 +72,7 @@ $button$
 <$set name="isHighlighted" filter=<<check-active-filter>>>
 <div class={{{ [<isHighlighted>match[yes]then[tc-sidebar-tab-open-item lithic-active-sidebar-item]else[tc-sidebar-tab-open-item]] }}}>
    <$macrocall $name="stream-droppable-item" button="""<$link to={{!!title}}><$view field="title"/></$link>"""/>
-   <div style="margin-left: 22px; border-left: 1px solid #ddd; padding-left: 6px; font-size: 0.85em; opacity: 0.8;">
+   <div style="margin-left: 22px; border-left: 1px solid <<colour table-border>>; padding-left: 6px; font-size: 0.85em; opacity: 0.8;">
       <div class="tc-menu-item" style="display:-webkit-box; -webkit-line-clamp:5; -webkit-box-orient:vertical; overflow:hidden; text-overflow:ellipsis; white-space:normal; line-height:1.4em; padding-bottom:2px;">
          <$link to={{!!title}} class="tc-tiddlylink" style="color:inherit; text-decoration:none;">
             <$transclude field="caption">

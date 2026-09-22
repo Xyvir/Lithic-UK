@@ -54,7 +54,7 @@ type: text/css
 
 /* --- Inline code --- */
 .unieditor .md-code {
-	background: rgba(var(--lithic-c-code-fg-rgb, 128, 128, 128), 0.15);
+	background: rgba(var(--lithic-c-code-fg-rgb), 0.15);
 	border-radius: 2px;
 	color: var(--lithic-c-code-ref);
 }
@@ -64,7 +64,7 @@ type: text/css
 	color: var(--lithic-c-code-ref);
 }
 .unieditor .md-code-block {
-	background: rgba(var(--lithic-c-code-fg-rgb, 128, 128, 128), 0.08);
+	background: rgba(var(--lithic-c-code-fg-rgb), 0.08);
 	color: var(--lithic-c-code-ref);
 }
 

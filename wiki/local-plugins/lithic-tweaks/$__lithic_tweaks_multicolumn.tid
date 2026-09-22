@@ -8,7 +8,7 @@ type: text/vnd.tiddlywiki
      width=auto
      gap=8ch
      border=no
-     borderhex="#E8E8E8"
+     borderhex="<<colour table-border>>"
      break=yes
 >
 <$let

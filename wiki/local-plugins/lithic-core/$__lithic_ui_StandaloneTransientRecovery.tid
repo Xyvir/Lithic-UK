@@ -28,7 +28,7 @@ subtitle: Unsaved edits found
 .standalone-recovery-preview pre {
 	max-height: 8em;
 	overflow: auto;
-	background: rgba(128,128,128,0.12);
+	background: <<colour pre-background>>;
 	padding: 0.5em 0.75em;
 	border-radius: 4px;
 	font-size: 0.8em;

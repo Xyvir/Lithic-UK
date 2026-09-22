@@ -1,10 +1,16 @@
 tags: $:/tags/Stylesheet
 title: $:/lithic/streams-menu-fix
+type: text/css
 
-/* Adapt menu text to the current theme's foreground color */
+/* Adapt menu text to the contrast core's menu ink. This used to hard-bind the
+   palette foreground, which defeated the contrast roles below it (an !important
+   declaration cannot be outbid by specificity) and left the hover band's ink
+   unreadable on mid-luminance primaries. Retyped to text/css because the
+   wikitext parser rewrites a literal double hyphen into an en-dash, which would
+   silently kill these var() lookups. */
 .sq-contextmenu .tc-menu-list-item, .sq-contextmenu .tc-menu-list-item a {
-    color: <<colour foreground>> !important; 
-    fill: <<colour foreground>> !important;
+    color: var(--lithic-c-menu-fg) !important;
+    fill: var(--lithic-c-menu-fg) !important;
 }
 
 /* The Notebook theme applies `animation: pop` (which uses transform: scale) to .tc-drop-down.
