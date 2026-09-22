@@ -492,18 +492,40 @@ try {
   const vaultPage = await browser.newPage();
   await vaultPage.setViewport({ width: 900, height: 700 });
   vaultPage.on('pageerror', error => errors.push(`vault: ${error.message}`));
+  // A record of what the launcher asked Rust, held on this side of the browser.
+  // Opening an instance navigates away from the page that asked, so the page's own
+  // log is gone by the time that call is worth checking.
+  const vaultCalls = [];
+  await vaultPage.exposeFunction('__lithicRecord', entry => vaultCalls.push(entry));
   await vaultPage.evaluateOnNewDocument(() => {
     const vault = {
-      state: { exists: true, unlocked: false, count: 0, path: 'C:\\Users\\fixture\\AppData\\Local\\Lithic\\credentials.vault' },
-      entries: [],
+      state: { exists: true, unlocked: false, granted: false, count: 1, path: 'C:\\Users\\fixture\\AppData\\Local\\Lithic\\credentials.vault' },
+      // One saved login, for the first bookmark fixture: the rows and the manager key
+      // have something to be green about without the test having to set it up first.
+      entries: [{ origin: 'https://personal.lithic.uk', user: 'keeper' }],
       calls: []
     };
     window.__lithicVault = vault;
     const answer = (command, args) => {
       vault.calls.push({ command, args });
+      if (typeof window.__lithicRecord === 'function') window.__lithicRecord({ command, args });
       switch (command) {
         case 'credentials_status':
-          return { ...vault.state, count: vault.state.unlocked ? vault.entries.length : 0 };
+          // The count comes from the file's origin index in Rust, so it is known
+          // while locked; the mock answers from its entries either way.
+          return { ...vault.state, count: vault.entries.length };
+        case 'credential_coverage': {
+          // Which of the addresses asked about the vault holds a login for. Never
+          // needs a secret, which is what colours a row before anything is unlocked.
+          const asked = args.origins.map(origin => {
+            try {
+              return new URL(origin).origin;
+            } catch {
+              return origin;
+            }
+          });
+          return asked.filter(origin => vault.entries.some(entry => entry.origin === origin));
+        }
         case 'list_credentials':
           return vault.state.unlocked ? vault.entries : [];
         case 'check_credentials_secret':
@@ -511,6 +533,14 @@ try {
         case 'unlock_credentials':
           vault.state.unlocked = true;
           return vault.entries;
+        case 'unlock_for_instance': {
+          if (args.secret === 'wrong-secret') throw new Error('That secret does not open the vault.');
+          if (!vault.entries.some(entry => entry.origin === args.origin)) {
+            throw new Error(`No login is saved for ${args.origin}.`);
+          }
+          vault.state.granted = true;
+          return { origin: args.origin, user: 'keeper' };
+        }
         case 'remember_credentials': {
           // Rust normalises to an origin (scheme, host, port) before storing, and
           // the dialog forgets entries by what it lists — so the mock has to
@@ -528,9 +558,22 @@ try {
         case 'forget_credentials':
           vault.entries = vault.entries.filter(entry => entry.origin !== args.origin);
           return vault.entries;
+        case 'check_credential':
+          // One login the instance still accepts, and one it has since refused: the
+          // two verdicts the row has to be able to tell apart.
+          return args.origin === 'https://personal.lithic.uk'
+            ? { outcome: 'accepted', status: 200, detail: 'The instance asks for a password, and accepts this login.' }
+            : { outcome: 'refused', status: 401, detail: 'The instance refused this login (401).' };
+        case 'change_credentials_secret':
+          return { ...vault.state, count: vault.entries.length };
+        case 'destroy_credentials':
+          vault.entries = [];
+          vault.state.unlocked = false;
+          return { ...vault.state, exists: false, count: 0 };
         case 'lock_credentials':
           vault.state.unlocked = false;
-          return { ...vault.state, count: 0 };
+          vault.state.granted = false;
+          return { ...vault.state, count: vault.entries.length };
         default:
           // Everything else the launcher asks for in this mode: no answer, which
           // every caller already treats as "absent".
@@ -538,94 +581,366 @@ try {
       }
     };
     window.__TAURI__ = {
-      core: { invoke: (command, args) => Promise.resolve(answer(command, args)) },
+      // A command that refuses has to reject the way Rust's does: a synchronous throw
+      // out of `invoke` would not be the same contract.
+      core: {
+        invoke: (command, args) => {
+          try {
+            return Promise.resolve(answer(command, args));
+          } catch (error) {
+            return Promise.reject(error);
+          }
+        }
+      },
       event: { listen: () => Promise.resolve(() => {}) }
     };
   });
   await vaultPage.goto(`file://${artifact}?mode=tauri`, { waitUntil: 'domcontentloaded' });
-  await vaultPage.waitForSelector('.vault-button');
-  const vaultButtonTitle = await vaultPage.$eval('.vault-button', node => node.getAttribute('title'));
-  assert.equal(vaultButtonTitle, 'Saved instance logins — locked', 'A locked vault says so before it is opened');
-  assert.equal(
-    await vaultPage.$eval('.vault-button', node => node.querySelector('svg') !== null),
-    true,
-    'The vault control is an icon button, like the sync one beside it'
-  );
+  // Two bookmarks, one of which the vault already holds a login for.
+  await vaultPage.evaluate(entries => {
+    localStorage.setItem('bookmarkedInstances', JSON.stringify(entries));
+  }, [
+    { url: 'https://personal.lithic.uk', label: 'personal.lithic.uk' },
+    { url: 'https://other.example', label: 'other.example' }
+  ]);
+  await vaultPage.goto(`file://${artifact}?mode=tauri`, { waitUntil: 'domcontentloaded' });
+  await vaultPage.waitForSelector('.bookmark-row .vault-row-button');
+  await new Promise(resolve => setTimeout(resolve, 250));
 
-  await vaultPage.click('.vault-button');
+  // The vault no longer has a control in the heading: what it owns is an instance's
+  // address, so its controls live with the instances.
+  assert.equal(await vaultPage.$('.vault-button'), null, 'The vault has no app-level button in the heading');
+
+  const managerControl = await vaultPage.evaluate(() => {
+    const node = document.querySelector('.vault-manager-button');
+    return {
+      exists: Boolean(node),
+      inCard: node?.closest('.action-pair') !== null,
+      hasLogins: node?.classList.contains('has-logins') ?? null,
+      title: node?.getAttribute('title') ?? '',
+      nextToBookmark: node?.previousElementSibling?.classList.contains('bookmark-button') ?? false
+    };
+  });
+  assert.ok(managerControl.exists, 'The manager key renders in the desktop app');
+  assert.ok(managerControl.inCard, 'It sits in the action card');
+  assert.ok(managerControl.nextToBookmark, '...beside the bookmark control, which owns the same question');
+  assert.equal(managerControl.hasLogins, true, 'A vault holding a login says so in colour');
+  assert.ok(managerControl.title.includes('1 saved'), `And says how many without being opened: ${managerControl.title}`);
+
+  // One key per bookmark, coloured from the vault file's index: green for an address a
+  // login is saved for, grey for one that has none — decided before anything unlocks.
+  const rowKeys = await vaultPage.evaluate(() =>
+    [...document.querySelectorAll('.bookmark-row')].map(row => {
+      const key = row.querySelector('.vault-row-button');
+      return {
+        covered: key?.classList.contains('covered') ?? null,
+        title: key?.getAttribute('title') ?? '',
+        colour: key ? getComputedStyle(key).color : '',
+        beforeRemove: key?.nextElementSibling?.classList.contains('remove-recent') ?? false
+      };
+    })
+  );
+  assert.equal(rowKeys.length, 2, 'Every bookmark row gets a key');
+  assert.equal(rowKeys[0].covered, true, 'The bookmark with a saved login shows the key green');
+  assert.equal(rowKeys[1].covered, false, 'One without shows it grey, meaning it can be set up');
+  assert.equal(rowKeys[0].colour, 'rgb(123, 168, 111)', 'Green is the same green the manager key uses');
+  assert.equal(rowKeys[1].colour, 'rgb(138, 138, 138)', 'Grey is the same grey');
+  assert.ok(rowKeys[1].beforeRemove, 'The key sits with the row’s other controls, not over the link');
+  assert.ok(rowKeys[1].title.includes('Save a login'), `Grey says what a click will do: ${rowKeys[1].title}`);
+
+  // First-time setup, from the row whose key is grey: the manager opens with that
+  // address ready, because the app cannot learn a password by watching a login work.
+  await vaultPage.evaluate(() => document.querySelectorAll('.bookmark-row .vault-row-button')[1].click());
   await vaultPage.waitForSelector('.vault-modal');
   assert.equal(
     await vaultPage.$eval('.vault-modal h2', node => node.textContent.trim()),
     'Saved Instance Logins'
   );
-  // Locked with a vault on disk: the dialog asks for the secret and nothing else.
-  assert.equal(await vaultPage.$('.vault-modal input[placeholder^="https://instance"]'), null, 'A locked vault offers no way to add a login');
+  // Locked with a vault on disk: the secret and nothing else, plus what the file
+  // says about itself without being opened.
+  assert.equal(await vaultPage.$('#vault-new-origin'), null, 'A locked vault offers no way to add a login');
+  assert.ok(
+    await vaultPage.$eval('.vault-count', node => node.textContent.includes('One login is saved')),
+    'The count is known while locked, because it comes from the file’s origin index'
+  );
   await vaultPage.type('.vault-modal input[type="password"]', 'hunter2');
   await vaultPage.waitForFunction(() => document.querySelector('.vault-warning') !== null);
   const warning = await vaultPage.$eval('.vault-warning', node => node.textContent.trim());
   assert.ok(warning.includes('day and a half'), 'The weak-secret warning is Rust’s own arithmetic, shown as written');
   await vaultPage.click('.vault-modal .modal-action');
-  await vaultPage.waitForFunction(() => document.querySelector('.vault-empty') !== null);
+  await vaultPage.waitForSelector('.vault-list li');
   const afterUnlock = await vaultPage.evaluate(() => ({
     calls: window.__lithicVault.calls,
-    title: document.querySelector('.vault-button').getAttribute('title'),
-    labelled: document.querySelector('.vault-button').classList.contains('unlocked')
+    listed: document.querySelector('.vault-list li').textContent.replace(/\s+/g, ' ').trim(),
+    prefilled: document.querySelector('#vault-new-origin').value,
+    managerTitle: document.querySelector('.vault-manager-button').getAttribute('title')
   }));
   const unlockCall = afterUnlock.calls.find(call => call.command === 'unlock_credentials');
   assert.deepEqual(unlockCall?.args, { secret: 'hunter2' }, 'Unlocking passes the secret under the name Rust expects');
-  assert.equal(afterUnlock.labelled, true, 'An unlocked vault is visibly unlocked');
-  assert.ok(afterUnlock.title.includes('unlocked'), 'And its control says which state it is in');
+  assert.ok(afterUnlock.listed.includes('https://personal.lithic.uk'), 'The saved login is listed by its address');
+  assert.equal(afterUnlock.prefilled, 'https://other.example', 'The address whose key was clicked is ready to save');
+  assert.ok(afterUnlock.managerTitle.includes('open'), 'And the manager says the vault is open while its dialog is up');
 
-  // Adding a login: the origin is the field that trips people, so it takes any
-  // address and Rust is left to normalise it.
-  await vaultPage.type('.vault-modal input[placeholder^="https://instance"]', 'https://personal.example.uk/sync/wiki.html');
-  const fields = await vaultPage.$$('.vault-modal input:not([type="checkbox"])');
-  await fields[1].type('keeper');
-  await fields[2].type('s3cret');
+  // Saving that login: the origin is the field that trips people, so it takes any
+  // address and Rust is left to normalise it — and the field was already filled from
+  // the row whose key was clicked.
+  await vaultPage.$eval('#vault-new-origin', node => { node.value = ''; });
+  await vaultPage.type('#vault-new-origin', 'https://other.example/sync/wiki.html');
+  await vaultPage.type('#vault-new-user', 'keeper');
+  await vaultPage.type('#vault-new-password', 's3cret');
   await vaultPage.evaluate(() => {
     const buttons = [...document.querySelectorAll('.vault-modal .modal-action')];
     buttons.find(button => button.textContent.includes('Save Login')).click();
   });
-  await vaultPage.waitForFunction(() => document.querySelector('.vault-list li') !== null);
+  await vaultPage.waitForFunction(() => document.querySelectorAll('.vault-list li').length === 2);
   const saved = await vaultPage.evaluate(() => ({
     calls: window.__lithicVault.calls,
-    row: document.querySelector('.vault-list li').textContent.replace(/\s+/g, ' ').trim()
+    rows: [...document.querySelectorAll('.vault-list li')].map(row => row.textContent.replace(/\s+/g, ' ').trim()),
+    greenRows: [...document.querySelectorAll('.bookmark-row .vault-row-button')].map(key => key.classList.contains('covered')),
+    coveredCall: window.__lithicVault.calls.filter(call => call.command === 'credential_coverage').at(-1)
   }));
   const saveCall = saved.calls.find(call => call.command === 'remember_credentials');
   assert.deepEqual(
     saveCall?.args,
-    { origin: 'https://personal.example.uk/sync/wiki.html', user: 'keeper', password: 's3cret' },
+    { origin: 'https://other.example/sync/wiki.html', user: 'keeper', password: 's3cret' },
     'Saving passes origin, user and password exactly as Rust declares them'
   );
-  assert.ok(saved.row.includes('https://personal.example.uk'), 'The saved login is listed by its address');
+  assert.equal(saved.rows.length, 2, 'Both saved logins are listed');
+  assert.deepEqual(saved.greenRows, [true, true], 'And every row the vault now covers turns green');
+  assert.ok(
+    saved.coveredCall.args.origins.includes('https://other.example'),
+    'The rows were recoloured by asking the vault about their addresses'
+  );
 
-  // Forgetting one entry, then locking: both are the commands Rust expects, and
-  // locking must clear the list rather than leave it on screen.
-  await vaultPage.click('.vault-list li .vault-forget');
-  await vaultPage.waitForFunction(() => document.querySelector('.vault-list li') === null);
-  const afterForget = await vaultPage.evaluate(() => window.__lithicVault.calls.filter(call => call.command === 'forget_credentials'));
-  assert.deepEqual(afterForget.at(-1)?.args, { origin: 'https://personal.example.uk' }, 'Forgetting passes the normalised origin');
+  // Checking a login against its instance. Only offered here, in the list, because the
+  // password has to be readable to send it — which is true only while the vault is open.
+  await vaultPage.waitForFunction(() => document.querySelectorAll('.vault-list .vault-test').length === 2);
+  const check = async needle => {
+    await vaultPage.evaluate(text => {
+      const row = [...document.querySelectorAll('.vault-list li')].find(node => node.textContent.includes(text));
+      row.querySelector('.vault-test').click();
+    }, needle);
+  };
+  // Waited for with a pause rather than a condition: the mock answers at once, and a
+  // missing or wrong verdict should fail as the assertion below — which names it —
+  // rather than as a timeout that only says nothing appeared.
+  await check('personal.lithic.uk');
+  await new Promise(resolve => setTimeout(resolve, 200));
+  await check('other.example');
+  await new Promise(resolve => setTimeout(resolve, 200));
+  const checked = await vaultPage.evaluate(() => ({
+    calls: window.__lithicVault.calls.filter(call => call.command === 'check_credential'),
+    verdicts: [...document.querySelectorAll('.vault-check')]
+      .map(node => `${node.className.replace('vault-check ', '')}:${node.textContent.trim()}`)
+      .sort(),
+    // Read defensively: if no verdict rendered at all, the assertions below are what
+    // should say so, not a null dereference in here.
+    reason: document.querySelector('.vault-check.refused')?.getAttribute('title') ?? '',
+    labels: [...document.querySelectorAll('.vault-list .vault-test')].map(node => node.getAttribute('aria-label'))
+  }));
+  assert.deepEqual(checked.calls.at(-1)?.args, { origin: 'https://other.example' }, 'Checking passes the origin under the name Rust expects');
+  assert.deepEqual(checked.verdicts, ['accepted:Signs in', 'refused:Refused'], 'Each login shows what its instance said about it');
+  assert.ok(checked.reason.includes('401'), `And the reason is kept behind the verdict: ${checked.reason}`);
+  assert.ok(
+    checked.labels.every(label => label.startsWith('Check the login for https://')),
+    `The control says which login it will check: ${checked.labels.join(' / ')}`
+  );
+
+  // Forgetting one, from the list: the command takes the normalised origin, and the
+  // row that address belongs to goes back to grey.
+  await vaultPage.evaluate(() => {
+    const row = [...document.querySelectorAll('.vault-list li')].find(node => node.textContent.includes('other.example'));
+    row.querySelector('.vault-forget').click();
+  });
+  await vaultPage.waitForFunction(() => document.querySelectorAll('.vault-list li').length === 1);
+  const afterForget = await vaultPage.evaluate(() => ({
+    calls: window.__lithicVault.calls.filter(call => call.command === 'forget_credentials'),
+    greenRows: [...document.querySelectorAll('.bookmark-row .vault-row-button')].map(key => key.classList.contains('covered'))
+  }));
+  assert.deepEqual(afterForget.calls.at(-1)?.args, { origin: 'https://other.example' }, 'Forgetting passes the normalised origin');
+  assert.deepEqual(afterForget.greenRows, [true, false], 'The forgotten address stops showing a saved login');
+
+  // Changing the secret is offered only with the vault open, which is why the old one
+  // is not asked for again: the key being replaced is already in memory.
+  await vaultPage.click('.vault-advanced summary');
+  await vaultPage.type('#vault-new-secret', 'a much longer secret');
+  await vaultPage.type('#vault-new-secret-confirm', 'a much longer secret');
   await vaultPage.evaluate(() => {
     const buttons = [...document.querySelectorAll('.vault-modal .modal-action')];
-    buttons.find(button => button.textContent.trim() === 'Lock').click();
+    buttons.find(button => button.textContent.includes('Change Secret')).click();
   });
-  await vaultPage.waitForFunction(() => document.querySelector('.vault-modal h2') && document.querySelector('.vault-modal input[placeholder^="https://instance"]') === null);
-  assert.equal(
-    await vaultPage.evaluate(() => window.__lithicVault.state.unlocked),
-    false,
-    'Locking asks Rust to drop the session'
+  // Waited for by its wording, not its presence: saving a login already put a notice
+  // there, and a stale one would pass a presence check.
+  await vaultPage.waitForFunction(() => document.querySelector('.vault-notice')?.textContent.includes('changed'));
+  const rotated = await vaultPage.evaluate(() => ({
+    calls: window.__lithicVault.calls.filter(call => call.command === 'change_credentials_secret'),
+    notice: document.querySelector('.vault-notice').textContent.trim()
+  }));
+  assert.deepEqual(
+    rotated.calls.at(-1)?.args,
+    { newSecret: 'a much longer secret' },
+    'The replacement secret goes over as `newSecret`, and the old one is never sent'
   );
+  assert.ok(rotated.notice.includes('changed'), `The dialog says the secret changed: ${rotated.notice}`);
+
+  // Leaving the dialog locks: the vault is open only while it is on screen, so nothing
+  // is left unlocked behind a dialog nobody is looking at.
+  await vaultPage.click('.vault-modal .modal-close');
+  await vaultPage.waitForFunction(() => document.querySelector('.vault-modal') === null);
   assert.ok(
-    await vaultPage.evaluate(() => document.querySelector('.vault-button').classList.contains('unlocked') === false),
-    'And the control goes back to locked'
+    await vaultPage.evaluate(() => window.__lithicVault.calls.some(call => call.command === 'lock_credentials')),
+    'Closing the manager locks the vault rather than leaving it open'
+  );
+  assert.equal(await vaultPage.$('.instance-unlock-secret'), null, 'and no prompt is left behind by any of it');
+
+  // A bookmark with nothing saved opens straight away — no prompt, because there is
+  // nothing the app could answer with.
+  const immediateRequests = [];
+  const recordImmediate = request => {
+    if (request.isNavigationRequest()) immediateRequests.push(request.url());
+  };
+  vaultPage.on('request', recordImmediate);
+  await vaultPage.evaluate(() => {
+    const row = [...document.querySelectorAll('.bookmark-row')].find(node => node.textContent.includes('other.example'));
+    row.querySelector('.bookmark-name').click();
+  });
+  await new Promise(resolve => setTimeout(resolve, 400));
+  vaultPage.off('request', recordImmediate);
+  assert.ok(
+    immediateRequests.some(url => url.startsWith('https://other.example')),
+    `An instance with nothing saved opens without a prompt (saw ${JSON.stringify(immediateRequests)})`
+  );
+  assert.equal(
+    immediateRequests.filter(url => url.includes('personal.lithic.uk')).length,
+    0,
+    'and the bookmark the vault does cover is not involved in that click'
   );
 
-  // A vault that does not exist yet: one dialog, a confirmation field, and no
-  // "unlock" wording — creating must not be mistaken for opening.
+  // --- Unlocking is per instance, not per session -------------------------------
+  // Opening an instance the vault has a login for asks for the secret first, and the
+  // credential that buys is one instance load: Rust holds it only until the load is
+  // done, and this launcher locks again on the way back.
+  const navigationRequests = [];
+  const recordInstanceNavigation = request => {
+    if (request.isNavigationRequest()) navigationRequests.push(request.url());
+  };
+  await vaultPage.goto(`file://${artifact}?mode=tauri`, { waitUntil: 'domcontentloaded' });
+  await vaultPage.waitForSelector('.bookmark-row .vault-row-button');
+  navigationRequests.length = 0;
+  vaultPage.on('request', recordInstanceNavigation);
+  await vaultPage.evaluate(() => {
+    const row = [...document.querySelectorAll('.bookmark-row')].find(node => node.textContent.includes('personal.lithic.uk'));
+    row.querySelector('.bookmark-name').click();
+  });
+  await vaultPage.waitForSelector('.instance-unlock-secret');
+  await new Promise(resolve => setTimeout(resolve, 200));
+  assert.equal(
+    navigationRequests.length,
+    0,
+    'Asking for the secret happens before anything is requested from the instance'
+  );
+  assert.ok(
+    await vaultPage.$eval('.instance-unlock-secret', node =>
+      node.closest('.launcher-modal').querySelector('h2').textContent.includes('https://personal.lithic.uk')
+    ),
+    'The prompt names the instance it is for'
+  );
+
+  assert.ok(
+    await vaultPage.evaluate(() =>
+      [...document.querySelectorAll('.vault-modal .modal-action')].some(button =>
+        button.textContent.includes('Open Without the Login')
+      )
+    ),
+    'and there is a way past the prompt, for an instance whose secret was forgotten'
+  );
+
+  // A wrong secret is refused where it was typed, and does not open the instance.
+  await vaultPage.type('.instance-unlock-secret', 'wrong-secret');
+  await vaultPage.evaluate(() => {
+    const buttons = [...document.querySelectorAll('.vault-modal .modal-action')];
+    buttons.find(button => button.textContent.includes('Unlock & Open')).click();
+  });
+  await vaultPage.waitForFunction(() => document.querySelector('.vault-modal .status-line.error') !== null);
+  const refused = await vaultPage.evaluate(() => document.querySelector('.vault-modal .status-line.error').textContent.trim());
+  assert.ok(refused.includes('does not open the vault'), `A wrong secret says so: ${refused}`);
+  assert.equal(navigationRequests.length, 0, 'And it does not open the instance anyway');
+
+  // The right one signs in to that origin and opens it, with the marker that gives the
+  // instance a way back to this launcher.
+  await vaultPage.$eval('.instance-unlock-secret', node => { node.value = ''; });
+  await vaultPage.type('.instance-unlock-secret', 'correct horse');
+  await vaultPage.evaluate(() => {
+    const buttons = [...document.querySelectorAll('.vault-modal .modal-action')];
+    buttons.find(button => button.textContent.includes('Unlock & Open')).click();
+  });
+  await new Promise(resolve => setTimeout(resolve, 500));
+  vaultPage.off('request', recordInstanceNavigation);
+  const opened = vaultCalls.filter(call => call.command === 'unlock_for_instance').at(-1);
+  assert.deepEqual(
+    opened?.args,
+    { origin: 'https://personal.lithic.uk', secret: 'correct horse' },
+    'Unlocking for an instance passes the origin and the secret under the names Rust expects'
+  );
+  assert.ok(
+    vaultCalls.some(call => call.command === 'unlock_for_instance' && call.args.origin === 'https://personal.lithic.uk'),
+    'and it was asked once, for the instance that was opened'
+  );
+  assert.ok(
+    navigationRequests.some(url => url.startsWith('https://personal.lithic.uk')),
+    `Then the instance is opened (saw ${JSON.stringify(navigationRequests)})`
+  );
+  assert.ok(
+    navigationRequests.some(url => url.includes('lithic-from=')),
+    '...carrying the marker that names this launcher, so the instance has a way back'
+  );
+
+  // --- Starting over, and the one control knowing the secret cannot undo ---------
+  await vaultPage.goto(`file://${artifact}?mode=tauri`, { waitUntil: 'domcontentloaded' });
+  await vaultPage.waitForSelector('.vault-manager-button');
+  await vaultPage.click('.vault-manager-button');
+  await vaultPage.waitForSelector('.vault-modal');
+  assert.ok(
+    await vaultPage.$eval('.vault-modal .vault-count', node => node.textContent.includes('One login is saved')),
+    'The manager says what is stored without opening it'
+  );
+  assert.equal(
+    await vaultPage.$eval('.vault-modal .vault-danger', node => node.textContent.trim()),
+    'Forget All Saved Logins'
+  );
+  // It asks first, and the asking happens before anything is destroyed.
+  await vaultPage.click('.vault-modal .vault-danger');
+  // Both dialogs are on screen at once, so the question is found among them rather
+  // than assumed to be the first.
+  await vaultPage.waitForFunction(() =>
+    [...document.querySelectorAll('.launcher-modal h2')].some(node => node.textContent.includes('Forget every saved login'))
+  );
+  assert.equal(
+    await vaultPage.evaluate(() => window.__lithicVault.calls.some(call => call.command === 'destroy_credentials')),
+    false,
+    'Confirming is what deletes the vault, not the click that opened the question'
+  );
+  await vaultPage.evaluate(() => {
+    const button = [...document.querySelectorAll('.modal-action')].find(node => node.textContent.trim() === 'Forget All');
+    button.click();
+  });
+  await vaultPage.waitForFunction(() => window.__lithicVault.calls.some(call => call.command === 'destroy_credentials'));
+  await vaultPage.waitForFunction(() => document.querySelector('.vault-manager-button')?.classList.contains('has-logins') === false);
+  const destroyed = await vaultPage.evaluate(() => ({
+    calls: window.__lithicVault.calls.filter(call => call.command === 'destroy_credentials').length,
+    greenRows: [...document.querySelectorAll('.bookmark-row .vault-row-button')].filter(key => key.classList.contains('covered')).length,
+    count: document.querySelector('.vault-count')
+  }));
+  assert.equal(destroyed.calls, 1, 'Forgetting everything is one command');
+  assert.equal(destroyed.greenRows, 0, 'And no bookmark claims a saved login afterwards');
+  assert.equal(destroyed.count, null, 'The count goes with it');
+
+  // Nothing on disk now, so the same dialog is the one that creates a vault: the
+  // secret twice, since nothing can recover it.
   await vaultPage.evaluate(() => { window.__lithicVault.state.exists = false; });
   await vaultPage.click('.modal-close');
-  await vaultPage.click('.vault-button');
-  await vaultPage.waitForFunction(() => document.querySelector('.vault-modal input[placeholder^="https://instance"]') === null);
+  await vaultPage.click('.vault-manager-button');
+  await vaultPage.waitForFunction(() => document.querySelector('#vault-new-origin') === null);
   const createLabels = await vaultPage.evaluate(() => {
     const fields = [...document.querySelectorAll('.vault-modal input')].map(node => node.getAttribute('type'));
     const primary = document.querySelector('.vault-modal .modal-action');
@@ -650,11 +965,11 @@ try {
   await confirmFields[1].type('e');
   await vaultPage.waitForFunction(() => document.querySelector('.vault-modal .modal-action').disabled === false);
   await vaultPage.click('.vault-modal .modal-action');
-  await vaultPage.waitForFunction(() => document.querySelector('.vault-button').classList.contains('unlocked'));
+  await vaultPage.waitForFunction(() => document.querySelector('.vault-empty') !== null);
   const created = await vaultPage.evaluate(() => window.__lithicVault.calls.filter(call => call.command === 'unlock_credentials').at(-1));
   assert.deepEqual(created?.args, { secret: 'correct horse' }, 'The first secret becomes the vault’s, through the same command');
   assert.equal(
-    await vaultPage.evaluate(() => document.querySelector('.vault-button').getAttribute('title').includes('0 saved')),
+    await vaultPage.evaluate(() => document.querySelector('.vault-manager-button').getAttribute('title').includes('none saved yet')),
     true,
     'Registering a vault reports nothing saved yet rather than an unreadable count'
   );

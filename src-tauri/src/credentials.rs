@@ -17,9 +17,13 @@
 //! ## What the file holds
 //!
 //! `credentials.vault` is JSON, so its *envelope* is inspectable — version, KDF
-//! parameters, salt, nonce — and nothing else is. Origins, usernames and
-//! passwords all live inside the ciphertext, so a copied file says nothing about
-//! which instances are stored until the secret opens it:
+//! parameters, salt, nonce, and an index of the origins it holds as salted
+//! hashes. Usernames and passwords are inside the ciphertext, and so are the
+//! origins themselves; the index exists only so the launcher can answer "is there
+//! a saved login for this address?" without the secret, which is what colours a
+//! bookmark's key control. A copied file names no instance — an attacker has to
+//! guess hostnames — and the index's salt is per write, so one file's answers say
+//! nothing about another's.
 //!
 //! ```text
 //! key   = Argon2id(secret, salt, m=64 MiB, t=3, p=1)
@@ -36,6 +40,16 @@
 //! the file is a complete reset, and [`crate::forget_credentials`] is the
 //! surgical version of the same thing.
 //!
+//! ## Unlocking is per instance
+//!
+//! The vault does not sit open for a session. It stays locked until the moment a
+//! bookmarked instance is opened, and what is unlocked then is one credential,
+//! lent to the app for as long as that instance takes to load ([`Grant`]) — which
+//! is all the app needs to answer that instance's own password challenge. Leaving
+//! the launcher drops it (the launcher locks on mount), and it expires on a clock
+//! as well. The manager is the other caller, and it holds the vault open only
+//! while its dialog is up.
+//!
 //! ## Tests
 //!
 //! The interesting cases are the ones a real deployment produces — a tampered
@@ -46,11 +60,13 @@ use std::collections::BTreeMap;
 use std::fmt;
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::time::{Duration, Instant};
 
 use argon2::{Algorithm, Argon2, Params, Version};
 use chacha20poly1305::aead::{Aead, Payload};
 use chacha20poly1305::{KeyInit, XChaCha20Poly1305, XNonce};
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 use zeroize::Zeroize;
 
 /// The vault's filename, looked for beside the executable first (see
@@ -78,6 +94,10 @@ const M_COST_KIB: u32 = 65_536;
 const T_COST: u32 = 3;
 const P_COST: u32 = 1;
 const SALT_BYTES: usize = 16;
+/// The index's own salt, drawn per write. Per vault would be enough to stop two
+/// files from being compared with each other; per write costs nothing and stops an
+/// old copy of the file from being matched against the new one either.
+const INDEX_SALT_BYTES: usize = 16;
 const NONCE_BYTES: usize = 24;
 const KEY_BYTES: usize = 32;
 const KDF_ID: &str = "argon2id";
@@ -139,6 +159,83 @@ struct Envelope {
     v: u32,
     kdf: KdfParams,
     aead: AeadPayload,
+    /// Absent in a vault written before the index existed. Whether it is there is
+    /// part of the additional data the ciphertext is bound to, so the field can be
+    /// neither added nor removed from an existing file without failing the tag.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    index: Option<Index>,
+}
+
+/// Which origins a vault holds, as salted hashes.
+///
+/// The one part of the contents that is readable without the secret, deliberately:
+/// the launcher has to know whether a bookmark's key control is grey (nothing
+/// saved) or green (a login is), and answering that must not require unlocking
+/// anything. Hashes rather than names keep the file from listing what it holds.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
+struct Index {
+    /// Base64, like every other byte string in the envelope. The origin hashes
+    /// below are hex instead: they are compared and joined as text, never decoded.
+    salt: String,
+    /// Sorted, so membership is a binary search and the bytes are reproducible.
+    origins: Vec<String>,
+}
+
+impl Index {
+    /// Built from the entries at write time, so it cannot drift from them: the
+    /// only way to change what the index says is to rewrite the vault.
+    fn build(entries: &BTreeMap<String, Credential>, salt: &[u8]) -> Index {
+        let mut origins: Vec<String> = entries.keys().map(|origin| index_hash(salt, origin)).collect();
+        origins.sort_unstable();
+        origins.dedup();
+        Index { salt: encode_base64(salt), origins }
+    }
+
+    fn contains(&self, origin: &str) -> bool {
+        let Ok(salt) = decode_base64(&self.salt) else {
+            return false;
+        };
+        self.origins.binary_search(&index_hash(&salt, origin)).is_ok()
+    }
+
+    fn len(&self) -> usize {
+        self.origins.len()
+    }
+}
+
+/// `sha256(salt || origin)`, hex, so the envelope stays JSON text.
+///
+/// Not a password hash and not pretending to be one: an origin is a hostname, so
+/// anyone holding the file can hash candidates and test them. What this buys is
+/// that the file does not *say* which instances are in it.
+fn index_hash(salt: &[u8], origin: &str) -> String {
+    let mut hasher = Sha256::new();
+    hasher.update(salt);
+    hasher.update(origin.as_bytes());
+    hex(&hasher.finalize())
+}
+
+fn hex(bytes: &[u8]) -> String {
+    use std::fmt::Write as _;
+    let mut out = String::with_capacity(bytes.len() * 2);
+    for byte in bytes {
+        let _ = write!(out, "{:02x}", byte);
+    }
+    out
+}
+
+fn encode_base64(bytes: &[u8]) -> String {
+    use base64::engine::general_purpose::STANDARD;
+    use base64::Engine;
+    STANDARD.encode(bytes)
+}
+
+fn decode_base64(value: &str) -> Result<Vec<u8>, VaultError> {
+    use base64::engine::general_purpose::STANDARD;
+    use base64::Engine;
+    STANDARD
+        .decode(value)
+        .map_err(|error| VaultError::Corrupt(format!("bad base64: {}", error)))
 }
 
 #[derive(Serialize, Deserialize, Debug)]
@@ -216,6 +313,75 @@ impl Unlocked {
 
     pub fn is_empty(&self) -> bool {
         self.entries.is_empty()
+    }
+}
+
+/// One credential, lent to the app for as long as an instance takes to load.
+///
+/// Unlocking is not session state: the secret is asked for when a bookmarked
+/// instance is opened, the credential it protects is held just long enough for the
+/// app to answer that instance's own password challenge, and then it is dropped.
+/// Everything through here is a lookup — the KDF is never run from the webview's
+/// thread, where a 64 MiB derivation would freeze the window while it waits.
+pub struct Grant {
+    origin: String,
+    user: String,
+    password: String,
+    expires_at: Instant,
+}
+
+/// How long a grant outlives the moment it was made.
+///
+/// It has to survive the navigation it was made for: the webview asks for the
+/// password only once the server has answered 401, which is after the launcher has
+/// left the page, and nothing reports when that has happened. So it expires on a
+/// clock instead — long enough for a slow instance to load, short enough that a
+/// credential is not sitting in memory for the rest of the session. Returning to
+/// the launcher drops it immediately.
+pub const GRANT_TTL: Duration = Duration::from_secs(120);
+
+impl Grant {
+    pub fn new(origin: String, user: String, password: String) -> Grant {
+        Grant::with_ttl(origin, user, password, GRANT_TTL)
+    }
+
+    fn with_ttl(origin: String, user: String, password: String, ttl: Duration) -> Grant {
+        Grant { origin, user, password, expires_at: Instant::now() + ttl }
+    }
+
+    /// The credential for `origin` — when this grant is for that origin and has
+    /// not expired. Origin-exact, the same rule the rest of the vault uses.
+    pub fn credential_for(&self, origin: &str) -> Option<(&str, &str)> {
+        if !self.is_live() || self.origin != origin {
+            return None;
+        }
+        Some((&self.user, &self.password))
+    }
+
+    pub fn origin(&self) -> &str {
+        &self.origin
+    }
+
+    pub fn is_live(&self) -> bool {
+        Instant::now() < self.expires_at
+    }
+}
+
+impl Drop for Grant {
+    fn drop(&mut self) {
+        self.password.zeroize();
+    }
+}
+
+impl fmt::Debug for Grant {
+    /// Redacted for the same reason [`Unlocked`]'s is.
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("Grant")
+            .field("origin", &self.origin)
+            .field("user", &self.user)
+            .field("password", &"<redacted>")
+            .finish()
     }
 }
 
@@ -377,15 +543,23 @@ fn derive_key(secret: &str, salt: &[u8], params: (u32, u32, u32)) -> Result<[u8;
     Ok(key)
 }
 
-/// The additional data bound to the ciphertext: the version, the KDF, and its
-/// parameters. Editing any of them invalidates the tag, so the file cannot be
-/// rewritten into a cheaper vault that still opens with the same secret.
-fn envelope_aad(version: u32, kdf: &KdfParams) -> Vec<u8> {
-    format!(
+/// The additional data bound to the ciphertext: the version, the KDF, its
+/// parameters, and the origin index. Editing any of them invalidates the tag, so
+/// the file cannot be rewritten into a cheaper vault that still opens with the
+/// same secret — nor have an origin added to or removed from its index.
+///
+/// A vault with no index produces exactly the bytes this produced before the index
+/// existed, which is what lets an older file keep opening; the tag is what stops
+/// one being written today and then downgraded by hand.
+fn envelope_aad(version: u32, kdf: &KdfParams, index: Option<&Index>) -> Vec<u8> {
+    let mut aad = format!(
         "lithic-vault:{}:{}:m={},t={},p={}:salt={}",
         version, kdf.id, kdf.m, kdf.t, kdf.p, kdf.salt
-    )
-    .into_bytes()
+    );
+    if let Some(index) = index {
+        aad.push_str(&format!(":index={}:{}", index.salt, index.origins.join(",")));
+    }
+    aad.into_bytes()
 }
 
 fn random_bytes(count: usize) -> Result<Vec<u8>, VaultError> {
@@ -394,11 +568,25 @@ fn random_bytes(count: usize) -> Result<Vec<u8>, VaultError> {
     Ok(buffer)
 }
 
+/// Write the vault out with the index derived from its entries.
 fn encrypt(
     key: &[u8; KEY_BYTES],
     salt: Vec<u8>,
     params: (u32, u32, u32),
     entries: &BTreeMap<String, Credential>,
+) -> Result<Envelope, VaultError> {
+    let index = Index::build(entries, &random_bytes(INDEX_SALT_BYTES)?);
+    encrypt_with(key, salt, params, entries, Some(index))
+}
+
+/// The body of [`encrypt`], with the index given rather than derived — which is
+/// what lets a test write the kind of file this build used to write.
+fn encrypt_with(
+    key: &[u8; KEY_BYTES],
+    salt: Vec<u8>,
+    params: (u32, u32, u32),
+    entries: &BTreeMap<String, Credential>,
+    index: Option<Index>,
 ) -> Result<Envelope, VaultError> {
     use base64::engine::general_purpose::STANDARD;
     use base64::Engine;
@@ -415,7 +603,7 @@ fn encrypt(
     let ct = cipher
         .encrypt(
             XNonce::from_slice(&nonce),
-            Payload { msg: &plaintext, aad: &envelope_aad(FORMAT_VERSION, &kdf) },
+            Payload { msg: &plaintext, aad: &envelope_aad(FORMAT_VERSION, &kdf, index.as_ref()) },
         )
         .map_err(|_| VaultError::Corrupt("could not encrypt the vault".to_string()))?;
     Ok(Envelope {
@@ -426,6 +614,7 @@ fn encrypt(
             nonce: STANDARD.encode(&nonce),
             ct: STANDARD.encode(&ct),
         },
+        index,
     })
 }
 
@@ -470,7 +659,7 @@ fn decode(envelope: &Envelope, key: &[u8; KEY_BYTES]) -> Result<BTreeMap<String,
     let plaintext = cipher
         .decrypt(
             XNonce::from_slice(&nonce),
-            Payload { msg: &ct, aad: &envelope_aad(envelope.v, &envelope.kdf) },
+            Payload { msg: &ct, aad: &envelope_aad(envelope.v, &envelope.kdf, envelope.index.as_ref()) },
         )
         // A failed tag is either a wrong secret or an edited envelope, and the two
         // are indistinguishable from here — which is the point. Callers treat this
@@ -541,15 +730,51 @@ pub fn create(path: &Path, secret: &str, entries: BTreeMap<String, Credential>) 
     Ok(vault)
 }
 
-/// Re-encrypt every entry under a new secret.
-pub fn change_secret(path: &Path, old: &str, new: &str) -> Result<Unlocked, VaultError> {
-    let previous = unlock(path, old)?;
-    create(path, new, previous.entries.clone())
+/// Re-encrypt an open vault under a new secret.
+///
+/// Only the manager can call this, and only while the vault is open: the key being
+/// replaced is already in memory, so the old secret does not have to be typed
+/// again. The new key gets a fresh salt, so the two secrets share no derivation,
+/// and every entry is re-encrypted in one write.
+pub fn rotate(path: &Path, vault: &mut Unlocked, secret: &str) -> Result<(), VaultError> {
+    validate_secret(secret)?;
+    let salt = random_bytes(SALT_BYTES)?;
+    let params = (M_COST_KIB, T_COST, P_COST);
+    let key = derive_key(secret, &salt, params)?;
+    vault.key.zeroize();
+    vault.key = key;
+    vault.salt = salt;
+    vault.params = params;
+    write(path, vault)
 }
 
 /// Persist a mutation to an already-unlocked vault.
 pub fn save(path: &Path, vault: &Unlocked) -> Result<(), VaultError> {
     write(path, vault)
+}
+
+/// Which of `origins` the vault holds a login for.
+///
+/// Answered from the envelope alone, so it works while the vault is locked — which
+/// is the whole point of the index. An unreadable file covers nothing, the same
+/// answer as an empty vault, and leaves the UI showing grey rather than claiming a
+/// login it cannot produce.
+pub fn coverage(path: &Path, origins: &[String]) -> Vec<String> {
+    let Ok(envelope) = read_envelope(path) else {
+        return Vec::new();
+    };
+    let Some(index) = envelope.index.as_ref() else {
+        return Vec::new();
+    };
+    origins.iter().filter(|origin| index.contains(origin)).cloned().collect()
+}
+
+/// How many logins the file holds, from the envelope alone.
+pub fn stored_count(path: &Path) -> usize {
+    read_envelope(path)
+        .ok()
+        .and_then(|envelope| envelope.index.map(|index| index.len()))
+        .unwrap_or(0)
 }
 
 /// Delete the vault. The only "recovery" this design has, and it costs the
@@ -634,19 +859,21 @@ mod tests {
     }
 
     #[test]
-    fn the_file_never_contains_the_password() {
+    fn the_file_never_contains_the_password_or_the_host() {
         let dir = temporary_dir("plaintext");
         let path = dir.join(VAULT_FILE);
         create(&path, SECRET, entries()).expect("create");
         let raw = fs::read_to_string(&path).expect("read");
         assert!(!raw.contains(FIXTURE_PASSWORD), "the password is in the file in the clear");
         assert!(!raw.contains(SECRET), "the secret is in the file");
-        // Origins and usernames are inside the ciphertext too, so a copied file
-        // does not even say which instances it holds.
+        // Origins and usernames are inside the ciphertext, so a copied file does
+        // not say which instances it holds. The index answers questions *about*
+        // origins without naming any of them.
         assert!(!raw.contains("personal.lithic.uk"), "the origin is readable without the secret");
         assert!(!raw.contains("admin"), "the username is readable without the secret");
         // The envelope stays readable, which is what keeps the file diagnosable.
         assert!(raw.contains("argon2id") && raw.contains("xchacha20poly1305"));
+        assert!(raw.contains("\"index\""), "the index is what colours a bookmark's key control");
     }
 
     #[test]
@@ -754,11 +981,11 @@ mod tests {
     }
 
     #[test]
-    fn changing_the_secret_re_encrypts_everything() {
+    fn rotating_the_secret_re_encrypts_everything() {
         let dir = temporary_dir("rotate");
         let path = dir.join(VAULT_FILE);
-        create(&path, SECRET, entries()).expect("create");
-        change_secret(&path, SECRET, "a-much-longer-secret").expect("rotate");
+        let mut vault = create(&path, SECRET, entries()).expect("create");
+        rotate(&path, &mut vault, "a-much-longer-secret").expect("rotate");
         assert!(
             matches!(unlock(&path, SECRET), Err(VaultError::WrongSecret)),
             "the old secret must stop working"
@@ -768,6 +995,147 @@ mod tests {
             opened.credential_for("https://personal.lithic.uk").map(|entry| entry.password.as_str()),
             Some(FIXTURE_PASSWORD)
         );
+        // The rotated vault is still the same vault: the manager stays open through
+        // it, and the next save writes under the new key.
+        vault.remember("http://192.168.1.42".to_string(), "esp32".to_string(), "lan-pass".to_string());
+        save(&path, &vault).expect("save after rotate");
+        assert_eq!(unlock(&path, "a-much-longer-secret").expect("reopen").summaries().len(), 2);
+    }
+
+    #[test]
+    fn coverage_answers_while_locked_and_costs_no_key() {
+        let dir = temporary_dir("coverage");
+        let path = dir.join(VAULT_FILE);
+        create(&path, SECRET, entries()).expect("create");
+        let asked = vec![
+            "https://personal.lithic.uk".to_string(),
+            "https://other.example".to_string(),
+        ];
+        // No secret appears anywhere in this call: that is the point of the index.
+        assert_eq!(coverage(&path, &asked), vec!["https://personal.lithic.uk".to_string()]);
+        assert_eq!(stored_count(&path), 1);
+
+        let mut vault = unlock(&path, SECRET).expect("unlock");
+        vault.remember("https://other.example".to_string(), "keeper".to_string(), "pw".to_string());
+        save(&path, &vault).expect("save");
+        assert_eq!(coverage(&path, &asked).len(), 2, "the index is derived at write time, so it cannot lag a save");
+        assert_eq!(stored_count(&path), 2);
+
+        vault.forget("https://other.example");
+        save(&path, &vault).expect("save");
+        assert_eq!(coverage(&path, &asked), vec!["https://personal.lithic.uk".to_string()]);
+        assert_eq!(stored_count(&path), 1);
+    }
+
+    #[test]
+    fn a_missing_or_corrupt_vault_covers_nothing() {
+        let dir = temporary_dir("nocoverage");
+        let path = dir.join(VAULT_FILE);
+        let asked = vec!["https://personal.lithic.uk".to_string()];
+        assert!(coverage(&path, &asked).is_empty(), "no file, nothing covered");
+        assert_eq!(stored_count(&path), 0);
+        fs::write(&path, b"{ this is not json").expect("write");
+        assert!(coverage(&path, &asked).is_empty(), "an unreadable file covers nothing rather than claiming a login");
+        assert_eq!(stored_count(&path), 0);
+    }
+
+    #[test]
+    fn the_index_is_bound_to_the_ciphertext() {
+        let dir = temporary_dir("indexedit");
+        let path = dir.join(VAULT_FILE);
+        create(&path, SECRET, entries()).expect("create");
+        let raw = fs::read_to_string(&path).expect("read");
+        let asked = vec!["https://personal.lithic.uk".to_string()];
+
+        // Swapping one hash for another must not be a way to make the vault claim
+        // a login it does not have, or to hide one it does.
+        let mut value: serde_json::Value = serde_json::from_str(&raw).expect("parse");
+        let origins = value["index"]["origins"].as_array_mut().expect("index origins");
+        assert_eq!(origins.len(), 1, "the fixture has exactly one entry to edit");
+        let original = origins[0].as_str().expect("hash").to_string();
+        let first = original.chars().next().expect("hash is not empty");
+        let swapped = if first == '0' { '1' } else { '0' };
+        let tampered = format!("{}{}", swapped, &original[first.len_utf8()..]);
+        assert_ne!(tampered, original, "the edit has to actually change a byte");
+        assert_eq!(tampered.len(), original.len(), "and keep it a well-formed hash");
+        origins[0] = serde_json::Value::String(tampered);
+        fs::write(&path, serde_json::to_vec_pretty(&value).expect("serialise")).expect("write");
+        assert!(
+            matches!(unlock(&path, SECRET), Err(VaultError::WrongSecret)),
+            "an edited index must fail the tag rather than answering from it"
+        );
+        assert!(coverage(&path, &asked).is_empty(), "and an edited index must not colour a control green");
+
+        // Deleting the field is the same attack with fewer keystrokes: the bytes the
+        // tag was made over included the index, so this is no longer that file.
+        fs::write(&path, &raw).expect("restore");
+        let mut value: serde_json::Value = serde_json::from_str(&raw).expect("parse");
+        value.as_object_mut().expect("an object").remove("index");
+        fs::write(&path, serde_json::to_vec_pretty(&value).expect("serialise")).expect("write");
+        assert!(
+            matches!(unlock(&path, SECRET), Err(VaultError::WrongSecret)),
+            "removing the index must not quietly open the vault"
+        );
+    }
+
+    #[test]
+    fn a_vault_written_before_the_index_still_opens() {
+        let dir = temporary_dir("legacy");
+        let path = dir.join(VAULT_FILE);
+        // Byte for byte the shape this build used to write: no index, and therefore
+        // the older additional data, which is what has to keep opening.
+        let salt = random_bytes(SALT_BYTES).expect("salt");
+        let params = (M_COST_KIB, T_COST, P_COST);
+        let key = derive_key(SECRET, &salt, params).expect("key");
+        let envelope = encrypt_with(&key, salt, params, &entries(), None).expect("encrypt");
+        fs::write(&path, serde_json::to_vec_pretty(&envelope).expect("serialise")).expect("write");
+        assert!(
+            !fs::read_to_string(&path).expect("read").contains("\"index\""),
+            "the fixture has to be the old shape"
+        );
+
+        let mut opened = unlock(&path, SECRET).expect("an older vault still opens");
+        assert_eq!(
+            opened.credential_for("https://personal.lithic.uk").map(|entry| entry.user.as_str()),
+            Some("admin")
+        );
+        assert!(coverage(&path, &["https://personal.lithic.uk".to_string()]).is_empty(), "an unindexed vault says nothing");
+        assert_eq!(stored_count(&path), 0);
+        // The next write is a modern one, so a single edit upgrades the file.
+        opened.remember("https://other.example".to_string(), "keeper".to_string(), "pw".to_string());
+        save(&path, &opened).expect("save");
+        assert_eq!(
+            coverage(&path, &["https://other.example".to_string()]),
+            vec!["https://other.example".to_string()]
+        );
+        assert_eq!(stored_count(&path), 2, "and carries the entries it already had");
+    }
+
+    #[test]
+    fn a_grant_is_for_one_origin_expires_and_hides_its_password() {
+        let grant = Grant::new(
+            "https://personal.lithic.uk".to_string(),
+            "admin".to_string(),
+            FIXTURE_PASSWORD.to_string(),
+        );
+        assert_eq!(grant.credential_for("https://personal.lithic.uk"), Some(("admin", FIXTURE_PASSWORD)));
+        assert_eq!(grant.credential_for("https://evil-lithic.uk"), None, "a grant covers its own origin only");
+        assert_eq!(grant.credential_for("http://personal.lithic.uk"), None, "and the scheme is part of that");
+        assert!(grant.is_live(), "a grant outlives the navigation it was made for");
+        assert_eq!(grant.origin(), "https://personal.lithic.uk");
+        let rendered = format!("{:?}", grant);
+        assert!(!rendered.contains(FIXTURE_PASSWORD), "a Debug of a grant must not carry the password: {}", rendered);
+        assert!(rendered.contains("<redacted>"));
+
+        // Expiry without a sleep: a grant made with no life left has none.
+        let expired = Grant::with_ttl(
+            "https://personal.lithic.uk".to_string(),
+            "admin".to_string(),
+            FIXTURE_PASSWORD.to_string(),
+            Duration::ZERO,
+        );
+        assert!(!expired.is_live());
+        assert_eq!(expired.credential_for("https://personal.lithic.uk"), None);
     }
 
     #[test]

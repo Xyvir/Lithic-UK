@@ -370,6 +370,39 @@ h1 { flex: none; min-width: 0; margin: 0; color: #f4edf5; font-size: 1.8rem; fon
 }
 .bookmark-button svg { width: 22px; height: 24px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linejoin: round; overflow: visible; }
 .bookmark-button:hover { background: #3d3d3d; }
+/*
+ * Saved logins, in the action card beside the bookmark control: the manager for the
+ * vault as a whole. Grey while nothing is saved, green once something is — the same
+ * two states, and the same two colours, as the key on a bookmark row, because they
+ * mean the same thing (here, "the vault holds logins").
+ */
+.action-pair .vault-manager-button {
+  align-self: stretch;
+  min-height: 60px;
+  margin: 0;
+  padding: 0;
+  border: 1px solid #454545;
+  border-radius: 7px;
+  background: #333;
+}
+.action-pair .vault-manager-button svg { width: 20px; height: 24px; overflow: visible; }
+.vault-manager-button {
+  display: grid;
+  place-items: center;
+  flex: 0 0 48px;
+  width: 48px;
+  min-height: 0;
+  height: 60px;
+  border: 1px solid #454545;
+  border-radius: 7px;
+  background: #333;
+  color: #8a8a8a;
+  cursor: pointer;
+}
+.vault-manager-button svg { width: 22px; height: 24px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; overflow: visible; }
+.vault-manager-button:hover { background: #3d3d3d; color: #bbb; }
+.vault-manager-button.has-logins { color: #7ba86f; }
+.vault-manager-button.has-logins:hover { color: #9cc78f; }
 .mount-card { gap: 0; }
 .mount-card .action-button { border-right: 0; border-radius: 7px 0 0 7px; }
 .mount-card .bookmark-button { flex-basis: 48px; border-left: 0; border-radius: 0 7px 7px 0; }
@@ -679,16 +712,9 @@ footer > * { pointer-events: auto; }
 .recent-modal { position: relative; width: min(100%, 700px); max-height: 80vh; padding: 20px; border: 1px solid #454545; border-radius: 10px; background: #252525; box-shadow: 0 12px 40px #000; }
 .recent-modal h2 { margin: 0 0 14px; font-size: 1.5rem; }
 .modal-close { position: absolute; top: 8px; right: 10px; padding: 0 8px; border: 0; background: transparent; color: #ff5555; font-size: 1.8rem; cursor: pointer; }
-/* Saved instance logins (the credential vault). A sibling of the GitHub sync
- * button — same circle, same size, same hover — because it is the same kind of
- * thing: app-level state the launcher can open. It goes green once the vault is
- * open in this session, which is exactly when a protected instance stops asking
- * for its password. */
-.vault-button { position: relative; display: grid; place-items: center; width: 38px; height: 38px; padding: 0; border: 2px solid #393939; border-radius: 50%; background: transparent; color: #8a8a8a; cursor: pointer; transition: color 0.2s, border-color 0.2s; }
-.vault-button svg { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
-.vault-button:hover { border-color: #666; background: #242424; color: #bbb; }
-.vault-button.unlocked { color: #7ba86f; border-color: #5d8a52; }
-.vault-button.unlocked:hover { color: #9cc78f; }
+/* Saved instance logins (the credential vault). The controls for it are the key in
+ * the action card (the vault as a whole) and the key on each bookmark row (one
+ * instance) — see `.vault-manager-button` and `.vault-row-button`. */
 .vault-modal { width: min(100%, 560px); }
 .vault-modal h3.vault-subhead { margin: 18px 0 0; font-size: 1rem; color: #ddd; }
 .vault-modal .vault-field { display: block; margin: 12px 0 0; }
@@ -699,6 +725,21 @@ footer > * { pointer-events: auto; }
 .vault-user { flex: 0 1 auto; max-width: 38%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: #a0a0a0; font-size: 0.86rem; }
 .vault-forget { flex: 0 0 auto; padding: 0 4px; border: 0; background: transparent; color: #ff5555; font-size: 1.1rem; line-height: 1; cursor: pointer; }
 .vault-forget:disabled { opacity: 0.4; cursor: default; }
+/* Check a saved login against its instance. Only offered in the list, because the
+ * password has to be readable to send it — that is, only while the vault is open. */
+.vault-test { flex: 0 0 auto; display: grid; place-items: center; padding: 0 4px; border: 0; background: transparent; color: #8ab4f8; cursor: pointer; }
+.vault-test:hover:not(:disabled) { color: #a9c9ff; }
+.vault-test:disabled { opacity: 0.4; cursor: default; }
+.vault-test svg { width: 17px; height: 17px; fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; }
+/* What the instance said, in the same vocabulary the keys use: green for a login
+ * that works, red for one it refused, amber for an instance that stopped asking,
+ * grey for anything that never answered. The sentence behind it is the tooltip. */
+.vault-check { flex: 0 0 auto; font-size: 0.78rem; white-space: nowrap; }
+.vault-check.busy { color: #a5a5a5; }
+.vault-check.accepted { color: #7ba86f; }
+.vault-check.refused { color: #e08a7a; }
+.vault-check.not-required { color: #e0b341; }
+.vault-check.unclear, .vault-check.unreachable { color: #8f8f8f; }
 .vault-empty { color: #8f8f8f; }
 /* Every input in a modal is full width; a checkbox is not a field, and letting
  * it stretch is the same trap the repo picker documents above. */
@@ -710,6 +751,17 @@ footer > * { pointer-events: auto; }
 .vault-notice { color: #7ba86f; font-size: 0.86rem; }
 .vault-path { margin-top: 14px; color: #7d7d7d; font-size: 0.78rem; overflow-wrap: anywhere; }
 .vault-path code { color: #9a9a9a; }
+/* What the vault holds, said without opening it: the count comes from the file's
+ * origin index, which is the one part of the contents readable while locked. */
+.vault-count { margin: 12px 0 0; color: #b9b9b9; }
+.vault-note { color: #8f8f8f; font-size: 0.86rem; line-height: 1.45; }
+.vault-advanced { margin-top: 16px; padding-top: 12px; border-top: 1px solid #3d3d3d; }
+.vault-advanced summary { color: #a5a5a5; font-size: 0.9rem; cursor: pointer; }
+.vault-advanced .vault-field { margin-top: 10px; }
+/* The one control knowing the secret cannot undo, so it is set apart rather than
+ * styled like the secondaries beside it. */
+.vault-danger { color: #e08a7a; }
+.vault-danger:hover:not(:disabled) { color: #ff9d88; }
 .recent-search { width: 100%; height: 52px; padding: 12px 42px;
   border: 1px solid #454545; border-radius: 7px; background: #333; color: #eee; font: inherit; }
 .recent-search:focus { outline: none; border-color: #ffb74d; }
@@ -774,6 +826,17 @@ footer > * { pointer-events: auto; }
 .recent-icon-button:disabled { opacity: 0.25; cursor: default; }
 .recent-icon-button svg { width: 21px; height: 21px; fill: none; stroke: currentColor; stroke-width: 1.55; stroke-linecap: round; stroke-linejoin: round; }
 .cache-history-button { color: #bcbcbc; }
+/*
+ * The saved-logins key on a bookmark row. Grey means nothing is saved for this
+ * address and clicking sets one up; green means a login is saved and clicking
+ * manages it. Both states come from the vault file's index, so a row can say what
+ * is in the vault before anything has been unlocked. Written after the
+ * `.recent-icon-button` rules so the two states win on hover, which is where a
+ * row's icon buttons all react. */
+.vault-row-button { color: #8a8a8a; }
+.vault-row-button.covered { color: #7ba86f; }
+.vault-row-button:hover:enabled { color: #8ab4f8; }
+.vault-row-button.covered:hover:enabled { color: #9cc78f; }
 /*
  * Local-only mark: a Lith outside any backed-up folder. Muted on purpose — the
  * file is safe where the user put it, so this reads as information with an
@@ -869,10 +932,15 @@ footer > * { pointer-events: auto; }
   .action-pair { flex-wrap: nowrap; }
   .action-pair .action-button { flex: 1 1 auto; }
   .action-pair .bookmark-button { flex: 0 0 48px; }
+  .action-pair .vault-manager-button { flex: 0 0 48px; }
 }
 
 @media (max-width: 440px) {
   .action-pair .bookmark-button { display: none; }
+  /* The manager key stays when there is something to manage — forgetting every
+   * login, or changing the secret, is reachable from nowhere else. With nothing
+   * saved it goes, since a row's key covers setting the first login up. */
+  .action-pair .vault-manager-button:not(.has-logins) { display: none; }
 }
 
 /* --- PENDING IMPORTS WINDOW (legacy parity) --- */

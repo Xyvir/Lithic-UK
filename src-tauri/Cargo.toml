@@ -50,6 +50,10 @@ argon2 = "0.5"
 chacha20poly1305 = "0.10"
 zeroize = "1"
 base64 = "0.22"
+# The vault's origin index: salted hashes of the origins it holds, so the launcher
+# can colour a bookmark's key control without unlocking anything. Already in the
+# tree at this version, so it costs a line rather than a download.
+sha2 = "0.10"
 # OsRng for the vault's salt and nonce. Already in the tree at this major.
 getrandom = "0.2"
 # In-process git for the GitHub sync. `https` maps to the platform TLS stack

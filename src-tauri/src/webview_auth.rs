@@ -12,10 +12,13 @@
 //! the vault. Two properties are deliberate and worth keeping:
 //!
 //! **It is read-only.** It never creates a vault, never asks for the secret, and
-//! never runs the KDF. If the vault is locked, or holds nothing for the origin
-//! being challenged, the handler does nothing at all and the webview falls back
-//! to its own prompt — so a locked app behaves exactly as it did before any of
-//! this existed. Unlocking is the launcher's job, on the launcher's thread.
+//! never runs the KDF. What it reads is the grant the launcher left behind for the
+//! instance being loaded: one origin's credential, valid for a couple of minutes
+//! and dropped the moment the launcher comes back. With no grant for the origin
+//! being challenged — locked, expired, or never saved — the handler does nothing
+//! at all and the webview falls back to its own prompt, so a locked app behaves
+//! exactly as it did before any of this existed. Unlocking is the launcher's job,
+//! on the launcher's thread.
 //!
 //! **It is synchronous, and must stay cheap.** The handler runs on the UI thread
 //! while the webview waits: a mutex and a map lookup, microseconds. An Argon2id
@@ -66,8 +69,8 @@ pub fn install(window: &tauri::WebviewWindow, app: tauri::AppHandle) {
 
 /// The saved credential for the origin being challenged, when there is one.
 ///
-/// `None` covers every reason not to answer: a locked vault, an origin nothing
-/// was saved for, and an address that is not an origin at all.
+/// `None` covers every reason not to answer: nothing granted for this origin
+/// (locked, expired, or never saved), and an address that is not an origin at all.
 #[cfg(windows)]
 unsafe fn answer(
     app: &tauri::AppHandle,
