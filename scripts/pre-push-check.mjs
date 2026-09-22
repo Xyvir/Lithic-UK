@@ -5,12 +5,14 @@
  *
  *   1. launcher-ui unit tests (node --test)
  *   2. svelte-check (svelte + TS types)
- *   3. workflow YAML sanity (js-yaml parse of every .github/workflows file)
- *   4. the light distribution guard (variants/lithic-light.html against
+ *   3. lockfile sync (every dep in package.json is the spec the lock records,
+ *      so `npm ci` cannot fail with EUSAGE in CI)
+ *   4. workflow YAML sanity (js-yaml parse of every .github/workflows file)
+ *   5. the light distribution guard (variants/lithic-light.html against
  *      src/lithic.html: same core, same plugin versions, still flash-sized)
- *   5. cargo check (Rust type/borrow check — catches the recent E07xx class
+ *   6. cargo check (Rust type/borrow check — catches the recent E07xx class
  *      of release-workflow failures)
- *   6. cargo clippy (Rust lint pass, warnings are failures)
+ *   7. cargo clippy (Rust lint pass, warnings are failures)
  *
  * Usage: npm run check:push   (or: node scripts/pre-push-check.mjs)
  * Exit 0 = safe to push; nonzero = fix before pushing.
@@ -36,6 +38,66 @@ function checkWorkflowYaml() {
       loadYaml(fs.readFileSync(`.github/workflows/${file}`, 'utf8'));
     } catch (error) {
       problems.push(`${file}: ${String(error.message).split('\n')[0]}`);
+    }
+  }
+  return problems.length === 0 ? null : problems.join('\n  ');
+}
+
+/**
+ * Each project CI installs with `npm ci`. A dependency range edited in
+ * package.json but never written back to the lock makes `npm ci` abort with
+ * "can only install packages when your package.json and package-lock.json are
+ * in sync" — and nothing else local notices, because every gate runs against
+ * the already-installed tree. The lock records the spec it resolved from in its
+ * root entry (`packages['']`), so comparing the specs catches the drift
+ * exactly, with no registry access and no semver arithmetic. Which versions npm
+ * would then resolve is a separate question from whether it will even try.
+ */
+const lockProjects = [
+  { dir: '.', label: 'package.json' },
+  { dir: 'launcher-ui', label: 'launcher-ui/package.json' },
+];
+const lockDepFields = ['dependencies', 'devDependencies', 'optionalDependencies', 'peerDependencies'];
+
+/** Returns null when every lock agrees with its package.json, else a message. */
+function checkLockfileSync() {
+  const problems = [];
+  for (const { dir, label } of lockProjects) {
+    const pkgPath = path.join(dir, 'package.json');
+    const lockPath = path.join(dir, 'package-lock.json');
+    if (!fs.existsSync(lockPath)) {
+      // npm-shrinkwrap.json would be the lock instead; only a problem if
+      // there is a package.json that CI installs.
+      if (fs.existsSync(pkgPath) && !fs.existsSync(path.join(dir, 'npm-shrinkwrap.json'))) {
+        problems.push(`${label}: no lockfile beside it — CI's \`npm ci\` cannot run`);
+      }
+      continue;
+    }
+    const pkg = JSON.parse(fs.readFileSync(pkgPath, 'utf8'));
+    const lock = JSON.parse(fs.readFileSync(lockPath, 'utf8'));
+    const root = (lock.packages ?? {})[''] ?? {};
+    for (const field of lockDepFields) {
+      const declared = pkg[field] ?? {};
+      const recorded = root[field] ?? {};
+      for (const name of new Set([...Object.keys(declared), ...Object.keys(recorded)])) {
+        if (declared[name] === recorded[name]) continue;
+        const from = declared[name] ?? '(absent)';
+        const to = recorded[name] ?? '(absent)';
+        problems.push(
+          `${label} ${field} ${name}: package.json says ${from}, lock says ${to}` +
+            (declared[name] === undefined
+              ? ' — remove it from the lock with `npm install`'
+              : ' — run `npm install` to update the lock'),
+        );
+      }
+      // A declared dep must also actually resolve in the lock; a spec that
+      // matches but has no entry would still fail `npm ci`.
+      for (const name of Object.keys(declared)) {
+        if (recorded[name] !== declared[name]) continue;
+        if ((lock.packages ?? {})[`node_modules/${name}`] === undefined) {
+          problems.push(`${label} ${field} ${name}: declared but has no resolved entry in the lock`);
+        }
+      }
     }
   }
   return problems.length === 0 ? null : problems.join('\n  ');
@@ -92,6 +154,16 @@ for (const step of spawned) {
     console.log('FAILED');
     console.log('  ' + tail);
   }
+}
+
+process.stdout.write('> lockfile sync                  ');
+const lockProblems = checkLockfileSync();
+if (lockProblems === null) {
+  console.log('OK');
+} else {
+  failed = true;
+  console.log('FAILED');
+  console.log('  ' + lockProblems);
 }
 
 process.stdout.write('> workflow YAML sanity           ');

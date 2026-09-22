@@ -38,8 +38,8 @@ jobs:
         with:
           workspaces: 'src-tauri -> target'
 
-      # Type/borrow-check the crate without linking. System deps for tauri v1
-      # on Linux (webkit2gtk etc.) are needed to compile the glib/gtk FFI
+      # Type/borrow-check the crate without linking. System deps for tauri v2
+      # on Linux (webkit2gtk 4.1 etc.) are needed to compile the glib/gtk FFI
       # bindings that cargo check must expand, plus git2's `https` transport, which is WinHTTP on Windows but OpenSSL here.
       - name: Install System Dependencies
         run: |
