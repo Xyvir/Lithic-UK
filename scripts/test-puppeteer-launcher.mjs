@@ -71,9 +71,11 @@ try {
   };
 
   // Which vertical edges the panel's children share, where the list's scrollbar
-  // lands relative to them, and what that scrollbar is made of: a 6px rounded
+  // lands relative to them, and what that scrollbar is made of: a 4px rounded
   // thumb with the platform's arrow buttons switched off. The scrollbar belongs
-  // in the panel's right padding, never between the rows and the search box.
+  // in the panel's right padding, never between the rows and the search box —
+  // and the whole panel is measured against the action card above it, because
+  // "the rows line up with the buttons" is the thing a person actually sees.
   // Re-measured after the search filter drops the scrollbar, to prove the
   // reserved gutter keeps the rows from shifting sideways.
   const measurePanelEdges = () => page.evaluate(() => {
@@ -82,9 +84,14 @@ try {
     const search = document.querySelector('input.recent-search');
     const row = document.querySelector('.recent-row');
     const reset = document.querySelector('.reset-cache');
-    if (!section || !list || !search || !row) return null;
+    const card = document.querySelector('.action-card');
+    if (!section || !list || !search || !row || !card) return null;
     const box = element => element.getBoundingClientRect();
     const style = getComputedStyle(section);
+    const cardStyle = getComputedStyle(card);
+    // The card's content box: exactly where its buttons start and end.
+    const cardInnerLeft = box(card).left + parseFloat(cardStyle.borderLeftWidth) + parseFloat(cardStyle.paddingLeft);
+    const cardInnerRight = box(card).right - parseFloat(cardStyle.borderRightWidth) - parseFloat(cardStyle.paddingRight);
     return {
       paddingLeft: style.paddingLeft,
       paddingRight: style.paddingRight,
@@ -96,6 +103,11 @@ try {
       rowVsSearchRight: box(row).right - box(search).right,
       rowVsSearchLeft: box(row).left - box(search).left,
       resetVsSearchRight: reset ? box(reset).right - box(search).right : null,
+      searchVsCardLeft: box(search).left - cardInnerLeft,
+      rowVsCardLeft: box(row).left - cardInnerLeft,
+      searchVsCardRight: box(search).right - cardInnerRight,
+      rowVsCardRight: box(row).right - cardInnerRight,
+      resetVsCardRight: reset ? box(reset).right - cardInnerRight : null,
       // Padding box, i.e. where the panel's border sits on the inside.
       panelInnerRight: box(section).right - parseFloat(style.borderRightWidth),
       scrollbarOuterRight: box(list).right,
@@ -155,20 +167,20 @@ try {
   assert.equal(result.searchPaddingRight, '42px', 'Search text leaves room for the clear control');
   assert.equal(result.searchHeight, 52, 'Recent search uses the shared control height');
   assert.equal(result.recentList?.marginTop, '10px', 'Recent rows have a visible separation from search');
-  assert.equal(result.recentList?.paddingRight, '5px', 'Recent rows keep a gap from the list scrollbar');
+  assert.equal(result.recentList?.paddingRight, '4px', 'Recent rows keep a gap from the list scrollbar');
 
   // Aligned edges, with the list scrolling. Exact: the scrollbar is the custom
-  // 6px one, not the platform's 10-11px scrollbar, so the 11px pull in
-  // .recent-list covers its width exactly.
+  // 4px one, not the platform's 10-11px scrollbar, so the 8px pull in
+  // .recent-list covers its width plus its gap exactly.
   await seedScrollingRecents();
   const edges = await measurePanelEdges();
   assert.ok(edges, 'Recent panel exposes its search box, rows and button');
   assert.equal(edges?.scrolls, true, 'Seeded recents make the list scroll, so the scrollbar is part of this layout');
   assert.equal(edges?.paddingLeft, edges?.paddingRight, 'Panel padding is symmetric, so the column stays centred');
-  // 6px is the custom scrollbar's own width; the platform's thin scrollbar is
-  // 10-11px, so anything above 6 means the ::-webkit-scrollbar rules went dead.
-  assert.ok((edges?.gutter ?? 99) <= 6, 'Recent list reserves the custom 6px scrollbar, not the platform scrollbar');
-  assert.equal(edges?.barWidth, '6px', 'Scrollbar styling is applied — setting scrollbar-width would make the engine ignore it');
+  // 4px is the custom scrollbar's own width; the platform's thin scrollbar is
+  // 10-11px, so anything above 4 means the ::-webkit-scrollbar rules went dead.
+  assert.ok((edges?.gutter ?? 99) <= 4, 'Recent list reserves the custom 4px scrollbar, not the platform scrollbar');
+  assert.equal(edges?.barWidth, '4px', 'Scrollbar styling is applied — setting scrollbar-width would make the engine ignore it');
   assert.equal(edges?.barArrows, 'none', 'Scrollbar has no arrow buttons at its ends');
   assert.match(edges?.barThumbRadius ?? '', /999px|3px/, 'Scrollbar thumb is rounded');
   // Half a pixel of slack: the reserved scrollbar width is rounded to whole
@@ -177,8 +189,16 @@ try {
   assert.ok(Math.abs(edges?.rowVsSearchLeft ?? 99) <= 0.5, 'Recent rows start where the search box starts');
   assert.ok(Math.abs(edges?.rowVsSearchRight ?? 99) <= 0.5, 'Recent rows end where the search box ends');
   assert.ok(Math.abs(edges?.resetVsSearchRight ?? 99) <= 0.5, 'Rebuild control ends where the search box ends');
+  // The panel's contents share the action card's edges, not just each other's:
+  // a scrollbar's worth of extra inset here is exactly the misalignment the
+  // panel's padding exists to avoid.
+  assert.ok(Math.abs(edges?.searchVsCardLeft ?? 99) <= 0.5, 'Search box starts where the action card’s buttons start');
+  assert.ok(Math.abs(edges?.rowVsCardLeft ?? 99) <= 0.5, 'Recent rows start where the action card’s buttons start');
+  assert.ok(Math.abs(edges?.searchVsCardRight ?? 99) <= 0.5, 'Search box ends where the action card’s buttons end');
+  assert.ok(Math.abs(edges?.rowVsCardRight ?? 99) <= 0.5, 'Recent rows end where the action card’s buttons end');
+  assert.ok(Math.abs(edges?.resetVsCardRight ?? 99) <= 0.5, 'Rebuild control ends where the action card’s buttons end');
   assert.ok((edges?.scrollbarOuterRight ?? 0) <= (edges?.panelInnerRight ?? 0), 'Recent list scrollbar sits inside the panel padding, not over the rows');
-  assert.ok((edges?.panelInnerRight ?? 0) - (edges?.scrollbarOuterRight ?? 0) >= 12, 'Scrollbar keeps clearance from the panel border');
+  assert.ok((edges?.panelInnerRight ?? 0) - (edges?.scrollbarOuterRight ?? 0) >= 3, 'Scrollbar keeps clearance from the panel border');
   assert.ok((result.recentRows[0]?.height ?? 0) === 52, 'Recent row uses the shared control height');
   assert.ok((result.historyRect?.width ?? 99) <= 20, 'History/download icon is visually smaller than its control');
   assert.ok(result.mountBookmark && result.mountBookmark.height === 60, 'Bookmark control matches the main action height');
