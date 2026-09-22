@@ -1,5 +1,5 @@
 import { parseLithToJSON } from './lithic-format.ts';
-import { isScratchFileName, resolveScratchKind, parseScratchSource, parseTidFile } from './scratch-editor.ts';
+import { resolveScratchKind, resolveScratchPlan, parseScratchSource, parseTidFile } from './scratch-editor.ts';
 import { tagRootDogear } from './pending-imports.ts';
 import { JSON_PATCH_RUNTIME } from './json-patch.ts';
 import { DEFAULT_PLUGINS, LITHIC_BASE_FILTER } from './legacy-saver.ts';
@@ -851,12 +851,13 @@ function injectEngineGlobals(html: string, globals: Record<string, string>): str
 
 /**
  * The scratch mount's root tiddler title: the parsed plan's base — the file
- * stem — matching parseScratchSource's injected root tiddler. Returns the
- * name unchanged for non-scratch files.
+ * name with its extension — matching parseScratchSource's injected root
+ * tiddler. Asked of resolveScratchPlan rather than re-derived here, so the
+ * injected root and the engine global the saver serializes from cannot
+ * disagree. Returns the name unchanged for non-scratch files.
  */
 function scratchRootTitle(name: string): string {
-  if (!isScratchFileName(name)) return name;
-  return name.replace(/\.[^.]+$/, '').trim() || 'Scratch';
+  return resolveScratchPlan(name)?.base ?? name;
 }
 
 /**

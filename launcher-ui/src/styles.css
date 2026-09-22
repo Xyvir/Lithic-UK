@@ -44,19 +44,28 @@ body { overflow: hidden; background: #181818; }
 
 /* Thin dark scrollbars, ported from the legacy launcher: a 6px rounded thumb on
  * a transparent track. The engine default is a light grey slab with arrow
- * buttons, which was the brightest thing on a #252525 panel.
+ * buttons, which was the brightest thing on a #252525 panel, and the platform
+ * scrollbar draws square ends whatever colour you paint it.
  *
- * Both spellings are here on purpose. `scrollbar-width`/`scrollbar-color` are
- * the standard pair (Firefox, and Chromium 121+), and they *inherit*, so one
- * rule reaches every scroll region — the recent list, the history and orphan
- * lists, the pending-imports tray, code blocks scrolling sideways. Safari and
- * older Chromium ignore both and only read the ::-webkit- pseudo-elements,
- * which do not inherit, hence the universal selector. */
-* { scrollbar-width: thin; scrollbar-color: #454545 transparent; }
+ * These pseudo-elements are the only way to get that: `::-webkit-scrollbar-button`
+ * is what removes the arrows at the tops and bottoms, and the thumb's radius is
+ * what rounds it. They also pin the width at exactly 6px (see .recent-list — the
+ * rows' right edge is aligned against it). They do not inherit, hence the
+ * universal selector.
+ *
+ * Chromium starts ignoring every rule here the moment `scrollbar-width` or
+ * `scrollbar-color` is set on the element, so the standard pair cannot sit
+ * alongside them: it lives behind a feature query that only matches engines
+ * without the pseudo-elements (Firefox). Hoisting it back out silently returns
+ * the launcher to the platform scrollbar — square, with its arrow buttons. */
 *::-webkit-scrollbar { width: 6px; height: 6px; }
+*::-webkit-scrollbar-button { display: none; }
 *::-webkit-scrollbar-track { background: transparent; }
-*::-webkit-scrollbar-thumb { background-color: #454545; border-radius: 20px; }
+*::-webkit-scrollbar-thumb { background-color: #454545; border-radius: 999px; }
 *::-webkit-scrollbar-thumb:hover { background-color: #5c5c5c; }
+@supports not selector(::-webkit-scrollbar) {
+  * { scrollbar-width: thin; scrollbar-color: #454545 transparent; }
+}
 
 .container {
   position: relative;
@@ -336,7 +345,13 @@ h1 { flex: none; min-width: 0; margin: 0; color: #f4edf5; font-size: 1.8rem; fon
   display: flex;
   flex-direction: column;
   margin-top: 0;
-  padding: 10px 12px;
+  /* The 26px side padding is the gutter the recent list's scrollbar lives in:
+   * the list is pulled out into it (see .recent-list) so its rows end flush with
+   * the search box above and the Reset/Rebuild button below, instead of stopping
+   * a scrollbar's width short of them. 26px swallows that 11px gutter and still
+   * leaves the scrollbar clear of the panel's border. Both sides are padded
+   * equally, so the content column stays centred on the panel. */
+  padding: 10px 26px;
   border: 1px solid #414141;
   border-radius: 8px;
   background: #252525;
@@ -461,6 +476,7 @@ h1 { flex: none; min-width: 0; margin: 0; color: #f4edf5; font-size: 1.8rem; fon
 @media (prefers-reduced-motion: reduce) {
   .activity-dots i { animation: none; }
   .install-dismiss { animation: none; }
+  .install-dismiss-label { transition: none; }
   .sync-spinner { animation-duration: 2.5s; }
 }
 
@@ -494,14 +510,27 @@ footer > * { pointer-events: auto; }
 .install-button { margin-left: auto; }
 /* "dismiss ✕": small bare white text in the install button's upper-right
  * corner, no pill or background, sitting above the label's line box so it never
- * lands on the glyphs. The faint shadow is what keeps white legible on the light
- * button face; without it the text washes out. Dark red on hover. Padding is
- * invisible (no background) and only widens the hit target. */
+ * lands on the glyphs. The faint shadow is what keeps the white ✕ legible on the
+ * light button face; without it the text washes out. Dark red on hover — and the
+ * word is only ever shown on hover, so it is always the red, which reads better
+ * on that pale blue than white does. Padding is invisible (no background) and
+ * only widens the hit target.
+ *
+ * Only the ✕ shows at rest; the word is a hint, and it unfurls to the left of
+ * the ✕ while the cursor is on the control (or it has keyboard focus). The label
+ * is taken out of flow rather than collapsed, for two reasons: the ✕ never moves
+ * as the word appears and the button's box does not resize, so hovering cannot
+ * make the control shift out from under the cursor. It keeps its own ink box, so
+ * nothing is clipped, and because it is a child of the button, its (invisible)
+ * area is part of the hover target — the word appears exactly where the cursor
+ * already is, and the control's footprint stays the width the always-visible word
+ * used to give it. The 4px left padding is the gap the two sit with, and it can
+ * be this tight because the gap no longer comes from a laid-out word space. */
 .install-dismiss {
   position: absolute;
   top: 2px;
   right: 6px;
-  padding: 0 6px;
+  padding: 0 6px 0 4px;
   border: 0;
   background: none;
   color: #fff;
@@ -510,7 +539,20 @@ footer > * { pointer-events: auto; }
   cursor: pointer;
   animation: dismiss-nudge 2.8s ease-in-out 1.2s 3;
 }
+.install-dismiss-label {
+  position: absolute;
+  top: 50%;
+  right: 100%;
+  opacity: 0;
+  white-space: nowrap;
+  /* Half its own height back, so the word sits on the ✕'s line rather than
+   * hanging below it; the horizontal nudge is the reveal's travel. */
+  transform: translate(0.35em, -50%);
+  transition: opacity 0.16s ease, transform 0.16s ease;
+}
 .install-dismiss:hover { color: #b3261e; }
+.install-dismiss:hover .install-dismiss-label,
+.install-dismiss:focus-visible .install-dismiss-label { opacity: 1; transform: translate(0, -50%); }
 .install-dismiss:focus-visible { outline: 1px solid #ffb74d; }
 @keyframes dismiss-nudge {
   0%, 100% { transform: scale(1); }
@@ -603,12 +645,23 @@ footer > * { pointer-events: auto; }
 .recent-search { width: 100%; height: 52px; padding: 12px 42px;
   border: 1px solid #454545; border-radius: 7px; background: #333; color: #eee; font: inherit; }
 .recent-search:focus { outline: none; border-color: #ffb74d; }
-/* The 5px right padding is the scrollbar's gutter: without it the thumb sits on
- * the row's remove button. Legacy did the same.
- * `scrollbar-gutter: stable` reserves that gutter even when the list is short
- * enough not to scroll, so typing in the search box — which filters rows out and
- * removes the scrollbar — no longer makes every row jump 11px wider. */
-.recent-list { flex: 1 1 auto; min-height: 0; max-height: none; margin: 10px 0; overflow-y: auto; scrollbar-gutter: stable; padding-right: 5px; padding-bottom: 60px; }
+/* The 5px right padding is the gap between a row and the scrollbar: without it
+ * the thumb sits on the row's remove button. Legacy did the same.
+ * `scrollbar-gutter: stable` reserves the scrollbar's width inside the list even
+ * when it is short enough not to scroll, so typing in the search box — which
+ * filters rows out and removes the scrollbar — never makes the rows jump wider.
+ * The negative right margin pulls the list out by that reserved width plus the
+ * gap, which parks the scrollbar in `.recent-section`'s right padding instead of
+ * between the rows and the search box, so the rows end exactly where the search
+ * box and the button below do. The list stays flush left, so every element in the
+ * panel shares both edges.
+ * The 11px pull is the 6px scrollbar (pinned by the rule at the top of this file)
+ * plus that gap, which lands the rows within a fraction of a pixel of the search
+ * box — the reserved width itself is rounded to whole pixels when the display
+ * scale is fractional. Restore the standard `scrollbar-width`/`scrollbar-color`
+ * pair and the platform scrollbar is 10-11px wide, which puts the rows a pixel or
+ * two past the search box, so this number and that rule move together. */
+.recent-list { flex: 1 1 auto; min-height: 0; max-height: none; margin: 10px -11px 10px 0; overflow-y: auto; scrollbar-gutter: stable; padding-right: 5px; padding-bottom: 60px; }
 .recent-row {
   position: relative;
   display: flex;

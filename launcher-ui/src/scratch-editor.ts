@@ -85,12 +85,20 @@ export function resolveScratchKind(name: string): ScratchKind | null {
  * Resolve the ScratchPlan for a handoff. Plain text payloads parse as
  * markdown-style scratch (the .md default — Lithic's streams are the
  * authoring format, so round-trips keep the source intact).
+ *
+ * The root title is the file name WITH its extension, because that title is
+ * what the mounted wiki shows as the document — `notes.md`, `book.ipynb` — and
+ * a bare stem would name nothing in particular. This is the one place the
+ * title is derived; both the injected root tiddler and the engine global the
+ * saver serializes from come from here, so they cannot disagree. A name that is
+ * only an extension (`.md`) has no file name to keep and falls back to
+ * `Scratch`.
  */
 export function resolveScratchPlan(name: string, base?: string): ScratchPlan | null {
   const kind = resolveScratchKind(name);
   if (!kind) return null;
   const stem = name.replace(/\.[^.]+$/, '').trim();
-  return { kind, base: (base ?? stem).trim() || 'Scratch' };
+  return { kind, base: (base ?? (stem ? name : '')).trim() || 'Scratch' };
 }
 
 /**

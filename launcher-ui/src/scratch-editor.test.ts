@@ -72,11 +72,13 @@ test('scratch kind resolves per extension (case-insensitive)', () => {
   assert.equal(resolveScratchKind('f.lith'), null);
 });
 
-test('resolveScratchPlan derives a base title from the file stem', () => {
+test('resolveScratchPlan derives the root title from the file name, extension kept', () => {
   const plan = resolveScratchPlan('Meeting Notes.md');
   assert.equal(plan?.kind, 'text');
-  assert.equal(plan?.base, 'Meeting Notes');
-  // Empty stem falls back to "Scratch".
+  // The document title names the file it edits, extension and all.
+  assert.equal(plan?.base, 'Meeting Notes.md');
+  assert.equal(resolveScratchPlan('book.ipynb')?.base, 'book.ipynb');
+  // A name that is only an extension has no file name to keep: fall back.
   const bare = resolveScratchPlan('.md');
   assert.equal(bare?.base, 'Scratch');
   // Explicit base wins.
@@ -88,9 +90,11 @@ test('parseScratchSource (text) produces a streams payload that round-trips', ()
   const plan = resolveScratchPlan('Notes.txt')!;
   const tiddlers = parseScratchSource(source, plan);
 
-  assert.equal(tiddlers[0].title, 'Notes');
+  assert.equal(tiddlers[0].title, 'Notes.txt');
   assert.equal(tiddlers[0]['lithic-scratch'], 'yes');
-  assert.equal(tiddlers[1].parent, 'Notes');
+  assert.equal(tiddlers[1].parent, 'Notes.txt');
+  // Node titles are the document title plus an index, extension included.
+  assert.equal(tiddlers[1].title, 'Notes.txt 1');
   // Nodes render as markdown and carry the scratch fields.
   const node = tiddlers.find((t) => t.text === 'Indented child');
   assert.equal(node?.type, 'text/markdown');
@@ -103,7 +107,7 @@ test('parseScratchSource (tid) keeps header fields and body', () => {
   const tiddlers = parseScratchSource(source, plan);
 
   const root = tiddlers[0];
-  assert.equal(root.title, 'saved');
+  assert.equal(root.title, 'saved.tid');
   assert.equal(root['lithic-tid'], 'yes');
   assert.equal(root.tags, 'A B');
   assert.equal(root.text, 'Body text\n');

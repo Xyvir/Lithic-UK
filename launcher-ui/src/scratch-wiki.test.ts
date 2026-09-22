@@ -146,6 +146,28 @@ test('scratchTiddlers: root carries stream-list, nodes carry parent/gap/markdown
   assert.equal(nodes[1].parent, 'MyNotes 1');
 });
 
+/**
+ * The streams `get-stream-nodes` operator only recurses into a node that has
+ * BOTH `stream-list` and `stream-type`. The scratch mount is the stream creator
+ * that used to leave `stream-type` off, which silently truncated every walk to
+ * the document root — whose text is blank — so Copy Story River copied an empty
+ * string from a scratch document. Verified against the built engine: with the
+ * field, the same button copies the whole outliner body.
+ */
+test('scratch tiddlers carry stream-type so stream walks reach the nodes', () => {
+  const { root, nodes } = scratchTiddlers('Doc', parseScratchText('Root\n\tKid\n\t\tGrandkid\n'));
+  assert.equal(root['stream-type'], 'default', 'the document root is a stream root');
+  for (const node of nodes) {
+    assert.equal(node['stream-type'], 'default', `${node.title} is a stream node`);
+  }
+  // A node with children must be walkable: both fields present.
+  const withChildren = nodes.filter((node) => node['stream-list']);
+  assert.ok(withChildren.length > 0, 'the source has a node with children');
+  for (const node of withChildren) {
+    assert.ok(node['stream-list'] && node['stream-type']);
+  }
+});
+
 test('serializeScratchWiki reconstructs flat text from wiki fields', () => {
   const source = 'Alpha\n\tbeta one\n\n\tbeta two\nGamma\n';
   const parsed = parseScratchText(source);

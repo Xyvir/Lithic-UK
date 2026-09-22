@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { existsSync } from 'node:fs';
+import { readFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import puppeteer from 'puppeteer';
 
@@ -30,13 +31,76 @@ try {
   await page.goto(`file://${artifact}`, { waitUntil: 'domcontentloaded' });
   await page.waitForSelector('main.container');
   // The recent section is conditional, so seed one deterministic local entry
-  // before asserting its search and icon controls.
-  await page.evaluate(() => {
+  // before asserting its search and icon controls. The history affordance only
+  // renders for a wiki with recorded versions, so the fixture gets one: the
+  // version store keys its per-wiki record off `search_cache_meta_<name>`.
+  await page.evaluate(async () => {
     localStorage.setItem('lithic-recent-liths', JSON.stringify([{ name: 'fixture.lith', text: '' }]));
+    const request = indexedDB.open('keyval-store', 1);
+    await new Promise((resolve, reject) => {
+      request.onerror = () => reject(request.error);
+      request.onsuccess = () => resolve();
+    });
+    const db = request.result;
+    await new Promise((resolve, reject) => {
+      const tx = db.transaction('keyval', 'readwrite');
+      tx.objectStore('keyval').put(
+        { headId: 'v1', versions: [{ id: 'v1', ts: Date.now(), sizeBytes: 120, isBase: true }] },
+        'search_cache_meta_fixture.lith'
+      );
+      tx.oncomplete = resolve;
+      tx.onerror = () => reject(tx.error);
+    });
+    db.close();
   });
   await page.reload({ waitUntil: 'domcontentloaded' });
   await page.waitForSelector('input[aria-label="Search recent Liths"]');
   await new Promise(resolve => setTimeout(resolve, 250));
+
+  // Enough entries to overflow the list, so the scrollbar the panel's padding
+  // makes room for is actually part of the layout being asserted below.
+  const seedScrollingRecents = async () => {
+    await page.evaluate(() => {
+      const rows = [{ name: 'fixture.lith', text: '' }];
+      for (let index = 0; index < 19; index += 1) rows.push({ name: `overflow-${index}.lith`, text: '' });
+      localStorage.setItem('lithic-recent-liths', JSON.stringify(rows));
+    });
+    await page.reload({ waitUntil: 'domcontentloaded' });
+    await page.waitForSelector('input[aria-label="Search recent Liths"]');
+    await new Promise(resolve => setTimeout(resolve, 250));
+  };
+
+  // Which vertical edges the panel's children share, where the list's scrollbar
+  // lands relative to them, and what that scrollbar is made of: a 6px rounded
+  // thumb with the platform's arrow buttons switched off. The scrollbar belongs
+  // in the panel's right padding, never between the rows and the search box.
+  // Re-measured after the search filter drops the scrollbar, to prove the
+  // reserved gutter keeps the rows from shifting sideways.
+  const measurePanelEdges = () => page.evaluate(() => {
+    const section = document.querySelector('.recent-section');
+    const list = document.querySelector('.recent-list');
+    const search = document.querySelector('input.recent-search');
+    const row = document.querySelector('.recent-row');
+    const reset = document.querySelector('.reset-cache');
+    if (!section || !list || !search || !row) return null;
+    const box = element => element.getBoundingClientRect();
+    const style = getComputedStyle(section);
+    return {
+      paddingLeft: style.paddingLeft,
+      paddingRight: style.paddingRight,
+      gutter: list.offsetWidth - list.clientWidth,
+      scrolls: list.scrollHeight > list.clientHeight,
+      barWidth: getComputedStyle(list, '::-webkit-scrollbar').width,
+      barArrows: getComputedStyle(list, '::-webkit-scrollbar-button').display,
+      barThumbRadius: getComputedStyle(list, '::-webkit-scrollbar-thumb').borderRadius,
+      rowVsSearchRight: box(row).right - box(search).right,
+      rowVsSearchLeft: box(row).left - box(search).left,
+      resetVsSearchRight: reset ? box(reset).right - box(search).right : null,
+      // Padding box, i.e. where the panel's border sits on the inside.
+      panelInnerRight: box(section).right - parseFloat(style.borderRightWidth),
+      scrollbarOuterRight: box(list).right,
+    };
+  });
 
   const result = await page.evaluate(() => ({
     title: document.querySelector('h1')?.textContent?.trim(),
@@ -75,7 +139,10 @@ try {
   assert.equal(result.newBlank, true);
   assert.equal(result.mount, true);
   assert.equal(result.search || result.inputCount === 0, true);
-  assert.deepEqual(result.footer.sort(), ['Github', 'Install']);
+  // The install control only renders once the browser has offered an install
+  // prompt (webapp) or the desktop install is not current, so headless Chromium
+  // — which never fires `beforeinstallprompt` — legitimately has just the link.
+  assert.deepEqual(result.footer.filter(text => text !== 'Install'), ['Github']);
   assert.match(result.font, /Vollkorn/i);
   assert.ok(result.main && result.main.width <= 600, 'Launcher remains within the legacy max width');
   assert.ok(result.footerBounds && result.footerBounds.left >= 0 && result.footerBounds.right <= 900, 'Footer controls remain within the viewport');
@@ -88,7 +155,30 @@ try {
   assert.equal(result.searchPaddingRight, '42px', 'Search text leaves room for the clear control');
   assert.equal(result.searchHeight, 52, 'Recent search uses the shared control height');
   assert.equal(result.recentList?.marginTop, '10px', 'Recent rows have a visible separation from search');
-  assert.equal(result.recentList?.paddingRight, '0px', 'Recent rows use the full search width');
+  assert.equal(result.recentList?.paddingRight, '5px', 'Recent rows keep a gap from the list scrollbar');
+
+  // Aligned edges, with the list scrolling. Exact: the scrollbar is the custom
+  // 6px one, not the platform's 10-11px scrollbar, so the 11px pull in
+  // .recent-list covers its width exactly.
+  await seedScrollingRecents();
+  const edges = await measurePanelEdges();
+  assert.ok(edges, 'Recent panel exposes its search box, rows and button');
+  assert.equal(edges?.scrolls, true, 'Seeded recents make the list scroll, so the scrollbar is part of this layout');
+  assert.equal(edges?.paddingLeft, edges?.paddingRight, 'Panel padding is symmetric, so the column stays centred');
+  // 6px is the custom scrollbar's own width; the platform's thin scrollbar is
+  // 10-11px, so anything above 6 means the ::-webkit-scrollbar rules went dead.
+  assert.ok((edges?.gutter ?? 99) <= 6, 'Recent list reserves the custom 6px scrollbar, not the platform scrollbar');
+  assert.equal(edges?.barWidth, '6px', 'Scrollbar styling is applied — setting scrollbar-width would make the engine ignore it');
+  assert.equal(edges?.barArrows, 'none', 'Scrollbar has no arrow buttons at its ends');
+  assert.match(edges?.barThumbRadius ?? '', /999px|3px/, 'Scrollbar thumb is rounded');
+  // Half a pixel of slack: the reserved scrollbar width is rounded to whole
+  // pixels when the display scale is fractional. A regression to the platform
+  // scrollbar is a whole pixel or more of drift, so this still catches it.
+  assert.ok(Math.abs(edges?.rowVsSearchLeft ?? 99) <= 0.5, 'Recent rows start where the search box starts');
+  assert.ok(Math.abs(edges?.rowVsSearchRight ?? 99) <= 0.5, 'Recent rows end where the search box ends');
+  assert.ok(Math.abs(edges?.resetVsSearchRight ?? 99) <= 0.5, 'Rebuild control ends where the search box ends');
+  assert.ok((edges?.scrollbarOuterRight ?? 0) <= (edges?.panelInnerRight ?? 0), 'Recent list scrollbar sits inside the panel padding, not over the rows');
+  assert.ok((edges?.panelInnerRight ?? 0) - (edges?.scrollbarOuterRight ?? 0) >= 12, 'Scrollbar keeps clearance from the panel border');
   assert.ok((result.recentRows[0]?.height ?? 0) === 52, 'Recent row uses the shared control height');
   assert.ok((result.historyRect?.width ?? 99) <= 20, 'History/download icon is visually smaller than its control');
   assert.ok(result.mountBookmark && result.mountBookmark.height === 60, 'Bookmark control matches the main action height');
@@ -102,6 +192,15 @@ try {
   });
   assert.equal(cancelledSearch.value, 'fixture', 'Escape preserves the active recent search');
   assert.equal(cancelledSearch.focused, false, 'Escape deselects the search field');
+
+  // Filtered down to one row there is no scrollbar left: the reserved gutter has
+  // to hold the rows on exactly the edges they had while the list was scrolling.
+  const filteredEdges = await measurePanelEdges();
+  assert.ok(filteredEdges && !filteredEdges.scrolls, 'Filtering the list down removes the scrollbar');
+  assert.equal(filteredEdges?.gutter, edges?.gutter, 'The scrollbar gutter stays reserved after the filter');
+  assert.equal(filteredEdges?.rowVsSearchLeft, edges?.rowVsSearchLeft, 'Rows keep their left edge when the scrollbar goes away');
+  assert.equal(filteredEdges?.rowVsSearchRight, edges?.rowVsSearchRight, 'Rows keep their right edge when the scrollbar goes away');
+  assert.equal(filteredEdges?.resetVsSearchRight, edges?.resetVsSearchRight, 'Rebuild control keeps its right edge when the scrollbar goes away');
 
   await page.setViewport({ width: 600, height: 700 });
   const narrow = await page.evaluate(() => ({
@@ -162,6 +261,66 @@ try {
   }));
   assert.ok(mobileSearch.row, 'Mobile cached content-only match remains visible');
   assert.equal(mobileSearch.previewStyle, 'none', 'Mobile layout hides the context pop-out');
+
+  // --- The install offer's dismiss affordance ---
+  // It only renders in the desktop app, or in a browser that has offered an
+  // install prompt — never in this page — so drive the markup the bundle emits.
+  // The word is a hint that appears under the cursor; the ✕ is the control and
+  // must neither paint anything at rest nor move when the word arrives.
+  const artifactHtml = await readFile(artifact, 'utf8');
+  assert.ok(
+    artifactHtml.includes('install-dismiss-label') && artifactHtml.includes('>dismiss</span>'),
+    'Built launcher ships the dismiss affordance with its hover-revealed word'
+  );
+  await page.evaluate(() => {
+    document.querySelector('footer').insertAdjacentHTML(
+      'beforeend',
+      '<span class="install-offer"><button class="install-button" type="button">Install App</button>' +
+        '<button class="install-dismiss" title="Hide the install offer" aria-label="Dismiss install offer">' +
+        '<span class="install-dismiss-label">dismiss</span>\u2715</button></span>'
+    );
+  });
+  await new Promise(resolve => setTimeout(resolve, 250));
+  const measureDismiss = () => page.evaluate(() => {
+    const button = document.querySelector('.install-dismiss');
+    const label = button.querySelector('.install-dismiss-label');
+    const range = document.createRange();
+    const glyph = button.lastChild;
+    range.setStart(glyph, glyph.textContent.length - 1);
+    range.setEnd(glyph, glyph.textContent.length);
+    const glyphBox = range.getBoundingClientRect();
+    const labelBox = label.getBoundingClientRect();
+    const round = value => +value.toFixed(2);
+    return {
+      labelOpacity: getComputedStyle(label).opacity,
+      labelLeft: round(labelBox.left),
+      labelRight: round(labelBox.right),
+      glyphLeft: round(glyphBox.left),
+      glyphCenterY: round((glyphBox.top + glyphBox.bottom) / 2),
+      wordCenterY: round((labelBox.top + labelBox.bottom) / 2),
+      gapToGlyph: round(glyphBox.left - labelBox.right),
+      buttonLeft: round(button.getBoundingClientRect().left),
+      buttonWidth: round(button.getBoundingClientRect().width),
+      installLeft: round(document.querySelector('.install-button').getBoundingClientRect().left)
+    };
+  });
+  const dismissAtRest = await measureDismiss();
+  assert.equal(dismissAtRest.labelOpacity, '0', 'The dismiss word stays hidden until the cursor is on the control');
+  await page.hover('.install-dismiss');
+  await new Promise(resolve => setTimeout(resolve, 300));
+  const dismissHovered = await measureDismiss();
+  assert.equal(dismissHovered.labelOpacity, '1', 'The dismiss word appears on hover');
+  assert.equal(dismissHovered.glyphLeft, dismissAtRest.glyphLeft, 'The ✕ does not move when the word appears');
+  assert.equal(dismissHovered.glyphCenterY, dismissAtRest.glyphCenterY, 'The ✕ does not shift vertically when the word appears');
+  assert.equal(dismissHovered.buttonWidth, dismissAtRest.buttonWidth, 'Revealing the word does not resize the control');
+  assert.equal(dismissHovered.installLeft, dismissAtRest.installLeft, 'Revealing the word does not move the install button beside it');
+  assert.ok(Math.abs(dismissHovered.gapToGlyph - 4) <= 0.5, 'The word sits a set gap clear of the ✕');
+  assert.ok(Math.abs(dismissHovered.wordCenterY - dismissHovered.glyphCenterY) <= 0.5, 'The word is centred on the same line as the ✕');
+  // The hidden word is still part of the hover target: the reveal picks up the
+  // cursor wherever it already is, rather than only on the ✕ itself.
+  const hoverTargetWidth = dismissHovered.buttonWidth - dismissHovered.gapToGlyph + (dismissHovered.glyphLeft - dismissHovered.labelLeft);
+  assert.ok(hoverTargetWidth >= 40, 'The dismiss control keeps a wide enough hover target with the word hidden');
+
   assert.deepEqual(errors, []);
   console.log(`Puppeteer launcher smoke passed (${process.env.HEADED === '1' ? 'headed' : 'headless'})`);
 } finally {

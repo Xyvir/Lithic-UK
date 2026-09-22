@@ -196,7 +196,9 @@ test('scratch mode injects the flat-text serializers and publishes the root titl
   assert.match(html, /__LITHIC_SCRATCH_SERIALIZE__/);
   assert.match(html, /__LITHIC_TID_SERIALIZE__/);
   assert.match(html, /__LITHIC_SCRATCH_ROOT__/);
-  assert.match(html, /__LITHIC_SCRATCH_ROOT__"\] = "notes"/);
+  // The root title is the file name with its extension, so the story river
+  // names the file being edited rather than a bare stem.
+  assert.match(html, /__LITHIC_SCRATCH_ROOT__"\] = "notes.txt"/);
   // The save path branches on the injected scratch mode flag.
   assert.match(html, /var scratchMode = "text"/);
 });
@@ -212,20 +214,25 @@ test('non-scratch boots keep the scratch saver out of the document', () => {
 test('scratch mounts tag the root tiddler with Dogear for the story river', () => {
   const html = buildEngineHtml(ENGINE_STUB, { name: 'notes.txt', text: '# Heading\n\tchild' }, [], {}, { scratchMode: 'text' });
   const store = readStore(html);
-  const root = store.find((tiddler) => tiddler.title === 'notes');
+  const root = store.find((tiddler) => tiddler.title === 'notes.txt');
   assert.ok(root, 'scratch root tiddler is present');
   assert.ok((root.tags || '').split(' ').includes('Dogear'), 'root carries the Dogear tag');
+  // ...and `stream-type`, without which the streams `get-stream-nodes`
+  // operator refuses to walk the tree, so Copy Story River would copy nothing.
+  assert.equal(root['stream-type'], 'default');
+  const headingNode = store.find((tiddler) => tiddler.title === 'notes.txt 1');
+  assert.equal(headingNode?.['stream-type'], 'default');
 
   // .tid files without their own tags also get the marker + bookkeeping.
   const tidHtml = buildEngineHtml(ENGINE_STUB, { name: 'card.tid', text: 'title: card\n\nbody' }, [], {}, { scratchMode: 'tid' });
-  const tidRoot = readStore(tidHtml).find((tiddler) => tiddler.title === 'card');
+  const tidRoot = readStore(tidHtml).find((tiddler) => tiddler.title === 'card.tid');
   assert.equal(tidRoot?.tags, 'Dogear');
   assert.equal(tidRoot?.['lithic-tid-injected'], 'tags type');
 
   // Authored tags are respected: no Dogear injection; the bookkeeping
   // field tracks only the injected default type.
   const taggedHtml = buildEngineHtml(ENGINE_STUB, { name: 'tagged.tid', text: 'title: tagged\ntags: Mine\n\nbody' }, [], {}, { scratchMode: 'tid' });
-  const taggedRoot = readStore(taggedHtml).find((tiddler) => tiddler.title === 'tagged');
+  const taggedRoot = readStore(taggedHtml).find((tiddler) => tiddler.title === 'tagged.tid');
   assert.equal(taggedRoot?.tags, 'Mine');
   assert.equal(taggedRoot?.['lithic-tid-injected'], 'type');
 });
@@ -396,13 +403,13 @@ test('ipynb scratch mode injects the notebook runtime and parses notebook cells'
   // The ES5 notebook serializer ships alongside the other scratch runtimes.
   assert.match(html, /__LITHIC_IPYNB_SERIALIZE__/);
   assert.match(html, /var scratchMode = "ipynb"/);
-  assert.match(html, /__LITHIC_SCRATCH_ROOT__"\] = "analysis"/);
+  assert.match(html, /__LITHIC_SCRATCH_ROOT__"\] = "analysis.ipynb"/);
 
   // Cells mount as a nodestream: markdown cell, fenced code cell, root.
   const store = readStore(html);
   const codeNode = store.find((tiddler) => (tiddler.text || '').startsWith('```python'));
   assert.ok(codeNode, 'code cell is fenced for the ephemeral coderunner');
-  const root = store.find((tiddler) => tiddler.title === 'analysis');
+  const root = store.find((tiddler) => tiddler.title === 'analysis.ipynb');
   assert.equal(root?.['lithic-ipynb'], 'yes');
   assert.ok(root?.['lithic-ipynb-meta'], 'root carries the notebook metadata for re-export');
 });

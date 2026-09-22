@@ -197,10 +197,26 @@ export function scratchNodeTitle(base: string, index: number): string {
 }
 
 /**
+ * Every stream tiddler carries `stream-type` — the streams plugin assigns it to
+ * `default` on the nodes it creates, and Lithic's own creators do the same
+ * (`$:/core/ui/Actions/new-journal`, the streams action macros). The scratch
+ * mount is the one place that used to leave it off, and that is not cosmetic:
+ * the streams `get-stream-nodes` operator only walks a node when it has BOTH
+ * `stream-list` and `stream-type` (see
+ * wiki/external/tiddlystudy/plugins/streams/.../get-stream-nodes.js). Without
+ * it the walk stops at the document root, whose text is empty, so every filter
+ * built on that operator — Copy Story River, the context menu's copy body text
+ * — copies nothing at all from a scratch document. `stream-type` is never
+ * serialized back to the file: the scratch saver writes flat text from the
+ * stream-list, and a .tid mount keeps the file's own header fields.
+ */
+const STREAM_TYPE = { 'stream-type': 'default' };
+
+/**
  * Build the scratch wiki tiddlers for a parsed source.
  * The root tiddler carries `stream-list` (children order); each node gets
- * `parent`, its absolute indent (`lithic-indent`), its gap (`lithic-gap`),
- * and renders as markdown.
+ * `parent`, its absolute indent (`lithic-indent`), its gap (`lithic-gap`), its
+ * stream type, and renders as markdown.
  */
 export function scratchTiddlers(
   base: string,
@@ -220,6 +236,7 @@ export function scratchTiddlers(
       'lithic-indent': String(node.indent),
       'lithic-gap': String(node.gapBefore),
       type: 'text/markdown',
+      ...STREAM_TYPE,
       text: node.text
     };
     nodes.push(tiddler);
@@ -234,6 +251,7 @@ export function scratchTiddlers(
     title: base,
     text: '',
     type: 'text/markdown',
+    ...STREAM_TYPE,
     ...(rootTitles.length > 0 ? { 'stream-list': rootTitles.map(listEntry).join(' ') } : {}),
     ...extraRootFields
   };
