@@ -11,8 +11,15 @@
 //! maps each instance's origin to its own username and password. A second
 //! bookmarked instance costs an entry, not another secret. The consequence is
 //! worth stating plainly — the secret is the only thing between a copied vault
-//! file and every password in it — which is why it is length-checked (see
-//! [`MIN_SECRET_LEN`]) and why the UI warns about short all-digit secrets.
+//! file and every password in it — which is why it has a fixed shape (see
+//! [`PIN_LEN`]) and why the UI warns about an all-digit one: six digits is a
+//! million guesses, six letters and digits is two billion.
+//!
+//! The secret is a PIN rather than a passphrase on purpose. It is typed on the way
+//! into an instance, so it has to be quick; case is folded away
+//! ([`normalize_secret`]) so `l1th1c` and `L1TH1C` are the same key, which is what
+//! makes "case-insensitive" a fact about the file rather than a claim about the
+//! entry boxes.
 //!
 //! ## What the file holds
 //!
@@ -26,7 +33,7 @@
 //! nothing about another's.
 //!
 //! ```text
-//! key   = Argon2id(secret, salt, m=64 MiB, t=3, p=1)
+//! key   = Argon2id(PIN, salt, m=128 MiB, t=3, p=1)
 //! vault = XChaCha20-Poly1305(key, nonce, login map, aad = envelope parameters)
 //! ```
 //!
@@ -53,8 +60,9 @@
 //! ## Tests
 //!
 //! The interesting cases are the ones a real deployment produces — a tampered
-//! envelope, a truncated file, a secret typed with a trailing space — so they are
-//! covered here rather than left to a manual pass.
+//! envelope, a truncated file, a PIN typed in the wrong case, a vault written
+//! before the PIN form existed — so they are covered here rather than left to a
+//! manual pass.
 
 use std::collections::BTreeMap;
 use std::fmt;
@@ -73,24 +81,23 @@ use zeroize::Zeroize;
 /// [`crate::vault_path`]).
 pub const VAULT_FILE: &str = "credentials.vault";
 
-/// The floor for an unlock secret.
+/// How many characters the PIN has.
 ///
-/// Six *characters*, not six digits: Argon2id takes bytes, so the character set
-/// is what multiplies the search space. Six digits is 10^6 guesses — hours on one
-/// core — while six mixed characters is 5.7×10^10, four orders of magnitude more
-/// for the same typing effort. Nothing here enforces a maximum, because length is
-/// the cheapest strength there is; [`validate_secret`] accepts anything up to
-/// [`MAX_SECRET_BYTES`].
-pub const MIN_SECRET_LEN: usize = 6;
-
-/// A sanity ceiling, not a policy: an unbounded secret would be hashed by Argon2
-/// anyway, but nothing reasonable is longer than this and a megabyte of input
-/// should not reach the KDF at all.
-pub const MAX_SECRET_BYTES: usize = 1024;
+/// Six, entered as six boxes that accept the moment the last one is filled — so
+/// this is not a floor to reach but the shape of the thing, and [`validate_secret`]
+/// refuses anything that is not exactly this long.
+pub const PIN_LEN: usize = 6;
 
 /// Known-answer values for the KDF, so the parameters and the algorithm are
 /// pinned by a test rather than by a comment.
-const M_COST_KIB: u32 = 65_536;
+///
+/// Raised from 64 MiB when the secret became a six-character PIN. It is the KDF,
+/// not the length, that holds the line now: a PIN is an order of magnitude cheaper
+/// to type than a passphrase, so each guess has to cost more. The envelope records
+/// its own parameters, so a vault written at the old cost opens at the old cost
+/// (see `a_vault_written_before_the_index_still_opens`, which writes exactly that
+/// shape) and is upgraded by its next write.
+const M_COST_KIB: u32 = 131_072;
 const T_COST: u32 = 3;
 const P_COST: u32 = 1;
 const SALT_BYTES: usize = 16;
@@ -129,7 +136,7 @@ pub enum VaultError {
     WrongSecret,
     /// The file exists but is not a readable vault.
     Corrupt(String),
-    /// The secret does not meet [`MIN_SECRET_LEN`] / [`MAX_SECRET_BYTES`].
+    /// The secret is not a PIN: [`PIN_LEN`] letters or digits, so say why.
     Secret(String),
     Io(String),
 }
@@ -140,7 +147,7 @@ impl fmt::Display for VaultError {
             // Deliberately credential-free: these strings reach the UI and, from
             // there, potentially a log.
             VaultError::Missing => write!(formatter, "No credentials saved yet."),
-            VaultError::WrongSecret => write!(formatter, "That secret does not open the vault."),
+            VaultError::WrongSecret => write!(formatter, "That PIN does not open the vault."),
             VaultError::Corrupt(detail) => write!(formatter, "The vault file is unreadable: {}", detail),
             VaultError::Secret(detail) => write!(formatter, "{}", detail),
             VaultError::Io(detail) => write!(formatter, "Vault file error: {}", detail),
@@ -385,37 +392,51 @@ impl fmt::Debug for Grant {
     }
 }
 
-/// Hard rules for a secret. Anything that passes is usable; anything that fails
-/// is refused with a reason the UI can show verbatim.
+/// The PIN as it is typed, folded to the form the vault derives its key from.
+///
+/// Upper-cased, because the PIN is case-insensitive: the boxes fold what is typed
+/// and this folds it again, so the entry method and the file cannot disagree about
+/// which PIN opens a vault. Trimmed, because a space cannot be typed into a box and
+/// a pasted one is not a secret anybody chose.
+pub fn normalize_secret(secret: &str) -> String {
+    secret.trim().to_ascii_uppercase()
+}
+
+/// Hard rules for a PIN. Anything that passes is usable; anything that fails is
+/// refused with a reason the UI can show verbatim.
+///
+/// Only the shape is checked. Whether a PIN is the *right* one is decided by the
+/// AEAD tag when the file is opened, which is what keeps a wrong PIN from being
+/// distinguishable from a corrupt file by anything but the error it returns.
 pub fn validate_secret(secret: &str) -> Result<(), VaultError> {
-    if secret.chars().count() < MIN_SECRET_LEN {
-        return Err(VaultError::Secret(format!(
-            "Use at least {} characters — the secret is what protects every saved password.",
-            MIN_SECRET_LEN
-        )));
+    let pin = normalize_secret(secret);
+    if pin.chars().count() != PIN_LEN {
+        return Err(VaultError::Secret(format!("A PIN is {} letters or digits.", PIN_LEN)));
     }
-    if secret.len() > MAX_SECRET_BYTES {
-        return Err(VaultError::Secret(format!(
-            "Keep the secret under {} bytes.",
-            MAX_SECRET_BYTES
-        )));
+    if !pin.chars().all(|character| character.is_ascii_alphanumeric()) {
+        return Err(VaultError::Secret("Use letters and digits only.".to_string()));
     }
     Ok(())
 }
 
-/// A soft warning, not a refusal: a short secret made only of digits is the one
-/// case worth saying out loud, with the cost attached to it.
+/// A soft warning, not a refusal: a PIN made only of digits is the one case worth
+/// saying out loud, with the cost attached to it.
+///
+/// Only the all-digit PIN gets this. One letter in a six-character PIN multiplies
+/// the space by 36^6/10^6 — three thousand times — so a PIN that already has a
+/// letter in it has made the point the warning exists to make.
 pub fn weak_secret_warning(secret: &str) -> Option<String> {
-    let digits = secret.chars().all(|character| character.is_ascii_digit());
-    let length = secret.chars().count();
-    if !digits || length >= 10 {
+    let pin = normalize_secret(secret);
+    if pin.chars().count() != PIN_LEN || !pin.chars().all(|character| character.is_ascii_digit()) {
         return None;
     }
-    // 10^length guesses at this vault's own KDF cost. The 0.3 s per guess is the
-    // measured-ish cost of m=64 MiB / t=3 on a desktop core; the point of the
-    // warning is the shape of the curve, not the second decimal of it.
-    let space = 10f64.powi(length as i32);
-    let single_core = space * 0.3;
+    // 10^length guesses at this vault's own KDF cost. Seconds per guess is the cost
+    // of the memory setting, which is where Argon2id spends its time: 0.3 s is the
+    // measured-ish cost of 64 MiB on a desktop core, so the estimate follows
+    // [`M_COST_KIB`] instead of going stale beside it.
+    let per_guess = 0.3 * (M_COST_KIB as f64 / 65_536.0);
+    let space = 10f64.powi(PIN_LEN as i32);
+    let single_core = space * per_guess;
     let eight_cores = single_core / 8.0;
     let phrase = |seconds: f64| {
         if seconds < 3600.0 {
@@ -427,8 +448,8 @@ pub fn weak_secret_warning(secret: &str) -> Option<String> {
         }
     };
     Some(format!(
-        "{} digits is only {} combinations — about {} of guessing on one core, or {} spread across eight. Letters, or simply more characters, make that number useless.",
-        length,
+        "{} digits is {} combinations — about {} on one core, or {} across eight. One letter makes that number useless.",
+        PIN_LEN,
         thousands(space as u64),
         phrase(single_core),
         phrase(eight_cores)
@@ -683,11 +704,32 @@ fn read_envelope(path: &Path) -> Result<Envelope, VaultError> {
 }
 
 /// Open the vault with `secret`, returning everything needed for the session.
+///
+/// The shape of a PIN is not checked here, and cannot be: a file written before the
+/// PIN form existed was keyed by whatever was typed, so the only thing that decides
+/// whether a secret is the right one is whether it opens the file.
 pub fn unlock(path: &Path, secret: &str) -> Result<Unlocked, VaultError> {
-    validate_secret(secret)?;
     let envelope = read_envelope(path)?;
-    let (key, salt) = key_from_envelope(&envelope, secret)?;
-    let entries = decode(&envelope, &key)?;
+    let pin = normalize_secret(secret);
+    match open_with(&envelope, &pin) {
+        Ok(vault) => Ok(vault),
+        // An older vault was keyed by the bytes that were typed, folding included. A
+        // secret folding actually changed is the only one that could be such a file —
+        // a numeric PIN folds to itself — so this second derivation costs nothing for
+        // anyone using the PIN form, and it is what keeps an older vault openable
+        // rather than something to delete and start over. A corrupt file never gets
+        // here: only a wrong PIN is retried.
+        Err(error) if error == VaultError::WrongSecret && secret != pin => {
+            open_with(&envelope, secret).map_err(|_| error)
+        }
+        Err(error) => Err(error),
+    }
+}
+
+/// Derive the key from one candidate secret and read the entries under it.
+fn open_with(envelope: &Envelope, secret: &str) -> Result<Unlocked, VaultError> {
+    let (key, salt) = key_from_envelope(envelope, secret)?;
+    let entries = decode(envelope, &key)?;
     Ok(Unlocked {
         key,
         salt,
@@ -716,10 +758,11 @@ fn write(path: &Path, vault: &Unlocked) -> Result<(), VaultError> {
 /// Create a vault with `secret`, replacing any existing one. Used by the first
 /// unlock (nothing saved yet) and by "start over" after a forgotten secret.
 pub fn create(path: &Path, secret: &str, entries: BTreeMap<String, Credential>) -> Result<Unlocked, VaultError> {
-    validate_secret(secret)?;
+    let pin = normalize_secret(secret);
+    validate_secret(&pin)?;
     let salt = random_bytes(SALT_BYTES)?;
     let params = (M_COST_KIB, T_COST, P_COST);
-    let key = derive_key(secret, &salt, params)?;
+    let key = derive_key(&pin, &salt, params)?;
     let mut vault = Unlocked { key, salt, params, entries };
     if vault.is_empty() {
         // An empty vault is a legitimate state (the last credential removed), and
@@ -737,10 +780,11 @@ pub fn create(path: &Path, secret: &str, entries: BTreeMap<String, Credential>) 
 /// again. The new key gets a fresh salt, so the two secrets share no derivation,
 /// and every entry is re-encrypted in one write.
 pub fn rotate(path: &Path, vault: &mut Unlocked, secret: &str) -> Result<(), VaultError> {
-    validate_secret(secret)?;
+    let pin = normalize_secret(secret);
+    validate_secret(&pin)?;
     let salt = random_bytes(SALT_BYTES)?;
     let params = (M_COST_KIB, T_COST, P_COST);
-    let key = derive_key(secret, &salt, params)?;
+    let key = derive_key(&pin, &salt, params)?;
     vault.key.zeroize();
     vault.key = key;
     vault.salt = salt;
@@ -807,9 +851,10 @@ pub fn vault_path(exe_dir: Option<PathBuf>, app_data: Option<PathBuf>) -> PathBu
 mod tests {
     use super::*;
 
-    /// A secret long enough to be accepted, used by every test that is not about
-    /// the rules themselves.
-    const SECRET: &str = "correct-horse";
+    /// The PIN every test that is not about the PIN rules themselves uses. Lower
+    /// case on purpose: the vault folds it, so a test that reads back with the
+    /// upper-case form is testing folding without having to say so in its name.
+    const SECRET: &str = "l1th1c";
     const FIXTURE_PASSWORD: &str = "hunter2-not-a-real-password";
 
     fn temporary_dir(name: &str) -> PathBuf {
@@ -851,7 +896,7 @@ mod tests {
         create(&path, SECRET, entries()).expect("create");
         let before = fs::read(&path).expect("read");
         assert!(
-            matches!(unlock(&path, "wrong-secret"), Err(VaultError::WrongSecret)),
+            matches!(unlock(&path, "zzzzzz"), Err(VaultError::WrongSecret)),
             "a wrong secret must not open the vault"
         );
         assert_eq!(fs::read(&path).expect("read"), before, "a failed unlock must not rewrite the vault");
@@ -877,36 +922,74 @@ mod tests {
     }
 
     #[test]
-    fn refuses_a_short_secret_and_accepts_anything_longer() {
-        assert!(matches!(validate_secret("12345"), Err(VaultError::Secret(_))));
-        assert!(validate_secret("123456").is_ok(), "six characters, digits or not");
-        assert!(validate_secret("sixchr").is_ok());
-        assert!(validate_secret("a 6-char secret with spaces").is_ok());
-        let long = "x".repeat(MAX_SECRET_BYTES + 1);
-        assert!(matches!(validate_secret(&long), Err(VaultError::Secret(_))));
+    fn a_pin_is_six_letters_or_digits() {
+        for refused in ["12345", "1234567", "", "l1th c", "l1th-c", "l1th1!"] {
+            assert!(
+                matches!(validate_secret(refused), Err(VaultError::Secret(_))),
+                "should be refused: {:?}",
+                refused
+            );
+        }
+        for accepted in ["123456", "l1th1c", "L1TH1C", "aB9zY2"] {
+            assert!(validate_secret(accepted).is_ok(), "should be accepted: {:?}", accepted);
+        }
+        // Surrounding whitespace is folded away rather than counted against the PIN:
+        // a box cannot produce a space, so a pasted one is an artefact, not a secret.
+        assert!(validate_secret("  l1th1c  ").is_ok());
     }
 
     #[test]
-    fn the_secret_is_taken_exactly_as_typed() {
-        let dir = temporary_dir("exact");
+    fn the_pin_is_case_insensitive() {
+        let dir = temporary_dir("case");
         let path = dir.join(VAULT_FILE);
-        create(&path, "  spaced secret  ", entries()).expect("create");
-        // Whitespace is part of the secret, not decoration: trimming it on either
-        // side would silently accept a different secret than the one that was set.
+        create(&path, "l1th1c", entries()).expect("create");
+        assert!(unlock(&path, "L1TH1C").is_ok(), "the PIN is case-insensitive, so its upper-case form opens it");
+        assert!(unlock(&path, "L1th1c").is_ok(), "and so does any mixture in between");
         assert!(
-            matches!(unlock(&path, "spaced secret"), Err(VaultError::WrongSecret)),
-            "a trimmed secret must not open the vault"
+            matches!(unlock(&path, "l1th1d"), Err(VaultError::WrongSecret)),
+            "a different PIN does not"
         );
-        assert!(unlock(&path, "  spaced secret  ").is_ok(), "the exact secret still opens it");
     }
 
     #[test]
-    fn warns_only_about_short_all_digit_secrets() {
+    fn a_vault_written_with_an_old_style_secret_still_opens() {
+        // Before the PIN was a PIN, the secret was whatever was typed: any length, any
+        // case, keyed by exactly those bytes. Folding that away would lock the user out
+        // of their own vault, so the typed form is tried before the answer is no — and
+        // only when folding changed it, so a PIN pays nothing for this.
+        let dir = temporary_dir("oldsecret");
+        let path = dir.join(VAULT_FILE);
+        let salt = random_bytes(SALT_BYTES).expect("salt");
+        let params = (M_COST_KIB, T_COST, P_COST);
+        let key = derive_key("correct horse", &salt, params).expect("key");
+        let mut vault = Unlocked { key, salt, params, entries: entries() };
+        write(&path, &vault).expect("write");
+        assert_eq!(
+            unlock(&path, "correct horse").expect("the old secret opens its own vault").summaries().len(),
+            1
+        );
+        // The fallback is exact match, because that is what the old file was keyed by:
+        // a different case is a different derivation, and there is nothing to fold it
+        // to without rewriting the file.
+        assert!(matches!(unlock(&path, "CORRECT HORSE"), Err(VaultError::WrongSecret)));
+        // And it is a fallback rather than a dead end: saving under the old secret
+        // works, so the file can be brought forward at leisure.
+        vault.remember("https://other.example".to_string(), "keeper".to_string(), "pw".to_string());
+        save(&path, &vault).expect("save");
+        assert_eq!(unlock(&path, "correct horse").expect("reopen").summaries().len(), 2);
+    }
+
+    #[test]
+    fn warns_about_an_all_digit_pin_only() {
         let warning = weak_secret_warning("123456").expect("six digits is worth warning about");
         assert!(warning.contains("1,000,000"), "the warning carries the number: {}", warning);
-        assert!(warning.contains("one core"), "and what it costs: {}", warning);
-        assert!(weak_secret_warning("1234567890").is_none(), "ten digits is past the point of the warning");
-        assert!(weak_secret_warning("hunter2xx").is_none(), "letters make it a different question");
+        assert!(warning.contains("eight"), "and what it costs: {}", warning);
+        assert!(weak_secret_warning("l1th1c").is_none(), "one letter makes it a different question");
+        assert!(weak_secret_warning("ABC123").is_none());
+        assert!(
+            weak_secret_warning("12345").is_none(),
+            "and a PIN that is not one yet is not the warning's business"
+        );
     }
 
     #[test]
@@ -916,7 +999,7 @@ mod tests {
         create(&path, SECRET, entries()).expect("create");
         let raw = fs::read_to_string(&path).expect("read");
         for replacement in [
-            raw.replace("\"m\": 65536", "\"m\": 8"),
+            raw.replace("\"m\": 131072", "\"m\": 8"),
             raw.replace("\"t\": 3", "\"t\": 1"),
             raw.replace("\"p\": 1", "\"p\": 4"),
         ] {
@@ -985,12 +1068,12 @@ mod tests {
         let dir = temporary_dir("rotate");
         let path = dir.join(VAULT_FILE);
         let mut vault = create(&path, SECRET, entries()).expect("create");
-        rotate(&path, &mut vault, "a-much-longer-secret").expect("rotate");
+        rotate(&path, &mut vault, "n3wp1n").expect("rotate");
         assert!(
             matches!(unlock(&path, SECRET), Err(VaultError::WrongSecret)),
             "the old secret must stop working"
         );
-        let opened = unlock(&path, "a-much-longer-secret").expect("unlock with the new secret");
+        let opened = unlock(&path, "n3wp1n").expect("unlock with the new secret");
         assert_eq!(
             opened.credential_for("https://personal.lithic.uk").map(|entry| entry.password.as_str()),
             Some(FIXTURE_PASSWORD)
@@ -999,7 +1082,7 @@ mod tests {
         // it, and the next save writes under the new key.
         vault.remember("http://192.168.1.42".to_string(), "esp32".to_string(), "lan-pass".to_string());
         save(&path, &vault).expect("save after rotate");
-        assert_eq!(unlock(&path, "a-much-longer-secret").expect("reopen").summaries().len(), 2);
+        assert_eq!(unlock(&path, "n3wp1n").expect("reopen").summaries().len(), 2);
     }
 
     #[test]
@@ -1191,7 +1274,7 @@ mod tests {
         let rendered = [
             VaultError::WrongSecret.to_string(),
             VaultError::Missing.to_string(),
-            unlock(&path, "nope-nope").unwrap_err().to_string(),
+            unlock(&path, "n0p3zz").unwrap_err().to_string(),
         ]
         .join(" ");
         assert!(!rendered.contains(FIXTURE_PASSWORD));

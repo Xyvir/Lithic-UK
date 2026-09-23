@@ -76,3 +76,12 @@ git2 = { version = "0.21.0", default-features = false, features = ["https", "ven
 lto = true
 codegen-units = 1
 strip = true
+
+# Argon2id is a memory-hard KDF and it is pure Rust, which means an unoptimised
+# build runs it something like fifty times slower — and the vault's tests derive a
+# key dozens of times, once per create, unlock and rotate. Sampling a realistic
+# cost instead of paying an unrealistic one keeps `cargo test` (and so the gate)
+# in seconds, and it changes nothing about what is tested: the same parameters,
+# salt sizes and AEAD framing are exercised either way.
+[profile.dev.package.argon2]
+opt-level = 3

@@ -2390,6 +2390,47 @@ fn unlock_for_instance(
     Ok(answer)
 }
 
+/// Save one instance's login and leave a grant for it behind, in one unlock.
+///
+/// This is the launcher's "add a saved credential?" modal as one call. Saving needs
+/// the vault open and opening an instance needs a grant, so doing them as two
+/// commands would derive the key from the PIN twice — and, worse, would leave the
+/// vault open in between. Here the vault is local to the function: dropping it at
+/// the end zeroizes the key and the passwords, and what survives is the same
+/// one-origin, expiring grant any other instance open leaves. The manager's own copy
+/// is neither read nor closed, because the manager is not what asked.
+#[tauri::command]
+fn save_login_for_instance(
+    origin: String,
+    secret: String,
+    user: String,
+    password: String,
+    state: tauri::State<VaultState>,
+) -> Result<InstanceGrant, String> {
+    let origin = credentials::normalize_origin(&origin)
+        .ok_or_else(|| "That is not an address credentials could be saved for.".to_string())?;
+    let path = vault_path();
+    // No vault yet means the PIN typed here is the one this vault will have, which is
+    // the same bargain `unlock_credentials` makes on first use.
+    let mut vault = match credentials::unlock(&path, &secret) {
+        Ok(vault) => vault,
+        Err(VaultError::Missing) => credentials::create(&path, &secret, std::collections::BTreeMap::new())?,
+        Err(error) => return Err(error.into()),
+    };
+    vault.remember(origin.clone(), user, password);
+    credentials::save(&path, &vault)?;
+    let Some(entry) = vault.credential_for(&origin) else {
+        return Err(format!("No login is saved for {}.", origin));
+    };
+    let grant = credentials::Grant::new(origin, entry.user.clone(), entry.password.clone());
+    let answer = InstanceGrant { origin: grant.origin().to_string(), user: entry.user.clone() };
+    if let Ok(mut slot) = state.grant.lock() {
+        // Assigning over the slot drops any previous grant, which zeroizes it.
+        *slot = Some(grant);
+    }
+    Ok(answer)
+}
+
 /// What the vault holds, while it is unlocked.
 ///
 /// Locked is not an error here: it is the answer "nothing to show", and the UI
@@ -2548,6 +2589,7 @@ pub fn run() {
             check_credentials_secret,
             unlock_credentials,
             unlock_for_instance,
+            save_login_for_instance,
             list_credentials,
             lock_credentials,
             remember_credentials,
