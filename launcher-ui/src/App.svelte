@@ -10,6 +10,7 @@
   import { getRecentFiles, addRecentFile, removeRecentFile, addBrowserOnlyRecent, removeBrowserOnlyRecent, clearAllRecentFiles, purgeOldestCachesIfNeeded, saveSearchCache, forgetWikiCache, cachedWikiNames, idb, getSearchCacheText, listWikiVersions, wikiHasHistory, downloadWikiVersion, getDirtyState, clearDirtyState, listDirtyRecoveries, isWikiDriftedFromHead, isInstallDismissed, setInstallDismissed, recentDiskPath, type RecentEntry } from './storage';
   import { resolveStorageMode, storageModeOverride, browserOnlyMarkTitle, BROWSER_ONLY_NOTE, type StorageMode } from './browser-storage';
   import { readBookmarkEntries, saveBookmark, removeBookmark, setBookmarkManualAuth, setBookmarkIcon, refreshBookmarkIcon, verifyInstanceUrl, normalizeInstanceUrl, instanceLabel, type BookmarkEntry, type InstanceVerification } from './bookmarks';
+  import { LOGIN_CHECK_LABELS, askInstanceAboutLogin, loginVerdict, loginVerdictFromError, typedLoginCheck, type LoginCheckState, type LoginVerdict } from './login-check';
   import PinEntry from './PinEntry.svelte';
   import { fetchRemoteFiles, fetchRemoteWiki, probePatchApi, createLockHeartbeat, readRemoteLock, uploadRemoteFile, webdavUrl, resolveSessionId, lithUploadName, type WebdavFile } from './webdav';
   import { normalizeLithName } from './legacy-saver';
@@ -2630,28 +2631,12 @@
   let newOrigin = '';
   let newUser = '';
   let newPassword = '';
-  let newPasswordConfirm = '';
+  /** The add-a-login form's own verdict; same rules as the offer dialog's. */
+  let newLoginVerdict: LoginVerdict | null = null;
+  const newLoginCheck = typedLoginCheck((verdict) => (newLoginVerdict = verdict));
+  $: newLoginCheck(newOrigin.trim(), newUser, newPassword);
   let newSecret = '';
   let newSecretConfirm = '';
-
-  /**
-   * What a check of a saved login concluded.
-   *
-   * The names are the ones Rust sends, so the class on the row and the outcome the
-   * app decided are the same word — including "no longer asks for a password",
-   * which is a verdict of its own rather than a kind of success.
-   */
-  type LoginCheckState = 'busy' | 'accepted' | 'refused' | 'not-required' | 'unclear' | 'unreachable';
-
-  /** Short enough for a row, keeping the distinctions Rust made. */
-  const LOGIN_CHECK_LABELS: Record<LoginCheckState, string> = {
-    busy: 'Checking…',
-    accepted: 'Signs in',
-    refused: 'Refused',
-    'not-required': 'Not asked',
-    unclear: 'Unclear',
-    unreachable: 'No answer'
-  };
 
   /**
    * What each saved login last answered when it was checked against its instance.
@@ -2676,19 +2661,13 @@
     };
     try {
       const check = await tauriInvoke<{ outcome: string; status: number; detail: string }>('check_credential', { origin });
-      const state = (check.outcome in LOGIN_CHECK_LABELS ? check.outcome : 'unclear') as LoginCheckState;
-      vaultChecks = { ...vaultChecks, [origin]: { state, label: LOGIN_CHECK_LABELS[state], detail: check.detail } };
+      const verdict = loginVerdict(check.outcome, check.detail);
+      vaultChecks = { ...vaultChecks, [origin]: { ...verdict, label: LOGIN_CHECK_LABELS[verdict.state] } };
     } catch (error) {
       // A command that refused is an answer too: the login could not be sent, so
       // nothing was proved about it either way.
-      vaultChecks = {
-        ...vaultChecks,
-        [origin]: {
-          state: 'unreachable',
-          label: LOGIN_CHECK_LABELS.unreachable,
-          detail: error instanceof Error ? error.message : String(error)
-        }
-      };
+      const verdict = loginVerdictFromError(error);
+      vaultChecks = { ...vaultChecks, [origin]: { ...verdict, label: LOGIN_CHECK_LABELS[verdict.state] } };
     }
   }
 
@@ -2719,7 +2698,6 @@
   let offerPinConfirm = '';
   let offerUser = '';
   let offerPassword = '';
-  let offerPasswordConfirm = '';
   let offerError = '';
   let offerWarning: string | null = null;
   let offerBusy = false;
@@ -2727,6 +2705,15 @@
   let offerPinReset = 0;
   /** Bumped when the PIN is complete, to move the caret on to its confirmation. */
   let offerPinConfirmFocus = 0;
+  /**
+   * What this dialog's fields last answered when they were put to the instance.
+   * Null while they are still being typed into, or hold something other than a
+   * complete login. See `typedLoginCheck` for when it is asked and when it is
+   * cleared.
+   */
+  let offerCheckVerdict: LoginVerdict | null = null;
+  const offerLoginCheck = typedLoginCheck((verdict) => (offerCheckVerdict = verdict));
+  $: offerLoginCheck(credentialOffer?.origin ?? '', offerUser, offerPassword);
 
   /** The exact address a saved login is kept under, for the origin field's hints. */
   function vaultOriginOf(url: string): string {
@@ -2802,7 +2789,6 @@
     newOrigin = origin;
     newUser = '';
     newPassword = '';
-    newPasswordConfirm = '';
     newSecret = '';
     newSecretConfirm = '';
     // Last time's verdicts were about last time; nothing is carried over.
@@ -2823,7 +2809,6 @@
     vaultSecret = '';
     vaultConfirm = '';
     newPassword = '';
-    newPasswordConfirm = '';
     newSecret = '';
     newSecretConfirm = '';
     vaultChecks = {};
@@ -2895,8 +2880,19 @@
     vaultError = '';
     vaultNotice = '';
     try {
+      // The same question the offer dialog asks, for the same reason: a login added
+      // here answers the page exactly as one added from a bookmark does.
+      const origin = newOrigin.trim();
+      const verdict = newLoginVerdict && newLoginVerdict.state !== 'busy'
+        ? newLoginVerdict
+        : await askInstanceAboutLogin(origin, newUser, newPassword);
+      newLoginVerdict = verdict;
+      if (verdict.state === 'refused') {
+        vaultError = 'Not saved: this instance refuses that login.';
+        return;
+      }
       vaultEntries = await tauriInvoke<VaultEntry[]>('remember_credentials', {
-        origin: newOrigin.trim(),
+        origin,
         user: newUser,
         password: newPassword,
       });
@@ -2909,7 +2905,6 @@
       newOrigin = '';
       newUser = '';
       newPassword = '';
-      newPasswordConfirm = '';
       await refreshVaultStatus();
       await refreshVaultCoverage();
     } catch (error) {
@@ -3012,7 +3007,6 @@
         offerPinConfirm = '';
         offerUser = '';
         offerPassword = '';
-        offerPasswordConfirm = '';
         offerError = '';
         offerWarning = null;
         offerPinReset += 1;
@@ -3086,7 +3080,6 @@
     offerPin = '';
     offerPinConfirm = '';
     offerPassword = '';
-    offerPasswordConfirm = '';
     offerError = '';
     offerWarning = null;
   }
@@ -3132,6 +3125,19 @@
     offerBusy = true;
     offerError = '';
     try {
+      // A verdict is always about the text in the boxes right now — any change to
+      // them clears it — so one that has already arrived costs nothing to use. If
+      // none has, the answer is still on its way, and this is the moment it would
+      // decide something: the gap between typing and clicking is exactly where a
+      // password the instance will refuse would otherwise get through.
+      const verdict = offerCheckVerdict && offerCheckVerdict.state !== 'busy'
+        ? offerCheckVerdict
+        : await askInstanceAboutLogin(target.origin, offerUser, offerPassword);
+      offerCheckVerdict = verdict;
+      if (verdict.state === 'refused') {
+        offerError = 'Not saved: this instance refuses that login.';
+        return;
+      }
       await tauriInvoke('save_login_for_instance', {
         origin: target.origin,
         secret: offerPin,
@@ -3434,14 +3440,22 @@
         {/if}
         {#if offerWarning}<p class="vault-warning">{offerWarning}</p>{/if}
         <label class="vault-field"><span>Username</span><input class="credential-offer-user" bind:value={offerUser} autocomplete="off" /></label>
+        <!-- One password box, not two: the instance is asked about what is typed here,
+             and it is the only thing that can tell a mistyped password from a correct
+             one — two identical typos satisfy a repeat box. -->
         <label class="vault-field"><span>Password</span><input class="credential-offer-password" type={vaultReveal ? 'text' : 'password'} bind:value={offerPassword} autocomplete="off" /></label>
-        <label class="vault-field"><span>Repeat password</span><input class="credential-offer-password-confirm" type={vaultReveal ? 'text' : 'password'} bind:value={offerPasswordConfirm} autocomplete="off" /></label>
+        {#if offerCheckVerdict}
+          <!-- Said in the dialog rather than discovered after the handoff: this is
+               the last screen that can tell the user a password is wrong, because
+               the page it signs in to is one this app cannot speak on. -->
+          <p class="vault-check-line {offerCheckVerdict.state}" role="status" title={offerCheckVerdict.detail}>{offerCheckVerdict.detail}</p>
+        {/if}
         <label class="vault-reveal"><input type="checkbox" bind:checked={vaultReveal} /> Show</label>
         {#if offerError}<p class="status-line error" role="alert">{offerError}</p>{/if}
         <div class="modal-actions">
           <button
             class="modal-action credential-offer-save"
-            disabled={offerBusy || offerPin.length !== 6 || (vaultCreateMode && offerPin !== offerPinConfirm) || !offerUser || !offerPassword || offerPassword !== offerPasswordConfirm}
+            disabled={offerBusy || offerPin.length !== 6 || (vaultCreateMode && offerPin !== offerPinConfirm) || !offerUser || !offerPassword || offerCheckVerdict?.state === 'refused'}
             on:click={saveOfferedCredential}
           >{offerBusy ? 'Saving…' : 'Save Credential'}</button>
           <button class="modal-action secondary credential-offer-cancel" disabled={offerBusy} on:click={closeCredentialOffer}>Cancel</button>
@@ -3497,11 +3511,15 @@
             {#each vaultOriginHints as hint (hint)}<option value={hint}></option>{/each}
           </datalist>
           <label class="vault-field"><span>Username</span><input id="vault-new-user" bind:value={newUser} autocomplete="off" /></label>
+          <!-- As in the offer dialog: the instance is the check, so there is no second
+               password box for two matching typos to pass. -->
           <label class="vault-field"><span>Password</span><input id="vault-new-password" type={vaultReveal ? 'text' : 'password'} bind:value={newPassword} autocomplete="off" /></label>
-          <label class="vault-field"><span>Repeat password</span><input id="vault-new-password-confirm" type={vaultReveal ? 'text' : 'password'} bind:value={newPasswordConfirm} autocomplete="off" /></label>
+          {#if newLoginVerdict}
+            <p class="vault-check-line {newLoginVerdict.state}" role="status" title={newLoginVerdict.detail}>{newLoginVerdict.detail}</p>
+          {/if}
           <label class="vault-reveal"><input type="checkbox" bind:checked={vaultReveal} /> Show</label>
           <div class="modal-actions">
-            <button class="modal-action" disabled={vaultBusy || !newOrigin.trim() || !newUser || !newPassword || newPassword !== newPasswordConfirm} on:click={saveVaultEntry}>{vaultBusy ? '…' : 'Save Login'}</button>
+            <button class="modal-action" disabled={vaultBusy || !newOrigin.trim() || !newUser || !newPassword || newLoginVerdict?.state === 'refused'} on:click={saveVaultEntry}>{vaultBusy ? '…' : 'Save Login'}</button>
             <button class="modal-action secondary" disabled={vaultBusy} on:click={lockVault}>Lock</button>
             <button class="modal-action secondary" on:click={closeVaultModal}>Done</button>
           </div>

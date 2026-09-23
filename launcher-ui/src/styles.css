@@ -723,6 +723,15 @@ footer > * { pointer-events: auto; }
 .vault-check.refused { color: #e08a7a; }
 .vault-check.not-required { color: #e0b341; }
 .vault-check.unclear, .vault-check.unreachable { color: #8f8f8f; }
+/* The same verdict the rows carry, said as a sentence instead of a label: a dialog
+ * has room for the reason, and this is the one place a login that is not saved yet
+ * can be told it is wrong before it is written down. */
+.vault-check-line { margin: 8px 0 0; font-size: 0.86rem; line-height: 1.45; }
+.vault-check-line.busy { color: #a5a5a5; }
+.vault-check-line.accepted { color: #7ba86f; }
+.vault-check-line.refused { color: #e08a7a; }
+.vault-check-line.not-required { color: #e0b341; }
+.vault-check-line.unclear, .vault-check-line.unreachable { color: #8f8f8f; }
 .vault-empty { color: #8f8f8f; }
 /* Every input in a modal is full width; a checkbox is not a field, and letting
  * it stretch is the same trap the repo picker documents above. */

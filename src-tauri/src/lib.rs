@@ -1691,27 +1691,19 @@ fn classify_login(authenticated: u16, without: u16) -> LoginCheck {
     }
 }
 
-/// Check one saved login against the instance it was saved for.
+/// The two questions that decide what an instance says about a login, asked in the
+/// one place both callers share.
 ///
-/// The manager's "does this still work?" button. It runs only while the vault is
-/// open, because the password has to be readable to send it — and this is
-/// deliberately the one command that takes a credential to the network, which is
-/// what the user is asking for when they press it.
-#[tauri::command]
-async fn check_credential(origin: String, state: tauri::State<'_, VaultState>) -> Result<LoginCheck, String> {
-    // `Result` because a Tauri 2 async command that borrows state has to return
-    // one; only the two "there is nothing to check" cases are errors.
-    let origin = credentials::normalize_origin(&origin)
-        .ok_or_else(|| "That is not an address credentials could be saved for.".to_string())?;
-    let Some(header) = credential_header(&origin, &state) else {
-        return Err(format!("No saved login for {}.", origin));
-    };
+/// Extracted so that "is this password right?" and "is this password still right?"
+/// cannot drift apart: the offer dialog asks the first about a login typed seconds
+/// ago, the manager asks the second about a saved one, and an instance answers both
+/// the same way. `/manifest.json` is the request this app already trusts to describe
+/// an instance (see `probe_instance`), so it is the same one a login is checked
+/// against rather than a path of its own.
+async fn ask_instance_about_login(origin: &str, header: &str) -> LoginCheck {
     let Some(client) = http_client() else {
-        return Ok(classify_login(0, 0));
+        return classify_login(0, 0);
     };
-    // `/manifest.json` is the request this app already trusts to describe an
-    // instance (see `probe_instance`), so it is the same one a login is checked
-    // against rather than a path of its own.
     let url = format!("{}/manifest.json", origin);
     let timeout = std::time::Duration::from_secs(8);
     let authenticated = match client
@@ -1723,7 +1715,7 @@ async fn check_credential(origin: String, state: tauri::State<'_, VaultState>) -
     {
         Ok(response) => response.status().as_u16(),
         // Nothing answered, so there is no second question to ask.
-        Err(_) => return Ok(classify_login(0, 0)),
+        Err(_) => return classify_login(0, 0),
     };
     // Asked a second time without the credential, and only when the first request
     // got far enough for the answer to be ambiguous. Deliberately no header: this
@@ -1736,7 +1728,49 @@ async fn check_credential(origin: String, state: tauri::State<'_, VaultState>) -
     } else {
         0
     };
-    Ok(classify_login(authenticated, without))
+    classify_login(authenticated, without)
+}
+
+/// Check one saved login against the instance it was saved for.
+///
+/// The manager's "does this still work?" button. It runs only while the vault is
+/// open, because the password has to be readable to send it — and, with
+/// `check_login_for_instance`, this is one of the two commands that take a
+/// credential to the network at all, both of them because the user asked for it.
+/// Nothing here runs on a timer.
+#[tauri::command]
+async fn check_credential(origin: String, state: tauri::State<'_, VaultState>) -> Result<LoginCheck, String> {
+    // `Result` because a Tauri 2 async command that borrows state has to return
+    // one; only the two "there is nothing to check" cases are errors.
+    let origin = credentials::normalize_origin(&origin)
+        .ok_or_else(|| "That is not an address credentials could be saved for.".to_string())?;
+    let Some(header) = credential_header(&origin, &state) else {
+        return Err(format!("No saved login for {}.", origin));
+    };
+    Ok(ask_instance_about_login(&origin, &header).await)
+}
+
+/// Would this login be accepted, before it is written down anywhere?
+///
+/// The offer dialog's check, and the reason it exists: the launcher hands the window
+/// to an instance and cannot speak on the pages that follow, so a password saved
+/// wrong here is only discovered there. Asking first turns that into a sentence in
+/// the dialog the user is already looking at.
+///
+/// The credential goes to the instance's own origin and nowhere else — the very
+/// place it is about to be sent to sign in — and it never appears in an error
+/// message. No vault state, deliberately: the case that matters is a dialog open
+/// when there is no vault yet, where there is nothing saved to read a password from
+/// in the first place.
+#[tauri::command]
+async fn check_login_for_instance(
+    origin: String,
+    user: String,
+    password: String,
+) -> Result<LoginCheck, String> {
+    let origin = credentials::normalize_origin(&origin)
+        .ok_or_else(|| "That is not an address credentials could be saved for.".to_string())?;
+    Ok(ask_instance_about_login(&origin, &credentials::basic_header(&user, &password)).await)
 }
 
 /// One instance icon, as bytes for the launcher to cache as a data URL.
@@ -2584,6 +2618,7 @@ pub fn run() {
             probe_instance,
             fetch_instance_icon,
             check_credential,
+            check_login_for_instance,
             credentials_status,
             credential_coverage,
             check_credentials_secret,
