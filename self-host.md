@@ -131,7 +131,7 @@ For the LXC install, these are stored in `/etc/default/lithic`.
 └── BasicAuth      → Protects everything
 ```
 
-- **`/`** — Serves the Lithic Launcher UI. The launcher automatically detects WebDAV mode and shows your remote `.lith` files.
+- **`/`** — Serves the Lithic Launcher UI (via `/src/launcher.html`, which `index.html` redirects to). The launcher automatically detects WebDAV mode and shows your remote `.lith` files. The detection reads the host that served the file: a launcher arriving over http(s) from anywhere that is not a published deployment (`lithic.uk`, `*.github.io`) is a launcher an instance is serving, because the same bytes are shipped to every deployment and so cannot carry a marker saying which one it is. `?mode=webapp` overrides it for a copy of the PWA hosted under a name of its own.
 - **`/sync/`** — A WebDAV directory backed by the `/data` volume. All `.lith` files are stored here. The launcher uses `PROPFIND`, `PUT`, and `DELETE` to manage files.
 - **`/data`** — Persistent volume mount point. Back this up to protect your data.
 

@@ -159,12 +159,53 @@ export function launcherReturn(
 /**
  * An instance naming itself. The legacy launcher reads the same tag, so a
  * deployment that already carries it keeps working when it moves to this
- * launcher — and it is how an instance that is neither localhost nor `/sync/`
- * says "the thing behind this page is a server" without being guessed at from
- * its hostname.
+ * launcher. It is the explicit half of the answer — see `servedByInstance` for
+ * the half that has to be inferred, because the launcher artifact is shared and
+ * so cannot carry a tag of its own.
  */
 function declaresInstance(doc: Pick<Document, 'querySelector'> | null): boolean {
   return Boolean(doc && doc.querySelector('meta[name="lithic-webdav"]'));
+}
+
+/**
+ * Hosts that serve this launcher as a client rather than as part of an instance:
+ * the published deployments, whose copy is the PWA a visitor uses to open *other*
+ * people's servers. No `/sync/` sits beside them, which is the whole difference.
+ */
+const PUBLIC_LAUNCHER_HOSTS = ['lithic.uk', 'www.lithic.uk'];
+
+/**
+ * Whether the origin that served this document is somebody's instance.
+ *
+ * The launcher is one artifact shipped to every deployment — `autoupdate.sh`
+ * pulls the same `src/launcher.html` into an instance's public directory that
+ * GitHub Pages serves from the PWA's — so the file cannot declare what it is: the
+ * same bytes are both. Every explicit declaration there is (`?mode=`, the `/sync/`
+ * path, the meta tag) is therefore something the launcher an instance serves does
+ * not have. What it does have is the fact that a copy of this launcher arriving
+ * over http(s) from anywhere that is not a published deployment arrived from a
+ * server somebody runs — and an instance serves this file precisely so its own
+ * `/sync/` can be listed beside it. This is the inference the pre-Svelte launcher
+ * made, and the reason a directly-opened instance needs no declaration at all.
+ *
+ * It is a guess, and both ways of being wrong are recoverable: a fork hosted on a
+ * domain of its own is read as an instance (it can carry the meta tag, or be
+ * opened with `?mode=webapp`), and a copy of the PWA served under a name that is
+ * not in the list above would be misread the same way, which is why the list is
+ * part of the rule rather than a detail of it.
+ *
+ * localhost, `127.0.0.1` and `.local` are not named here: those are instances by
+ * their own rule, which is about a machine rather than about a guess.
+ */
+export function servedByInstance(location: Location): boolean {
+  // Only http(s) can have a `/sync/` behind it; `tauri:` and `file:` are the app
+  // and a copy on disk, and neither is an instance.
+  if (location.protocol !== 'http:' && location.protocol !== 'https:') return false;
+  const host = location.hostname.toLowerCase();
+  if (!host) return false;
+  if (PUBLIC_LAUNCHER_HOSTS.includes(host)) return false;
+  if (host.endsWith('.github.io')) return false;
+  return true;
 }
 
 export function resolveMode(
@@ -191,7 +232,11 @@ export function resolveMode(
     || declaresInstance(doc)
     || location.hostname === 'localhost'
     || location.hostname === '127.0.0.1'
-    || location.hostname.endsWith('.local');
+    || location.hostname.endsWith('.local')
+    // The launcher an instance serves carries none of the declarations above, so
+    // the origin that served it is the only thing left to read. Last, because
+    // every explicit signal outranks a guess about a hostname.
+    || servedByInstance(location);
 
   return isSelfHost ? 'self-host' : 'webapp';
 }

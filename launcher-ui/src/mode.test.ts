@@ -5,6 +5,7 @@ import {
   launcherReturn,
   resolveMode,
   servedByApp,
+  servedByInstance,
   tauriApiAvailable,
   withLauncherHandoff
 } from './mode.ts';
@@ -40,22 +41,57 @@ test('sync paths resolve to self-host mode', () => {
   assert.equal(resolveMode(location('https://example.com/sync/wiki')), 'self-host');
 });
 
+test('a launcher served by an instance is that instance, however it is reached', () => {
+  // The deployment this exists for: `/` redirects to `/src/launcher.html`, which is
+  // the same file the PWA is served from — so nothing in the document says
+  // "instance": no meta tag, no `/sync/` in the path, and a hostname that is
+  // nobody's published deployment. The server that sent it is the evidence.
+  assert.equal(resolveMode(location('https://personal.lithic.uk/src/launcher.html')), 'self-host');
+  assert.equal(resolveMode(location('https://personal.lithic.uk/')), 'self-host');
+  assert.equal(resolveMode(location('https://lithic.example.com/src/launcher.html')), 'self-host');
+  assert.equal(resolveMode(location('https://192.168.1.10:8080/src/launcher.html')), 'self-host');
+  // The published deployments are the client, by name: they have no server of
+  // their own, so `webapp` is the only true answer for them.
+  assert.equal(resolveMode(location('https://lithic.uk/src/launcher.html')), 'webapp');
+  assert.equal(resolveMode(location('https://www.lithic.uk/src/launcher.html')), 'webapp');
+  assert.equal(resolveMode(location('https://xyvir.github.io/Lithic-UK/src/launcher.html')), 'webapp');
+  // A fork hosted on a domain of its own is the known cost of guessing, and it has
+  // the switch that always wins.
+  assert.equal(resolveMode(location('https://my-fork.example.net/src/launcher.html')), 'self-host');
+  assert.equal(resolveMode(location('https://my-fork.example.net/src/launcher.html?mode=webapp')), 'webapp');
+});
+
 test('only the app’s own document is the app', () => {
   assert.equal(resolveMode(location('https://tauri.localhost/'), doc(false), { __TAURI__: {} }), 'tauri');
   assert.equal(resolveMode(location('tauri://localhost/'), doc(false), { __TAURI__: {} }), 'tauri');
 });
 
+test('only http(s) from somewhere that is not a published deployment is an instance', () => {
+  assert.equal(servedByInstance(location('https://personal.lithic.uk/src/launcher.html')), true);
+  assert.equal(servedByInstance(location('https://lithic.uk/')), false);
+  assert.equal(servedByInstance(location('https://xyvir.github.io/Lithic-UK/')), false);
+  // The app, and a copy of the file on disk, are neither an instance nor a client.
+  assert.equal(servedByInstance(location('tauri://localhost/')), false);
+  assert.equal(servedByInstance(location('file:///C:/Lithic/src/launcher.html')), false);
+});
+
 test('the injected global alone does not make an instance’s page the app', () => {
   // The regression this exists for: the app injects __TAURI__ into every
   // document its window loads, so a bookmarked instance used to claim `tauri`
-  // and take every local-only path built on it.
+  // and take every local-only path built on it: Rust IPC, this machine's disk,
+  // an install offered beside the exe — all against somebody else's server.
   const host = { __TAURI__: {} };
-  assert.equal(resolveMode(location('https://personal.example.uk/'), doc(false), host), 'webapp');
+  // The global says there is an app behind the window, never that it served this
+  // document. `personal.example.uk` served it, so this is that instance's page —
+  // with or without a declaration, and with or without a global in the window.
+  assert.equal(resolveMode(location('https://personal.example.uk/'), doc(false), host), 'self-host');
   assert.equal(resolveMode(location('https://personal.example.uk/'), doc(true), host), 'self-host');
   assert.equal(resolveMode(location('https://personal.example.uk/sync/'), doc(false), host), 'self-host');
-  // In a plain browser nothing changes: no global, so self-host is a declaration.
-  assert.equal(resolveMode(location('https://personal.example.uk/'), doc(false), undefined), 'webapp');
+  assert.equal(resolveMode(location('https://personal.example.uk/'), doc(false), undefined), 'self-host');
   assert.equal(resolveMode(location('https://personal.example.uk/'), doc(true), undefined), 'self-host');
+  // Only the app's own document, and an explicit `?mode=`, say otherwise.
+  assert.equal(resolveMode(location('https://tauri.localhost/'), doc(false), host), 'tauri');
+  assert.equal(resolveMode(location('https://personal.example.uk/?mode=webapp'), doc(false), host), 'webapp');
 });
 
 test('an explicit declaration outranks an accidental hostname match', () => {
