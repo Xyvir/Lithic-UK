@@ -370,39 +370,6 @@ h1 { flex: none; min-width: 0; margin: 0; color: #f4edf5; font-size: 1.8rem; fon
 }
 .bookmark-button svg { width: 22px; height: 24px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linejoin: round; overflow: visible; }
 .bookmark-button:hover { background: #3d3d3d; }
-/*
- * Saved logins, in the action card beside the bookmark control: the manager for the
- * vault as a whole. Grey while nothing is saved, green once something is — the same
- * two states, and the same two colours, as the key on a bookmark row, because they
- * mean the same thing (here, "the vault holds logins").
- */
-.action-pair .vault-manager-button {
-  align-self: stretch;
-  min-height: 60px;
-  margin: 0;
-  padding: 0;
-  border: 1px solid #454545;
-  border-radius: 7px;
-  background: #333;
-}
-.action-pair .vault-manager-button svg { width: 20px; height: 24px; overflow: visible; }
-.vault-manager-button {
-  display: grid;
-  place-items: center;
-  flex: 0 0 48px;
-  width: 48px;
-  min-height: 0;
-  height: 60px;
-  border: 1px solid #454545;
-  border-radius: 7px;
-  background: #333;
-  color: #8a8a8a;
-  cursor: pointer;
-}
-.vault-manager-button svg { width: 22px; height: 24px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; overflow: visible; }
-.vault-manager-button:hover { background: #3d3d3d; color: #bbb; }
-.vault-manager-button.has-logins { color: #7ba86f; }
-.vault-manager-button.has-logins:hover { color: #9cc78f; }
 .mount-card { gap: 0; }
 .mount-card .action-button { border-right: 0; border-radius: 7px 0 0 7px; }
 .mount-card .bookmark-button { flex-basis: 48px; border-left: 0; border-radius: 0 7px 7px 0; }
@@ -713,8 +680,24 @@ footer > * { pointer-events: auto; }
 .recent-modal h2 { margin: 0 0 14px; font-size: 1.5rem; }
 .modal-close { position: absolute; top: 8px; right: 10px; padding: 0 8px; border: 0; background: transparent; color: #ff5555; font-size: 1.8rem; cursor: pointer; }
 /* Saved instance logins (the credential vault). The controls for it are the key in
- * the action card (the vault as a whole) and the key on each bookmark row (one
+ * the bookmark dialog (the vault as a whole) and the key on each bookmark row (one
  * instance) — see `.vault-manager-button` and `.vault-row-button`. */
+/*
+ * The vault's own manager, inside the dialog that owns the same thing it does: an
+ * instance's address. It sits there rather than in the launcher's action row, where
+ * it spent permanent space on a control you reach for only while setting an instance
+ * up. Grey while nothing is saved, green once something is — the same two states,
+ * and the same two colours, as the key on a bookmark row, because they mean the same
+ * thing (here, "the vault holds logins").
+ *
+ * Grey is the text and the glyph, not the whole button: this one has a label on it,
+ * and a labelled control that has gone uniformly grey reads as disabled.
+ */
+.modal-action.vault-manager-button { display: flex; flex: 0 0 auto; align-items: center; gap: 8px; padding: 10px 14px; color: #a5a5a5; }
+.modal-action.vault-manager-button svg { flex: 0 0 auto; width: 17px; height: 17px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; overflow: visible; }
+.modal-action.vault-manager-button:hover { color: #ddd; }
+.modal-action.vault-manager-button.has-logins { color: #7ba86f; border-color: #5d8a52; }
+.modal-action.vault-manager-button.has-logins:hover { color: #9cc78f; }
 .vault-modal { width: min(100%, 560px); }
 .vault-modal h3.vault-subhead { margin: 18px 0 0; font-size: 1rem; color: #ddd; }
 .vault-modal .vault-field { display: block; margin: 12px 0 0; }
@@ -758,7 +741,20 @@ footer > * { pointer-events: auto; }
 .vault-advanced { margin-top: 16px; padding-top: 12px; border-top: 1px solid #3d3d3d; }
 .vault-advanced summary { color: #a5a5a5; font-size: 0.9rem; cursor: pointer; }
 .vault-advanced .vault-field { margin-top: 10px; }
-/* The one control knowing the secret cannot undo, so it is set apart rather than
+/* The one line a dialog gets before it asks for something: what it is asking, and
+ * no more. Everything the vault does is discoverable from the controls themselves. */
+.vault-sub { margin: 0 0 4px; color: #a5a5a5; font-size: 0.9rem; }
+/* The PIN boxes. Their widths are flexible on purpose: six of them have to fit the
+ * dialog on a phone, so they grow to a comfortable size and stop there rather than
+ * setting a width that would push the last one onto its own line. */
+.vault-pin { margin-top: 12px; }
+.pin-entry { display: block; }
+.pin-label { display: block; margin-bottom: 5px; color: #a5a5a5; font-size: 0.85rem; }
+.pin-boxes { display: flex; gap: 6px; }
+.launcher-modal .pin-boxes .pin-box { flex: 1 1 0; min-width: 0; max-width: 46px; height: 48px;
+  padding: 0; text-align: center; font-size: 1.15rem; letter-spacing: 0; }
+.pin-box:disabled { opacity: 0.5; }
+/* The one control knowing the PIN cannot undo, so it is set apart rather than
  * styled like the secondaries beside it. */
 .vault-danger { color: #e08a7a; }
 .vault-danger:hover:not(:disabled) { color: #ff9d88; }
@@ -834,6 +830,9 @@ footer > * { pointer-events: auto; }
  * `.recent-icon-button` rules so the two states win on hover, which is where a
  * row's icon buttons all react. */
 .vault-row-button { color: #8a8a8a; }
+/* Told not to ask again: still nothing saved, said a shade quieter than the plain
+ * grey so the two "nothing saved here" states are not indistinguishable. */
+.vault-row-button.manual { color: #6f6f6f; }
 .vault-row-button.covered { color: #7ba86f; }
 .vault-row-button:hover:enabled { color: #8ab4f8; }
 .vault-row-button.covered:hover:enabled { color: #9cc78f; }
@@ -932,16 +931,28 @@ footer > * { pointer-events: auto; }
   .action-pair { flex-wrap: nowrap; }
   .action-pair .action-button { flex: 1 1 auto; }
   .action-pair .bookmark-button { flex: 0 0 48px; }
-  .action-pair .vault-manager-button { flex: 0 0 48px; }
+  /* The mark above carries the same link, so on a phone the footer copy is the
+   * one that goes. Webapp mode only: the desktop app has never had this
+   * button, it syncs from the header instead. */
+  .github-link { display: none; }
 }
 
-@media (max-width: 440px) {
-  .action-pair .bookmark-button { display: none; }
-  /* The manager key stays when there is something to manage — forgetting every
-   * login, or changing the secret, is reachable from nowhere else. With nothing
-   * saved it goes, since a row's key covers setting the first login up. */
-  .action-pair .vault-manager-button:not(.has-logins) { display: none; }
+/*
+ * The bookmark tile is no longer dropped on the narrowest launchers: the vault's
+ * manager — changing the secret, or forgetting every login — is reached through the
+ * dialog that tile opens, so hiding it would strand the vault with no way in. It was
+ * worth 48px when this rule was written; the control that used to sit beside it now
+ * lives inside that dialog, which is where the room came from.
+ *
+ * Below the width where the two text buttons and the tile still sit on one line
+ * (about 350px — the text buttons do not shrink below their labels) the row wraps
+ * instead, and the tile takes a line of its own rather than being clipped.
+ */
+@media (max-width: 350px) {
+  .action-pair { flex-wrap: wrap; }
+  .action-pair .bookmark-button { flex: 1 1 100%; }
 }
+
 
 /* --- PENDING IMPORTS WINDOW (legacy parity) --- */
 .pending-imports {
@@ -1111,6 +1122,14 @@ body.drag-over::after {
 .brand-icon-wrap.pickable { cursor: pointer; }
 .brand-icon-wrap.pickable:hover .brand-icon { border-color: #ffb74d; }
 .brand-icon-wrap.pickable:focus-visible { outline: 2px solid #ffb74d; outline-offset: 2px; border-radius: 8px; }
+/* The mark as a link (webapp and the desktop app). Same 52px frame as the
+ * button; `.brand-icon-wrap` resets `cursor` to default and this is an <a>, so
+ * both the pointer and the underline have to be asked for. Hover uses the same
+ * accent as the install button — the app's interactive colour — so the mark
+ * reads as a way out rather than as decoration. */
+.brand-github { cursor: pointer; text-decoration: none; }
+.brand-github:hover .brand-icon, .brand-github:focus-visible .brand-icon { border-color: #8ab4f8; }
+.brand-github:focus-visible { outline: 2px solid #8ab4f8; outline-offset: 2px; border-radius: 8px; }
 .brand-icon-wrap.brand-emoji-wrap .brand-emoji {
   display: grid; place-items: center; width: 52px; height: 52px; border: 3px solid #444;
   border-radius: 6px; background: #f4f4f4; font-size: 1.7rem; line-height: 1;

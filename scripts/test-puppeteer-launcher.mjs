@@ -250,6 +250,86 @@ try {
   assert.ok(wide.paddingBottom < 70, 'Wide layout does not reserve the blocking footer band');
   assert.ok(wide.footerLeft < wide.mainLeft || wide.footerLeft > wide.mainLeft + 600, 'Wide footer is placed outside the launcher column');
 
+  // The bookmark tile on narrow launchers. It used to be dropped below 440px; it is now
+  // the only route into the dialog that holds the saved-logins manager, so dropping it
+  // would strand the vault with no way to change its secret or forget it. Kept, it has
+  // to stay inside the card — at 320px the row wraps rather than overflowing.
+  const readActionRow = async (width) => {
+    await page.setViewport({ width, height: 700 });
+    return page.evaluate(() => {
+      const card = document.querySelector('.action-pair');
+      const tile = card?.querySelector('.bookmark-button');
+      const first = card?.querySelector('.action-button');
+      if (!card || !tile || !first) return null;
+      const tileBox = tile.getBoundingClientRect();
+      return {
+        overflow: card.scrollWidth - card.clientWidth,
+        tileWidth: Math.round(tileBox.width),
+        sameLine: Math.round(tileBox.top) === Math.round(first.getBoundingClientRect().top),
+        insideCard: tileBox.right <= card.getBoundingClientRect().right + 0.5
+      };
+    });
+  };
+  const phoneRow = await readActionRow(390);
+  assert.equal(phoneRow?.sameLine, true, 'The bookmark tile still sits beside the action buttons at phone width');
+  assert.equal(phoneRow?.insideCard, true, '...inside the card, which is where the narrow rule used to drop it');
+  assert.equal(phoneRow?.overflow, 0, '...without the row overflowing');
+  const tinyRow = await readActionRow(320);
+  assert.equal(tinyRow?.insideCard, true, 'At 320px the tile stays inside the card rather than hanging past its edge');
+  assert.equal(tinyRow?.sameLine, false, '...by taking a line of its own, since the text buttons do not shrink below their labels');
+  assert.equal(tinyRow?.overflow, 0, '...and the row still does not overflow');
+
+  // Webapp mode: the mark is the project link, so the footer's copy of it is
+  // the one that goes on mobile — the mark always fits. This file:// document
+  // resolves to webapp (no Tauri global, no instance marker).
+  const readMarkAt = async (width) => {
+    await page.setViewport({ width, height: 700 });
+    return page.evaluate(() => {
+      const mark = document.querySelector('.brand-icon-wrap');
+      const link = document.querySelector('.github-link');
+      return {
+        markTag: mark?.tagName ?? null,
+        markHref: mark?.getAttribute('href') ?? null,
+        markLabel: mark?.getAttribute('aria-label') ?? null,
+        footerDisplay: link ? getComputedStyle(link).display : 'absent',
+        footerHref: link?.getAttribute('href') ?? null
+      };
+    });
+  };
+  const mobileMark = await readMarkAt(600);
+  const desktopMark = await readMarkAt(1000);
+  assert.equal(mobileMark.markTag, 'A', 'Mobile: the Lithic mark is the project link');
+  assert.equal(mobileMark.markHref, 'https://github.com/Lithic-UK/Lithic', 'Mobile: the mark points at the project');
+  assert.equal(mobileMark.markLabel, 'Lithic on GitHub', 'Mobile: the mark is labelled for screen readers');
+  assert.equal(mobileMark.footerDisplay, 'none', 'Mobile hides the footer Github button');
+  assert.equal(desktopMark.markTag, 'A', 'Desktop: the mark is the project link too');
+  assert.equal(desktopMark.footerDisplay, 'flex', 'Desktop keeps the footer Github button');
+  assert.equal(desktopMark.footerHref, mobileMark.markHref, 'The footer link points where the mark does');
+
+  // The other half of that rule: self-host is the one mode where the mark really
+  // is a control — the instance's own icon picker — so it must not have turned
+  // into a link. Forced with the mode query the legacy launcher already accepts;
+  // this page cannot reach a server over file://, so its failed fetches are
+  // expected and are deliberately not collected as errors.
+  const selfHostPage = await browser.newPage();
+  await selfHostPage.setViewport({ width: 1000, height: 700 });
+  await selfHostPage.goto(`file://${artifact}?mode=self-host`, { waitUntil: 'domcontentloaded' });
+  await selfHostPage.waitForSelector('main.container');
+  const selfHostMark = await selfHostPage.evaluate(() => {
+    const mark = document.querySelector('.brand-icon-wrap');
+    return {
+      tag: mark?.tagName ?? null,
+      label: mark?.getAttribute('aria-label') ?? null,
+      href: mark?.getAttribute('href') ?? null,
+      disabled: mark?.hasAttribute('disabled') ?? null
+    };
+  });
+  await selfHostPage.close();
+  assert.equal(selfHostMark.tag, 'BUTTON', 'Self-host: the mark stays the icon picker button');
+  assert.equal(selfHostMark.label, 'Set this instance’s icon', 'Self-host: the picker button is still labelled');
+  assert.equal(selfHostMark.href, null, 'Self-host: the mark does not link away from the picker');
+  assert.equal(selfHostMark.disabled, false, 'Self-host: the picker is a live control, not the old dead button');
+
   // Seed a cache-only wiki. The query below is intentionally absent from the
   // filename so this exercises cached content search without file permissions.
   await page.evaluate(async () => {
@@ -490,6 +570,39 @@ try {
   // vault's own behaviour — KDF, AEAD, origin matching — is covered by the Rust
   // unit tests, and the two meet at exactly these names.
   const vaultPage = await browser.newPage();
+  /**
+   * Type a PIN the way the dialog is meant to be used: into the first box, by
+   * keyboard, with the sixth character being the submit. Each box is left alone
+   * afterwards — driving them one at a time would test six inputs rather than the
+   * entry method, and the focus movement is the half of it worth pinning.
+   */
+  const typePin = async (page, container, pin) => {
+    const boxes = await page.$$(`${container} .pin-box`);
+    assert.equal(boxes.length, 6, `${container} is entered as six boxes`);
+    await boxes[0].click();
+    await page.keyboard.type(pin);
+  };
+  /**
+   * Bring the launcher back after it has handed the window to an instance.
+   *
+   * A handoff to a host that does not resolve leaves the tab on an error page, and
+   * that document has no `localStorage` to read — which surfaces as an unrelated
+   * SecurityError somewhere below rather than as the assertion it really is. So this
+   * waits for the launcher's own document to be up, and navigates again if the tab
+   * was still on its way somewhere else.
+   */
+  const reopenLauncher = async () => {
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      await vaultPage.goto(`file://${artifact}?mode=tauri`, { waitUntil: 'domcontentloaded' });
+      try {
+        await vaultPage.waitForSelector('.bookmark-row .vault-row-button', { timeout: 5000 });
+        if (await vaultPage.evaluate(() => typeof window.__lithicVault === 'object')) return;
+      } catch {
+        // Still somewhere else: the next attempt navigates again.
+      }
+    }
+    throw new Error('the launcher never came back up');
+  };
   await vaultPage.setViewport({ width: 900, height: 700 });
   vaultPage.on('pageerror', error => errors.push(`vault: ${error.message}`));
   // A record of what the launcher asked Rust, held on this side of the browser.
@@ -505,6 +618,10 @@ try {
       entries: [{ origin: 'https://personal.lithic.uk', user: 'keeper' }],
       calls: []
     };
+    // The PIN the boxes are expected to produce — folded to upper case, which is what
+    // the launcher sends — and one that is not it.
+    const PIN = 'L1TH1C';
+    const WRONG_PIN = 'ZZZZZZ';
     window.__lithicVault = vault;
     const answer = (command, args) => {
       vault.calls.push({ command, args });
@@ -528,18 +645,49 @@ try {
         }
         case 'list_credentials':
           return vault.state.unlocked ? vault.entries : [];
-        case 'check_credentials_secret':
-          return { ok: true, problem: null, warning: args.secret.length < 8 ? 'Six digits is about a day and a half of guessing on eight cores.' : null };
+        // Rust's own rules, near enough to keep the contract honest: six letters or
+        // digits, and the arithmetic for the one case worth warning about.
+        case 'check_credentials_secret': {
+          const pin = String(args.secret ?? '').toUpperCase();
+          if (!/^[0-9A-Z]{6}$/.test(pin)) {
+            return { ok: false, problem: 'A PIN is 6 letters or digits.', warning: null };
+          }
+          return {
+            ok: true,
+            problem: null,
+            warning: /^[0-9]{6}$/.test(pin)
+              ? 'Six digits is 1,000,000 combinations — about 7 days on one core, or 21 hours across eight. One letter makes that number useless.'
+              : null
+          };
+        }
+        case 'probe_instance':
+          // Only one fixture answers without asking for a password: the verdict is what
+          // decides whether the offer is made at all, so both answers have to be
+          // reachable from here.
+          return args.url.includes('open.example')
+            ? { state: 'lithic', status: 200 }
+            : { state: 'protected', status: 401 };
         case 'unlock_credentials':
+          if (args.secret === WRONG_PIN) throw new Error('That PIN does not open the vault.');
           vault.state.unlocked = true;
           return vault.entries;
         case 'unlock_for_instance': {
-          if (args.secret === 'wrong-secret') throw new Error('That secret does not open the vault.');
+          if (args.secret !== PIN) throw new Error('That PIN does not open the vault.');
           if (!vault.entries.some(entry => entry.origin === args.origin)) {
             throw new Error(`No login is saved for ${args.origin}.`);
           }
           vault.state.granted = true;
           return { origin: args.origin, user: 'keeper' };
+        }
+        case 'save_login_for_instance': {
+          // One command, which is the point of the dialog: the login is stored and the
+          // grant it leaves behind is what signs the instance in.
+          if (args.secret !== PIN) throw new Error('That PIN does not open the vault.');
+          vault.entries = vault.entries
+            .filter(entry => entry.origin !== args.origin)
+            .concat([{ origin: args.origin, user: args.user }]);
+          vault.state.granted = true;
+          return { origin: args.origin, user: args.user };
         }
         case 'remember_credentials': {
           // Rust normalises to an origin (scheme, host, port) before storing, and
@@ -611,21 +759,82 @@ try {
   // address, so its controls live with the instances.
   assert.equal(await vaultPage.$('.vault-button'), null, 'The vault has no app-level button in the heading');
 
+  // The vault's own manager is a button inside the bookmark dialog, which owns the
+  // same thing it does — an instance's address. It used to be a tile in the
+  // launcher's action row, spending permanent main-screen space on a control you
+  // only reach for while setting an instance up.
+  await vaultPage.click('.action-pair .bookmark-button');
+  await vaultPage.waitForSelector('.vault-manager-button');
   const managerControl = await vaultPage.evaluate(() => {
     const node = document.querySelector('.vault-manager-button');
     return {
       exists: Boolean(node),
-      inCard: node?.closest('.action-pair') !== null,
+      inBookmarkDialog: Boolean(node?.closest('.launcher-modal')?.querySelector('#bookmark-title')),
+      inActionCard: Boolean(node?.closest('.action-pair')),
       hasLogins: node?.classList.contains('has-logins') ?? null,
-      title: node?.getAttribute('title') ?? '',
-      nextToBookmark: node?.previousElementSibling?.classList.contains('bookmark-button') ?? false
+      title: node?.getAttribute('title') ?? ''
     };
   });
   assert.ok(managerControl.exists, 'The manager key renders in the desktop app');
-  assert.ok(managerControl.inCard, 'It sits in the action card');
-  assert.ok(managerControl.nextToBookmark, '...beside the bookmark control, which owns the same question');
+  assert.ok(managerControl.inBookmarkDialog, 'It sits in the bookmark dialog, which owns the same address');
+  assert.equal(managerControl.inActionCard, false, '...and no longer takes a tile in the launcher’s own action row');
   assert.equal(managerControl.hasLogins, true, 'A vault holding a login says so in colour');
   assert.ok(managerControl.title.includes('1 saved'), `And says how many without being opened: ${managerControl.title}`);
+  // Its shape in that row: a key glyph and a label, on the same line as the two buttons
+  // the dialog already had, coloured rather than hidden — and the colour is read as the
+  // computed value, because a plain `.modal-action.secondary` would paint it #ddd and
+  // quietly win on a later rule.
+  const managerLooks = await vaultPage.evaluate(() => {
+    const node = document.querySelector('.vault-manager-button');
+    const row = node.closest('.modal-actions');
+    const buttons = [...row.querySelectorAll('button')];
+    const box = node.getBoundingClientRect();
+    return {
+      label: node.textContent.trim(),
+      hasGlyph: Boolean(node.querySelector('svg')),
+      colour: getComputedStyle(node).color,
+      onOneLine: buttons.every(button => Math.round(button.getBoundingClientRect().top) === Math.round(box.top)),
+      rowOverflow: row.scrollWidth - row.clientWidth
+    };
+  });
+  assert.equal(managerLooks.label, 'Saved Logins', 'The manager key is labelled, so what it manages is not a guess');
+  assert.ok(managerLooks.hasGlyph, '...and keeps the key it is recognised by');
+  assert.equal(managerLooks.colour, 'rgb(123, 168, 111)', 'Green is the same green a bookmark row’s key uses for a saved login');
+  assert.equal(managerLooks.onOneLine, true, 'It shares the dialog’s action row rather than wrapping under it');
+  assert.equal(managerLooks.rowOverflow, 0, '...without the row overflowing the dialog');
+  // The one-pass setup this placement buys: the address typed in the bookmark dialog
+  // is the one the manager offers to save a login for, so an instance does not have to
+  // be bookmarked first and given a login afterwards. It is handed over as typed —
+  // Rust is what decides an origin — which is why this is not a normalised address.
+  await vaultPage.type('input[aria-label="Self-hosted instance URL"]', 'other.example');
+  await vaultPage.click('.vault-manager-button');
+  await vaultPage.waitForSelector('.vault-modal');
+  const handedOver = await vaultPage.evaluate(() => ({
+    bookmarkDialogClosed: document.querySelector('#bookmark-title') === null,
+    dialogs: document.querySelectorAll('.modal-overlay').length
+  }));
+  assert.equal(handedOver.bookmarkDialogClosed, true, 'The bookmark dialog closes behind the vault it opened');
+  assert.equal(handedOver.dialogs, 1, '...so the two are never stacked on each other');
+  // The add field only exists with the vault open, so the address the dialog carried over
+  // is read there — which is also the reason the hand-off is worth having: an address you
+  // are already looking at does not have to be typed a second time.
+  // The sixth character is the submit, so there is no button to press.
+  await typePin(vaultPage, '.vault-unlock-pin', 'L1TH1C');
+  await new Promise(resolve => setTimeout(resolve, 400));
+  assert.equal(
+    await vaultPage.evaluate(() => Boolean(document.querySelector('#vault-new-origin'))),
+    true,
+    'The completed PIN submits itself: the vault is open with no button pressed'
+  );
+  assert.equal(
+    await vaultPage.$eval('#vault-new-origin', node => node.value),
+    'other.example',
+    'And the address typed in the bookmark dialog is the one offered to save a login for'
+  );
+  // A fresh page for what comes next, which walks the per-instance keys from the locked
+  // vault this left behind.
+  await vaultPage.goto(`file://${artifact}?mode=tauri`, { waitUntil: 'domcontentloaded' });
+  await vaultPage.waitForSelector('.bookmark-row .vault-row-button');
 
   // One key per bookmark, coloured from the vault file's index: green for an address a
   // login is saved for, grey for one that has none — decided before anything unlocks.
@@ -659,27 +868,31 @@ try {
   // Locked with a vault on disk: the secret and nothing else, plus what the file
   // says about itself without being opened.
   assert.equal(await vaultPage.$('#vault-new-origin'), null, 'A locked vault offers no way to add a login');
-  assert.ok(
-    await vaultPage.$eval('.vault-count', node => node.textContent.includes('One login is saved')),
+  assert.equal(
+    await vaultPage.$eval('.vault-count', node => node.textContent.trim()),
+    '1 login saved.',
     'The count is known while locked, because it comes from the file’s origin index'
   );
-  await vaultPage.type('.vault-modal input[type="password"]', 'hunter2');
-  await vaultPage.waitForFunction(() => document.querySelector('.vault-warning') !== null);
-  const warning = await vaultPage.$eval('.vault-warning', node => node.textContent.trim());
-  assert.ok(warning.includes('day and a half'), 'The weak-secret warning is Rust’s own arithmetic, shown as written');
-  await vaultPage.click('.vault-modal .modal-action');
-  await vaultPage.waitForSelector('.vault-list li');
+  await typePin(vaultPage, '.vault-unlock-pin', 'L1TH1C');
+  await new Promise(resolve => setTimeout(resolve, 400));
+  assert.equal(
+    await vaultPage.evaluate(() => document.querySelector('.vault-list li')?.textContent.includes('personal.lithic.uk') ?? false),
+    true,
+    'The completed PIN opens the vault, listing what is in it'
+  );
   const afterUnlock = await vaultPage.evaluate(() => ({
     calls: window.__lithicVault.calls,
     listed: document.querySelector('.vault-list li').textContent.replace(/\s+/g, ' ').trim(),
     prefilled: document.querySelector('#vault-new-origin').value,
-    managerTitle: document.querySelector('.vault-manager-button').getAttribute('title')
+    openDialogs: [...document.querySelectorAll('.vault-modal, .launcher-modal')].length,
+    bookmarkDialogClosed: document.querySelector('#bookmark-title') === null
   }));
   const unlockCall = afterUnlock.calls.find(call => call.command === 'unlock_credentials');
-  assert.deepEqual(unlockCall?.args, { secret: 'hunter2' }, 'Unlocking passes the secret under the name Rust expects');
+  assert.deepEqual(unlockCall?.args, { secret: 'L1TH1C' }, 'Unlocking passes the PIN under the name Rust expects, folded to upper case');
   assert.ok(afterUnlock.listed.includes('https://personal.lithic.uk'), 'The saved login is listed by its address');
   assert.equal(afterUnlock.prefilled, 'https://other.example', 'The address whose key was clicked is ready to save');
-  assert.ok(afterUnlock.managerTitle.includes('open'), 'And the manager says the vault is open while its dialog is up');
+  assert.equal(afterUnlock.bookmarkDialogClosed, true, 'The bookmark dialog closes behind the vault it opened, rather than stacking on it');
+  assert.equal(afterUnlock.openDialogs, 1, 'One dialog is on screen, and it is the vault’s');
 
   // Saving that login: the origin is the field that trips people, so it takes any
   // address and Rust is left to normalise it — and the field was already filled from
@@ -688,6 +901,7 @@ try {
   await vaultPage.type('#vault-new-origin', 'https://other.example/sync/wiki.html');
   await vaultPage.type('#vault-new-user', 'keeper');
   await vaultPage.type('#vault-new-password', 's3cret');
+  await vaultPage.type('#vault-new-password-confirm', 's3cret');
   await vaultPage.evaluate(() => {
     const buttons = [...document.querySelectorAll('.vault-modal .modal-action')];
     buttons.find(button => button.textContent.includes('Save Login')).click();
@@ -763,24 +977,27 @@ try {
   // Changing the secret is offered only with the vault open, which is why the old one
   // is not asked for again: the key being replaced is already in memory.
   await vaultPage.click('.vault-advanced summary');
-  await vaultPage.type('#vault-new-secret', 'a much longer secret');
-  await vaultPage.type('#vault-new-secret-confirm', 'a much longer secret');
-  await vaultPage.evaluate(() => {
-    const buttons = [...document.querySelectorAll('.vault-modal .modal-action')];
-    buttons.find(button => button.textContent.includes('Change Secret')).click();
-  });
-  // Waited for by its wording, not its presence: saving a login already put a notice
-  // there, and a stale one would pass a presence check.
-  await vaultPage.waitForFunction(() => document.querySelector('.vault-notice')?.textContent.includes('changed'));
+  await typePin(vaultPage, '.vault-new-pin', 'n3wp1n');
+  await typePin(vaultPage, '.vault-new-pin-confirm', 'n3wp1n');
+  // Read by its wording, not its presence: saving a login already put a notice there,
+  // and a stale one would pass a presence check.
+  await new Promise(resolve => setTimeout(resolve, 400));
   const rotated = await vaultPage.evaluate(() => ({
     calls: window.__lithicVault.calls.filter(call => call.command === 'change_credentials_secret'),
-    notice: document.querySelector('.vault-notice').textContent.trim()
+    notice: document.querySelector('.vault-notice')?.textContent.trim() ?? '',
+    boxes: [...document.querySelectorAll('.vault-new-pin .pin-box')].map(box => box.value).join('')
   }));
   assert.deepEqual(
     rotated.calls.at(-1)?.args,
-    { newSecret: 'a much longer secret' },
-    'The replacement secret goes over as `newSecret`, and the old one is never sent'
+    { newSecret: 'N3WP1N' },
+    'The replacement PIN goes over as `newSecret`, and the old one is never sent'
   );
+  assert.equal(
+    rotated.calls.length,
+    1,
+    'The completed confirmation is the submit: changing the PIN needs no button press'
+  );
+  assert.equal(rotated.boxes, 'N3WP1N', 'And the boxes hold what was typed, in upper case');
   assert.ok(rotated.notice.includes('changed'), `The dialog says the secret changed: ${rotated.notice}`);
 
   // Leaving the dialog locks: the vault is open only while it is on screen, so nothing
@@ -791,30 +1008,172 @@ try {
     await vaultPage.evaluate(() => window.__lithicVault.calls.some(call => call.command === 'lock_credentials')),
     'Closing the manager locks the vault rather than leaving it open'
   );
-  assert.equal(await vaultPage.$('.instance-unlock-secret'), null, 'and no prompt is left behind by any of it');
+  assert.equal(await vaultPage.$('.instance-unlock-pin .pin-box'), null, 'and no prompt is left behind by any of it');
 
-  // A bookmark with nothing saved opens straight away — no prompt, because there is
-  // nothing the app could answer with.
-  const immediateRequests = [];
-  const recordImmediate = request => {
-    if (request.isNavigationRequest()) immediateRequests.push(request.url());
+  // --- Offering to save a login, where there is a prompt to answer --------------
+  // An instance with nothing saved used to open straight through. It now asks first —
+  // but only where asking can lead anywhere: an instance that challenges a visitor who
+  // has no password, which is what `probe_instance` is asked before anything appears.
+  const offerRequests = [];
+  const recordOffer = request => {
+    if (request.isNavigationRequest()) offerRequests.push(request.url());
   };
-  vaultPage.on('request', recordImmediate);
-  await vaultPage.evaluate(() => {
-    const row = [...document.querySelectorAll('.bookmark-row')].find(node => node.textContent.includes('other.example'));
-    row.querySelector('.bookmark-name').click();
-  });
-  await new Promise(resolve => setTimeout(resolve, 400));
-  vaultPage.off('request', recordImmediate);
-  assert.ok(
-    immediateRequests.some(url => url.startsWith('https://other.example')),
-    `An instance with nothing saved opens without a prompt (saw ${JSON.stringify(immediateRequests)})`
+  /** Click a bookmark by its label, and give the dialog (or the navigation) a moment. */
+  const openBookmark = async label => {
+    await vaultPage.evaluate(text => {
+      const row = [...document.querySelectorAll('.bookmark-row')].find(node => node.textContent.includes(text));
+      row.querySelector('.bookmark-name').click();
+    }, label);
+    await new Promise(resolve => setTimeout(resolve, 300));
+  };
+  vaultPage.on('request', recordOffer);
+  await openBookmark('other.example');
+  const offered = await vaultPage.evaluate(() => ({
+    heading: document.querySelector('#credential-offer-title')?.textContent.trim() ?? '',
+    sub: document.querySelector('#credential-offer-title')?.nextElementSibling?.textContent.trim() ?? '',
+    pinBoxes: document.querySelectorAll('.credential-offer-pin .pin-box').length,
+    confirmBoxes: document.querySelectorAll('.credential-offer-pin-confirm .pin-box').length,
+    buttons: [...document.querySelectorAll('.modal-actions button')].map(node => node.textContent.trim()),
+    saveDisabled: document.querySelector('.credential-offer-save')?.disabled ?? null,
+    dialogs: document.querySelectorAll('.modal-overlay').length,
+    probes: window.__lithicVault.calls.filter(call => call.command === 'probe_instance').at(-1)?.args
+  }));
+  assert.equal(offered.heading, 'Add a saved credential?', 'An instance with nothing saved is offered one');
+  assert.equal(offered.sub, 'other.example asks for a password.', 'The offer names the instance and why it is being made');
+  assert.equal(offered.pinBoxes, 6, 'The PIN is asked for in six boxes');
+  assert.equal(offered.confirmBoxes, 0, 'A vault on disk already has a PIN, so there is nothing to confirm');
+  assert.deepEqual(
+    offered.buttons,
+    ['Save Credential', 'Cancel', 'Don’t ask again'],
+    'Both ways out sit beside the one way in, and none of them is a second dialog'
   );
+  assert.equal(offered.saveDisabled, true, 'And an empty credential cannot be saved');
+  assert.equal(offered.dialogs, 1, 'All of it fits one dialog');
+  assert.deepEqual(
+    offered.probes,
+    { url: 'https://other.example' },
+    'Whether to ask at all was decided by the probe, before anything was shown'
+  );
+  assert.equal(offerRequests.length, 0, 'Nothing has been requested from the instance yet');
+
+  // The boxes fold what is typed, here in the one place where six characters do not
+  // submit anything: with a vault already on disk there is nothing to choose, so the
+  // PIN can be looked at after it has been typed.
+  await typePin(vaultPage, '.credential-offer-pin', 'l1th1c');
   assert.equal(
-    immediateRequests.filter(url => url.includes('personal.lithic.uk')).length,
-    0,
-    'and the bookmark the vault does cover is not involved in that click'
+    await vaultPage.$$eval('.credential-offer-pin .pin-box', nodes => nodes.map(node => node.value).join('')),
+    'L1TH1C',
+    'A lower-case PIN is folded as it is typed, which is what makes the entry case-insensitive'
   );
+
+  // The credential itself: a mistyped repeat is not saved, because a stored password
+  // nobody can type is worse than no stored password.
+  await vaultPage.type('.credential-offer-user', 'keeper');
+  await vaultPage.type('.credential-offer-password', 's3cret');
+  await vaultPage.type('.credential-offer-password-confirm', 's3cre');
+  assert.equal(
+    await vaultPage.$eval('.credential-offer-save', node => node.disabled),
+    true,
+    'A mistyped password repeat does not save a credential'
+  );
+  await vaultPage.type('.credential-offer-password-confirm', 't');
+  await vaultPage.$eval('.credential-offer-save', node => node.click());
+  await new Promise(resolve => setTimeout(resolve, 400));
+  vaultPage.off('request', recordOffer);
+  const savedOffer = vaultCalls.filter(call => call.command === 'save_login_for_instance').at(-1);
+  assert.deepEqual(
+    savedOffer?.args,
+    { origin: 'https://other.example', secret: 'L1TH1C', user: 'keeper', password: 's3cret' },
+    'Saving offers origin, PIN, user and password exactly as Rust declares them'
+  );
+  assert.ok(
+    offerRequests.some(url => url.startsWith('https://other.example')),
+    `And the instance opens straight afterwards, without the platform's own prompt (saw ${JSON.stringify(offerRequests)})`
+  );
+  assert.ok(
+    offerRequests.some(url => url.includes('lithic-from=')),
+    '...carrying the marker that names this launcher, as any other open does'
+  );
+
+  // "Don't ask again" is remembered with the bookmark, so the offer is made once and
+  // the answer is somewhere the next open can read it. The checkbox is not needed:
+  // the flag is only about the offer, and saving a login is the way back from it.
+  await reopenLauncher();
+  await openBookmark('other.example');
+  await vaultPage.waitForSelector('#credential-offer-title');
+  await vaultPage.click('.credential-offer-skip');
+  await new Promise(resolve => setTimeout(resolve, 400));
+  await reopenLauncher();
+  const skipped = await vaultPage.evaluate(() => {
+    const row = [...document.querySelectorAll('.bookmark-row')].find(node => node.textContent.includes('other.example'));
+    const key = row.querySelector('.vault-row-button');
+    return {
+      stored: JSON.parse(localStorage.getItem('bookmarkedInstances') ?? '[]').find(entry => entry.url === 'https://other.example')?.manualAuth ?? null,
+      manualKeys: [...document.querySelectorAll('.bookmark-row')].map(node => node.querySelector('.vault-row-button').classList.contains('manual')),
+      covered: key.classList.contains('covered'),
+      title: key.getAttribute('title')
+    };
+  });
+  assert.equal(skipped.stored, true, 'The answer is kept with the bookmark it is about');
+  assert.deepEqual(skipped.manualKeys, [false, true], 'The row says so rather than looking like any other unsaved one');
+  assert.equal(skipped.covered, false, '...without pretending a login is saved, because none is');
+  assert.ok(skipped.title.includes('chose not to'), `And its title says what was chosen: ${skipped.title}`);
+
+  // And the offered instance is remembered as asked: the second open asks nothing.
+  const skippedRequests = [];
+  const recordSkipped = request => {
+    if (request.isNavigationRequest()) skippedRequests.push(request.url());
+  };
+  vaultPage.on('request', recordSkipped);
+  await openBookmark('other.example');
+  await new Promise(resolve => setTimeout(resolve, 400));
+  vaultPage.off('request', recordSkipped);
+  assert.equal(
+    await vaultPage.evaluate(() => document.querySelector('#credential-offer-title') === null),
+    true,
+    'The instance that was answered "do not ask again" is not asked again'
+  );
+  assert.ok(
+    skippedRequests.some(url => url.startsWith('https://other.example')),
+    `It simply opens (saw ${JSON.stringify(skippedRequests)})`
+  );
+
+  // The other verdict from the probe: an instance that answers without a password is
+  // never asked about, because a saved login would have nothing to answer.
+  await reopenLauncher();
+  await vaultPage.evaluate(() => {
+    const entries = JSON.parse(localStorage.getItem('bookmarkedInstances') ?? '[]');
+    if (!entries.some(entry => entry.url === 'https://open.example')) {
+      entries.push({ url: 'https://open.example', label: 'open.example' });
+      localStorage.setItem('bookmarkedInstances', JSON.stringify(entries));
+    }
+  });
+  await reopenLauncher();
+  const openRequests = [];
+  const recordOpen = request => {
+    if (request.isNavigationRequest()) openRequests.push(request.url());
+  };
+  vaultPage.on('request', recordOpen);
+  await openBookmark('open.example');
+  await new Promise(resolve => setTimeout(resolve, 400));
+  vaultPage.off('request', recordOpen);
+  assert.equal(
+    await vaultPage.evaluate(() => document.querySelector('#credential-offer-title') === null),
+    true,
+    'An instance that asks for no password is never offered a login for one'
+  );
+  assert.ok(
+    openRequests.some(url => url.startsWith('https://open.example')),
+    `It opens straight away (saw ${JSON.stringify(openRequests)})`
+  );
+  // The fixture list goes back to the two the rest of this block walks, so the offer's
+  // third instance cannot quietly change what the next assertions count. Read from the
+  // launcher's own document, since the handoff has left this tab somewhere else.
+  await reopenLauncher();
+  await vaultPage.evaluate(() => {
+    const entries = JSON.parse(localStorage.getItem('bookmarkedInstances') ?? '[]');
+    localStorage.setItem('bookmarkedInstances', JSON.stringify(entries.filter(entry => entry.url !== 'https://open.example')));
+  });
 
   // --- Unlocking is per instance, not per session -------------------------------
   // Opening an instance the vault has a login for asks for the secret first, and the
@@ -824,63 +1183,104 @@ try {
   const recordInstanceNavigation = request => {
     if (request.isNavigationRequest()) navigationRequests.push(request.url());
   };
-  await vaultPage.goto(`file://${artifact}?mode=tauri`, { waitUntil: 'domcontentloaded' });
-  await vaultPage.waitForSelector('.bookmark-row .vault-row-button');
+  await reopenLauncher();
   navigationRequests.length = 0;
   vaultPage.on('request', recordInstanceNavigation);
   await vaultPage.evaluate(() => {
     const row = [...document.querySelectorAll('.bookmark-row')].find(node => node.textContent.includes('personal.lithic.uk'));
     row.querySelector('.bookmark-name').click();
   });
-  await vaultPage.waitForSelector('.instance-unlock-secret');
+  await vaultPage.waitForSelector('.instance-unlock-pin .pin-box');
   await new Promise(resolve => setTimeout(resolve, 200));
   assert.equal(
     navigationRequests.length,
     0,
-    'Asking for the secret happens before anything is requested from the instance'
+    'Asking for the PIN happens before anything is requested from the instance'
   );
-  assert.ok(
-    await vaultPage.$eval('.instance-unlock-secret', node =>
-      node.closest('.launcher-modal').querySelector('h2').textContent.includes('https://personal.lithic.uk')
+  assert.equal(
+    await vaultPage.$eval('.instance-unlock-pin', node =>
+      node.closest('.launcher-modal').querySelector('h2').textContent.trim()
     ),
-    'The prompt names the instance it is for'
+    'Open personal.lithic.uk',
+    'The prompt names the instance it is for, without the scheme every one of them shares'
   );
-
-  assert.ok(
+  assert.equal(
     await vaultPage.evaluate(() =>
       [...document.querySelectorAll('.vault-modal .modal-action')].some(button =>
         button.textContent.includes('Open Without the Login')
       )
     ),
-    'and there is a way past the prompt, for an instance whose secret was forgotten'
+    false,
+    'There is no way past the PIN: this dialog only exists for an instance a login is saved for'
   );
 
-  // A wrong secret is refused where it was typed, and does not open the instance.
-  await vaultPage.type('.instance-unlock-secret', 'wrong-secret');
-  await vaultPage.evaluate(() => {
-    const buttons = [...document.querySelectorAll('.vault-modal .modal-action')];
-    buttons.find(button => button.textContent.includes('Unlock & Open')).click();
-  });
-  await vaultPage.waitForFunction(() => document.querySelector('.vault-modal .status-line.error') !== null);
-  const refused = await vaultPage.evaluate(() => document.querySelector('.vault-modal .status-line.error').textContent.trim());
-  assert.ok(refused.includes('does not open the vault'), `A wrong secret says so: ${refused}`);
+  // Six boxes have to stay six boxes on one line: the dialog is `min(100%, 560px)` with
+  // padding, so on a phone they have to shrink rather than wrap, and the row must not
+  // hang past the modal's own edge. Measured at both widths, because the narrow one is
+  // where it would fail and the wide one is where it is read.
+  const measurePin = () =>
+    vaultPage.evaluate(() => {
+      const boxes = [...document.querySelectorAll('.instance-unlock-pin .pin-box')];
+      const modal = document.querySelector('.vault-modal').getBoundingClientRect();
+      const width = (node) => Math.round(node.getBoundingClientRect().width);
+      return {
+        count: boxes.length,
+        rows: new Set(boxes.map(node => Math.round(node.getBoundingClientRect().top))).size,
+        widths: [...new Set(boxes.map(width))],
+        // At most nothing: the last box may stop short of the modal's inner edge, but
+        // it must not pass it.
+        past: Math.max(0, Math.round(boxes.at(-1).getBoundingClientRect().right - (modal.right - 22)))
+      };
+    });
+  const pinAtWide = await measurePin();
+  assert.deepEqual(
+    { count: pinAtWide.count, rows: pinAtWide.rows, past: pinAtWide.past },
+    { count: 6, rows: 1, past: 0 },
+    `Six boxes on one line, inside the modal: ${JSON.stringify(pinAtWide)}`
+  );
+  await vaultPage.setViewport({ width: 320, height: 700 });
+  const pinAtNarrow = await measurePin();
+  await vaultPage.setViewport({ width: 900, height: 700 });
+  assert.deepEqual(
+    { count: pinAtNarrow.count, rows: pinAtNarrow.rows, past: pinAtNarrow.past },
+    { count: 6, rows: 1, past: 0 },
+    `...and still on the narrowest phone rather than wrapping: ${JSON.stringify(pinAtNarrow)}`
+  );
+  assert.ok(
+    pinAtNarrow.widths[0] < pinAtWide.widths[0],
+    `The boxes shrink to fit rather than overflowing: ${pinAtNarrow.widths[0]}px at 320 against ${pinAtWide.widths[0]}px at 900`
+  );
+
+  // A wrong PIN is refused where it was typed, does not open the instance, and leaves
+  // the boxes empty — the next attempt is typed again rather than edited.
+  await typePin(vaultPage, '.instance-unlock-pin', 'ZZZZZZ');
+  // A pause rather than a condition: the mock answers at once, and whether anything
+  // was asked at all is the assertion below — a wait would fail as a timeout that
+  // names nothing instead of as the promise that broke.
+  await new Promise(resolve => setTimeout(resolve, 400));
+  const refused = await vaultPage.evaluate(() => ({
+    detail: document.querySelector('.vault-modal .status-line.error')?.textContent.trim() ?? '',
+    boxes: [...document.querySelectorAll('.instance-unlock-pin .pin-box')].map(box => box.value).join('')
+  }));
+  assert.ok(
+    vaultCalls.some(call => call.command === 'unlock_for_instance' && call.args.secret === 'ZZZZZZ'),
+    'The sixth character is the submit: nothing else was pressed, and Rust was asked'
+  );
+  assert.ok(refused.detail.includes('does not open the vault'), `A wrong PIN says so: ${refused.detail}`);
+  assert.equal(refused.boxes, '', 'and the boxes are empty, ready for the next attempt');
   assert.equal(navigationRequests.length, 0, 'And it does not open the instance anyway');
 
   // The right one signs in to that origin and opens it, with the marker that gives the
-  // instance a way back to this launcher.
-  await vaultPage.$eval('.instance-unlock-secret', node => { node.value = ''; });
-  await vaultPage.type('.instance-unlock-secret', 'correct horse');
-  await vaultPage.evaluate(() => {
-    const buttons = [...document.querySelectorAll('.vault-modal .modal-action')];
-    buttons.find(button => button.textContent.includes('Unlock & Open')).click();
-  });
+  // instance a way back to this launcher. Nothing else is pressed: the sixth character
+  // is the whole of the confirmation.
+  await typePin(vaultPage, '.instance-unlock-pin', 'L1TH1C');
   await new Promise(resolve => setTimeout(resolve, 500));
   vaultPage.off('request', recordInstanceNavigation);
   const opened = vaultCalls.filter(call => call.command === 'unlock_for_instance').at(-1);
   assert.deepEqual(
     opened?.args,
-    { origin: 'https://personal.lithic.uk', secret: 'correct horse' },
-    'Unlocking for an instance passes the origin and the secret under the names Rust expects'
+    { origin: 'https://personal.lithic.uk', secret: 'L1TH1C' },
+    'Unlocking for an instance passes the origin and the PIN under the names Rust expects'
   );
   assert.ok(
     vaultCalls.some(call => call.command === 'unlock_for_instance' && call.args.origin === 'https://personal.lithic.uk'),
@@ -897,18 +1297,21 @@ try {
 
   // --- Starting over, and the one control knowing the secret cannot undo ---------
   await vaultPage.goto(`file://${artifact}?mode=tauri`, { waitUntil: 'domcontentloaded' });
+  await vaultPage.waitForSelector('.action-pair .bookmark-button');
+  await vaultPage.click('.action-pair .bookmark-button');
   await vaultPage.waitForSelector('.vault-manager-button');
   await vaultPage.click('.vault-manager-button');
   await vaultPage.waitForSelector('.vault-modal');
-  assert.ok(
-    await vaultPage.$eval('.vault-modal .vault-count', node => node.textContent.includes('One login is saved')),
+  assert.equal(
+    await vaultPage.$eval('.vault-modal .vault-count', node => node.textContent.trim()),
+    '1 login saved.',
     'The manager says what is stored without opening it'
   );
+  // It asks first, and the asking happens before anything is destroyed.
   assert.equal(
     await vaultPage.$eval('.vault-modal .vault-danger', node => node.textContent.trim()),
-    'Forget All Saved Logins'
+    'Forget Everything'
   );
-  // It asks first, and the asking happens before anything is destroyed.
   await vaultPage.click('.vault-modal .vault-danger');
   // Both dialogs are on screen at once, so the question is found among them rather
   // than assumed to be the first.
@@ -920,12 +1323,13 @@ try {
     false,
     'Confirming is what deletes the vault, not the click that opened the question'
   );
+  // Scoped to the question itself: the dialog underneath carries a button with the
+  // same wording now, and an unscoped search would answer "no" by pressing it again.
   await vaultPage.evaluate(() => {
-    const button = [...document.querySelectorAll('.modal-action')].find(node => node.textContent.trim() === 'Forget All');
+    const button = [...document.querySelectorAll('.confirm-modal .modal-action')].find(node => node.textContent.trim() === 'Forget Everything');
     button.click();
   });
   await vaultPage.waitForFunction(() => window.__lithicVault.calls.some(call => call.command === 'destroy_credentials'));
-  await vaultPage.waitForFunction(() => document.querySelector('.vault-manager-button')?.classList.contains('has-logins') === false);
   const destroyed = await vaultPage.evaluate(() => ({
     calls: window.__lithicVault.calls.filter(call => call.command === 'destroy_credentials').length,
     greenRows: [...document.querySelectorAll('.bookmark-row .vault-row-button')].filter(key => key.classList.contains('covered')).length,
@@ -937,46 +1341,87 @@ try {
 
   // Nothing on disk now, so the same dialog is the one that creates a vault: the
   // secret twice, since nothing can recover it.
+  // Grey again, which is only readable from where the manager now lives — and that is
+  // the point of the count: it is known without unlocking, and it says the vault holds
+  // nothing any more rather than leaving the last answer standing.
   await vaultPage.evaluate(() => { window.__lithicVault.state.exists = false; });
-  await vaultPage.click('.modal-close');
+  await vaultPage.click('.vault-modal .modal-close');
+  await vaultPage.waitForFunction(() => document.querySelector('.vault-modal') === null);
+  await vaultPage.click('.action-pair .bookmark-button');
+  await vaultPage.waitForSelector('.vault-manager-button');
+  assert.deepEqual(
+    await vaultPage.evaluate(() => ({
+      hasLogins: document.querySelector('.vault-manager-button').classList.contains('has-logins'),
+      colour: getComputedStyle(document.querySelector('.vault-manager-button')).color
+    })),
+    { hasLogins: false, colour: 'rgb(165, 165, 165)' },
+    'Forgetting everything returns the manager key to the grey it starts at, not the default button white'
+  );
   await vaultPage.click('.vault-manager-button');
   await vaultPage.waitForFunction(() => document.querySelector('#vault-new-origin') === null);
-  const createLabels = await vaultPage.evaluate(() => {
-    const fields = [...document.querySelectorAll('.vault-modal input')].map(node => node.getAttribute('type'));
-    const primary = document.querySelector('.vault-modal .modal-action');
-    return { fields, primary: primary.textContent.trim(), disabled: primary.disabled };
-  });
-  assert.equal(createLabels.fields.filter(type => type === 'password').length, 2, 'Creating a vault asks for the secret twice, since nothing can recover it');
-  assert.equal(createLabels.primary, 'Create & Unlock');
-  assert.equal(createLabels.disabled, true, 'An empty secret cannot create a vault');
-  await vaultPage.type('.vault-modal input[type="password"]', 'correct horse');
-  assert.equal(
-    await vaultPage.evaluate(() => document.querySelector('.vault-modal .modal-action').disabled),
-    true,
-    'A secret typed once, with the confirmation still empty, cannot create a vault'
+  const createLabels = await vaultPage.evaluate(() => ({
+    pinBoxes: document.querySelectorAll('.vault-unlock-pin .pin-box').length,
+    confirmBoxes: document.querySelectorAll('.vault-unlock-pin-confirm .pin-box').length,
+    primary: document.querySelector('.vault-modal .modal-action').textContent.trim(),
+    disabled: document.querySelector('.vault-modal .modal-action').disabled
+  }));
+  assert.deepEqual(
+    createLabels,
+    { pinBoxes: 6, confirmBoxes: 6, primary: 'Set PIN', disabled: true },
+    'Creating a vault asks for the PIN twice, since nothing can recover it'
   );
-  const confirmFields = await vaultPage.$$('.vault-modal input[type="password"]');
-  await confirmFields[1].type('correct hors');
+  // Six digits is the one PIN worth warning about, and the arithmetic shown is Rust's
+  // own sentence rather than a second opinion assembled here.
+  await typePin(vaultPage, '.vault-unlock-pin', '123456');
+  await new Promise(resolve => setTimeout(resolve, 400));
+  const weakPin = await vaultPage.$eval('.vault-warning', node => node.textContent.trim()).catch(() => '');
+  assert.ok(weakPin.includes('1,000,000'), `A digits-only PIN is warned about, in Rust's own arithmetic: ${weakPin}`);
   assert.equal(
-    await vaultPage.evaluate(() => document.querySelector('.vault-modal .modal-action').disabled),
+    await vaultPage.$eval('.vault-modal .modal-action', node => node.disabled),
     true,
-    'A mistyped confirmation does not create a vault under a secret nobody knows'
+    'A PIN typed once, with the confirmation still empty, cannot create a vault'
   );
-  await confirmFields[1].type('e');
-  await vaultPage.waitForFunction(() => document.querySelector('.vault-modal .modal-action').disabled === false);
-  await vaultPage.click('.vault-modal .modal-action');
-  await vaultPage.waitForFunction(() => document.querySelector('.vault-empty') !== null);
+  await typePin(vaultPage, '.vault-unlock-pin-confirm', '123455');
+  assert.equal(
+    await vaultPage.$eval('.vault-modal .modal-action', node => node.disabled),
+    true,
+    'A mistyped confirmation does not create a vault under a PIN nobody knows'
+  );
+  assert.equal(
+    await vaultPage.evaluate(() => window.__lithicVault.calls.some(call => call.command === 'unlock_credentials')),
+    false,
+    '...and nothing was created by the confirmation, because the two do not agree'
+  );
+  // Corrected in place: the last box is cleared and retyped, which is all a mistake in
+  // a six-box PIN costs, and the completed confirmation then creates the vault itself.
+  await vaultPage.evaluate(() => document.querySelectorAll('.vault-unlock-pin-confirm .pin-box')[5].focus());
+  await vaultPage.keyboard.press('Backspace');
+  await vaultPage.keyboard.type('6');
+  // Named rather than waited for, for the same reason as above: the point is that the
+  // completed confirmation is what created the vault.
+  await new Promise(resolve => setTimeout(resolve, 400));
   const created = await vaultPage.evaluate(() => window.__lithicVault.calls.filter(call => call.command === 'unlock_credentials').at(-1));
-  assert.deepEqual(created?.args, { secret: 'correct horse' }, 'The first secret becomes the vault’s, through the same command');
+  assert.deepEqual(created?.args, { secret: '123456' }, 'The first PIN becomes the vault’s, through the same command');
   assert.equal(
-    await vaultPage.evaluate(() => document.querySelector('.vault-manager-button').getAttribute('title').includes('none saved yet')),
-    true,
-    'Registering a vault reports nothing saved yet rather than an unreadable count'
+    await vaultPage.evaluate(() => document.querySelector('.vault-modal .vault-notice')?.textContent.trim() ?? ''),
+    'Ready. Add a login.',
+    '...and the finished confirmation is what submitted it, with no button pressed'
   );
   assert.equal(
     await vaultPage.evaluate(() => Boolean(document.querySelector('.vault-path')?.textContent.includes('credentials.vault'))),
     true,
     'The dialog names the file the logins live in'
+  );
+  // Read from where the manager now lives: a vault that has just been registered but
+  // holds nothing has to say so, rather than leaving its count unreadable.
+  await vaultPage.click('.vault-modal .modal-close');
+  await vaultPage.waitForFunction(() => document.querySelector('.vault-modal') === null);
+  await vaultPage.click('.action-pair .bookmark-button');
+  await vaultPage.waitForSelector('.vault-manager-button');
+  assert.equal(
+    await vaultPage.evaluate(() => document.querySelector('.vault-manager-button').getAttribute('title').includes('none saved yet')),
+    true,
+    'Registering a vault reports nothing saved yet rather than an unreadable count'
   );
   await vaultPage.close();
 

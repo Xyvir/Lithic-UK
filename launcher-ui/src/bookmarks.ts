@@ -24,6 +24,14 @@ export type BookmarkEntry = {
   /** Data URL of the instance's cached icon, when one could be fetched. */
   icon?: string;
   iconFetchedAt?: number;
+  /**
+   * The user answered "don't ask again" when the app offered to save a login for
+   * this instance, so opening it goes straight through and no further offer is
+   * made. It is only about the *offer*: a login saved later — from the row's own
+   * key control, or by hand in the manager — is used exactly as any other, which
+   * is also why the flag needs no way to be taken back. Saving is the way back.
+   */
+  manualAuth?: boolean;
 };
 
 export function normalizeInstanceUrl(value: string): string {
@@ -60,6 +68,7 @@ function toEntry(value: unknown): BookmarkEntry | null {
     entry.icon = record.icon;
     entry.iconFetchedAt = typeof record.iconFetchedAt === 'number' ? record.iconFetchedAt : 0;
   }
+  if (record.manualAuth === true) entry.manualAuth = true;
   return entry;
 }
 
@@ -103,6 +112,28 @@ export function removeBookmark(value: string, storage: Storage = localStorage): 
     readBookmarkEntries(storage).filter((entry) => entry.url !== value),
     storage
   );
+}
+
+/**
+ * Remember (or clear) "don't ask again" for one bookmark.
+ *
+ * Kept with the bookmark rather than in the vault because that is where the fact
+ * belongs: it is about *opening this instance*, not about any stored credential —
+ * and it has to be readable while the vault is locked, since the offer it silences
+ * is made before anything is unlocked.
+ */
+export function setBookmarkManualAuth(
+  value: string,
+  manual: boolean,
+  storage: Storage = localStorage
+): BookmarkEntry[] {
+  const entries = readBookmarkEntries(storage).map((entry) => {
+    if (entry.url !== value) return entry;
+    if (manual) return { ...entry, manualAuth: true };
+    const { manualAuth: _manual, ...rest } = entry;
+    return rest;
+  });
+  return writeBookmarkEntries(entries, storage);
 }
 
 /** Attach (or drop) a cached icon for one bookmark. */

@@ -8,7 +8,8 @@
   import { bootLegacyWiki, bootLegacyHtml, type RemoteTarget } from './legacy-launcher-runtime';
   import { EMOJI_LIST, uploadInstanceIcon, clearInstanceIcon, emojiFaviconUrl, applyFavicon, bustIconCache, readInstanceEmoji, saveInstanceEmoji, clearInstanceEmoji } from './instance-icon';
   import { getRecentFiles, addRecentFile, removeRecentFile, clearAllRecentFiles, purgeOldestCachesIfNeeded, saveSearchCache, forgetWikiCache, cachedWikiNames, idb, getSearchCacheText, listWikiVersions, wikiHasHistory, downloadWikiVersion, getDirtyState, clearDirtyState, listDirtyRecoveries, isWikiDriftedFromHead, isInstallDismissed, setInstallDismissed, recentDiskPath, type RecentEntry } from './storage';
-  import { readBookmarkEntries, saveBookmark, removeBookmark, setBookmarkIcon, refreshBookmarkIcon, verifyInstanceUrl, normalizeInstanceUrl, instanceLabel, type BookmarkEntry, type InstanceVerification } from './bookmarks';
+  import { readBookmarkEntries, saveBookmark, removeBookmark, setBookmarkManualAuth, setBookmarkIcon, refreshBookmarkIcon, verifyInstanceUrl, normalizeInstanceUrl, instanceLabel, type BookmarkEntry, type InstanceVerification } from './bookmarks';
+  import PinEntry from './PinEntry.svelte';
   import { fetchRemoteFiles, fetchRemoteWiki, probePatchApi, createLockHeartbeat, readRemoteLock, uploadRemoteFile, webdavUrl, resolveSessionId, lithUploadName, type WebdavFile } from './webdav';
   import { normalizeLithName } from './legacy-saver';
   import { searchCachedWikis } from './cache-search';
@@ -74,8 +75,6 @@
   let bookmarkInput = '';
   let bookmarkError = '';
   let bookmarkInputElement: HTMLInputElement;
-  /** The secret field of the open-an-instance dialog (see `openBookmarkedInstance`). */
-  let instanceSecretElement: HTMLInputElement;
   let showNewLithModal = false;
   let newLithName = '';
   let newLithError = '';
@@ -1927,6 +1926,23 @@
     bookmarkError = '';
   }
 
+  /**
+   * The vault, from the bookmark dialog.
+   *
+   * Whatever address is typed here is carried over as the one to save a login
+   * for, so setting an instance up is one pass rather than two — the same thing
+   * clicking a bookmark row's key does. The dialog closes behind it: the vault's
+   * own dialog is where the work now is, and two overlays stacked on each other
+   * would leave Escape and the outside-click both ambiguous.
+   */
+  function openSavedLoginsFromBookmarks() {
+    const typed = bookmarkInput.trim();
+    closeBookmarkModal();
+    // Passed as typed, not normalised: the add field takes any address and Rust
+    // is the one that decides what an instance's origin actually is.
+    openVaultModal(typed);
+  }
+
   async function addInstanceBookmark() {
     let normalized: string;
     try {
@@ -2544,6 +2560,12 @@
   let vaultSecret = '';
   let vaultConfirm = '';
   let vaultReveal = false;
+  /** Bumped when a PIN is refused, so the boxes empty and take the caret again. */
+  let vaultPinReset = 0;
+  /** Bumped when the PIN is complete, to move the caret on to its confirmation. */
+  let vaultConfirmFocus = 0;
+  /** Bumped when a new PIN is complete, for the same reason as `vaultConfirmFocus`. */
+  let newPinConfirmFocus = 0;
   let vaultError = '';
   let vaultNotice = '';
   let vaultBusy = false;
@@ -2551,6 +2573,7 @@
   let newOrigin = '';
   let newUser = '';
   let newPassword = '';
+  let newPasswordConfirm = '';
   let newSecret = '';
   let newSecretConfirm = '';
 
@@ -2626,6 +2649,27 @@
   let instanceSecret = '';
   let instanceUnlockError = '';
   let instanceUnlockBusy = false;
+  /** Bumped when a PIN is refused, so the boxes empty and take the caret again. */
+  let instanceSecretReset = 0;
+
+  /**
+   * The offer to save a login, made when a bookmarked instance that asks for a
+   * password is opened and the vault holds nothing for it. `null` means it is not on
+   * screen; the address is carried so that answering it opens that instance.
+   */
+  let credentialOffer: { origin: string; address: string } | null = null;
+  let offerPin = '';
+  let offerPinConfirm = '';
+  let offerUser = '';
+  let offerPassword = '';
+  let offerPasswordConfirm = '';
+  let offerError = '';
+  let offerWarning: string | null = null;
+  let offerBusy = false;
+  /** Bumped when a PIN is refused, so the boxes empty and take the caret again. */
+  let offerPinReset = 0;
+  /** Bumped when the PIN is complete, to move the caret on to its confirmation. */
+  let offerPinConfirmFocus = 0;
 
   /** The exact address a saved login is kept under, for the origin field's hints. */
   function vaultOriginOf(url: string): string {
@@ -2640,8 +2684,13 @@
   $: vaultCreateMode = Boolean(vaultStatus) && !vaultStatus?.exists;
   $: vaultOriginHints = bookmarks.map((entry) => vaultOriginOf(entry.url)).filter(Boolean);
   $: vaultSavedCount = vaultStatus?.count ?? 0;
+  // The count is known while the vault is locked (it comes from the file's own
+  // origin index), which is the whole point of this title. It deliberately says
+  // nothing about the vault being open: this key is only on screen inside the
+  // bookmark dialog, and the vault is open only while its own dialog is up — the
+  // two are never true at once, so a state for it would be a state nobody sees.
   $: vaultManagerTitle = vaultSavedCount > 0
-    ? `Saved instance logins — ${vaultSavedCount} saved${vaultStatus?.unlocked ? ', open' : ''}`
+    ? `Saved instance logins — ${vaultSavedCount} saved`
     : 'Saved instance logins — none saved yet';
 
   async function refreshVaultStatus() {
@@ -2676,10 +2725,10 @@
   }
 
   /** What a bookmark row's key control will do, said plainly. */
-  function vaultRowTitle(origin: string): string {
-    return vaultCoverage.has(origin)
-      ? `A login is saved for ${origin} — manage it`
-      : `Save a login for ${origin} so it stops asking`;
+  function vaultRowTitle(origin: string, manual = false): string {
+    if (vaultCoverage.has(origin)) return `A login is saved for ${origin} — manage it`;
+    if (manual) return `You chose not to save a login for ${origin} — manage saved logins`;
+    return `Save a login for ${origin} so it stops asking`;
   }
 
   /**
@@ -2696,6 +2745,7 @@
     newOrigin = origin;
     newUser = '';
     newPassword = '';
+    newPasswordConfirm = '';
     newSecret = '';
     newSecretConfirm = '';
     // Last time's verdicts were about last time; nothing is carried over.
@@ -2716,6 +2766,7 @@
     vaultSecret = '';
     vaultConfirm = '';
     newPassword = '';
+    newPasswordConfirm = '';
     newSecret = '';
     newSecretConfirm = '';
     vaultChecks = {};
@@ -2739,31 +2790,22 @@
     }
   }
 
-  /** Ask Rust to measure a candidate secret, so the rule lives in one place. */
+  /** Ask Rust to measure a candidate PIN, so the rule lives in one place. */
   async function checkVaultSecret(secret: string) {
-    vaultWarning = null;
-    if (!secret) return;
-    try {
-      const verdict = await tauriInvoke<{ ok: boolean; problem?: string | null; warning?: string | null }>(
-        'check_credentials_secret',
-        { secret },
-      );
-      vaultWarning = verdict.ok ? verdict.warning ?? null : verdict.problem ?? null;
-    } catch (error) {
-      vaultWarning = error instanceof Error ? error.message : String(error);
-    }
+    vaultWarning = secret ? await secretVerdict(secret) : null;
   }
 
-  async function unlockVault() {
+  async function unlockVault(pin = vaultSecret) {
+    if (vaultBusy) return;
     vaultBusy = true;
     vaultError = '';
     vaultNotice = '';
     try {
-      vaultEntries = await tauriInvoke<VaultEntry[]>('unlock_credentials', { secret: vaultSecret });
+      vaultEntries = await tauriInvoke<VaultEntry[]>('unlock_credentials', { secret: pin });
       vaultSecret = '';
       vaultConfirm = '';
       await refreshVaultStatus();
-      if (vaultEntries.length === 0) vaultNotice = 'Ready. Add the login your instance asks for.';
+      if (vaultEntries.length === 0) vaultNotice = 'Ready. Add a login.';
       // The vault is open right now, which is the only time a protected instance's
       // icon can be fetched at all — Rust needs the credential for it. Fetching here
       // caches it, so the row still shows the instance's own icon on a later launch,
@@ -2771,6 +2813,8 @@
       void refreshBookmarkIcons();
     } catch (error) {
       vaultError = error instanceof Error ? error.message : String(error);
+      // A refused PIN is typed again rather than edited, so the boxes go back to empty.
+      vaultPinReset += 1;
     } finally {
       vaultBusy = false;
     }
@@ -2781,7 +2825,7 @@
     try {
       vaultStatus = await tauriInvoke<VaultStatus>('lock_credentials');
       vaultEntries = [];
-      vaultNotice = 'Locked. Saved logins stay encrypted until the secret is entered again.';
+      vaultNotice = 'Locked.';
     } catch (error) {
       vaultError = error instanceof Error ? error.message : String(error);
     } finally {
@@ -2808,6 +2852,7 @@
       newOrigin = '';
       newUser = '';
       newPassword = '';
+      newPasswordConfirm = '';
       await refreshVaultStatus();
       await refreshVaultCoverage();
     } catch (error) {
@@ -2842,8 +2887,8 @@
   async function destroyVault() {
     const confirmed = await askConfirmation({
       title: 'Forget every saved login?',
-      body: 'The vault file is deleted, and the secret goes with it — nothing is stored that could recover it. Instances will ask for a password again, and a new secret can be chosen next time.',
-      confirmLabel: 'Forget All'
+      body: 'The vault file is deleted, and the PIN with it. Instances will ask for a password again.',
+      confirmLabel: 'Forget Everything'
     });
     if (!confirmed) return;
     vaultBusy = true;
@@ -2853,7 +2898,7 @@
       vaultStatus = await tauriInvoke<VaultStatus>('destroy_credentials');
       vaultEntries = [];
       await refreshVaultCoverage();
-      vaultNotice = 'Every saved login is gone. Instances will ask for the password again.';
+      vaultNotice = 'Every saved login is gone. Instances will ask for a password again.';
     } catch (error) {
       vaultError = error instanceof Error ? error.message : String(error);
     } finally {
@@ -2876,7 +2921,7 @@
       vaultStatus = await tauriInvoke<VaultStatus>('change_credentials_secret', { newSecret });
       newSecret = '';
       newSecretConfirm = '';
-      vaultNotice = 'The secret has been changed. Use the new one from here on.';
+      vaultNotice = 'The PIN has been changed.';
     } catch (error) {
       vaultError = error instanceof Error ? error.message : String(error);
     } finally {
@@ -2885,24 +2930,58 @@
   }
 
   /**
-   * Open a bookmarked instance, asking for the secret first when the vault holds a
-   * login for it.
+   * Open a bookmarked instance.
    *
-   * A saved login is the only reason to ask for anything before navigating: the app
-   * answers the instance's own password challenge from the grant this unlock leaves
-   * behind, and that grant is gone by the time this launcher is shown again.
+   * Three things can happen, and which one is decided before anything navigates. A
+   * saved login means the PIN is asked for, and answering it opens the instance. No
+   * saved login, on an instance that challenges a visitor who has none, means the
+   * offer to save one. Anything else simply opens, because there is nothing the app
+   * could answer with and nothing worth interrupting for.
    */
-  function openBookmarkedInstance(url: string) {
+  async function openBookmarkedInstance(url: string) {
     const origin = vaultOriginOf(url);
-    if (mode === 'tauri' && vaultStatus && origin && vaultCoverage.has(origin)) {
-      instanceUnlock = { origin, address: url };
-      instanceSecret = '';
-      instanceUnlockError = '';
-      vaultReveal = false;
-      setTimeout(() => instanceSecretElement?.focus(), 0);
-      return;
+    if (mode === 'tauri' && vaultStatus && origin) {
+      if (vaultCoverage.has(origin)) {
+        instanceUnlock = { origin, address: url };
+        instanceSecret = '';
+        instanceUnlockError = '';
+        instanceSecretReset += 1;
+        return;
+      }
+      const entry = bookmarks.find((item) => item.url === url);
+      if (!entry?.manualAuth && (await asksForPassword(url))) {
+        credentialOffer = { origin, address: url };
+        offerPin = '';
+        offerPinConfirm = '';
+        offerUser = '';
+        offerPassword = '';
+        offerPasswordConfirm = '';
+        offerError = '';
+        offerWarning = null;
+        offerPinReset += 1;
+        return;
+      }
     }
     window.location.href = withLauncherHandoff(url, window.location.href);
+  }
+
+  /**
+   * Does this instance challenge a visitor who has no password?
+   *
+   * A saved login is only worth offering where there is a prompt to answer: against
+   * an instance that answers everyone, saving one achieves nothing, and asking for a
+   * password in order to do it is pure friction. `probe_instance` already answers
+   * this — a `protected` verdict is a 401 on its manifest — and this is the one place
+   * its verdict decides something *before* a navigation rather than after one.
+   */
+  async function asksForPassword(url: string): Promise<boolean> {
+    try {
+      const probe = await tauriInvoke<{ state: string }>('probe_instance', { url });
+      return probe.state === 'protected';
+    } catch {
+      // No probe in this build: never stand between the user and what they clicked.
+      return false;
+    }
   }
 
   function cancelInstanceUnlock() {
@@ -2911,28 +2990,126 @@
     instanceUnlockError = '';
   }
 
-  async function unlockInstance() {
+  /**
+   * Lend this instance the credential its PIN unlocks, and open it.
+   *
+   * The PIN arrives as an argument rather than being read back out of state: it is
+   * handed over by the box that completed, which is the one moment the value is
+   * certainly the one that was typed.
+   */
+  async function unlockInstance(pin: string) {
     const target = instanceUnlock;
-    if (!target) return;
+    if (!target || instanceUnlockBusy) return;
     instanceUnlockBusy = true;
     instanceUnlockError = '';
     try {
-      await tauriInvoke('unlock_for_instance', { origin: target.origin, secret: instanceSecret });
+      await tauriInvoke('unlock_for_instance', { origin: target.origin, secret: pin });
       instanceSecret = '';
       instanceUnlock = null;
       window.location.href = withLauncherHandoff(target.address, window.location.href);
     } catch (error) {
       instanceUnlockError = error instanceof Error ? error.message : String(error);
+      // A refused PIN is typed again rather than edited, so the boxes go back to empty.
+      instanceSecretReset += 1;
     } finally {
       instanceUnlockBusy = false;
     }
   }
 
-  /** Go anyway, and let the platform's own password prompt appear. */
-  function openWithoutLogin() {
-    const target = instanceUnlock;
-    cancelInstanceUnlock();
-    if (target) window.location.href = withLauncherHandoff(target.address, window.location.href);
+  // --- Offering to save a login, when an instance asks for one ------------------
+  //
+  // Nothing can learn a password by watching a login work, so the only way a login
+  // gets saved is being given one. This is that moment: one dialog holding all of it
+  // — the PIN that unlocks the vault (or picks the one it will have), the credential
+  // for this instance, and the way out of being asked again. One stop, rather than a
+  // prompt from the app followed by a prompt from the page.
+
+  function closeCredentialOffer() {
+    credentialOffer = null;
+    offerPin = '';
+    offerPinConfirm = '';
+    offerPassword = '';
+    offerPasswordConfirm = '';
+    offerError = '';
+    offerWarning = null;
+  }
+
+  /** A terse verdict on a candidate PIN, measured by Rust so the rule has one home. */
+  async function secretVerdict(secret: string): Promise<string | null> {
+    if (!secret) return null;
+    try {
+      const verdict = await tauriInvoke<{ ok: boolean; problem?: string | null; warning?: string | null }>(
+        'check_credentials_secret',
+        { secret },
+      );
+      return verdict.ok ? verdict.warning ?? null : verdict.problem ?? null;
+    } catch (error) {
+      return error instanceof Error ? error.message : String(error);
+    }
+  }
+
+  /**
+   * The PIN is complete: say whether it is weak, and move on to its confirmation.
+   *
+   * Only while creating. With a vault already on disk there is nothing to choose —
+   * the PIN is either this vault's or it is not, and `Save` is where that is decided,
+   * so checking it here would only be a second derivation of the same key.
+   */
+  async function offerPinComplete(pin: string) {
+    if (!vaultCreateMode) return;
+    offerPinConfirmFocus += 1;
+    offerWarning = await secretVerdict(pin);
+  }
+
+  /**
+   * Save this instance's login and open it, in one unlock.
+   *
+   * One command rather than unlock-then-save-then-lend: the PIN is derived once, and
+   * the vault that the derivation opens is dropped on the way out with nothing left
+   * open behind it — the answer is the same one-origin, expiring grant any other
+   * instance open leaves.
+   */
+  async function saveOfferedCredential() {
+    const target = credentialOffer;
+    if (!target || offerBusy) return;
+    offerBusy = true;
+    offerError = '';
+    try {
+      await tauriInvoke('save_login_for_instance', {
+        origin: target.origin,
+        secret: offerPin,
+        user: offerUser,
+        password: offerPassword,
+      });
+      offerPin = '';
+      offerPinConfirm = '';
+      offerPassword = '';
+      credentialOffer = null;
+      // The row's key is drawn from the vault file's index, which the save just
+      // rewrote: a stale set would leave it grey for a login that now exists.
+      void refreshVaultStatus();
+      void refreshVaultCoverage();
+      window.location.href = withLauncherHandoff(target.address, window.location.href);
+    } catch (error) {
+      offerError = error instanceof Error ? error.message : String(error);
+      offerPinReset += 1;
+    } finally {
+      offerBusy = false;
+    }
+  }
+
+  /**
+   * Open it, and stop offering: the answer is "I will type it myself".
+   *
+   * Remembered with the bookmark, and only about the offer — a login saved later, by
+   * the row's own key control, is used exactly as any other.
+   */
+  function refuseCredentialOffer() {
+    const target = credentialOffer;
+    if (!target) return;
+    bookmarks = setBookmarkManualAuth(target.address, true);
+    closeCredentialOffer();
+    window.location.href = withLauncherHandoff(target.address, window.location.href);
   }
 </script>
 
@@ -2940,22 +3117,38 @@
 
 <main class="container" data-mode={mode}>
   <header class="heading">
-    <button
-      type="button"
-      class="brand-icon-wrap"
-      class:brand-emoji-wrap={Boolean(brandEmoji)}
-      class:pickable={isSelfHost()}
-      disabled={!isSelfHost()}
-      aria-label={isSelfHost() ? 'Set this instance’s icon' : undefined}
-      title={isSelfHost() ? 'Set this instance’s icon' : undefined}
-      on:click={() => openEmojiPicker()}
-    >
-      {#if brandEmoji}
-        <span class="brand-emoji" aria-hidden="true">{brandEmoji}</span>
-      {:else}
+    {#if isSelfHost()}
+      <!-- A <button> only here, where the mark sets this deployment's own icon:
+           that is the one job the mark has, and it only exists for an instance. -->
+      <button
+        type="button"
+        class="brand-icon-wrap pickable"
+        class:brand-emoji-wrap={Boolean(brandEmoji)}
+        aria-label="Set this instance’s icon"
+        title="Set this instance’s icon"
+        on:click={() => openEmojiPicker()}
+      >
+        {#if brandEmoji}
+          <span class="brand-emoji" aria-hidden="true">{brandEmoji}</span>
+        {:else}
+          <img class="brand-icon" src={mstile150} alt="Lithic" />
+        {/if}
+      </button>
+    {:else}
+      <!-- Everywhere else there is no instance icon to set, so the mark carries
+           the project link instead of sitting inert. That is also what lets the
+           footer's Github button go on mobile without losing the way there. -->
+      <a
+        class="brand-icon-wrap brand-github"
+        href="https://github.com/Lithic-UK/Lithic"
+        target="_blank"
+        rel="noreferrer"
+        aria-label="Lithic on GitHub"
+        title="Lithic on GitHub"
+      >
         <img class="brand-icon" src={mstile150} alt="Lithic" />
-      {/if}
-    </button>
+      </a>
+    {/if}
     <div class="heading-copy">
       <h1>Lithic - Launcher</h1>
       {#if isSelfHost()}
@@ -3090,28 +3283,112 @@
         <p>Save a self-hosted instance for quick access.</p>
         <input bind:this={bookmarkInputElement} bind:value={bookmarkInput} aria-label="Self-hosted instance URL" placeholder="https://..." on:keydown={(event) => event.key === 'Enter' && addInstanceBookmark()} />
         {#if bookmarkError}<p class="status-line error" role="alert">{bookmarkError}</p>{/if}
-        <div class="modal-actions"><button class="modal-action" on:click={addInstanceBookmark}>Save Bookmark</button><button class="modal-action secondary" on:click={closeBookmarkModal}>Cancel</button></div>      </div>
+        <div class="modal-actions">
+          <button class="modal-action" on:click={addInstanceBookmark}>Save Bookmark</button>
+          <button class="modal-action secondary" on:click={closeBookmarkModal}>Cancel</button>
+          {#if mode === 'tauri' && vaultStatus}
+          <!--
+            Saved logins, from the dialog that owns the same thing it does: an
+            instance's address. It used to be a tile in the launcher's own row —
+            the same pairing, but spending permanent space on the main screen for
+            something you only reach for while setting an instance up. The key on
+            each bookmark row manages one address; this one manages the vault
+            itself, which is changing the secret or forgetting every login at once.
+            Same two colours as those row keys: grey means nothing saved, green
+            means something is.
+          -->
+          <button
+            class="modal-action secondary vault-manager-button"
+            class:has-logins={vaultSavedCount > 0}
+            type="button"
+            aria-label={vaultManagerTitle}
+            title={vaultManagerTitle}
+            on:click={openSavedLoginsFromBookmarks}
+          ><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="8.2" cy="8.2" r="4.3"/><path d="m11.4 11.4 8 8"/><path d="m15.4 15.4 2.6-2.6"/><path d="m18.2 18.2 2.6-2.6"/></svg><span>Saved Logins</span></button>
+          {/if}
+        </div>
+      </div>
     </div>
   {/if}
   {#if instanceUnlock}
     <!--
       Asked for every time an instance with a saved login is opened, which is the
       point of the model: the vault is locked until something needs it, and what this
-      buys is one instance load. Rust drops the credential when the load is done, and
-      this launcher locks again on the way back in.
+      buys is one instance load. The sixth character is the submit — there is nothing
+      else this dialog could be asking for, and nothing in it to confirm.
     -->
     <div class="modal-overlay" role="presentation" on:click={(event) => event.currentTarget === event.target && cancelInstanceUnlock()}>
       <div class="launcher-modal vault-modal" role="dialog" aria-modal="true" aria-labelledby="instance-unlock-title">
         <button class="modal-close" aria-label="Close unlock dialog" on:click={cancelInstanceUnlock}>×</button>
-        <h2 id="instance-unlock-title">Open {instanceUnlock.origin}</h2>
-        <p>A login is saved for this instance. The secret is asked for each time one is opened, and the credential it unlocks is not kept once the instance has loaded.</p>
-        <label class="vault-field"><span>Secret</span><input class="instance-unlock-secret" bind:this={instanceSecretElement} type={vaultReveal ? 'text' : 'password'} bind:value={instanceSecret} autocomplete="off" on:keydown={(event) => event.key === 'Enter' && unlockInstance()} /></label>
-        <label class="vault-reveal"><input type="checkbox" bind:checked={vaultReveal} /> Show the secret</label>
+        <h2 id="instance-unlock-title">Open {instanceLabel(instanceUnlock.origin)}</h2>
+        <p class="vault-sub">Saved login — enter your PIN.</p>
+        <div class="vault-pin instance-unlock-pin">
+          <PinEntry
+            bind:value={instanceSecret}
+            label="PIN"
+            disabled={instanceUnlockBusy}
+            reveal={vaultReveal}
+            reset={instanceSecretReset}
+            complete={(pin) => void unlockInstance(pin)}
+          />
+        </div>
+        <label class="vault-reveal"><input type="checkbox" bind:checked={vaultReveal} /> Show</label>
         {#if instanceUnlockError}<p class="status-line error" role="alert">{instanceUnlockError}</p>{/if}
         <div class="modal-actions">
-          <button class="modal-action" disabled={instanceUnlockBusy || !instanceSecret} on:click={unlockInstance}>{instanceUnlockBusy ? 'Unlocking…' : 'Unlock & Open'}</button>
-          <button class="modal-action secondary" on:click={openWithoutLogin}>Open Without the Login</button>
-          <button class="modal-action secondary" on:click={cancelInstanceUnlock}>Cancel</button>
+          <button class="modal-action secondary" disabled={instanceUnlockBusy} on:click={cancelInstanceUnlock}>Cancel</button>
+        </div>
+      </div>
+    </div>
+  {/if}
+  {#if credentialOffer}
+    <!--
+      The offer to save a login, made only where there is a prompt it could answer: an
+      instance that challenges a visitor who has no password. All of it is in one
+      dialog — the PIN (chosen here if no vault exists yet), the credential for this
+      instance, and the way out of being asked again — because a save that needs three
+      dialogs is a save nobody makes.
+    -->
+    <div class="modal-overlay" role="presentation" on:click={(event) => event.currentTarget === event.target && closeCredentialOffer()}>
+      <div class="launcher-modal vault-modal" role="dialog" aria-modal="true" aria-labelledby="credential-offer-title">
+        <button class="modal-close" aria-label="Close the save-a-login dialog" on:click={closeCredentialOffer}>×</button>
+        <h2 id="credential-offer-title">Add a saved credential?</h2>
+        <p class="vault-sub">{instanceLabel(credentialOffer.origin)} asks for a password.</p>
+        <div class="vault-pin credential-offer-pin">
+          <PinEntry
+            bind:value={offerPin}
+            label={vaultCreateMode ? 'Choose a PIN' : 'PIN'}
+            disabled={offerBusy}
+            reveal={vaultReveal}
+            reset={offerPinReset}
+            complete={(pin) => void offerPinComplete(pin)}
+          />
+        </div>
+        {#if vaultCreateMode}
+          <div class="vault-pin credential-offer-pin-confirm">
+            <PinEntry
+              bind:value={offerPinConfirm}
+              label="Repeat the PIN"
+              disabled={offerBusy}
+              reveal={vaultReveal}
+              reset={offerPinReset}
+              focusSignal={offerPinConfirmFocus}
+            />
+          </div>
+        {/if}
+        {#if offerWarning}<p class="vault-warning">{offerWarning}</p>{/if}
+        <label class="vault-field"><span>Username</span><input class="credential-offer-user" bind:value={offerUser} autocomplete="off" /></label>
+        <label class="vault-field"><span>Password</span><input class="credential-offer-password" type={vaultReveal ? 'text' : 'password'} bind:value={offerPassword} autocomplete="off" /></label>
+        <label class="vault-field"><span>Repeat password</span><input class="credential-offer-password-confirm" type={vaultReveal ? 'text' : 'password'} bind:value={offerPasswordConfirm} autocomplete="off" /></label>
+        <label class="vault-reveal"><input type="checkbox" bind:checked={vaultReveal} /> Show</label>
+        {#if offerError}<p class="status-line error" role="alert">{offerError}</p>{/if}
+        <div class="modal-actions">
+          <button
+            class="modal-action credential-offer-save"
+            disabled={offerBusy || offerPin.length !== 6 || (vaultCreateMode && offerPin !== offerPinConfirm) || !offerUser || !offerPassword || offerPassword !== offerPasswordConfirm}
+            on:click={saveOfferedCredential}
+          >{offerBusy ? 'Saving…' : 'Save Credential'}</button>
+          <button class="modal-action secondary credential-offer-cancel" disabled={offerBusy} on:click={closeCredentialOffer}>Cancel</button>
+          <button class="modal-action secondary credential-offer-skip" disabled={offerBusy} on:click={refuseCredentialOffer}>Don’t ask again</button>
         </div>
       </div>
     </div>
@@ -3126,7 +3403,7 @@
         <button class="modal-close" aria-label="Close saved logins dialog" on:click={closeVaultModal}>×</button>
         <h2 id="vault-title">Saved Instance Logins</h2>
         {#if vaultStatus?.unlocked}
-          <p>This app answers a protected instance's password prompt from here, so it stops being asked for. A login is kept for one exact address.</p>
+          <p class="vault-sub">Answers an instance's password prompt, per exact address.</p>
           {#if vaultEntries.length > 0}
             <ul class="vault-list">
               {#each vaultEntries as entry (entry.origin)}
@@ -3164,44 +3441,89 @@
           </datalist>
           <label class="vault-field"><span>Username</span><input id="vault-new-user" bind:value={newUser} autocomplete="off" /></label>
           <label class="vault-field"><span>Password</span><input id="vault-new-password" type={vaultReveal ? 'text' : 'password'} bind:value={newPassword} autocomplete="off" /></label>
-          <label class="vault-reveal"><input type="checkbox" bind:checked={vaultReveal} /> Show the password</label>
+          <label class="vault-field"><span>Repeat password</span><input id="vault-new-password-confirm" type={vaultReveal ? 'text' : 'password'} bind:value={newPasswordConfirm} autocomplete="off" /></label>
+          <label class="vault-reveal"><input type="checkbox" bind:checked={vaultReveal} /> Show</label>
           <div class="modal-actions">
-            <button class="modal-action" disabled={vaultBusy || !newOrigin.trim() || !newUser || !newPassword} on:click={saveVaultEntry}>{vaultBusy ? '…' : 'Save Login'}</button>
+            <button class="modal-action" disabled={vaultBusy || !newOrigin.trim() || !newUser || !newPassword || newPassword !== newPasswordConfirm} on:click={saveVaultEntry}>{vaultBusy ? '…' : 'Save Login'}</button>
             <button class="modal-action secondary" disabled={vaultBusy} on:click={lockVault}>Lock</button>
             <button class="modal-action secondary" on:click={closeVaultModal}>Done</button>
           </div>
           <details class="vault-advanced">
-            <summary>The secret, or every saved login</summary>
-            <p class="vault-note">Changing the secret re-encrypts every login under it. Nothing is stored that could recover a forgotten one, so forgetting it means these logins can only be deleted.</p>
-            <label class="vault-field"><span>New secret</span><input id="vault-new-secret" type={vaultReveal ? 'text' : 'password'} bind:value={newSecret} autocomplete="off" on:input={() => checkVaultSecret(newSecret)} /></label>
-            <label class="vault-field"><span>Repeat the new secret</span><input id="vault-new-secret-confirm" type={vaultReveal ? 'text' : 'password'} bind:value={newSecretConfirm} autocomplete="off" /></label>
+            <summary>Change the PIN, or forget everything</summary>
+            <p class="vault-note">A new PIN re-encrypts every login. A forgotten PIN cannot be recovered — the logins can only be deleted.</p>
+            <div class="vault-pin vault-new-pin">
+              <PinEntry
+                bind:value={newSecret}
+                label="New PIN"
+                disabled={vaultBusy}
+                reveal={vaultReveal}
+                complete={(pin) => { if (pin !== newSecretConfirm) newPinConfirmFocus += 1; }}
+              />
+            </div>
+            <div class="vault-pin vault-new-pin-confirm">
+              <PinEntry
+                bind:value={newSecretConfirm}
+                label="Repeat the new PIN"
+                disabled={vaultBusy}
+                reveal={vaultReveal}
+                focusSignal={newPinConfirmFocus}
+                complete={(pin) => { if (pin === newSecret) void rotateVaultSecret(); }}
+              />
+            </div>
             <div class="modal-actions">
-              <button class="modal-action" disabled={vaultBusy || !newSecret || newSecret !== newSecretConfirm} on:click={rotateVaultSecret}>{vaultBusy ? '…' : 'Change Secret'}</button>
-              <button class="modal-action secondary vault-danger" disabled={vaultBusy} on:click={destroyVault}>Forget All Saved Logins</button>
+              <button class="modal-action" disabled={vaultBusy || newSecret.length !== 6 || newSecret !== newSecretConfirm} on:click={rotateVaultSecret}>{vaultBusy ? '…' : 'Change PIN'}</button>
+              <button class="modal-action secondary vault-danger" disabled={vaultBusy} on:click={destroyVault}>Forget Everything</button>
             </div>
           </details>
         {:else}
-          <p>
+          <p class="vault-sub">
             {#if vaultCreateMode}
-              Choose a secret. It unlocks every login saved here, and it is stored nowhere — so it is the one thing that cannot be recovered, and forgetting it means the saved logins can only be deleted.
+              Choose a PIN — 6 letters or digits, stored nowhere, so it cannot be recovered.
             {:else}
-              Enter the secret to unlock the saved logins. Nothing is answered until it is entered.
+              Enter your PIN.
             {/if}
           </p>
           {#if vaultSavedCount > 0}
             <!-- Known without unlocking, from the file's index — which is why the
                  manager can say what is in there without opening it. -->
-            <p class="vault-count" role="status">{vaultSavedCount === 1 ? 'One login is saved.' : `${vaultSavedCount} logins are saved.`} Unlock to see or change them.</p>
+            <p class="vault-count" role="status">{vaultSavedCount === 1 ? '1 login saved.' : `${vaultSavedCount} logins saved.`}</p>
           {/if}
-          <label class="vault-field"><span>Secret</span><input type={vaultReveal ? 'text' : 'password'} bind:value={vaultSecret} autocomplete="off" on:input={() => checkVaultSecret(vaultSecret)} /></label>
+          <div class="vault-pin vault-unlock-pin">
+            <PinEntry
+              bind:value={vaultSecret}
+              label={vaultCreateMode ? 'Choose a PIN' : 'PIN'}
+              disabled={vaultBusy}
+              reveal={vaultReveal}
+              reset={vaultPinReset}
+              complete={(pin) => {
+                if (vaultBusy) return;
+                if (vaultCreateMode) {
+                  vaultConfirmFocus += 1;
+                  void checkVaultSecret(pin);
+                } else {
+                  void unlockVault(pin);
+                }
+              }}
+            />
+          </div>
           {#if vaultCreateMode}
-            <label class="vault-field"><span>Repeat the secret</span><input type={vaultReveal ? 'text' : 'password'} bind:value={vaultConfirm} autocomplete="off" /></label>
+            <div class="vault-pin vault-unlock-pin-confirm">
+              <PinEntry
+                bind:value={vaultConfirm}
+                label="Repeat the PIN"
+                disabled={vaultBusy}
+                reveal={vaultReveal}
+                reset={vaultPinReset}
+                focusSignal={vaultConfirmFocus}
+                complete={(pin) => { if (pin === vaultSecret) void unlockVault(pin); }}
+              />
+            </div>
           {/if}
           {#if vaultWarning}<p class="vault-warning">{vaultWarning}</p>{/if}
-          <label class="vault-reveal"><input type="checkbox" bind:checked={vaultReveal} /> Show the secret</label>
+          <label class="vault-reveal"><input type="checkbox" bind:checked={vaultReveal} /> Show</label>
           <div class="modal-actions">
-            <button class="modal-action" disabled={vaultBusy || !vaultSecret || (vaultCreateMode && vaultSecret !== vaultConfirm)} on:click={unlockVault}>{vaultBusy ? '…' : vaultCreateMode ? 'Create & Unlock' : 'Unlock'}</button>
-            {#if vaultStatus?.exists}<button class="modal-action secondary vault-danger" disabled={vaultBusy} on:click={destroyVault}>Forget All Saved Logins</button>{/if}
+            <button class="modal-action" disabled={vaultBusy || vaultSecret.length !== 6 || (vaultCreateMode && vaultSecret !== vaultConfirm)} on:click={() => unlockVault()}>{vaultBusy ? '…' : vaultCreateMode ? 'Set PIN' : 'Unlock'}</button>
+            {#if vaultStatus?.exists}<button class="modal-action secondary vault-danger" disabled={vaultBusy} on:click={destroyVault}>Forget Everything</button>{/if}
             <button class="modal-action secondary" on:click={closeVaultModal}>Cancel</button>
           </div>
         {/if}
@@ -3377,22 +3699,6 @@
       {#if mode !== 'self-host'}
       <button class="bookmark-button" aria-label="Bookmark a self-hosted instance" title="Bookmark a Remote Instance" on:click={openBookmarkModal}><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 21V5a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v16l-6-4z" /></svg></button>
       {/if}
-      {#if mode === 'tauri' && vaultStatus}
-      <!--
-        Saved logins. A key beside the bookmark control because the two answer the
-        same question in the same place — this instance's address. The key on each
-        bookmark row manages one instance; this one manages the vault itself:
-        changing the secret, or forgetting every login at once.
-      -->
-      <button
-        class="vault-manager-button"
-        class:has-logins={vaultSavedCount > 0}
-        type="button"
-        aria-label={vaultManagerTitle}
-        title={vaultManagerTitle}
-        on:click={() => openVaultModal()}
-      ><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="8.2" cy="8.2" r="4.3"/><path d="m11.4 11.4 8 8"/><path d="m15.4 15.4 2.6-2.6"/><path d="m18.2 18.2 2.6-2.6"/></svg></button>
-      {/if}
     </div>
   </section>
   {#if bookmarks.length > 0 || recentFiles.length > 0 || remoteFiles.length > 0 || isSelfHost() || Object.keys(cachedEntries).length > 0 || showRecent}
@@ -3440,14 +3746,18 @@
                 anything, from the vault file's index. Clicking it opens the manager
                 with this address already in the add field, which is the first-time
                 setup: the vault is created (or unlocked) and the login saved here.
+                It is also how an instance that was told "don't ask again" gets a
+                login anyway: saving one is the way back, which is why the flag needs
+                no control of its own.
               -->
               <button
                 class="recent-icon-button vault-row-button"
                 class:covered={vaultCoverage.has(origin)}
+                class:manual={entry.manualAuth === true}
                 type="button"
                 disabled={!origin}
-                aria-label={origin ? vaultRowTitle(origin) : `No address to save a login for on ${entry.url}`}
-                title={origin ? vaultRowTitle(origin) : 'No address to save a login for'}
+                aria-label={origin ? vaultRowTitle(origin, entry.manualAuth === true) : `No address to save a login for on ${entry.url}`}
+                title={origin ? vaultRowTitle(origin, entry.manualAuth === true) : 'No address to save a login for'}
                 on:click={() => openVaultModal(origin)}
               ><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="8.2" cy="8.2" r="4.3"/><path d="m11.4 11.4 8 8"/><path d="m15.4 15.4 2.6-2.6"/><path d="m18.2 18.2 2.6-2.6"/></svg></button>
             {/if}

@@ -8,6 +8,7 @@ import {
   readBookmarks,
   saveBookmark,
   removeBookmark,
+  setBookmarkManualAuth,
   setBookmarkIcon,
   shouldRefreshIcon,
   fetchInstanceIcon,
@@ -73,6 +74,40 @@ test('a cached icon survives re-bookmarking and is dropped on request', () => {
   const cleared = setBookmarkIcon('https://work.test', null, store);
   assert.deepEqual(cleared, [{ url: 'https://work.test', label: 'work.test' }]);
   assert.ok(!('icon' in JSON.parse(store.getItem(BOOKMARKS_KEY) ?? '[]')[0]));
+});
+
+test('the answer "do not ask again" is kept with the bookmark it is about', () => {
+  const store = storage();
+  saveBookmark('https://work.test', store);
+  saveBookmark('https://home.test', store);
+
+  const one = setBookmarkManualAuth('https://work.test', true, store);
+  assert.equal(one.find((entry) => entry.url === 'https://work.test')?.manualAuth, true);
+  assert.ok(
+    !('manualAuth' in (one.find((entry) => entry.url === 'https://home.test') ?? {})),
+    'the other instance is not silenced by a click on this one'
+  );
+  // Stored, not held in the entry object: the offer it silences is made after a
+  // reload, so a flag that only lived in memory would ask again every launch.
+  assert.equal(
+    JSON.parse(store.getItem(BOOKMARKS_KEY) ?? '[]').find((entry: { url: string }) => entry.url === 'https://work.test').manualAuth,
+    true
+  );
+
+  // Re-bookmarking keeps it, like the cached icon: it is a fact about opening this
+  // instance, not something re-adding the address should forget.
+  assert.equal(saveBookmark('https://work.test/', store).find((entry) => entry.url === 'https://work.test')?.manualAuth, true);
+
+  // Clearing it leaves a clean entry, with no `manualAuth: false` left in storage.
+  const cleared = setBookmarkManualAuth('https://work.test', false, store);
+  assert.ok(!('manualAuth' in (cleared.find((entry) => entry.url === 'https://work.test') ?? {})));
+  assert.ok(!('manualAuth' in JSON.parse(store.getItem(BOOKMARKS_KEY) ?? '[]')[1]));
+
+  // A legacy entry (a bare URL string) can be silenced and still reads back as one.
+  const legacy = storage();
+  legacy.setItem(BOOKMARKS_KEY, JSON.stringify(['https://old.test']));
+  assert.equal(setBookmarkManualAuth('https://old.test', true, legacy)[0].label, 'old.test');
+  assert.equal(readBookmarkEntries(legacy)[0].manualAuth, true);
 });
 
 test('icon refresh policy is missing-or-stale', () => {
