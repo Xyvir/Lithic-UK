@@ -281,6 +281,7 @@ test('every injected bootstrap script parses for every launch shape', () => {
   assertInjectedScriptsParse(buildEngineHtml(ENGINE_STUB, { name: 'x.tid', text: '' }, [], {}, { scratchMode: 'tid' }), 'scratch tid');
   assertInjectedScriptsParse(buildEngineHtml(ENGINE_STUB, { name: 'x.ipynb', text: '' }, [], {}, { scratchMode: 'ipynb' }), 'scratch ipynb');
   assertInjectedScriptsParse(buildEngineHtml(ENGINE_STUB, { name: 'x.html', text: '' }, [], {}, { isHtmlMode: true }), 'html monolith');
+  assertInjectedScriptsParse(buildEngineHtml(ENGINE_STUB, { name: 'x.lith', text: '' }, [], {}, { browserOnly: true }), 'browser storage only');
   assertInjectedScriptsParse(
     buildEngineHtml(ENGINE_STUB, { name: 'my wiki.lith', text: '' }, [], {}, { remote: REMOTE_TARGET }),
     'self-host remote'
@@ -412,4 +413,31 @@ test('ipynb scratch mode injects the notebook runtime and parses notebook cells'
   const root = store.find((tiddler) => tiddler.title === 'analysis.ipynb');
   assert.equal(root?.['lithic-ipynb'], 'yes');
   assert.ok(root?.['lithic-ipynb-meta'], 'root carries the notebook metadata for re-export');
+});
+
+test('browser-storage-only mounts save into IndexedDB instead of asking for a file', () => {
+  const html = buildEngineHtml(ENGINE_STUB, { name: 'notes.lith', text: '' }, [], {}, { browserOnly: true });
+
+  // The mode is compiled in, and the save path branches on it before it can
+  // reach for a picker no platform in this mode has.
+  assert.match(html, /var browserOnly = true;/);
+  assert.match(html, /function saveToBrowserStorage\(tw, callback\)/);
+  assert.match(html, /if \(browserOnly\) \{\n        saveToBrowserStorage\(tw, callback\);\n        return true;\n      \}/);
+  // The save writes the same two keys a real save writes: the flat cache the
+  // recents row and search read, and the versioned history the download modal
+  // materialises a hard copy from.
+  assert.match(html, /function saveToBrowserStorage[\s\S]*addRecent\(target\)/);
+  assert.match(html, /function saveToBrowserStorage[\s\S]*saveSearchCache\(fileName, jsonText\)/);
+  // The name it keys all of that on is the mount's own, so a rename in the
+  // launcher prompt carries through to the row that appears afterwards.
+  assert.match(html, /function saveToBrowserStorage[\s\S]*\|\| "notes\.lith"/);
+  // …and its recents row is recorded as having no file, which is what the
+  // launcher marks as volatile instead of offering to re-open.
+  assert.match(html, /__lithicBrowserOnly__\n\s+\? \{ handle: null, name: fileHandle\.name, tauriPath: null, browserOnly: true \}/);
+});
+
+test('an ordinary mount does not get the browser-storage save path', () => {
+  const html = buildEngineHtml(ENGINE_STUB, { name: 'notes.lith', text: '' });
+  assert.match(html, /var browserOnly = false;/);
+  assert.match(html, /return root\.showSaveFilePicker \? root\.showSaveFilePicker\(saveOptions\) : Promise\.reject/);
 });

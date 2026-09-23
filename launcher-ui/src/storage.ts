@@ -8,6 +8,13 @@ export interface RecentEntry {
   name?: string;
   text?: string;
   path?: string;
+  /**
+   * No file anywhere, on any platform: this row's Lith exists only as a cached
+   * copy in this browser's storage (the index-db-only fallback — see
+   * browser-storage.ts). Recorded on the row rather than inferred from the
+   * current mode, because the row outlives the mode it was made in.
+   */
+  browserOnly?: boolean;
 }
 
 export class KeyvalStore {
@@ -133,10 +140,68 @@ export async function addRecentFile(fileHandle: FileSystemFileHandle, tauriPath:
 function normalizeRecentEntry(f: any): RecentEntry {
   // Already shaped (has handle/tauriPath keys) — keep as-is.
   if (f && typeof f === 'object' && ('handle' in f || 'tauriPath' in f)) {
-    return { handle: f.handle ?? null, name: f.name, tauriPath: f.tauriPath ?? null } as RecentEntry;
+    return {
+      handle: f.handle ?? null,
+      name: f.name,
+      tauriPath: f.tauriPath ?? null,
+      browserOnly: f.browserOnly === true,
+      // A browser-only row for an HTML monolith carries its own page text: a
+      // monolith has no tiddler snapshot to read the page back from.
+      ...(typeof f.text === 'string' && f.text ? { text: f.text } : {})
+    } as RecentEntry;
   }
   // Legacy raw rows: a bare handle (or string name).
   return { handle: f, tauriPath: null } as RecentEntry;
+}
+
+/** The name a recents row is listed under, whatever shape it arrived in. */
+export function recentRowName(entry: RecentRow): string {
+  const raw = entry as any;
+  return raw?.handle?.name ?? raw?.name ?? '';
+}
+
+/**
+ * Remember a Lith that has no file behind it: the index-db-only fallback's row.
+ *
+ * It goes in the same store the handle rows do, and deliberately so. This
+ * mode's whole claim is "your Lith is in this browser's storage", and a row
+ * parked in localStorage would be the one part of it that is not — quietly
+ * surviving the site-data clear the user performs to erase everything.
+ *
+ * `text` is for the mounts whose content is not in the search cache: an HTML
+ * monolith is a whole page with no tiddler store, so the row is the only place
+ * its text can live.
+ */
+export async function addBrowserOnlyRecent(name: string, text = '', store: CacheStore = idb): Promise<RecentEntry[]> {
+  try {
+    const raw = (await store.get<any[]>('recentFiles')) || [];
+    const rest = raw.map(normalizeRecentEntry).filter((row) => recentRowName(row) !== name);
+    const row = { handle: null, tauriPath: null, name, browserOnly: true, ...(text ? { text } : {}) };
+    const next = [row, ...rest].slice(0, 20) as unknown as RecentEntry[];
+    await store.set('recentFiles', next);
+    return next;
+  } catch (err) {
+    console.error('Failed to add a browser-only recent file to IndexedDB:', err);
+    return [];
+  }
+}
+
+/**
+ * Drop one browser-only row. Matched by name, because it has no handle to
+ * compare against — there is nothing on disk for it to be the same *as*.
+ */
+export async function removeBrowserOnlyRecent(name: string, store: CacheStore = idb): Promise<RecentEntry[]> {
+  try {
+    const raw = (await store.get<any[]>('recentFiles')) || [];
+    const next = raw
+      .map(normalizeRecentEntry)
+      .filter((row) => !(row.browserOnly === true && recentRowName(row) === name));
+    await store.set('recentFiles', next);
+    return next;
+  } catch (err) {
+    console.error('Failed to remove a browser-only recent file from IndexedDB:', err);
+    return [];
+  }
 }
 
 /**
@@ -203,23 +268,32 @@ export async function setInstallDismissed(dismissed: boolean): Promise<void> {
   }
 }
 
-export async function removeRecentFile(fileHandleToRemove: FileSystemFileHandle): Promise<RecentEntry[]> {
+export async function removeRecentFile(
+  fileHandleToRemove: FileSystemFileHandle,
+  store: CacheStore = idb
+): Promise<RecentEntry[]> {
   try {
-    const raw = (await idb.get<any[]>('recentFiles')) || [];
+    const raw = (await store.get<any[]>('recentFiles')) || [];
     const recentFiles: RecentEntry[] = raw.map(normalizeRecentEntry);
     const newRecentFiles: RecentEntry[] = [];
 
     for (const f of recentFiles) {
+      // A row with no comparable handle — a browser-only row, or a Tauri row
+      // that records its path instead — cannot be the row being removed, so it
+      // stays. Dropping these turned any removal into a collision: the row the
+      // user did *not* point at was the one that disappeared.
+      if (!f.handle?.isSameEntry) {
+        newRecentFiles.push(f);
+        continue;
+      }
       try {
-        if (f.handle?.isSameEntry && !(await f.handle.isSameEntry(fileHandleToRemove))) {
-          newRecentFiles.push(f);
-        }
+        if (!(await f.handle.isSameEntry(fileHandleToRemove))) newRecentFiles.push(f);
       } catch {
         newRecentFiles.push(f);
       }
     }
 
-    await idb.set('recentFiles', newRecentFiles);
+    await store.set('recentFiles', newRecentFiles);
     return newRecentFiles;
   } catch (err) {
     console.error('Failed to remove recent file from IndexedDB:', err);

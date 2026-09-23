@@ -7,7 +7,8 @@
   import { pwaInstall, promptPwaInstall } from './pwa-install';
   import { bootLegacyWiki, bootLegacyHtml, type RemoteTarget } from './legacy-launcher-runtime';
   import { EMOJI_LIST, uploadInstanceIcon, clearInstanceIcon, emojiFaviconUrl, applyFavicon, bustIconCache, readInstanceEmoji, saveInstanceEmoji, clearInstanceEmoji } from './instance-icon';
-  import { getRecentFiles, addRecentFile, removeRecentFile, clearAllRecentFiles, purgeOldestCachesIfNeeded, saveSearchCache, forgetWikiCache, cachedWikiNames, idb, getSearchCacheText, listWikiVersions, wikiHasHistory, downloadWikiVersion, getDirtyState, clearDirtyState, listDirtyRecoveries, isWikiDriftedFromHead, isInstallDismissed, setInstallDismissed, recentDiskPath, type RecentEntry } from './storage';
+  import { getRecentFiles, addRecentFile, removeRecentFile, addBrowserOnlyRecent, removeBrowserOnlyRecent, clearAllRecentFiles, purgeOldestCachesIfNeeded, saveSearchCache, forgetWikiCache, cachedWikiNames, idb, getSearchCacheText, listWikiVersions, wikiHasHistory, downloadWikiVersion, getDirtyState, clearDirtyState, listDirtyRecoveries, isWikiDriftedFromHead, isInstallDismissed, setInstallDismissed, recentDiskPath, type RecentEntry } from './storage';
+  import { resolveStorageMode, storageModeOverride, browserOnlyMarkTitle, BROWSER_ONLY_NOTE, type StorageMode } from './browser-storage';
   import { readBookmarkEntries, saveBookmark, removeBookmark, setBookmarkManualAuth, setBookmarkIcon, refreshBookmarkIcon, verifyInstanceUrl, normalizeInstanceUrl, instanceLabel, type BookmarkEntry, type InstanceVerification } from './bookmarks';
   import PinEntry from './PinEntry.svelte';
   import { fetchRemoteFiles, fetchRemoteWiki, probePatchApi, createLockHeartbeat, readRemoteLock, uploadRemoteFile, webdavUrl, resolveSessionId, lithUploadName, type WebdavFile } from './webdav';
@@ -35,6 +36,23 @@
 
   export let mode: LauncherMode;
   const files = createFileBridge();
+  /**
+   * Where this page's saves can land: a real file, or — on a platform with no
+   * File System Access API (Safari and Firefox, which is the whole of macOS
+   * outside Chrome, and the only place a PWA can be installed there) — only
+   * this browser's own storage. Settled once, at boot: the answer cannot change
+   * while the page lives, and every mount below inherits it.
+   */
+  const storageMode: StorageMode = resolveStorageMode(
+    mode,
+    typeof window === 'undefined' ? undefined : (window as unknown as { showSaveFilePicker?: unknown }),
+    typeof window === 'undefined' ? null : storageModeOverride(window.location.search)
+  );
+  /**
+   * The index-db-only fallback: no Lith mounted here has a file behind it, so
+   * its cached copy in this browser *is* the document.
+   */
+  const indexDbOnly = storageMode === 'index-db';
   const RECENT_KEY = 'lithic-recent-liths';
   let lithText = '';
   let fileName = 'untitled.lith';
@@ -1251,6 +1269,17 @@
     if (file.handle) {
       recentFiles = await addRecentFile(file.handle, file.path ?? null);
       persistRecentsSidecar();
+    } else if (indexDbOnly) {
+      // Nothing here has a file to remember and nothing can, so the row says so
+      // — and is stored in the store the Lith's content is stored in. An HTML
+      // monolith has no tiddler snapshot to read its page back from, so its
+      // text travels in the row; a Lith's is already in the search cache the
+      // mount's own saver writes.
+      recentFiles = await addBrowserOnlyRecent(
+        file.name,
+        isHtmlMonolithName(file.name) ? file.text ?? '' : ''
+      );
+      persistRecentsSidecar();
     } else {
       const name = file.name;
       recentFiles = [file, ...recentFiles.filter((item) => getEntryName(item) !== name)].slice(0, 20);
@@ -1365,7 +1394,12 @@
     // own recovery through add-ons or plugins, and the launcher must not
     // interpose on what the page does with its own edits. Saved history is not
     // interposition, so monoliths keep it like every other mount.
-    const driftedFromHead = !isHtmlMonolith && !isScratch && await isWikiDriftedFromHead(safeName, contents);
+    // Drift asks whether the file changed outside this device since the last
+    // local save. In the browser-storage fallback there is no file that could
+    // have changed — the cached copy *is* the document — so the comparison is
+    // the cache against itself, and answering it there marks a full SYNC
+    // snapshot on mounts that changed nothing.
+    const driftedFromHead = !isHtmlMonolith && !isScratch && !indexDbOnly && await isWikiDriftedFromHead(safeName, contents);
     if (tracksUnsavedEdits(name)) {
       if ((await prepareDirtyRecovery(safeName)) === 'later') {
         busy = false;
@@ -1401,7 +1435,7 @@
     await bootLegacyWiki(handoff, [...pendingImports, ...ephemeralIntegrationTiddlers(), ...extraTiddlers], {
       __EPHEMERAL_MODE__: mode === 'self-host' ? 'self-host' : 'paper-light',
       __LITHIC_LAUNCHER_MODE__: mode
-    }, { driftedFromHead, scratchMode, remote });
+    }, { driftedFromHead, scratchMode, remote, browserOnly: indexDbOnly });
     pendingImports = [];
   }
 
@@ -1478,6 +1512,19 @@
     try {
       const rawHandle = (recent as any).handle;
       const tauriPath = recentDiskPath(recent);
+      // A Lith that lives only in this browser's storage — or any row this
+      // platform could not write back to a file — mounts *writable*, from the
+      // cached copy, so the next save lands in the same place it came from.
+      // The cache is read in preference to the row, because the cache is what
+      // every save has been updating.
+      if ((recent as any).browserOnly === true || (indexDbOnly && !rawHandle?.getFile && !tauriPath)) {
+        const name = getEntryName(recent);
+        const cached = isHtmlMonolithName(name) ? '' : await getSearchCacheText(name);
+        const text = cached || (recent as any).text || '';
+        await mountWiki(text, name);
+        status = `Mounted ${name}`;
+        return;
+      }
       if (mode === 'tauri') {
         if (tauriPath) {
           await mountTauriPath(tauriPath);
@@ -2370,7 +2417,11 @@
    */
   async function removeRecent(file: RecentEntry | { name?: string; handle?: any }) {
     const name = getEntryName(file);
-    if ((file as any).handle) {
+    if ((file as any).browserOnly === true) {
+      // No handle to compare against, and no localStorage copy either: this row
+      // is one of the fallback's own, in the store the handle rows live in.
+      recentFiles = await removeBrowserOnlyRecent(name);
+    } else if ((file as any).handle) {
       recentFiles = await removeRecentFile((file as any).handle);
     } else {
       recentFiles = recentFiles.filter((item) => item !== file);
@@ -2441,7 +2492,13 @@
       void runGitSyncHeartbeat();
     };
     document.addEventListener('visibilitychange', onVisibilityChange);
-    void purgeOldestCachesIfNeeded().catch(() => { /* best effort */ });
+    // Proactive quota relief, deliberately not run in the index-db-only
+    // fallback: it deletes the oldest-modified caches, and there the oldest
+    // cache is somebody's only copy of a Lith — the same all-clear this mode
+    // goes out of its way not to perform. A save that hits the quota reports
+    // the failure instead, which is the honest outcome, and the note above the
+    // list says to keep downloaded copies.
+    if (!indexDbOnly) void purgeOldestCachesIfNeeded().catch(() => { /* best effort */ });
     const closeOnEscape = (event: KeyboardEvent) => {
       if (event.key === 'Escape') {
         // The confirmation is the top of the stack, so it takes the Escape and
@@ -3708,6 +3765,14 @@
         <input class="recent-search" aria-label="Search recent Liths" placeholder="Search recent liths…" bind:value={search} on:keydown={handleSearchKeydown} />
         {#if search}<button class="recent-search-clear" type="button" aria-label="Clear recent Lith search" on:click={() => search = ''}>×</button>{/if}
       </div>
+      <!--
+        The fallback's claim, said once above the list: this platform gave the
+        launcher nowhere to save a file, so the marked rows below are the whole
+        document, and the download in each row's history is the copy to keep.
+      -->
+      {#if indexDbOnly}
+        <p class="browser-only-note" role="note">{BROWSER_ONLY_NOTE}</p>
+      {/if}
       <div class="recent-list">
         {#if isSelfHost()}
           {#if remoteBusy && remoteFiles.length === 0}
@@ -3786,6 +3851,17 @@
                 <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8.5"></circle><path d="M12 7.5v5.5"></path><path d="M12 16.2h.01"></path></svg>
               </button>
             {/if}
+            <!--
+              The fallback's mark, on the row for as long as the row exists: no
+              file backs this Lith, so there is nothing to fix and nothing to
+              clear — the only way out is out of the browser, through the
+              history dialog this opens.
+            -->
+            {#if (file as any).browserOnly}
+              <button class="recent-icon-button browser-only-button" type="button" aria-label={browserOnlyMarkTitle(name)} title={browserOnlyMarkTitle(name)} on:click={() => openHistoryModal(name)}>
+                <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3 2 20h20Z"></path><path d="M12 10v4.5"></path><path d="M12 17.3v.2"></path></svg>
+              </button>
+            {/if}
             {#if cacheSearchMatches[name]?.preview}
               <div
                 use:positionCachePreview
@@ -3823,14 +3899,25 @@
           </div>
         {/each}
       </div>
-      {#if showRebuildControl}
-        <button class="reset-cache" on:click={rebuildRecents} disabled={rebuildBusy} title={isSelfHost()
-          ? 'Rebuild this list from the server'
-          : 'Rebuild this list from the files on disk'}>{
-          rebuildBusy ? 'Re-indexing…' : 'Rebuild Recents'
-        }</button>
-      {:else}
-        <button class="reset-cache" on:click={clearRecent} title="Clears this list and its local history. Your files stay.">Reset Recents</button>
+      <!--
+        In the index-db-only fallback neither control means what it says, so
+        neither is offered. Nothing on disk can be re-listed, and "Reset" there
+        is not "clear a list, your files stay" — the cache *is* the files, so
+        one click would take every Lith on the device with it. Site data is the
+        browser's own way to do that, and its friction is the point: it is worth
+        requiring a deliberate trip through the browser's settings to erase
+        everything the launcher holds.
+      -->
+      {#if !indexDbOnly}
+        {#if showRebuildControl}
+          <button class="reset-cache" on:click={rebuildRecents} disabled={rebuildBusy} title={isSelfHost()
+            ? 'Rebuild this list from the server'
+            : 'Rebuild this list from the files on disk'}>{
+            rebuildBusy ? 'Re-indexing…' : 'Rebuild Recents'
+          }</button>
+        {:else}
+          <button class="reset-cache" on:click={clearRecent} title="Clears this list and its local history. Your files stay.">Reset Recents</button>
+        {/if}
       {/if}
     </section>
   {/if}

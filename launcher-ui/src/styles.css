@@ -844,6 +844,15 @@ footer > * { pointer-events: auto; }
  */
 .local-only-button { color: #8a8a8a; }
 .local-only-button:hover { color: #f0c674; }
+/*
+ * Browser-storage-only mark: a Lith with no file anywhere. Amber rather than
+ * the local-only mark's grey, and not muted on hover — that one is information
+ * about a file that is safe where it is, while this one is the standing truth
+ * that the copy on screen is the only copy there is.
+ */
+.browser-only-button { color: #d8a93c; }
+.browser-only-button svg { fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linecap: round; }
+.browser-only-button:hover { color: #f0c674; }
 .history-download-icon { width: 19px !important; height: 21px !important; overflow: visible; }
 .history-icon-shape { fill: currentColor; stroke: none; }
 .cache-preview {
@@ -873,6 +882,17 @@ footer > * { pointer-events: auto; }
 .remove-recent { color: #ff5555; }
 .remove-recent:hover { color: #ff7777; }
 .empty { padding: 20px; color: #999; text-align: center; }
+/* The fallback's one-line explanation, above the list it applies to. */
+.browser-only-note {
+  margin: 0 0 8px;
+  padding: 7px 9px;
+  border: 1px dashed #6b551f;
+  border-radius: 7px;
+  background: rgb(216 169 60 / 8%);
+  color: #e2c07c;
+  font-size: 0.78rem;
+  line-height: 1.35;
+}
 .reset-cache { width: 100%; padding: 11px; border: 1px dashed #454545; border-radius: 7px; background: transparent; color: #ddd; cursor: pointer; }
 .reset-cache:disabled { color: #8a8a8a; cursor: default; }
 /* Coverage is a count, not a warning: how much of the list is backed up. */

@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { KeyvalStore, addRecentFile, getRecentFiles, removeRecentFile, clearAllRecentFiles, forgetWikiCache, saveSearchCache, purgeOldestCachesIfNeeded, isWikiDriftedFromHead, recentDiskPath, isFlatCacheKey, cachedWikiNames, type CacheStore } from './storage.ts';
+import { KeyvalStore, addRecentFile, getRecentFiles, removeRecentFile, addBrowserOnlyRecent, removeBrowserOnlyRecent, recentRowName, clearAllRecentFiles, forgetWikiCache, saveSearchCache, purgeOldestCachesIfNeeded, isWikiDriftedFromHead, recentDiskPath, isFlatCacheKey, cachedWikiNames, type CacheStore } from './storage.ts';
 import { KeyvalWikiHistory } from './wiki-history.ts';
 
 // In Node environment without native indexedDB, we mock indexedDB or test logic
@@ -249,4 +249,59 @@ test('recentDiskPath finds the path in every row shape the recents store holds',
   assert.equal(recentDiskPath({ handle: { name: 'e.lith' } }), null);
   assert.equal(recentDiskPath({ name: 'f.lith', path: '' }), null);
   assert.equal(recentDiskPath({ handle: 'g.lith' }), null);
+});
+
+test('a browser-only row lands in the same store the file rows live in', async () => {
+  const store = new MemoryIdb();
+  await addBrowserOnlyRecent('notes.lith', '', store);
+  const rows = (await store.get<any[]>('recentFiles'))!;
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0].name, 'notes.lith');
+  assert.equal(rows[0].handle, null);
+  assert.equal(rows[0].browserOnly, true);
+});
+
+test('re-saving a browser-only Lith moves its row rather than duplicating it', async () => {
+  const store = new MemoryIdb();
+  await addBrowserOnlyRecent('notes.lith', '', store);
+  await addBrowserOnlyRecent('other.lith', '', store);
+  await addBrowserOnlyRecent('notes.lith', '', store);
+  const rows = (await store.get<any[]>('recentFiles'))!;
+  assert.deepEqual(rows.map((row) => row.name), ['notes.lith', 'other.lith']);
+});
+
+test('a browser-only row supersedes the file row of the same name', async () => {
+  // The same Lith cannot be both: whatever this mode mounts is remembered as
+  // living in browser storage, so the older file-row shape must not linger
+  // beside it and offer to open a file nobody can write to.
+  const store = new MemoryIdb([['recentFiles', [{ handle: { name: 'notes.lith' }, tauriPath: null }]]]);
+  await addBrowserOnlyRecent('notes.lith', '', store);
+  const rows = (await store.get<any[]>('recentFiles'))!;
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0].browserOnly, true);
+});
+
+test('removing a browser-only row takes that row and leaves the rest', async () => {
+  const store = new MemoryIdb();
+  await addBrowserOnlyRecent('notes.lith', '', store);
+  await addBrowserOnlyRecent('other.lith', '', store);
+  const next = await removeBrowserOnlyRecent('notes.lith', store);
+  assert.deepEqual(next.map((row) => row.name), ['other.lith']);
+  assert.deepEqual(((await store.get<any[]>('recentFiles'))!).map((row) => row.name), ['other.lith']);
+});
+
+test('a row with no comparable handle survives removing some other file', async () => {
+  // Regression: removal used to keep only rows whose handle answered
+  // isSameEntry, so pointing at one file quietly deleted every handle-less row
+  // beside it — which is every row the fallback mode makes.
+  const store = new MemoryIdb([[
+    'recentFiles',
+    [
+      { handle: null, name: 'browser-only.lith', browserOnly: true },
+      { handle: { name: 'target.lith', isSameEntry: async (other: any) => other === 'target' }, tauriPath: null },
+      { handle: null, name: 'path-only.lith', tauriPath: 'C:/Lithic/path-only.lith' }
+    ]
+  ]]);
+  const next = await removeRecentFile('target' as any, store);
+  assert.deepEqual(next.map((row) => recentRowName(row)), ['browser-only.lith', 'path-only.lith']);
 });

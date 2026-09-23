@@ -111,13 +111,29 @@ function injectTiddlers(html: string, tiddlers: Array<Record<string, string>>): 
   return html.replace(/<\/body>/i, `${script}</body>`);
 }
 
+/**
+ * How one mount saves: which save target the injected saver is given.
+ *
+ * `browserOnly` is the index-db-only fallback (browser-storage.ts): the
+ * platform has no File System Access API, so nothing this mount produces can
+ * ever be written to a file, and the cached copy in IndexedDB *is* the save.
+ */
+export type MountSaveOptions = {
+  isHtmlMode?: boolean;
+  driftedFromHead?: boolean;
+  scratchMode?: ScratchMode;
+  remote?: RemoteTarget | null;
+  browserOnly?: boolean;
+};
+
 function injectSaverBootstrap(
   html: string,
   suggestedFileName?: string,
   isHtmlMode = false,
   driftedFromHead = false,
   scratchMode: ScratchMode = 'off',
-  remote: RemoteTarget | null = null
+  remote: RemoteTarget | null = null,
+  browserOnly = false
 ): string {
   const pluginsJson = JSON.stringify(DEFAULT_PLUGINS);
   const jsonPatchRuntime = JSON_PATCH_RUNTIME;
@@ -137,6 +153,7 @@ function injectSaverBootstrap(
   const saveTypesJson = JSON.stringify(saveTypes);
   const htmlModeLiteral = isHtmlMode ? 'true' : 'false';
   const driftedFromHeadLiteral = driftedFromHead ? 'true' : 'false';
+  const browserOnlyLiteral = browserOnly ? 'true' : 'false';
   const scratchModeJson = JSON.stringify(scratchMode);
   // Self-host: the saver talks to the same-origin save API instead of a file
   // handle. Only the target identity is baked in here; the base text and digest
@@ -221,10 +238,15 @@ function injectSaverBootstrap(
           var existingIndex = inList.indexOf(true);
           // Tauri pseudo-handles (no getFile) must not enter the recents
           // store: record their disk path so the launcher re-opens via the
-          // Rust read command, not the File System Access API.
+          // Rust read command, not the File System Access API. The browser-only
+          // pseudo-handle is the same kind of thing for the opposite reason —
+          // there is no file at all — and is flagged so the launcher lists it
+          // as volatile rather than offering to re-open it.
           var newEntry = fileHandle.__lithicTauriPath__
             ? { handle: null, name: fileHandle.name, tauriPath: fileHandle.__lithicTauriPath__ }
-            : { handle: fileHandle, name: fileHandle.name, tauriPath: null };
+            : fileHandle.__lithicBrowserOnly__
+              ? { handle: null, name: fileHandle.name, tauriPath: null, browserOnly: true }
+              : { handle: fileHandle, name: fileHandle.name, tauriPath: null };
           if (existingIndex !== -1) {
             var moved = recentFiles.splice(existingIndex, 1)[0];
             recentFiles.unshift(moved);
@@ -543,6 +565,15 @@ function injectSaverBootstrap(
       return { name: name, __lithicTauriPath__: tauriPath };
     }
 
+    // The index-db-only fallback's save target. There is no file and no picker
+    // to name one, so the only thing this carries is the name every other part
+    // of the system keys off: the recents row, the search cache, the version
+    // history and the dirty-state backup.
+    var browserOnly = ${browserOnlyLiteral};
+    function browserOnlyHandle(name) {
+      return { name: name, __lithicBrowserOnly__: true };
+    }
+
     // The engine boots in place via document.open/write/close, which keeps the
     // same window, so launcher globals survive. Recover the file handle from
     // the IndexedDB recent-files list (keyed by the active handoff name) as a
@@ -677,10 +708,36 @@ function injectSaverBootstrap(
       }).catch(function(err) { callback(err); });
     }
 
+    // --- Index-db-only save path ---------------------------------------------
+    // The platform gave this tab no way to write a file, so the cached copy is
+    // not a backup of the save — it *is* the save. It writes exactly the keys a
+    // real save writes (the flat search cache and the versioned history), which
+    // is what keeps everything downstream working unchanged: the recents row,
+    // the search index, unsaved-edit recovery, and the version-history modal
+    // the user downloads their own hard copy from.
+    function saveToBrowserStorage(tw, callback) {
+      var jsonText = (tw && tw.wiki && tw.wiki.getTiddlersAsJson) ? tw.wiki.getTiddlersAsJson(userTiddlerFilter) : '[]';
+      var fileName = (handle && handle.name) || ${suggestedNameJson};
+      var target = browserOnlyHandle(fileName);
+      handle = target;
+      root.__LITHIC_FILE_HANDLE__ = target;
+      return Promise.all([
+        addRecent(target),
+        saveSearchCache(fileName, jsonText)
+      ]).then(function() { callback(null); }, function(err) {
+        console.error('Lithic browser-storage save failed:', err);
+        callback(err);
+      });
+    }
+
     var save = function(_text, _method, callback) {
       var tw = root.$tw;
       if (remote) {
         saveRemote(tw, callback);
+        return true;
+      }
+      if (browserOnly) {
+        saveToBrowserStorage(tw, callback);
         return true;
       }
       var saveOptions = {
@@ -915,7 +972,7 @@ export function buildEngineHtml(
   handoff: LauncherHandoff,
   extraTiddlers: Array<Record<string, string>> = [],
   engineGlobals: Record<string, string> = {},
-  options: { isHtmlMode?: boolean; driftedFromHead?: boolean; scratchMode?: ScratchMode; remote?: RemoteTarget | null } = {}
+  options: MountSaveOptions = {}
 ): string {
   const imported = handoff.text
     ? parseHandoffImported(handoff.name, handoff.text)
@@ -954,7 +1011,8 @@ export function buildEngineHtml(
     options.isHtmlMode === true,
     options.driftedFromHead === true,
     options.scratchMode ?? 'off',
-    options.remote ?? null
+    options.remote ?? null,
+    options.browserOnly === true
   );
   if (options.remote && !options.remote.readOnly) {
     // The saver diffs the wiki against the exact text the launcher loaded, so
@@ -979,7 +1037,7 @@ export async function bootLegacyWiki(
   handoff: LauncherHandoff,
   extraTiddlers: Array<Record<string, string>> = [],
   engineGlobals: Record<string, string> = {},
-  options: { isHtmlMode?: boolean; driftedFromHead?: boolean; scratchMode?: ScratchMode; remote?: RemoteTarget | null } = {}
+  options: MountSaveOptions = {}
 ): Promise<void> {
   const engine = await fetchEngine();
   const html = buildEngineHtml(engine, handoff, extraTiddlers, engineGlobals, options);
