@@ -1,0 +1,16 @@
+# Generated build OUTPUT, produced by the release pipeline (.github/workflows/
+# build-wiki.yml) and committed only because the repository is their delivery
+# channel — deploy/autoupdate.sh pulls src/launcher.html on a timer, the
+# Dockerfile COPYs it, and the Tauri bundle embeds it. Locally built copies are
+# for testing and must never be committed. See "GENERATED ARTIFACTS ARE CI-ONLY"
+# in agents.md.
+#
+# `linguist-generated` is what makes GitHub label these "Generated" and collapse
+# them in a diff instead of rendering megabytes of minified bundle.
+#
+# Deliberately NO `* text=auto` or eol rules in this file: the repo carries CRLF
+# in places (see the line-endings note in agents.md), so a blanket
+# normalization here would rewrite line endings repo-wide.
+src/launcher.html linguist-generated=true
+src/lithic.html linguist-generated=true
+variants/*.html linguist-generated=true

@@ -25,6 +25,16 @@ permissions:
   contents: write
   packages: write
 
+# One writer to main at a time, repo-wide: concurrency groups are shared across
+# workflows, and bump-pwa-version.yml deliberately names this same group.
+# cancel-in-progress stays OFF — by the time this job reaches its push it has
+# already built, and cancelling it is how you lose a finished release to nothing.
+# A group only serializes workflows against each other; a person pushing while
+# this runs is covered by scripts/ci-push-main.sh.
+concurrency:
+  group: main-writers
+  cancel-in-progress: false
+
 jobs:
   build:
     runs-on: ubuntu-latest
@@ -190,7 +200,7 @@ jobs:
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git add variants/prod.html variants/lithic-light.html src/lithic.html src/launcher.html manifest.json offline-service-worker.js
           git diff --cached --quiet || git commit -m "Update src/lithic.html + variants/prod.html, and bump PWA to $NEW_VERSION (build-$(date +'%Y.%m.%d-%H%M'))"
-          git push
+          bash scripts/ci-push-main.sh
 
       - name: Commit Built Wiki to variants (non-prod)
         if: ${{ inputs.build_config != 'prod' }}
@@ -212,7 +222,7 @@ jobs:
             git add variants/${{ inputs.build_config }}.html
             git diff --cached --quiet || git commit -m "Update variants/${{ inputs.build_config }}.html from build"
           fi
-          git push
+          bash scripts/ci-push-main.sh
 
       - name: Archive Wiki Folder
         run: zip -r wiki.zip wiki

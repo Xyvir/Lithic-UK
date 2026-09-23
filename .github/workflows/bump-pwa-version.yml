@@ -1,16 +1,31 @@
 name: Bump PWA Version
 
+# Manual by design. This used to fire on every push touching src/launcher.html
+# or src/lithic.html and commit the bump itself, which made it an unattended
+# writer to main. That races the release build: a prod build's final push is
+# rejected if main moved while it ran, and the rejected commit dies with the
+# runner — taking the rebuilt artifacts, the tag, the GitHub Release and the
+# Tauri/server jobs with it. It also turned ordinary pushes into extra
+# "chore: bump PWA version" commits nobody asked for.
+#
+# Dispatch this by hand, or use the prod path of "Build and Release TiddlyWiki",
+# which bumps manifest.json and the service worker itself as part of the release.
+#
+# Consequence worth knowing: pushing src/launcher.html no longer bumps the
+# version on its own, so an installed PWA keeps its cached launcher shell until
+# something bumps the service-worker version.
 on:
-  push:
-    paths:
-      - 'src/launcher.html'
-      - 'src/lithic.html'
-    branches:
-      - main
+  workflow_dispatch:
+
+# Shares the repo-wide `main-writers` group with build-wiki.yml, so two writers
+# cannot publish over each other; a person pushing mid-run is handled by
+# scripts/ci-push-main.sh.
+concurrency:
+  group: main-writers
+  cancel-in-progress: false
 
 jobs:
   bump-version:
-    if: github.actor != 'github-actions[bot]'
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -25,23 +40,27 @@ jobs:
           # Extract current version from manifest.json
           CURRENT_VERSION=$(grep '"version":' manifest.json | sed -E 's/.*"version": "([^"]+)".*/\1/')
           echo "Current Version: $CURRENT_VERSION"
-          
+
           # Increment patch version
           IFS='.' read -r major minor patch <<< "$CURRENT_VERSION"
           NEW_PATCH=$((patch + 1))
           NEW_VERSION="$major.$minor.$NEW_PATCH"
           echo "New Version: $NEW_VERSION"
-          
+          # Hand the value to the next step: a step's shell variables do not
+          # survive into it, which is why the commit subject used to read
+          # "bump PWA version to " with the number missing.
+          echo "NEW_VERSION=$NEW_VERSION" >> "$GITHUB_ENV"
+
           # Update manifest.json
           sed -i "s/\"version\": \"$CURRENT_VERSION\"/\"version\": \"$NEW_VERSION\"/" manifest.json
-          
+
           # Update offline-service-worker.js
           # Using a more flexible regex for the service worker version line
           sed -i "s/const VERSION = '[^']*'; \/\/ Updated by build pipeline/const VERSION = '$NEW_VERSION'; \/\/ Updated by build pipeline/" offline-service-worker.js
-          
+
       - name: Commit and Push
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git add manifest.json offline-service-worker.js
-          git diff --cached --quiet || (git commit -m "chore: bump PWA version to $NEW_VERSION [skip ci]" && git push)
+          git diff --cached --quiet || (git commit -m "chore: bump PWA version to $NEW_VERSION [skip ci]" && bash scripts/ci-push-main.sh)
