@@ -27,6 +27,17 @@ const artifactHtml = await readFile(artifact, 'utf8');
 // tries to fetch one from a host that does not exist (see the bookmark section).
 const missingIconHost = 'no-icon.example.com';
 
+/**
+ * How every `waitForFunction` in this file polls.
+ *
+ * Puppeteer's default is `raf`, and an animation frame is only delivered to the page the
+ * browser is painting: this suite opens a page (sometimes a whole browser context) per
+ * section, so "not the painted one" is the ordinary case here, and a wait on a background
+ * page then sits until it times out although the state it was waiting for arrived long
+ * ago. A timer poll asks the same question and does not depend on anything being drawn.
+ */
+const POLL = { polling: 250 };
+
 const browser = await puppeteer.launch({
   headless: process.env.HEADED === '1' ? false : 'new',
   args: ['--no-sandbox', '--disable-setuid-sandbox'],
@@ -507,7 +518,7 @@ try {
     button.click();
   }, selector, label);
   const waitForAction = (page, selector, label) => page.waitForFunction((css, text) =>
-    [...document.querySelectorAll(css)].some((node) => node.textContent.trim() === text), {}, selector, label);
+    [...document.querySelectorAll(css)].some((node) => node.textContent.trim() === text), POLL, selector, label);
   const readSyncDialog = (page) => page.evaluate(() => {
     const modal = document.querySelector('.git-sync-modal');
     if (!modal) return null;
@@ -637,7 +648,8 @@ try {
   await livePage.click('.git-sync-modal .modal-close');
   await livePage.waitForSelector('.git-sync-modal', { hidden: true });
   await livePage.waitForFunction(
-    () => [...document.querySelectorAll('.recent-row.remote-row .recent-name')].some((row) => row.textContent.includes('arrived.lith'))
+    () => [...document.querySelectorAll('.recent-row.remote-row .recent-name')].some((row) => row.textContent.includes('arrived.lith')),
+    POLL
   );
   const afterConnect = await livePage.evaluate(() => ({
     button: document.querySelector('.heading .sync-button')?.className ?? null,
@@ -653,6 +665,83 @@ try {
   assert.ok(
     afterConnect.rows.some((row) => row.startsWith('arrived.lith')),
     `Live self-host: connecting re-listed the store, so the Lith the setup pulled down is on screen: ${JSON.stringify(afterConnect.rows)}`
+  );
+
+  // --- Deleting a Lith from the server ----------------------------------------
+  // The legacy store put a × on every row of its remote list, and this mode's list is
+  // still that store: the two decorations the rework dropped from it — the group heading
+  // and the per-row dot — were there to tell the server's rows apart from the device's,
+  // and a control that acts on a row is not. What is new is the answer it takes. The
+  // legacy asked with `window.confirm`, which the desktop app renders as an OS message
+  // box belonging to no part of the launcher it interrupts, so the question is the app's
+  // own dialog now. Nothing is asked of the server until that question is answered.
+  const remoteRows = () => livePage.evaluate(() =>
+    [...document.querySelectorAll('.recent-row.remote-row')].map((row) => ({
+      name: row.querySelector('.recent-name')?.firstChild?.textContent?.trim() ?? null,
+      remove: row.querySelector('.remove-remote')?.getAttribute('aria-label') ?? null,
+      title: row.querySelector('.remove-remote')?.getAttribute('title') ?? null
+    }))
+  );
+  const storeDeletes = () => stub.state.asked.filter((entry) => entry.startsWith('DELETE '));
+  assert.deepEqual(
+    await remoteRows(),
+    [
+      {
+        name: 'arrived.lith',
+        remove: 'Delete arrived.lith from this server',
+        title: 'Delete from remote storage'
+      }
+    ],
+    'Live self-host: every row of the store carries the × that deletes it from the server'
+  );
+
+  // Declining, first: the × asks, and an answer of no reaches the server with nothing.
+  await livePage.click('.recent-row.remote-row .remove-remote');
+  await livePage.waitForSelector('.confirm-modal');
+  const deleteAsk = await livePage.evaluate(() => ({
+    title: document.querySelector('.confirm-modal h2')?.textContent?.trim() ?? null,
+    body: document.querySelector('.confirm-modal p')?.textContent?.trim() ?? null,
+    actions: [...document.querySelectorAll('.confirm-modal .modal-action')].map((action) => action.textContent.trim()),
+    danger: document.querySelector('.confirm-modal .modal-action')?.classList.contains('danger') ?? false,
+    crosses: document.querySelectorAll('.confirm-modal .modal-close').length
+  }));
+  assert.equal(deleteAsk.title, 'Delete this Lith?', 'Live self-host: the row’s × asks before it deletes');
+  assert.equal(
+    deleteAsk.body,
+    'arrived.lith is deleted from the server, not just this device.',
+    'Live self-host: and says which Lith, and which copy of it goes'
+  );
+  assert.deepEqual(deleteAsk.actions, ['Delete', 'Cancel'], 'Live self-host: with the answer it is asking for beside the way out');
+  assert.equal(deleteAsk.danger, true, 'Live self-host: in the one colour this app keeps for an act that cannot be undone');
+  assert.equal(deleteAsk.crosses, 0, 'Live self-host: and no × of its own, the way out being the Cancel that declines it');
+  await clickAction(livePage, '.confirm-modal .modal-action', 'Cancel');
+  await livePage.waitForSelector('.confirm-modal', { hidden: true });
+  assert.deepEqual(storeDeletes(), [], 'Live self-host: declining the question deletes nothing');
+  assert.deepEqual(
+    (await remoteRows()).map((row) => row.name),
+    ['arrived.lith'],
+    'Live self-host: and the row it was asked about is still in the store'
+  );
+
+  // Then the answer that means it. The row leaves because the list is read again rather
+  // than edited here — the server is the one that decides the file is gone — so this also
+  // stands as the re-list the legacy delete did by hand.
+  await livePage.click('.recent-row.remote-row .remove-remote');
+  await livePage.waitForSelector('.confirm-modal');
+  await clickAction(livePage, '.confirm-modal .modal-action', 'Delete');
+  await livePage.waitForFunction(() => document.querySelectorAll('.recent-row.remote-row').length === 0, POLL);
+  assert.deepEqual(
+    stub.state.liths.map((lith) => lith.name),
+    [],
+    'Live self-host: the delete reached the instance’s store'
+  );
+  assert.ok(
+    storeDeletes().includes('DELETE /sync/arrived.lith'),
+    `Live self-host: through the store route, under the name the row showed: ${JSON.stringify(storeDeletes())}`
+  );
+  assert.ok(
+    storeDeletes().includes('DELETE /sync/arrived.lith.lock'),
+    `Live self-host: and the presence lock goes with it, exactly as the legacy delete tidied up: ${JSON.stringify(storeDeletes())}`
   );
 
   // And back out again. The confirmation is a second dialog, so the disconnect is
@@ -740,6 +829,153 @@ try {
   );
   await liveContext.close();
   await stub.close();
+
+  // --- The instance's icon belongs to the instance -----------------------------
+  // A picker that only wrote to the browser it was used in is per-client by construction:
+  // whoever set the emoji sees it, everybody else gets the shipped mark, and a redeploy or
+  // a restored backup takes it away from them as well. So the choice itself is kept in the
+  // store, beside the renders it describes and inside the tree git backs up, and every
+  // client reads it before drawing its own heading. What is asserted here is that contract
+  // from the outside, on a browser that has never seen this instance: it inherits the icon,
+  // saving is what writes it, restoring the default is what takes it away, and the icon
+  // files are never mistaken for Liths.
+  const iconSource = await readFile(resolve('launcher-ui/src/instance-icon.ts'), 'utf8');
+  const iconSetting = /export const ICON_SETTING = '([^']+)'/.exec(iconSource)?.[1];
+  assert.equal(
+    iconSetting,
+    'favicon.conf',
+    `The choice is stored under the name the deployment's backup carries it in (source says ${iconSetting})`
+  );
+  const iconStub = await startSelfHostStub({ artifact });
+  const iconContext = await browser.createBrowserContext();
+  const iconPage = await iconContext.newPage();
+  const iconErrors = [];
+  iconPage.on('pageerror', (error) => iconErrors.push(error.message));
+  await iconPage.setViewport({ width: 1000, height: 700 });
+  // Set on the instance, never in this context: this is the browser whose mark used to be
+  // wrong, and this context's own storage starts empty on purpose.
+  iconStub.addFile(iconSetting, '🌿');
+  const settingReads = () => iconStub.state.asked.filter((entry) => entry === `GET /sync/${iconSetting}`).length;
+  await iconPage.goto(`${iconStub.origin}/launcher.html?mode=self-host`, { waitUntil: 'domcontentloaded' });
+  await iconPage.waitForSelector('.brand-emoji');
+  const inherited = await iconPage.evaluate(() => ({
+    mark: document.querySelector('.brand-icon-wrap')?.className ?? null,
+    glyph: document.querySelector('.brand-emoji')?.textContent?.trim() ?? null,
+    // The document ships a `rel="shortcut icon"` link and the module reuses it (`applyFavicon`
+    // looks for `icon` first, then that), so the tab is read the way the module finds it.
+    favicon: (document.querySelector("link[rel='icon']") ?? document.querySelector("link[rel='shortcut icon']"))?.href?.slice(0, 22) ?? null,
+    mirror: localStorage.getItem('lithic-icon-emoji')
+  }));
+  assert.equal(settingReads() > 0, true, 'A launcher on an instance asks the instance for its icon');
+  assert.equal(inherited.glyph, '🌿', `A browser that never picked an icon shows the instance's own: ${JSON.stringify(inherited)}`);
+  assert.match(inherited.mark ?? '', /brand-emoji-wrap/, 'and the mark reads as set rather than as the shipped tile');
+  assert.match(inherited.favicon ?? '', /^data:image\/png;base64,/, 'with the tab following the instance rather than the bundled favicon');
+  assert.equal(inherited.mirror, '🌿', 'and the choice mirrored locally, so an instance that cannot be asked later still shows it');
+
+  // The picker agrees, which is what makes the icon a setting the owner can change rather
+  // than a value the page happened to render.
+  await iconPage.click('.brand-icon-wrap.pickable');
+  await iconPage.waitForSelector('.emoji-modal');
+  const pickerOpen = await iconPage.evaluate(() => ({
+    selected: [...document.querySelectorAll('.emoji-btn.selected')].map((node) => node.textContent.trim()),
+    preview: document.querySelector('.emoji-preview')?.textContent?.trim() ?? null,
+    line: document.querySelector('.emoji-modal p')?.textContent?.trim() ?? null
+  }));
+  assert.deepEqual(pickerOpen.selected, ['🌿'], 'The picker opens on the instance’s icon, not on an empty choice');
+  assert.equal(pickerOpen.preview, '🌿', 'and previews it');
+  assert.equal(
+    pickerOpen.line,
+    'This icon belongs to the instance. Everyone who opens this address sees it.',
+    'and says whose icon it is, which is what makes the choice a setting rather than a theme'
+  );
+
+  await iconPage.evaluate(() => {
+    const button = [...document.querySelectorAll('.emoji-btn')].find((node) => node.textContent.trim() === '🎨');
+    if (!button) throw new Error('no 🎨 in the grid');
+    button.click();
+  });
+  await clickAction(iconPage, '.emoji-modal .modal-action', 'Save Icon');
+  await iconPage.waitForFunction(
+    () => document.querySelector('.emoji-modal .status-line')?.textContent?.includes('Saved') ?? false,
+    POLL
+  );
+  const saved = await iconPage.evaluate(() => ({
+    status: document.querySelector('.emoji-modal .status-line')?.textContent?.trim() ?? null,
+    glyph: document.querySelector('.brand-emoji')?.textContent?.trim() ?? null
+  }));
+  assert.equal(saved.status, '✓ Saved. This instance now uses 🎨.', 'Saving says what the instance is now known by');
+  assert.equal(saved.glyph, '🎨', 'and the mark follows it');
+  assert.equal(
+    iconStub.state.files.get(iconSetting)?.bytes.toString('utf8'),
+    '🎨',
+    'The emoji itself is in the store, which is the whole of what another client reads'
+  );
+  // Where in the run the choice lands: after the renders, immediately before the doorbell.
+  // Earlier and the setting could describe icons that never arrived; later and the instance
+  // would be told to apply a set whose choice is missing.
+  const storeWrites = iconStub.state.asked.filter((entry) => entry.startsWith('PUT /sync/'));
+  const settingAt = storeWrites.indexOf(`PUT /sync/${iconSetting}`);
+  const doorbellAt = storeWrites.indexOf('PUT /sync/custom.ico');
+  assert.equal(
+    settingAt,
+    doorbellAt - 1,
+    `The choice is written after the renders and immediately before the doorbell: ${JSON.stringify(storeWrites)}`
+  );
+  assert.equal(
+    storeWrites.filter((entry) => entry === `PUT /sync/${iconSetting}`).length,
+    1,
+    'and written exactly once, which is what makes its position mean anything'
+  );
+  // Every render is in the store too, and none of them is a Lith: the list is the store's
+  // answer filtered to the files a launcher can open, and the icons live in the same root.
+  assert.equal(iconStub.state.files.size, 9, `The store holds the renders and the choice: ${JSON.stringify([...iconStub.state.files.keys()])}`);
+  const storeRows = () => iconPage.evaluate(() =>
+    [...document.querySelectorAll('.recent-row.remote-row .recent-name')].map((row) => row.firstChild?.textContent?.trim() ?? '')
+  );
+  assert.deepEqual(await storeRows(), [], 'and the icon files are not listed as Liths');
+
+  // Restoring the shipped icon takes the choice with it, or the next client would inherit
+  // an emoji nobody is using any more.
+  await clickAction(iconPage, '.emoji-modal .modal-action', 'Restore Default');
+  await iconPage.waitForFunction(() => document.querySelector('.brand-emoji') === null, POLL);
+  assert.equal(iconStub.state.files.has(iconSetting), false, 'Restoring the default forgets the instance’s choice');
+  assert.ok(
+    iconStub.state.asked.includes(`DELETE /sync/${iconSetting}`),
+    `by deleting it from the store: ${JSON.stringify(iconStub.state.asked.slice(-12))}`
+  );
+  assert.ok(
+    iconStub.state.asked.lastIndexOf('DELETE /sync/custom.ico') > iconStub.state.asked.indexOf(`DELETE /sync/${iconSetting}`),
+    'with the doorbell last, that write being the signal the deployment acts on'
+  );
+  assert.equal(
+    await iconPage.evaluate(() => localStorage.getItem('lithic-icon-emoji')),
+    null,
+    'and the browser that made the choice stops mirroring it'
+  );
+
+  // A third browser, on an instance whose choice has just been removed: it is told there is
+  // nothing to inherit, and the shipped mark is what it draws — the other half of "the
+  // instance decides", which a mirror-only design cannot express at all.
+  const cleanContext = await browser.createBrowserContext();
+  const cleanPage = await cleanContext.newPage();
+  await cleanPage.setViewport({ width: 1000, height: 700 });
+  const readsBefore = settingReads();
+  await cleanPage.goto(`${iconStub.origin}/launcher.html?mode=self-host`, { waitUntil: 'domcontentloaded' });
+  await cleanPage.waitForSelector('.brand-icon-wrap');
+  const answered = async () => {
+    const started = Date.now();
+    while (settingReads() <= readsBefore && Date.now() - started < 5000) {
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    }
+    return settingReads() > readsBefore;
+  };
+  assert.equal(await answered(), true, 'A fresh browser asks the instance about the icon too');
+  assert.equal(await cleanPage.$('.brand-emoji'), null, 'and an instance with no choice shows the shipped mark');
+  assert.equal(await cleanPage.evaluate(() => localStorage.getItem('lithic-icon-emoji')), null, 'with nothing inherited into this browser either');
+  assert.deepEqual(iconErrors, [], `The whole icon flow ran without a console error: ${iconErrors.join(' | ')}`);
+  await cleanContext.close();
+  await iconContext.close();
+  await iconStub.close();
 
   // --- The copy an instance leaves in this app's profile ------------------------
   // Removing and re-adding a bookmark does not reach an instance's cached launcher: that
@@ -1153,11 +1389,33 @@ try {
   // A page the launcher handed this window to is reached at an instance origin
   // with a marker naming the launcher; that is the only state with somewhere to
   // return to, and in the desktop app there is no browser chrome to do it with.
-  assert.equal(
-    await page.$('.back-to-launcher'),
-    null,
-    'A launcher that was not handed over shows no way back'
-  );
+  // Where it is drawn is the point of it: in the page's margin, which means the mark and
+  // the title have to land in exactly the same place whether it is there or not. So the
+  // window is set to the desktop width the app's own window opens near — an 800px window
+  // leaves 100px of margin either side of the column, a phone-width one leaves none — and
+  // the same two boxes are measured on the page without a way back and the page with one.
+  const backViewport = page.viewport();
+  await page.setViewport({ width: 1000, height: 700 });
+  const headingBoxes = (target) => target.evaluate(() => {
+    const box = (selector) => {
+      const rect = document.querySelector(selector).getBoundingClientRect();
+      return {
+        left: Math.round(rect.left),
+        top: Math.round(rect.top),
+        width: Math.round(rect.width),
+        height: Math.round(rect.height)
+      };
+    };
+    const back = document.querySelector('.back-to-launcher');
+    return {
+      mark: box('.brand-icon-wrap'),
+      title: box('.heading-copy h1'),
+      back: back ? box('.back-to-launcher') : null,
+      backInActions: Boolean(document.querySelector('.heading-actions')?.contains(back))
+    };
+  });
+  const bare = await headingBoxes(page);
+  assert.equal(bare.back, null, 'A launcher that was not handed over shows no way back');
   const launcherAddress = 'https://tauri.localhost/';
   await page.goto(`file://${artifact}?lithic-from=${encodeURIComponent(launcherAddress)}`, {
     waitUntil: 'domcontentloaded'
@@ -1165,19 +1423,46 @@ try {
   await page.waitForSelector('.back-to-launcher');
   const backMarkup = await page.evaluate(() => {
     const back = document.querySelector('.back-to-launcher');
-    const label = back.getAttribute('aria-label');
-    const heading = document.querySelector('.heading-actions');
     return {
-      label,
+      label: back.getAttribute('aria-label'),
       target: back.getAttribute('data-target'),
-      hasArrow: Boolean(back.querySelector('svg path')),
-      inHeading: heading?.contains(back) ?? false
+      hasArrow: Boolean(back.querySelector('svg path'))
     };
   });
   assert.equal(backMarkup.label, 'Back to the main launcher');
   assert.ok(backMarkup.hasArrow, 'The way back renders an icon, not bare text');
-  assert.ok(backMarkup.inHeading, 'The way back sits in the heading beside the mode’s own control');
   assert.equal(backMarkup.target, launcherAddress, 'The marker names the launcher to return to');
+  const handed = await headingBoxes(page);
+  assert.deepEqual(
+    handed.mark,
+    bare.mark,
+    `The way back takes nothing from the mark: it is in the margin, not the heading's row ${JSON.stringify([bare.mark, handed.mark])}`
+  );
+  assert.deepEqual(
+    handed.title,
+    bare.title,
+    `and the title is where it was without one ${JSON.stringify([bare.title, handed.title])}`
+  );
+  assert.equal(handed.backInActions, false, 'It is no longer one of the heading’s trailing controls');
+  assert.ok(
+    handed.back.left + handed.back.width <= handed.mark.left,
+    `It sits clear of the mark, left of it: ${JSON.stringify(handed)}`
+  );
+  assert.ok(
+    Math.abs(handed.back.top + handed.back.height / 2 - (handed.mark.top + handed.mark.height / 2)) <= 1,
+    `and on the mark’s own centre line: ${JSON.stringify(handed)}`
+  );
+  // And at a phone's width, where there is no margin to hold a 38px circle: it joins the
+  // heading's row instead of hanging off the edge of the window, which is the one case
+  // where it is allowed to move the mark.
+  await page.setViewport({ width: 600, height: 700 });
+  const noMargin = await headingBoxes(page);
+  assert.ok(noMargin.back.left >= 0, `A window with no margin still shows the way back in full: ${JSON.stringify(noMargin)}`);
+  assert.ok(
+    noMargin.mark.left >= noMargin.back.left + noMargin.back.width,
+    `where it stands ahead of the mark rather than over it: ${JSON.stringify(noMargin)}`
+  );
+  await page.setViewport(backViewport ?? { width: 600, height: 700 });
   // Clicking must navigate to the launcher the marker named — not `history.back()`,
   // which would leave the app entirely for a page opened from a bookmark.
   const navigations = [];

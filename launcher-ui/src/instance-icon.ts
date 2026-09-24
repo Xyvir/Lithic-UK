@@ -2,17 +2,24 @@
  * Instance icons: the emoji-favicon workflow that lets someone who runs more
  * than one self-hosted Lithic instance tell them apart (personal, work, …).
  *
- * The choice is applied in two places at once, exactly like the legacy
- * `ui.emoji` fragment:
+ * The icon belongs to the *instance*, not to the browser that set it, so the workflow has
+ * three parts:
  *
- *   locally   — the launcher header icon and the browser tab favicon, so the
- *               instance is recognizable while you are standing on it; and
- *   server-side — every favicon / touch-icon size is rendered from the emoji on
- *               a canvas client-side and PUT into `/sync/`, with `custom.ico`
- *               LAST because the inotify watcher treats that write as the
- *               signal to copy the whole pre-sized set into the public
- *               directory. No server-side imagemagick is involved, so the
- *               ordering below is a contract, not an implementation detail.
+ *   the choice   — the emoji itself is left in the store root (`ICON_SETTING`), one line of
+ *                  plain text, where every client reads it: an instance opened in a
+ *                  browser that has never seen it shows the icon its owner picked. It
+ *                  travels with the store, so a backup carries the choice and a connect
+ *                  brings it back with the icons.
+ *   locally      — the launcher header icon and the browser tab favicon, so the instance
+ *                  is recognizable while you are standing on it. `localStorage` holds a
+ *                  mirror of the choice, used only when the instance cannot be asked.
+ *   server-side  — every favicon / touch-icon size is rendered from the emoji on a canvas
+ *                  client-side and PUT into `/sync/`, with `custom.ico` LAST because the
+ *                  inotify watcher treats that write as the signal to copy the whole
+ *                  pre-sized set into the public directory. The setting is written
+ *                  immediately before that doorbell (see `uploadInstanceIcon`). No
+ *                  server-side imagemagick is involved, so the ordering below is a
+ *                  contract, not an implementation detail.
  *
  * Everything DOM-touching is injectable (canvas factory, fetcher, storage) so
  * the upload contract is unit-testable in plain Node.
@@ -34,6 +41,20 @@ export const EMOJI_LIST: string[] = [
   // Faces (just a few)
   '😊', '😄', '😂', '😍', '🤔', '😎', '🤓', '😤', '😠', '😢', '😴', '🥳', '🤯', '😇', '🥶'
 ];
+
+/**
+ * The instance's own icon *choice*: the emoji, one line of plain text, in the store root
+ * beside the icons rendered from it.
+ *
+ * This is what makes the icon the instance's rather than this browser's: every client
+ * reads it (see `readServerEmoji`), so somebody opening an instance for the first time in
+ * a browser that has never seen it gets the icon its owner picked, not the shipped mark.
+ * It sits in the same directory as the wikis and the icon renders, so it is in the git
+ * tree too — a backup carries the choice, and connecting a server brings it back along
+ * with the icons. The deployment needs nothing from it beyond that: its watcher copies the
+ * icons the browser rendered, and this file only says which character they are.
+ */
+export const ICON_SETTING = 'favicon.conf';
 
 /**
  * The pre-sized icon set written on save. Order matters: `custom.ico` is the
@@ -139,6 +160,68 @@ export function emojiFaviconUrl(
 export type UploadResult = { ok: boolean; saved: number; total: number; error?: string };
 
 /**
+ * The instance's icon, as the instance itself records it.
+ *
+ * Two different answers matter here and are told apart on purpose: `null` is "the
+ * instance could not be asked" (offline, a proxy in the way), and `''` is "the instance
+ * has no custom icon". A client that could not ask may fall back to whatever this browser
+ * remembers; a client that asked and was told there is nothing has been answered, and the
+ * shipped mark is the truth.
+ */
+export async function readServerEmoji(
+  options: { fetcher?: typeof fetch; base?: string } = {}
+): Promise<string | null> {
+  const fetcher = options.fetcher ?? fetch;
+  const base = options.base ?? WEBDAV_BASE;
+  try {
+    const response = await fetcher(`${base}${ICON_SETTING}`, { headers: { Accept: 'text/plain' } });
+    // Nothing stored is the ordinary state of an instance nobody has given an icon.
+    if (response.status === 404) return '';
+    if (!response.ok) return null;
+    return (await response.text()).trim();
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Record the instance's choice. Written as part of the icon set rather than beside it,
+ * so the file never names icons that were not written: `uploadInstanceIcon` puts it up
+ * after the renders and immediately before the doorbell.
+ */
+export async function writeServerEmoji(
+  emoji: string,
+  options: { fetcher?: typeof fetch; base?: string } = {}
+): Promise<boolean> {
+  const fetcher = options.fetcher ?? fetch;
+  const base = options.base ?? WEBDAV_BASE;
+  try {
+    const response = await fetcher(`${base}${ICON_SETTING}`, {
+      method: 'PUT',
+      body: emoji,
+      headers: { 'Content-Type': 'text/plain; charset=utf-8' }
+    });
+    return response.ok || response.status === 201 || response.status === 204;
+  } catch {
+    return false;
+  }
+}
+
+/** Drop the recorded choice. A store that never had one is already in that state. */
+export async function deleteServerEmoji(
+  options: { fetcher?: typeof fetch; base?: string } = {}
+): Promise<boolean> {
+  const fetcher = options.fetcher ?? fetch;
+  const base = options.base ?? WEBDAV_BASE;
+  try {
+    const response = await fetcher(`${base}${ICON_SETTING}`, { method: 'DELETE' });
+    return response.ok || response.status === 204 || response.status === 404;
+  } catch {
+    return false;
+  }
+}
+
+/**
  * PUT the whole pre-sized icon set, sequentially, `custom.ico` last. A failed
  * write stops the run: a half-updated set is worse than none, and the watcher
  * only fires on the doorbell, so nothing is copied unless the whole set landed.
@@ -155,10 +238,21 @@ export async function uploadInstanceIcon(
   const fetcher = options.fetcher ?? fetch;
   const base = options.base ?? WEBDAV_BASE;
   const createCanvas = options.createCanvas ?? defaultCanvasFactory;
-  const total = ICON_TARGETS.length;
+  // The setting is a write of this set, so it is counted as one.
+  const total = ICON_TARGETS.length + 1;
   let saved = 0;
 
   for (const target of ICON_TARGETS) {
+    // Between the last render and the doorbell: the whole set is up, so the backup cannot
+    // commit a choice whose icons are half-written, and the doorbell (which is what makes
+    // the deployment apply the set) still closes the run.
+    if (target.path === ICON_DOORBELL) {
+      if (!(await writeServerEmoji(emoji, { fetcher, base }))) {
+        return { ok: false, saved, total, error: `PUT ${ICON_SETTING} failed` };
+      }
+      saved += 1;
+      options.onProgress?.(saved, total);
+    }
     const blob = await emojiIconBlob(emoji, target.size, createCanvas);
     if (!blob) return { ok: false, saved, total, error: 'Could not render the icon (no canvas).' };
     try {
@@ -181,20 +275,25 @@ export async function uploadInstanceIcon(
 }
 
 /**
- * Restore the shipped icon: DELETE the doorbell, which is the watcher's signal
- * to restore the default set server-wide.
+ * Restore the shipped icon: forget the instance's choice, then DELETE the doorbell,
+ * which is the watcher's signal to restore the default set server-wide.
+ *
+ * The two deletes are ordered like the writes they undo, and the doorbell is last for
+ * the same reason there: until it goes, nothing has been decided. An instance that had
+ * no choice recorded still answers true — the state asked for is the state reached.
  */
 export async function clearInstanceIcon(
   options: { fetcher?: typeof fetch; base?: string } = {}
 ): Promise<boolean> {
+  const forgotten = await deleteServerEmoji(options);
   const fetcher = options.fetcher ?? fetch;
   const base = options.base ?? WEBDAV_BASE;
   try {
     await fetcher(`${base}${ICON_DOORBELL}`, { method: 'DELETE' });
-    return true;
   } catch {
     return false;
   }
+  return forgotten;
 }
 
 /** Tell the service worker the icons changed so it drops cached copies. */
@@ -210,6 +309,14 @@ export function bustIconCache(delayMs = 2000): void {
   }, delayMs);
 }
 
+/**
+ * The mirror of the instance's choice, kept in this browser.
+ *
+ * It is not the setting — the store is — and it is never consulted while the instance
+ * answers: it exists so an instance that cannot be asked (a proxy in the way, a plain
+ * WebDAV box behind a broken CGI) still shows the icon this browser last saw, instead of
+ * falling back to the shipped mark for no reason the user can see.
+ */
 export function readInstanceEmoji(storage: Storage | undefined = safeStorage()): string {
   try {
     return storage?.getItem(INSTANCE_EMOJI_KEY) ?? '';

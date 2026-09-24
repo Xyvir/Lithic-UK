@@ -6,14 +6,14 @@
   import { isScratchFileName, isHtmlMonolithName, tracksUnsavedEdits, resolveMountName, resolveScratchKind, type ScratchKind } from './scratch-editor';
   import { pwaInstall, promptPwaInstall } from './pwa-install';
   import { bootLegacyWiki, bootLegacyHtml, type RemoteTarget } from './legacy-launcher-runtime';
-  import { EMOJI_LIST, uploadInstanceIcon, clearInstanceIcon, emojiFaviconUrl, applyFavicon, bustIconCache, readInstanceEmoji, saveInstanceEmoji, clearInstanceEmoji } from './instance-icon';
+  import { EMOJI_LIST, uploadInstanceIcon, clearInstanceIcon, emojiFaviconUrl, applyFavicon, bustIconCache, readInstanceEmoji, readServerEmoji, saveInstanceEmoji, clearInstanceEmoji } from './instance-icon';
   import { getRecentFiles, addRecentFile, removeRecentFile, addBrowserOnlyRecent, removeBrowserOnlyRecent, clearAllRecentFiles, purgeOldestCachesIfNeeded, saveSearchCache, forgetWikiCache, cachedWikiNames, idb, getSearchCacheText, listWikiVersions, wikiHasHistory, downloadWikiVersion, getDirtyState, clearDirtyState, listDirtyRecoveries, isWikiDriftedFromHead, isInstallDismissed, setInstallDismissed, recentDiskPath, type RecentEntry } from './storage';
   import { resolveStorageMode, storageModeOverride, browserOnlyMarkTitle, BROWSER_ONLY_HISTORY_NOTE, type StorageMode } from './browser-storage';
   import { readBookmarkEntries, saveBookmark, removeBookmark, setBookmarkIcon, refreshBookmarkIcon, verifyInstanceUrl, normalizeInstanceUrl, instanceLabel, type BookmarkEntry, type InstanceVerification } from './bookmarks';
   import { LOGIN_CHECK_LABELS, askInstanceAboutLogin, loginVerdict, loginVerdictFromError, typedLoginCheck, type LoginCheckState, type LoginVerdict } from './login-check';
   import { copyDropNote, forgetInstanceCopy } from './instance-copy';
   import PinEntry from './PinEntry.svelte';
-  import { fetchRemoteFiles, fetchRemoteWiki, probePatchApi, createLockHeartbeat, readRemoteLock, uploadRemoteFile, webdavUrl, resolveSessionId, lithUploadName, type WebdavFile } from './webdav';
+  import { deleteRemoteFile, fetchRemoteFiles, fetchRemoteWiki, probePatchApi, createLockHeartbeat, readRemoteLock, uploadRemoteFile, webdavUrl, resolveSessionId, lithUploadName, type WebdavFile } from './webdav';
   import { normalizeLithName } from './legacy-saver';
   import { searchCachedWikis } from './cache-search';
   import { topHits, type InstanceCacheRead, type InstanceReads } from './instance-search';
@@ -2133,6 +2133,44 @@
     }
   }
 
+  /**
+   * Delete a Lith from the server, and only after being asked.
+   *
+   * The legacy store put a × on every row of the remote list and its answer was
+   * `window.confirm`; the act behind it is the same and the answer is now the app's own
+   * dialog, so the question looks like it came from the launcher it interrupts. It is
+   * asked at all because this is the one control here that reaches every other reader of
+   * the instance: the file is gone from the server, not from a copy held on this device,
+   * and nothing in this mode holds one. The row is not dropped here — the list is the
+   * server's answer, so it is re-read and the row leaves when the server stops naming it.
+   *
+   * The presence lock goes with it, best effort, exactly as the legacy delete did: a Lith
+   * nobody has open has no lock file, and a missing one is not a failed delete.
+   */
+  async function removeRemoteLith(name: string): Promise<void> {
+    const confirmed = await askConfirmation({
+      title: 'Delete this Lith?',
+      body: `${name} is deleted from the server, not just this device.`,
+      confirmLabel: 'Delete',
+      danger: true
+    });
+    if (!confirmed) return;
+    remoteError = '';
+    remoteNotice = '';
+    busy = true;
+    status = `Deleting ${name}…`;
+    try {
+      await deleteRemoteFile(name);
+      void fetch(`${webdavUrl(name)}.lock`, { method: 'DELETE' }).catch(() => {});
+      await refreshRemoteList();
+    } catch (error) {
+      remoteError = `Could not delete ${name}: ${error instanceof Error ? error.message : String(error)}`;
+    } finally {
+      status = '';
+      busy = false;
+    }
+  }
+
   async function startLockHeartbeat(name: string): Promise<void> {
     stopLockHeartbeat();
     const heartbeat = createLockHeartbeat({ sessionId: resolveSessionId() });
@@ -2151,10 +2189,30 @@
 
   // --- Instance icon: the emoji favicon this instance is known by ------------
 
-  /** Apply the remembered emoji to the launcher header and the tab favicon. */
-  function restoreInstanceIcon(): void {
-    brandEmoji = readInstanceEmoji();
+  /**
+   * Apply this instance's icon to the launcher header and the tab favicon.
+   *
+   * The icon is the instance's, so the instance is asked first: whoever set it, it is
+   * the same mark for everyone who opens this address, which is the entire point of
+   * telling instances apart. The answers are told apart — the store holding no choice
+   * means the shipped mark, while an instance that cannot be asked at all falls back to
+   * the mirror this browser keeps, so a deployment behind a broken proxy does not
+   * silently lose an icon its owner picked. The mirror is then set to whatever the
+   * instance said, so it can never outvote a later answer.
+   */
+  async function restoreInstanceIcon(): Promise<void> {
+    const local = readInstanceEmoji();
+    if (!isSelfHost()) {
+      brandEmoji = local;
+      applyFavicon(local ? emojiFaviconUrl(local) : null);
+      return;
+    }
+    const fromServer = await readServerEmoji();
+    brandEmoji = fromServer ?? local;
     applyFavicon(brandEmoji ? emojiFaviconUrl(brandEmoji) : null);
+    if (fromServer === null) return;
+    if (fromServer) saveInstanceEmoji(fromServer);
+    else clearInstanceEmoji();
   }
 
   function openEmojiPicker(): void {
@@ -2792,7 +2850,7 @@
     bookmarks = readBookmarkEntries();
     // The emoji favicon is the instance's identity in the tab, so restore it
     // (and the tab icon) before anything else renders.
-    restoreInstanceIcon();
+    void restoreInstanceIcon();
     if (mode === 'self-host') {
       void refreshRemoteList();
       // Whether this instance is backed up, which is a question only the instance
@@ -3573,6 +3631,15 @@
 
 <main class="container" data-mode={mode}>
   <header class="heading">
+    <!--
+      The way back out of a handed-over instance, in the margin left of the mark rather
+      than in the heading's own row: a control that appears only sometimes must not move
+      what it appears beside, and this one shows up on exactly the pages where the mark
+      and the title are also the instance's identity. It leads the heading in source order
+      because position must not depend on the mode's trailing buttons, and it is taken out
+      of the flow in CSS, so neither the mark nor the title shifts by a pixel.
+    -->
+    {#if launcherReturnTarget}<button class="back-to-launcher" type="button" data-target={launcherReturnTarget.kind === 'url' ? launcherReturnTarget.url : 'history'} aria-label="Back to the main launcher" title="Back to the main launcher" on:click={backToLauncher}><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M19 12H5"/><path d="m11 18-6-6 6-6"/></svg></button>{/if}
     {#if isSelfHost()}
       <!-- A <button> only here, where the mark sets this deployment's own icon:
            that is the one job the mark has, and it only exists for an instance. -->
@@ -3624,7 +3691,6 @@
       {#if mountError}<div class="status-line error" role="alert">{mountError}</div>{/if}
     </div>
     <div class="heading-actions">
-    {#if launcherReturnTarget}<button class="back-to-launcher" type="button" data-target={launcherReturnTarget.kind === 'url' ? launcherReturnTarget.url : 'history'} aria-label="Back to the main launcher" title="Back to the main launcher" on:click={backToLauncher}><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M19 12H5"/><path d="m11 18-6-6 6-6"/></svg></button>{/if}
     <!--
       The backup button, on the desktop and on an instance alike. The legacy launcher
       only revealed it once the server had answered with its file list — a proxy for
@@ -4058,7 +4124,9 @@
       <div class="launcher-modal emoji-modal" role="dialog" aria-modal="true" aria-labelledby="emoji-title">
         <button class="modal-close" aria-label="Close icon picker" on:click={closeEmojiPicker}>×</button>
         <h2 id="emoji-title">Instance Icon</h2>
-        <p>This icon identifies the instance in your tab and taskbar.</p>
+        <!-- The icon is saved on the instance, not in this browser: saying so is what
+             makes the choice read as a setting rather than a theme. -->
+        <p>This icon belongs to the instance. Everyone who opens this address sees it.</p>
         <div class="emoji-preview" aria-hidden="true">{emojiChoice || '🎨'}</div>
         <div class="emoji-grid" role="listbox" aria-label="Choose an instance icon">
           {#each EMOJI_LIST as emoji}
@@ -4253,6 +4321,13 @@
           {#each filteredRemote as file (file.name)}
             <div class="recent-row remote-row">
               <button class="recent-name" title="Open from this server" on:click={() => openRemoteFile(file.name)}>{file.name}{#if file.lastModified}<span class="cached-size">{file.lastModified.toLocaleDateString()}</span>{/if}</button>
+              <!--
+                The × the legacy store carried on every remote row, kept: on an instance
+                the launcher's list is the store, and a Lith that can only be added is a
+                store nobody can tidy. It asks first, because this one deletes the file
+                every reader of the instance opens rather than a copy of it held here.
+              -->
+              <button class="recent-icon-button remove-recent remove-remote" type="button" aria-label={`Delete ${file.name} from this server`} title="Delete from remote storage" on:click={() => removeRemoteLith(file.name)}><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m7 7 10 10M17 7 7 17"></path></svg></button>
             </div>
           {/each}
         {/if}

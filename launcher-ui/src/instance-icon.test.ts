@@ -4,9 +4,13 @@ import {
   EMOJI_LIST,
   ICON_TARGETS,
   ICON_DOORBELL,
+  ICON_SETTING,
   INSTANCE_EMOJI_KEY,
   uploadInstanceIcon,
   clearInstanceIcon,
+  readServerEmoji,
+  writeServerEmoji,
+  deleteServerEmoji,
   emojiFaviconUrl,
   applyFavicon,
   readInstanceEmoji,
@@ -75,6 +79,21 @@ function recordingFetcher(failAt: number | null = null) {
   return { calls, fetcher: fetcher as unknown as typeof fetch };
 }
 
+/** A fetcher that answers from a handler, recording what it was asked. */
+function respondingFetcher(handler: (url: string, init?: RequestInit) => Response | Promise<Response>) {
+  const calls: Call[] = [];
+  const fetcher = async (url: string, init?: RequestInit) => {
+    calls.push({
+      url,
+      method: init?.method ?? 'GET',
+      body: init?.body,
+      contentType: (init?.headers as Record<string, string> | undefined)?.['Content-Type']
+    });
+    return handler(url, init);
+  };
+  return { calls, fetcher: fetcher as unknown as typeof fetch };
+}
+
 function storage() {
   const data = new Map<string, string>();
   return {
@@ -109,19 +128,41 @@ test('uploadInstanceIcon PUTs every pre-sized icon in order', async () => {
     onProgress: (saved) => progress.push(saved)
   });
 
-  assert.deepEqual(result, { ok: true, saved: ICON_TARGETS.length, total: ICON_TARGETS.length });
-  assert.equal(calls.length, ICON_TARGETS.length);
+  const sizes = ICON_TARGETS.filter((target) => target.path !== ICON_DOORBELL);
+  assert.deepEqual(result, { ok: true, saved: ICON_TARGETS.length + 1, total: ICON_TARGETS.length + 1 });
+  assert.equal(calls.length, ICON_TARGETS.length + 1);
   assert.deepEqual(
     calls.map((call) => call.url),
-    ICON_TARGETS.map((target) => `/sync/${target.path}`)
+    [...sizes.map((target) => `/sync/${target.path}`), `/sync/${ICON_SETTING}`, `/sync/${ICON_DOORBELL}`]
   );
   assert.ok(calls.every((call) => call.method === 'PUT'));
-  assert.ok(calls.every((call) => call.contentType === 'image/png'));
-  assert.deepEqual(calls.map((call) => call.url).lastIndexOf('/sync/custom.ico'), calls.length - 1);
+  assert.ok(
+    calls.filter((call) => call.url !== `/sync/${ICON_SETTING}`).every((call) => call.contentType === 'image/png')
+  );
+  // The doorbell still closes the run, and the choice is written immediately before it:
+  // the setting is never allowed to describe renders that did not land, and the deployment
+  // is never told to apply a set whose setting is missing.
+  assert.equal(calls[calls.length - 1].url, '/sync/custom.ico');
+  const setting = calls[calls.length - 2];
+  assert.equal(setting.url, `/sync/${ICON_SETTING}`);
+  assert.match(setting.contentType ?? '', /^text\/plain/);
+  assert.equal(setting.body, '🎨', 'one line of plain text: the character, and nothing around it');
   // Every size is rendered from the same emoji.
   assert.deepEqual(drawn.map((entry) => entry.size), ICON_TARGETS.map((target) => target.size));
   assert.ok(drawn.every((entry) => entry.emoji === '🎨'));
-  assert.deepEqual(progress, [1, 2, 3, 4, 5, 6, 7, 8]);
+  assert.deepEqual(progress, [1, 2, 3, 4, 5, 6, 7, 8, 9]);
+});
+
+test('a refused choice stops the run before the doorbell fires', async () => {
+  // The setting is the eighth write: seven renders, then the choice, then the doorbell.
+  const { calls, fetcher } = recordingFetcher(ICON_TARGETS.length);
+  const { factory } = fakeCanvasFactory();
+  const result = await uploadInstanceIcon('🌿', { fetcher, createCanvas: factory });
+
+  assert.equal(result.ok, false);
+  assert.equal(result.saved, ICON_TARGETS.length - 1);
+  assert.match(result.error ?? '', /favicon\.conf failed/);
+  assert.ok(!calls.some((call) => call.url.endsWith(ICON_DOORBELL)));
 });
 
 test('a failed write stops the run before the doorbell fires', async () => {
@@ -144,13 +185,66 @@ test('uploadInstanceIcon reports a DOM-less environment instead of claiming succ
   assert.equal(calls.length, 0);
 });
 
-test('clearInstanceIcon deletes the doorbell and reports failures', async () => {
+test('clearInstanceIcon forgets the choice, then deletes the doorbell', async () => {
   const { calls, fetcher } = recordingFetcher();
   assert.equal(await clearInstanceIcon({ fetcher }), true);
-  assert.deepEqual(calls, [{ url: '/sync/custom.ico', method: 'DELETE', body: undefined, contentType: undefined }]);
+  assert.deepEqual(calls, [
+    { url: `/sync/${ICON_SETTING}`, method: 'DELETE', body: undefined, contentType: undefined },
+    { url: '/sync/custom.ico', method: 'DELETE', body: undefined, contentType: undefined }
+  ]);
 
   const broken = (async () => { throw new Error('offline'); }) as unknown as typeof fetch;
   assert.equal(await clearInstanceIcon({ fetcher: broken }), false);
+
+  // A store that never held the choice is already in the state being asked for, so the
+  // reset is not reported as a failure just because there was nothing to delete.
+  const absent = respondingFetcher(async (url) =>
+    url === `/sync/${ICON_SETTING}` ? new Response(null, { status: 404 }) : new Response('', { status: 200 })
+  );
+  assert.equal(await clearInstanceIcon({ fetcher: absent.fetcher }), true);
+});
+
+test('readServerEmoji tells "no icon" apart from "cannot ask"', async () => {
+  const stored = respondingFetcher(() => new Response('🌿\n', { status: 200 }));
+  assert.equal(await readServerEmoji({ fetcher: stored.fetcher }), '🌿', 'the file is read as the character it holds, newline and all');
+  assert.deepEqual(stored.calls, [
+    { url: `/sync/${ICON_SETTING}`, method: 'GET', body: undefined, contentType: undefined }
+  ]);
+
+  const empty = respondingFetcher(() => new Response(null, { status: 404 }));
+  assert.equal(await readServerEmoji({ fetcher: empty.fetcher }), '', 'a store with no choice answers "no icon"');
+
+  const blank = respondingFetcher(() => new Response('   \n', { status: 200 }));
+  assert.equal(await readServerEmoji({ fetcher: blank.fetcher }), '', 'and so does a file with nothing in it');
+
+  const refused = respondingFetcher(() => new Response('nope', { status: 500 }));
+  assert.equal(await readServerEmoji({ fetcher: refused.fetcher }), null, 'a server that refuses the read has not answered');
+
+  const offline = (async () => {
+    throw new Error('offline');
+  }) as unknown as typeof fetch;
+  assert.equal(await readServerEmoji({ fetcher: offline }), null, 'and neither has one that cannot be reached');
+});
+
+test('the choice round-trips through the store', async () => {
+  const { calls, fetcher } = recordingFetcher();
+  assert.equal(await writeServerEmoji('🎨', { fetcher }), true);
+  assert.deepEqual(calls, [
+    {
+      url: `/sync/${ICON_SETTING}`,
+      method: 'PUT',
+      body: '🎨',
+      contentType: 'text/plain; charset=utf-8'
+    }
+  ]);
+  const refused = respondingFetcher(() => new Response('nope', { status: 500 }));
+  assert.equal(await writeServerEmoji('🎨', { fetcher: refused.fetcher }), false);
+  assert.equal(await deleteServerEmoji({ fetcher }), true);
+  assert.equal(calls[calls.length - 1].method, 'DELETE');
+  const offline = (async () => {
+    throw new Error('offline');
+  }) as unknown as typeof fetch;
+  assert.equal(await deleteServerEmoji({ fetcher: offline }), false);
 });
 
 test('the emoji choice round-trips through storage', () => {

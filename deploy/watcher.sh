@@ -188,6 +188,13 @@ inotifywait -m -e close_write,create,delete,moved_to "${DATA_DIR}" | while read 
             sleep 1  # Let the write finish
             apply_custom_icon "${DATA_DIR}/custom.ico"
         fi
+        # And back it up. The icon set is part of what the instance is, and boot applies
+        # whatever custom.ico the tree holds (`--apply-custom-icon`), so the file that
+        # decides the icon is the file that has to be committed — including when it is
+        # deleted, or connecting a backup would resurrect an icon its owner had removed.
+        # A Lith save would carry this eventually; nobody should have to save one to keep
+        # the icon they just chose.
+        sync_now
         continue
     fi
 

@@ -117,9 +117,17 @@ elif [[ "$REQUEST_URI" == */setup* ]] && [[ "$METHOD" == "POST" ]]; then
     # 1. Fetch from remote (safe, no merges yet)
     git -C "${DATA_DIR}" fetch origin main > "${DATA_DIR}/.git/git_sync.log" 2>&1 || true
     
-    # 2. Graceful Rescue: Download any liths we don't have locally
+    # 2. Graceful Rescue: Download any liths we don't have locally, and the instance's
+    # own icon with them. `favicon.conf` and the icons are not Liths, so an extension
+    # filter alone would leave them behind and a restored server would come back with its
+    # wikis and the shipped mark — the icon its owner picked is lost. `custom.ico` is in the
+    # list because it is both the 512px render and the file boot applies (`watcher.sh
+    # --apply-custom-icon`), and because its arrival is the watcher's cue to copy the set
+    # into the public directory.
     if git -C "${DATA_DIR}" rev-parse origin/main >/dev/null 2>&1; then
-        git -C "${DATA_DIR}" ls-tree -r --name-only origin/main | grep -E '\.(lith|json)$' | while IFS= read -r file; do
+        git -C "${DATA_DIR}" ls-tree -r --name-only origin/main \
+            | grep -E '\.(lith|json)$|^(favicon\.conf|custom\.ico|favicon\.ico|favicon-16x16\.png|favicon-32x32\.png|mstile-150x150\.png|android-chrome-192x192\.png|android-chrome-512x512\.png|apple-touch-icon\.png)$' \
+            | while IFS= read -r file; do
             if [ ! -f "${DATA_DIR}/$file" ]; then
                 git -C "${DATA_DIR}" checkout origin/main -- "$file" >> "${DATA_DIR}/.git/git_sync.log" 2>&1
             fi

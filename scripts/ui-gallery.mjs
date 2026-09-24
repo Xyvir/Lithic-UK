@@ -644,6 +644,41 @@ const SHEETS = [
         expect: '.recent-section'
       },
       {
+        // The instance's store, rows and all — the one list in the launcher whose rows are
+        // files on a server, and so the one list where a row's × deletes something for
+        // everybody. Shot through the stand-in: over `file://` there is no store to list,
+        // which is why the pane above is chrome and nothing else.
+        name: '251-instance-store',
+        view: 'wide',
+        mode: 'self-host',
+        server: true,
+        drive: async (page) => {
+          stub.addLith('keeper-notes.lith', new Date('2026-09-20T09:00:00Z'));
+          stub.addLith('scratchpad.lith', new Date('2026-09-18T09:00:00Z'));
+          await page.reload({ waitUntil: 'domcontentloaded' });
+          await page.waitForSelector('.recent-row.remote-row .remove-remote');
+          await settle(page, 300);
+        },
+        expect: '.recent-row.remote-row .remove-remote'
+      },
+      {
+        // The icon the instance is known by, drawn in a browser that never picked one: the
+        // choice lives in the store, so this mark is the instance's rather than this
+        // profile's. Seeded through the stand-in, because over `file://` there is no store
+        // to inherit it from.
+        name: '252-instance-icon-inherited',
+        view: 'wide',
+        mode: 'self-host',
+        server: true,
+        drive: async (page) => {
+          stub.addFile('favicon.conf', '🌿');
+          await page.reload({ waitUntil: 'domcontentloaded' });
+          await page.waitForSelector('.brand-emoji');
+          await settle(page, 300);
+        },
+        expect: '.brand-emoji'
+      },
+      {
         name: '260-tauri-bookmark-keys',
         view: 'wide',
         mode: 'tauri',
@@ -1271,6 +1306,26 @@ const SHEETS = [
         },
         clip: '.git-sync-modal',
         expect: '.git-sync-modal .modal-action'
+      },
+      {
+        // What the store's × asks before it deletes. It is the launcher's own dialog rather
+        // than the browser's, and it is asked at all because the file behind the row is the
+        // one every reader of the instance opens, not a copy held on this device.
+        name: '748-instance-delete-confirm',
+        view: 'dialog',
+        modal: 'confirm-title',
+        mode: 'self-host',
+        server: true,
+        drive: async (page) => {
+          stub.addLith('journal.lith', new Date('2026-09-16T09:00:00Z'));
+          await page.reload({ waitUntil: 'domcontentloaded' });
+          await page.waitForSelector('.recent-row.remote-row .remove-remote');
+          await page.click('.recent-row.remote-row .remove-remote');
+          await page.waitForSelector('.confirm-modal');
+          await settle(page, 300);
+        },
+        clip: '.confirm-modal',
+        expect: '.confirm-modal .modal-action.danger'
       },
       {
         // Edits the launcher captured and never saw saved. Reachable here because a

@@ -107,6 +107,16 @@ async function readBody(request) {
   }
 }
 
+/** The request's bytes, unparsed: icon renders are PNG and are stored as they arrived. */
+function readRawBody(request) {
+  return new Promise((resolve, reject) => {
+    const chunks = [];
+    request.on('data', (chunk) => chunks.push(chunk));
+    request.on('end', () => resolve(Buffer.concat(chunks)));
+    request.on('error', reject);
+  });
+}
+
 /**
  * Start the fixture instance on a free loopback port.
  *
@@ -138,9 +148,17 @@ export async function startSelfHostStub(options = {}) {
     userCode: options.userCode ?? DEFAULT_USER_CODE,
     deviceCode: options.deviceCode ?? DEFAULT_DEVICE_CODE,
     repos: (options.repos ?? DEFAULT_REPOS).map((repo) => ({ ...repo })),
-    /** The WebDAV store: `{ name, lastModified }`. */
+    /** The WebDAV store's Liths: `{ name, lastModified }`. */
     liths: options.liths ?? [],
-    /** Every `/api/...` request the page made, as `METHOD /path`. */
+    /**
+     * The rest of the store, by name: the instance's icon renders and its
+     * `favicon.conf` choice, which is anything PUT into `/sync/` that is not a
+     * Lith. Kept apart from `liths` because a Lith is what the launcher's list draws,
+     * while these exist to be *read* — and because the real deployment's root holds both,
+     * so a listing here that carried the icons is what proves the client filters them out.
+     */
+    files: new Map(),
+    /** Every `/api/...` and `/sync/...` request the page made, as `METHOD /path`. */
     asked: []
   };
 
@@ -154,7 +172,7 @@ export async function startSelfHostStub(options = {}) {
     };
     const json = (body, status = 200) => send(status, 'application/json', JSON.stringify(body));
 
-    if (path.startsWith('/api/')) state.asked.push(`${request.method} ${path}`);
+    if (path.startsWith('/api/') || path.startsWith('/sync/')) state.asked.push(`${request.method} ${path}`);
 
     if (path === '/offline-service-worker.js' && worker) {
       send(200, 'text/javascript; charset=utf-8', worker.toString());
@@ -232,8 +250,13 @@ export async function startSelfHostStub(options = {}) {
 
     // --- the WebDAV store ----------------------------------------------------
     if (path === '/sync/' && request.method === 'PROPFIND') {
-      const entries = state.liths
-        .map((lith) => propfindEntry(lith.name, lith.lastModified ?? new Date(0)))
+      // Everything the root holds, Liths and icons alike: the client's own filter is what
+      // keeps a `favicon-32x32.png` out of the list of Liths, and this is where that shows.
+      const entries = [
+        ...state.liths.map((lith) => ({ name: lith.name, lastModified: lith.lastModified })),
+        ...[...state.files.values()].map((file) => ({ name: file.name, lastModified: file.lastModified }))
+      ]
+        .map((entry) => propfindEntry(entry.name, entry.lastModified ?? new Date(0)))
         .join('');
       send(
         207,
@@ -242,12 +265,46 @@ export async function startSelfHostStub(options = {}) {
       );
       return;
     }
+    if (path.startsWith('/sync/') && request.method === 'GET') {
+      const name = decodeURIComponent(path.slice('/sync/'.length));
+      const file = state.files.get(name);
+      if (!file) {
+        send(404, 'text/plain; charset=utf-8', `no ${name} in this store\n`);
+        return;
+      }
+      // The content type a real deployment would serve for it, so a client that cares is
+      // answered here the way it is answered there.
+      const type = name.endsWith('.conf')
+        ? 'text/plain; charset=utf-8'
+        : name.endsWith('.json')
+          ? 'application/json'
+          : 'application/octet-stream';
+      send(200, type, file.bytes);
+      return;
+    }
     if (path.startsWith('/sync/') && request.method === 'PUT') {
       const name = decodeURIComponent(path.slice('/sync/'.length));
-      const existing = state.liths.find((lith) => lith.name === name);
-      if (existing) existing.lastModified = new Date();
-      else state.liths.push({ name, lastModified: new Date() });
+      // A `.lith` is a Lith the list draws; anything else — the icon renders, the
+      // `favicon.conf` choice — is a file of the store that is only ever read.
+      if (name.endsWith('.lith')) {
+        const existing = state.liths.find((lith) => lith.name === name);
+        if (existing) existing.lastModified = new Date();
+        else state.liths.push({ name, lastModified: new Date() });
+      } else {
+        state.files.set(name, { name, lastModified: new Date(), bytes: await readRawBody(request) });
+      }
       send(201, 'text/plain; charset=utf-8', '');
+      return;
+    }
+    // The row's own ×, and the presence lock the legacy delete tidied up after it: the
+    // store drops the Lith, and anything else named on this route is answered the same
+    // way without being there — which is what a lock file that was never written looks like.
+    if (path.startsWith('/sync/') && request.method === 'DELETE') {
+      const name = decodeURIComponent(path.slice('/sync/'.length));
+      const index = state.liths.findIndex((lith) => lith.name === name);
+      if (index >= 0) state.liths.splice(index, 1);
+      state.files.delete(name);
+      send(204, 'text/plain; charset=utf-8', '');
       return;
     }
 
@@ -270,6 +327,13 @@ export async function startSelfHostStub(options = {}) {
     /** Put a Lith in the server's store, as an upload or a git pull would. */
     addLith(name, lastModified = new Date()) {
       state.liths.push({ name, lastModified });
+    },
+    /**
+     * Put a file that is not a Lith in the store, as the instance's own icon flow and a
+     * git restore both do — the icon renders, or the `favicon.conf` choice.
+     */
+    addFile(name, body = '', lastModified = new Date()) {
+      state.files.set(name, { name, lastModified, bytes: Buffer.from(body, 'utf8') });
     },
     /**
      * Serve a different launcher from the same URL, as a redeploy does — the one thing

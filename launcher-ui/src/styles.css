@@ -91,11 +91,14 @@ body { overflow: hidden; background: #181818; }
   margin-bottom: 12px;
   padding-bottom: 10px;
   border-bottom: 1px solid #414141;
+  /* The containing block for .back-to-launcher, which is measured off this row's
+     left edge and drawn in the margin outside it. */
+  position: relative;
 }
-/* The heading's trailing controls. A wrapper because there can now be two of
-   them at once (a way back plus the mode's own button) and only one of them may
-   claim the free space: two `margin-left: auto` children split it and drift
-   apart instead of sitting together. */
+/* The heading's trailing control, which is the mode's own button — the way back out of
+   a handed-over page is not in here, because it may not take room from the mark. The
+   wrapper stays so the free space is claimed in one place rather than by whichever
+   button this mode happens to render. */
 .heading-actions { display: flex; align-items: center; gap: 8px; margin-left: auto; }
 .heading-copy { flex: 1; min-width: 0; }
 .heading-copy h1 { margin: 0; }
@@ -142,9 +145,22 @@ h1 { flex: none; min-width: 0; margin: 0; color: #f4edf5; font-size: 1.8rem; fon
 /* "Back to the main launcher". Rendered only for a page the app's window loaded
    from elsewhere (a bookmarked instance — see launcherReturn in mode.ts), where
    the desktop window has no browser chrome and no other control returns: without
-   it, reaching an instance's own launcher is a one-way trip. Styled as a sibling
-   of .help-button so the two read as one group. */
+   it, reaching an instance's own launcher is a one-way trip.
+
+   It is drawn in the page's margin, left of the mark, and out of the heading's row: it
+   exists on only some of the pages the heading does, and a control that comes and goes
+   must not carry the mark and the title with it. `right: calc(100% + 8px)` measures from
+   the heading's own left edge, which is the mark's — the mark is the row's first item —
+   so the circle stays 8px clear of it whatever the mark turns out to be.
+
+   `top: calc(50% - 5px)` is the mark's centre and not the heading's: the heading's 10px
+   bottom padding is inside the containing block, so half of it comes off the top to land
+   on the row's own centre line, which is where the mark is centred to. */
 .back-to-launcher {
+  position: absolute;
+  top: calc(50% - 5px);
+  right: calc(100% + 8px);
+  transform: translateY(-50%);
   display: grid;
   place-items: center;
   width: 38px;
@@ -167,6 +183,14 @@ h1 { flex: none; min-width: 0; margin: 0; color: #f4edf5; font-size: 1.8rem; fon
   stroke-width: 1.8;
   stroke-linecap: round;
   stroke-linejoin: round;
+}
+/* Below the width where the column still has a margin wide enough to hold it — 600px of
+   column plus the 46px it needs either side — it goes back into the heading's own row,
+   ahead of the mark. 15px of page margin cannot hold a 38px circle, and a control hanging
+   off the edge of the window is worse than one that has moved: at this width the mark and
+   the title have already given up their place to the phone layout. */
+@media (max-width: 691px) {
+  .back-to-launcher { position: static; transform: none; margin-right: 8px; }
 }
 /* Status-reactive like the legacy #github-sync-btn: grey = not synced,
    amber = verifying, green = verified, purple pulsing = syncing, red = the
