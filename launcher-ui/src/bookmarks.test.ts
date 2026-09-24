@@ -8,7 +8,6 @@ import {
   readBookmarks,
   saveBookmark,
   removeBookmark,
-  setBookmarkManualAuth,
   setBookmarkIcon,
   shouldRefreshIcon,
   fetchInstanceIcon,
@@ -32,7 +31,21 @@ function storage() {
 test('normalizes self-host instance URLs to origin', () => {
   assert.equal(normalizeInstanceUrl('example.test/path'), 'https://example.test');
   assert.equal(normalizeInstanceUrl('http://example.test:8080/wiki'), 'http://example.test:8080');
+  assert.equal(normalizeInstanceUrl('HTTP://example.test/wiki'), 'http://example.test');
+  // A port is not a scheme: a host given with one keeps it.
+  assert.equal(normalizeInstanceUrl('example.test:8080'), 'https://example.test:8080');
   assert.throws(() => normalizeInstanceUrl(''), /URL/);
+});
+
+test('refuses a spelled-out scheme rather than reading it as a host', () => {
+  // `https://` used to be prefixed to anything without one, so `ftp://other.example`
+  // parsed as the origin `https://ftp` — a bookmark to a machine that does not exist,
+  // saved without a complaint.
+  assert.throws(() => normalizeInstanceUrl('ftp://other.example'), /HTTP or HTTPS/);
+  assert.throws(() => normalizeInstanceUrl('file:///c:/liths/wiki.lith'), /HTTP or HTTPS/);
+  assert.throws(() => normalizeInstanceUrl('mailto:someone@example.test'), /HTTP or HTTPS/);
+  // No host at all: `https:foo` parses, but its origin is the string `null`.
+  assert.throws(() => normalizeInstanceUrl('https:foo'), /URL/);
 });
 
 test('deduplicates and removes local instance bookmarks', () => {
@@ -76,38 +89,27 @@ test('a cached icon survives re-bookmarking and is dropped on request', () => {
   assert.ok(!('icon' in JSON.parse(store.getItem(BOOKMARKS_KEY) ?? '[]')[0]));
 });
 
-test('the answer "do not ask again" is kept with the bookmark it is about', () => {
+// "Don't ask again" is gone: the modal that offers to save a login is now the only
+// place a password can be typed, so the answer it stood for is the modal's own
+// "open without saving" button.
+test('a stored "do not ask again" is not read, and does not survive a re-save', () => {
   const store = storage();
-  saveBookmark('https://work.test', store);
-  saveBookmark('https://home.test', store);
-
-  const one = setBookmarkManualAuth('https://work.test', true, store);
-  assert.equal(one.find((entry) => entry.url === 'https://work.test')?.manualAuth, true);
+  store.setItem(
+    BOOKMARKS_KEY,
+    JSON.stringify([{ url: 'https://work.test', label: 'work.test', manualAuth: true }])
+  );
   assert.ok(
-    !('manualAuth' in (one.find((entry) => entry.url === 'https://home.test') ?? {})),
-    'the other instance is not silenced by a click on this one'
+    !('manualAuth' in readBookmarkEntries(store)[0]),
+    'the flag is dropped as the entry is read, so nothing downstream can branch on it'
   );
-  // Stored, not held in the entry object: the offer it silences is made after a
-  // reload, so a flag that only lived in memory would ask again every launch.
-  assert.equal(
-    JSON.parse(store.getItem(BOOKMARKS_KEY) ?? '[]').find((entry: { url: string }) => entry.url === 'https://work.test').manualAuth,
-    true
-  );
+  // The old bytes stay until something writes, and the write is what clears them.
+  saveBookmark('https://work.test', store);
+  assert.ok(!('manualAuth' in JSON.parse(store.getItem(BOOKMARKS_KEY) ?? '[]')[0]));
 
-  // Re-bookmarking keeps it, like the cached icon: it is a fact about opening this
-  // instance, not something re-adding the address should forget.
-  assert.equal(saveBookmark('https://work.test/', store).find((entry) => entry.url === 'https://work.test')?.manualAuth, true);
-
-  // Clearing it leaves a clean entry, with no `manualAuth: false` left in storage.
-  const cleared = setBookmarkManualAuth('https://work.test', false, store);
-  assert.ok(!('manualAuth' in (cleared.find((entry) => entry.url === 'https://work.test') ?? {})));
-  assert.ok(!('manualAuth' in JSON.parse(store.getItem(BOOKMARKS_KEY) ?? '[]')[1]));
-
-  // A legacy entry (a bare URL string) can be silenced and still reads back as one.
+  // And a legacy entry (a bare URL string) still reads back as an entry.
   const legacy = storage();
   legacy.setItem(BOOKMARKS_KEY, JSON.stringify(['https://old.test']));
-  assert.equal(setBookmarkManualAuth('https://old.test', true, legacy)[0].label, 'old.test');
-  assert.equal(readBookmarkEntries(legacy)[0].manualAuth, true);
+  assert.equal(readBookmarkEntries(legacy)[0].label, 'old.test');
 });
 
 test('icon refresh policy is missing-or-stale', () => {

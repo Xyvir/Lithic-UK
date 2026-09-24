@@ -58,24 +58,32 @@ export function storageModeOverride(search: string): string | null {
 }
 
 /**
- * What the row's mark says, and what the section says once, above the list.
+ * What the row's mark says, and it is the whole of the saying: there is no line
+ * above the list repeating it.
  *
  * The claim is deliberately absolute: nothing in this mode writes a file, so
  * every row it produces is volatile for the same reason, and the mark is not a
  * problem to be cleared — it is what the Lith *is* until the user downloads a
  * copy of it. Clearing site data is the browser's own equivalent of deleting
  * the folder, which is why the launcher offers no `Reset Recents` here.
+ *
+ * A list that opens with a paragraph of explanation is worse at being a list, so
+ * the title on the mark carries all of it. `title` reaches a pointer and
+ * `aria-label` a screen reader, but a touch screen reaches neither — which is what
+ * the dialog below is for.
  */
-export const BROWSER_ONLY_LABEL = 'Browser storage only';
-
 export const BROWSER_ONLY_TOOLTIP =
   'Browser storage only: this Lith is kept in this browser’s cache, and nothing here is written back to a file. ' +
   'That copy is intrinsically volatile — clearing site data, or the browser reclaiming space, will lose it. ' +
   'Download your own hard copies from its version history.';
 
-export const BROWSER_ONLY_NOTE =
-  'Browser storage only — these Liths are kept in this browser’s cache rather than written to files. ' +
-  'Download copies from a Lith’s version history to keep them; this storage is finite and can be reclaimed.';
+/**
+ * The same claim, said where a touch screen can read it: the version-history dialog
+ * the mark itself opens, above the versions whose download is the way out.
+ */
+export const BROWSER_ONLY_HISTORY_NOTE =
+  'Browser storage only — this Lith has no file, so what this browser holds is the only copy there is. ' +
+  'Download a version to keep one you can mount again.';
 
 /** The row mark's title: the wiki's name, then what is true of it. */
 export function browserOnlyMarkTitle(name: string): string {

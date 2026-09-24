@@ -25,8 +25,18 @@
    */
   export let complete: ((pin: string) => void) | null = null;
   export let disabled = false;
-  /** Reveal the characters, driven by the dialog's own show toggle. */
+  /** Reveal the characters, driven by the show toggle beside this field's own label. */
   export let reveal = false;
+  /**
+   * Render that toggle in the label row, at the far end of it. The row is as wide as the
+   * boxes below it (see `.pin-entry`), so the far end is the boxes' own right edge — the
+   * end of the entry it reveals — rather than an em after the word "PIN", where it sat
+   * over the middle of them. Asked for by the shapes where these boxes are the only way in:
+   * a PIN that is typed once and never repeated has no other way to be checked by eye, and
+   * a PIN that is repeated below confirms itself, so it is offered no toggle at all rather
+   * than a switch nobody needs.
+   */
+  export let revealToggle = false;
   /** Bump this to empty the boxes and take focus again — a new attempt. */
   export let reset = 0;
   /** Bump this to move the caret into the first empty box. */
@@ -43,9 +53,15 @@
 
   let digits = seed(value);
 
-  /** The boxes are read from the DOM: six of them, in order, and nothing to keep in step. */
+  /**
+   * The boxes are read from the DOM: six of them, in order, and nothing to keep in step.
+   *
+   * `.pin-box` rather than `input`, because the label row may hold a Show checkbox — an
+   * `input` too, and earlier in the document, so the looser query would count seven and
+   * paint the PIN into the toggle.
+   */
   function boxes(): HTMLInputElement[] {
-    return root ? [...root.querySelectorAll('input')] : [];
+    return root ? [...root.querySelectorAll<HTMLInputElement>('.pin-box')] : [];
   }
 
   /** The model is the source of truth, so the DOM follows it — never the reverse. */
@@ -144,7 +160,12 @@
 </script>
 
 <div class="pin-entry" bind:this={root}>
-  <span class="pin-label">{label}</span>
+  <div class="pin-head">
+    <span class="pin-label">{label}</span>
+    {#if revealToggle}
+      <label class="vault-reveal"><input type="checkbox" bind:checked={reveal} /> Show</label>
+    {/if}
+  </div>
   <div class="pin-boxes" role="group" aria-label={label}>
     {#each Array.from({ length }, (_, index) => index) as index (index)}
       <!--

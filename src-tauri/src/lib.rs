@@ -1733,20 +1733,27 @@ async fn ask_instance_about_login(origin: &str, header: &str) -> LoginCheck {
 
 /// Check one saved login against the instance it was saved for.
 ///
-/// The manager's "does this still work?" button. It runs only while the vault is
-/// open, because the password has to be readable to send it — and, with
-/// `check_login_for_instance`, this is one of the two commands that take a
-/// credential to the network at all, both of them because the user asked for it.
-/// Nothing here runs on a timer.
+/// The manager's "does this still work?" button, and — with
+/// `check_login_for_instance` — one of the two commands that take a credential to
+/// the network at all, both of them because the user asked for it. Nothing here runs
+/// on a timer.
+///
+/// The secret is an argument, which is what lets the manager offer this without
+/// holding anything open: the password is decrypted inside this call, sent, and gone
+/// again by the time it returns. It is never returned to the launcher, not even in
+/// an error message.
 #[tauri::command]
-async fn check_credential(origin: String, state: tauri::State<'_, VaultState>) -> Result<LoginCheck, String> {
-    // `Result` because a Tauri 2 async command that borrows state has to return
-    // one; only the two "there is nothing to check" cases are errors.
+async fn check_credential(origin: String, secret: String) -> Result<LoginCheck, String> {
     let origin = credentials::normalize_origin(&origin)
         .ok_or_else(|| "That is not an address credentials could be saved for.".to_string())?;
-    let Some(header) = credential_header(&origin, &state) else {
-        return Err(format!("No saved login for {}.", origin));
-    };
+    // Built and dropped before the await: a response can take seconds, and the
+    // decrypted vault has no business outliving the header it was opened to make.
+    let header = with_vault(&secret, |vault| {
+        vault
+            .credential_for(&origin)
+            .map(|entry| credentials::basic_header(&entry.user, &entry.password))
+            .ok_or_else(|| format!("No saved login for {}.", origin))
+    })?;
     Ok(ask_instance_about_login(&origin, &header).await)
 }
 
@@ -2197,28 +2204,29 @@ use credentials::{CredentialSummary, VaultError};
 
 /// What the app holds in memory, and for how long.
 ///
-/// The vault is not unlocked for the session. It stays locked until something
-/// needs it, and each of the two things that can need it holds it for its own,
-/// short life:
+/// One credential, and only ever one: a [`credentials::Grant`] lent to an instance
+/// while it loads, because the webview asks the server's password challenge long
+/// after the launcher has left the page. It expires on a clock
+/// ([`credentials::GRANT_TTL`]) and is dropped the moment the launcher comes back.
 ///
-/// * `grant` — one credential, lent to an instance while it loads, because the
-///   webview asks the server's password challenge long after the launcher has left
-///   the page. It expires on a clock ([`credentials::GRANT_TTL`]) and is dropped
-///   the moment the launcher comes back. So opening a protected instance costs
-///   exactly one unlock, and nothing is left unlocked afterwards.
-/// * `open` — the whole vault, only while the manager dialog is up, because
-///   listing, adding, forgetting and rotating all happen there.
+/// There is deliberately no wider thing here. The manager used to keep the whole
+/// vault open while its dialog was up, which made "managing logins" a *state* the
+/// process sat in — and, because [`credential_pair`] answered from whatever was
+/// already in memory, a state that answered **any** origin's password challenge for
+/// as long as that dialog was on screen. Now every command that needs the vault opens it, does
+/// one thing, and drops it, so `with_vault` is the whole of the unlock policy and
+/// the key is zeroized on the way out of each call.
 ///
-/// Both are zeroized when dropped, so "locked" means the derived key and the
-/// decrypted passwords are gone rather than merely unreferenced.
+/// The price is one KDF per management action instead of one per dialog. At the
+/// cost this vault is set to ([`credentials::M_COST_KIB`]), and for the three to
+/// five logins it is meant to hold, that is the cheap side of the trade.
 pub(crate) struct VaultState {
-    open: Mutex<Option<credentials::Unlocked>>,
     grant: Mutex<Option<credentials::Grant>>,
 }
 
 impl VaultState {
     pub(crate) fn new() -> VaultState {
-        VaultState { open: Mutex::new(None), grant: Mutex::new(None) }
+        VaultState { grant: Mutex::new(None) }
     }
 }
 
@@ -2226,10 +2234,8 @@ impl VaultState {
 struct CredentialStatus {
     /// A vault file exists on disk.
     exists: bool,
-    /// The manager has the whole vault open. Not "an instance is signing in" —
-    /// that is `granted`.
-    unlocked: bool,
-    /// An instance load is holding one credential right now.
+    /// An instance load is holding one credential right now. There is no other
+    /// kind of open: nothing the launcher can ask for outlives the call that asked.
     granted: bool,
     /// How many logins are stored, answered from the file's origin index, so it is
     /// known while the vault is locked. The count is not one of the things the
@@ -2245,6 +2251,9 @@ struct SecretCheck {
     ok: bool,
     problem: Option<String>,
     warning: Option<String>,
+    /// `weak`, `average` or `strong` — the same word the line is coloured by, so the
+    /// colour and the verdict cannot be derived twice and disagree.
+    band: Option<String>,
 }
 
 /// Where the vault lives: beside the executable for a portable bundle, in app
@@ -2265,8 +2274,42 @@ pub(crate) fn dir_writable(dir: &Path) -> bool {
     written
 }
 
-/// The `Authorization` header for a URL's origin, when the vault is unlocked and
-/// holds credentials for it.
+/// Run `work` against the vault, opened for exactly the length of the call.
+///
+/// This is the whole unlock policy. The derived key exists on this stack frame and
+/// nowhere else, and dropping `vault` zeroizes it along with the passwords it
+/// decrypted — so every command that needs the vault asks for the secret in the
+/// same breath as the thing it is doing, and there is no state for one command to
+/// find and none left behind for the next.
+///
+/// A wrong secret is not a special case: it fails the file's tag, which is what
+/// `credentials::unlock` reports, and the sentence the launcher shows is that one.
+fn with_vault<T>(secret: &str, work: impl FnOnce(&mut credentials::Unlocked) -> Result<T, String>) -> Result<T, String> {
+    let mut vault = credentials::unlock(&vault_path(), secret)?;
+    work(&mut vault)
+}
+
+/// The same, for the two commands that may be the *first* thing a vault ever sees.
+///
+/// Saving a login into a vault that does not exist yet creates it under the secret
+/// being typed, which is what keeps first use one dialog rather than a separate
+/// "create a vault" step — and it means a vault file only ever exists because
+/// there is a login in it, so an empty one is not a state the app can reach.
+fn with_vault_or_create<T>(
+    secret: &str,
+    work: impl FnOnce(&mut credentials::Unlocked) -> Result<T, String>,
+) -> Result<T, String> {
+    let path = vault_path();
+    let mut vault = match credentials::unlock(&path, secret) {
+        Ok(vault) => vault,
+        Err(VaultError::Missing) => credentials::create(&path, secret, std::collections::BTreeMap::new())?,
+        Err(error) => return Err(error.into()),
+    };
+    work(&mut vault)
+}
+
+/// The `Authorization` header for a URL's origin, when an instance load is holding
+/// a grant that covers it.
 ///
 /// Origin-exact: a saved credential is offered to the host it was saved for and
 /// to nothing that merely resembles it. reqwest strips this header again if a
@@ -2277,26 +2320,22 @@ fn credential_header(url: &str, state: &VaultState) -> Option<String> {
     Some(credentials::basic_header(&user, &password))
 }
 
-/// The saved username and password for a URL's origin, when the app can produce
-/// one for it — either because the manager has the whole vault open, or because an
-/// instance load is holding a grant that covers this origin.
+/// The saved username and password for a URL's origin, when an instance load is
+/// holding a grant that covers it.
 ///
 /// Split out from the header above because the webview hook needs the two parts
 /// rather than the joined form: WebView2 takes a username and a password
 /// separately and does the encoding itself (`webview_auth`).
 ///
-/// One rule for both callers, deliberately: origin-exact, so a credential saved
-/// for one instance is never offered to a host that merely resembles it. Nothing
-/// on this path can unlock anything, which is what lets `webview_auth` call it on
+/// A grant is the *only* thing this can answer from. That is the point of it being
+/// the only thing in [`VaultState`]: origin-exact, scoped to one instance load, and
+/// expiring, so what the app can answer for is always something the user just asked
+/// for by opening that instance — never a mode the app is sitting in. Nothing on
+/// this path can unlock anything either, which is what lets `webview_auth` call it on
 /// the UI thread: an absent or expired grant is simply no answer, and running the
 /// KDF here would freeze the window while it waits.
 pub(crate) fn credential_pair(url: &str, state: &VaultState) -> Option<(String, String)> {
     let origin = credentials::normalize_origin(url)?;
-    if let Ok(guard) = state.open.lock() {
-        if let Some(entry) = guard.as_ref().and_then(|vault| vault.credential_for(&origin)) {
-            return Some((entry.user.clone(), entry.password.clone()));
-        }
-    }
     let guard = state.grant.lock().ok()?;
     let grant = guard.as_ref()?;
     grant
@@ -2306,26 +2345,26 @@ pub(crate) fn credential_pair(url: &str, state: &VaultState) -> Option<(String, 
 
 /// The current state, for the launcher's controls.
 ///
-/// Never called while one of the locks is held: `std::sync::Mutex` is not
-/// reentrant, so a caller inside a guard would deadlock rather than fail.
+/// Every field is answerable without the secret, which is what makes it safe to
+/// ask on every mount and after every action: the file's existence, whether an
+/// instance load is holding a credential, how many logins are stored, and where.
+/// The count comes from the file's own origin index, so it is known while nothing
+/// is open — which is the difference between "3 saved" and pretending to know
+/// nothing, and it is the only thing that index is for.
 fn status_of(state: &VaultState) -> CredentialStatus {
     let path = vault_path();
-    let open = state.open.lock().ok();
-    let unlocked = open.as_ref().map(|slot| slot.is_some()).unwrap_or(false);
-    let count = open
-        .as_ref()
-        .and_then(|slot| slot.as_ref())
-        .map(|vault| vault.summaries().len())
-        // Locked: the file can still say how many logins it holds, without saying
-        // which ones.
-        .unwrap_or_else(|| credentials::stored_count(&path));
     let granted = state
         .grant
         .lock()
         .ok()
         .and_then(|slot| slot.as_ref().map(|grant| grant.is_live()))
         .unwrap_or(false);
-    CredentialStatus { exists: path.exists(), unlocked, granted, count, path: path.to_string_lossy().into_owned() }
+    CredentialStatus {
+        exists: path.exists(),
+        granted,
+        count: credentials::stored_count(&path),
+        path: path.to_string_lossy().into_owned(),
+    }
 }
 
 #[tauri::command]
@@ -2349,33 +2388,50 @@ fn credential_coverage(origins: Vec<String>) -> Vec<String> {
 }
 
 /// Validate a candidate secret before anything is written with it, so the rule
-/// lives in one place: the launcher shows exactly what the vault enforces, and
-/// the weak-secret warning carries its own arithmetic.
+/// lives in one place: the launcher shows exactly what the vault enforces, and the
+/// verdict carries its own arithmetic.
 #[tauri::command]
 fn check_credentials_secret(secret: String) -> SecretCheck {
     match credentials::validate_secret(&secret) {
-        Ok(()) => SecretCheck { ok: true, problem: None, warning: credentials::weak_secret_warning(&secret) },
-        Err(error) => SecretCheck { ok: false, problem: Some(error.to_string()), warning: None },
+        Ok(()) => {
+            let verdict = credentials::secret_verdict(&secret);
+            SecretCheck {
+                ok: true,
+                problem: None,
+                warning: verdict.as_ref().map(|answer| answer.detail.clone()),
+                band: verdict.map(|answer| answer.band.as_str().to_string()),
+            }
+        }
+        Err(error) => {
+            SecretCheck { ok: false, problem: Some(error.to_string()), warning: None, band: None }
+        }
     }
 }
 
-/// Open the vault.
+/// Lend one instance the credential that was just typed for it, without saving it.
 ///
-/// With no vault file yet, the secret supplied here becomes the vault's — which
-/// is what makes first use one dialog rather than a separate "create" step.
+/// The one grant that is not built from the file: nothing is opened, nothing is
+/// written and no secret is needed, because the values came from the boxes. It exists
+/// because the page answers its own 401s from the grant (`webview_auth`), and with no
+/// grant the webview puts up its own dialog — which is the prompt this replaces. What
+/// it leaves behind is the same origin-exact, expiring grant any other open leaves,
+/// so "type it once, save nothing" is the whole of the difference.
 #[tauri::command]
-fn unlock_credentials(secret: String, state: tauri::State<VaultState>) -> Result<Vec<CredentialSummary>, String> {
-    let path = vault_path();
-    let vault = match credentials::unlock(&path, &secret) {
-        Ok(vault) => vault,
-        Err(VaultError::Missing) => credentials::create(&path, &secret, std::collections::BTreeMap::new())?,
-        Err(error) => return Err(error.into()),
-    };
-    let summaries = vault.summaries();
-    if let Ok(mut guard) = state.open.lock() {
-        *guard = Some(vault);
+fn lend_instance_credentials(
+    origin: String,
+    user: String,
+    password: String,
+    state: tauri::State<VaultState>,
+) -> Result<InstanceGrant, String> {
+    let origin = credentials::normalize_origin(&origin)
+        .ok_or_else(|| "That is not an address credentials could be saved for.".to_string())?;
+    let grant = credentials::Grant::new(origin, user.clone(), password);
+    let answer = InstanceGrant { origin: grant.origin().to_string(), user };
+    if let Ok(mut slot) = state.grant.lock() {
+        // Assigning over the slot drops any previous grant, which zeroizes it.
+        *slot = Some(grant);
     }
-    Ok(summaries)
+    Ok(answer)
 }
 
 /// What one instance load gets: confirmation of the origin it may sign in to, and
@@ -2444,8 +2500,9 @@ fn save_login_for_instance(
     let origin = credentials::normalize_origin(&origin)
         .ok_or_else(|| "That is not an address credentials could be saved for.".to_string())?;
     let path = vault_path();
-    // No vault yet means the PIN typed here is the one this vault will have, which is
-    // the same bargain `unlock_credentials` makes on first use.
+    // No vault yet means the PIN typed here is the one this vault will have — the same
+    // first-use bargain `remember_credentials` makes, one dialog and no separate
+    // "create" step.
     let mut vault = match credentials::unlock(&path, &secret) {
         Ok(vault) => vault,
         Err(VaultError::Missing) => credentials::create(&path, &secret, std::collections::BTreeMap::new())?,
@@ -2465,90 +2522,80 @@ fn save_login_for_instance(
     Ok(answer)
 }
 
-/// What the vault holds, while it is unlocked.
+/// What the vault holds, opened for the length of the call.
 ///
-/// Locked is not an error here: it is the answer "nothing to show", and the UI
-/// already knows which state it is in from `credentials_status`. Without this,
-/// reopening the dialog would have a list to manage and no way to read it.
+/// The list itself has to be behind the secret, and that is a fact about the file
+/// rather than a choice made here: its origin index is salted hashes, so nothing can
+/// enumerate what is saved without decrypting it. What the secret does *not* do is
+/// leave anything open afterwards — the summaries are the answer, not a session, and
+/// they carry no password (see [`CredentialSummary`]).
 #[tauri::command]
-fn list_credentials(state: tauri::State<VaultState>) -> Vec<CredentialSummary> {
-    state
-        .open
-        .lock()
-        .ok()
-        .and_then(|guard| guard.as_ref().map(|vault| vault.summaries()))
-        .unwrap_or_default()
+fn list_credentials(secret: String) -> Result<Vec<CredentialSummary>, String> {
+    with_vault(&secret, |vault| Ok(vault.summaries()))
 }
 
-/// Close everything: the manager's copy of the vault, and any grant an instance
-/// load is holding. Locking has to mean nothing answers any more — a grant left
-/// behind would keep signing that one origin in from memory.
+/// Drop whatever an instance load is holding, so nothing answers any more.
+///
+/// This is not a lock control and there is no matching unlock one: there is no open
+/// vault to close, and the manager neither holds one nor needs one. It is the
+/// launcher saying "the load that credential was for is over" — and it is called on
+/// every launcher mount, because the webview hands the window back long after the
+/// grant was made and a grant left behind would keep signing that one origin in
+/// from memory. Which is the single state this design exists not to keep.
 #[tauri::command]
 fn lock_credentials(state: tauri::State<VaultState>) -> CredentialStatus {
-    close(&state);
+    drop_grant(&state);
     status_of(&state)
 }
 
-fn close(state: &VaultState) {
-    if let Ok(mut slot) = state.open.lock() {
-        *slot = None;
-    }
+fn drop_grant(state: &VaultState) {
     if let Ok(mut slot) = state.grant.lock() {
         *slot = None;
     }
 }
 
+/// Add or replace one login, and say what the vault holds afterwards.
+///
+/// The secret is what opens the vault, and — when there is no vault yet — what
+/// becomes the vault's. That is first use: one dialog, no separate "create" step,
+/// and no way to end up with a file that holds nothing.
 #[tauri::command]
 fn remember_credentials(
     origin: String,
     user: String,
     password: String,
-    state: tauri::State<VaultState>,
+    secret: String,
 ) -> Result<Vec<CredentialSummary>, String> {
     let origin = credentials::normalize_origin(&origin)
         .ok_or_else(|| "That is not an address credentials can be saved for.".to_string())?;
-    let mut guard = state.open.lock().map_err(|_| "The credential vault is busy.".to_string())?;
-    let Some(vault) = guard.as_mut() else {
-        return Err("Unlock the credential vault first.".to_string());
-    };
-    vault.remember(origin, user, password);
-    credentials::save(&vault_path(), vault)?;
-    Ok(vault.summaries())
+    with_vault_or_create(&secret, |vault| {
+        vault.remember(origin, user, password);
+        credentials::save(&vault_path(), vault)?;
+        Ok(vault.summaries())
+    })
 }
 
+/// Drop one login, and say what the vault holds afterwards.
+///
+/// The secret is not asked for because of what forgetting would *reveal*: the file's
+/// index already answers "is there a login for this address?" without one, because a
+/// bookmark's key control has to be grey or green before anything is opened. It is
+/// asked for because forgetting is a change — and an unauthenticated change here
+/// would be a one-at-a-time destructive probe, where handing it a hostname either
+/// deletes a login or says there was none. That is precisely what the index was
+/// built as salted hashes to avoid handing out.
+///
+/// Destroying the whole vault is the deliberate exception, because it is the way back
+/// from a forgotten secret rather than a way to lose one quietly.
 #[tauri::command]
-fn forget_credentials(origin: String, state: tauri::State<VaultState>) -> Result<Vec<CredentialSummary>, String> {
+fn forget_credentials(origin: String, secret: String) -> Result<Vec<CredentialSummary>, String> {
     let origin = credentials::normalize_origin(&origin)
         .ok_or_else(|| "That is not an address credentials could have been saved for.".to_string())?;
-    let mut guard = state.open.lock().map_err(|_| "The credential vault is busy.".to_string())?;
-    let Some(vault) = guard.as_mut() else {
-        return Err("Unlock the credential vault first.".to_string());
-    };
-    vault.forget(&origin);
-    credentials::save(&vault_path(), vault)?;
-    Ok(vault.summaries())
-}
-
-/// Re-encrypt every entry under a new secret, using the key the open vault is
-/// already holding.
-///
-/// Only reachable with the manager open, which is why the old secret is not asked
-/// for again: it is the key in memory that is being replaced, and every entry is
-/// re-encrypted in a single write. This is not a recovery path — nothing is stored
-/// from which a forgotten secret could be derived, and `destroy_credentials` is
-/// what a forgotten secret costs.
-#[tauri::command]
-fn change_credentials_secret(new_secret: String, state: tauri::State<VaultState>) -> Result<CredentialStatus, String> {
-    // Scoped so the guard is released before `status_of`, which locks the same
-    // mutex: this one is not reentrant.
-    {
-        let mut guard = state.open.lock().map_err(|_| "The credential vault is busy.".to_string())?;
-        let Some(vault) = guard.as_mut() else {
-            return Err("Unlock the credential vault first.".to_string());
-        };
-        credentials::rotate(&vault_path(), vault, &new_secret)?;
-    }
-    Ok(status_of(&state))
+    with_vault(&secret, |vault| {
+        vault.forget(&origin);
+        credentials::save(&vault_path(), vault)?;
+        Ok(vault.summaries())
+    })
 }
 
 /// Start over: delete the file and lock the session. This is the recovery path
@@ -2559,7 +2606,7 @@ fn destroy_credentials(state: tauri::State<VaultState>) -> Result<CredentialStat
     credentials::destroy(&vault_path())?;
     // Including any grant: the file is gone, so nothing should still be answering
     // from memory on the strength of it.
-    close(&state);
+    drop_grant(&state);
     Ok(status_of(&state))
 }
 
@@ -2622,14 +2669,13 @@ pub fn run() {
             credentials_status,
             credential_coverage,
             check_credentials_secret,
-            unlock_credentials,
             unlock_for_instance,
             save_login_for_instance,
+            lend_instance_credentials,
             list_credentials,
             lock_credentials,
             remember_credentials,
             forget_credentials,
-            change_credentials_secret,
             destroy_credentials
         ])
         .run(tauri::generate_context!())
@@ -2675,6 +2721,39 @@ mod tests {
         assert_eq!(classify_login(200, 404).outcome, "unclear");
         assert_eq!(classify_login(200, 0).outcome, "unclear");
         assert_eq!(classify_login(500, 500).outcome, "unclear");
+    }
+
+    /// A grant is the only thing that answers a password challenge.
+    ///
+    /// This is the regression the design exists to prevent, not a detail: while the
+    /// manager kept the vault open, `credential_pair` answered **any** origin, so
+    /// merely looking at the saved logins authorised browsing as any of them. Nothing
+    /// opens the vault for a dialog any more, and what is left is origin-exact.
+    #[test]
+    fn only_a_grant_answers_a_password_challenge() {
+        let state = VaultState::new();
+        assert_eq!(credential_pair("https://personal.lithic.uk/", &state), None);
+
+        let grant = credentials::Grant::new(
+            "https://personal.lithic.uk".to_string(),
+            "keeper".to_string(),
+            "s3cret".to_string(),
+        );
+        *state.grant.lock().expect("the grant slot") = Some(grant);
+
+        let answered = credential_pair("https://personal.lithic.uk/", &state);
+        assert_eq!(answered, Some(("keeper".to_string(), "s3cret".to_string())));
+
+        // Origin-exact, in all three directions a near-miss can come from: another
+        // host, another scheme on the same host, and another port on it.
+        assert_eq!(credential_pair("https://other.example/", &state), None);
+        assert_eq!(credential_pair("http://personal.lithic.uk/", &state), None);
+        assert_eq!(credential_pair("https://personal.lithic.uk:8443/", &state), None);
+
+        // And dropping the grant is what leaves nothing answering — which is what
+        // `lock_credentials` does on every launcher mount.
+        drop_grant(&state);
+        assert_eq!(credential_pair("https://personal.lithic.uk/", &state), None);
     }
 
     /// Shell out to real git — for fixtures and assertions only. The sync

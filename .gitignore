@@ -54,6 +54,11 @@ wiki/tiddlywiki.log
 
 # Local preview and browser-test artifacts
 /.launcher-preview.log
+
+# The UI gallery's output: contact sheets and the per-state PNGs they are tiled
+# from. Generated on demand by scripts/ui-gallery.mjs, reviewed by eye, and too
+# heavy to belong in history. The script itself is tracked.
+/ui-gallery/
 /scratch/test-profile-*/
 /scratch/chrome-test-profile/
 /scratch/test-saver-headless.html

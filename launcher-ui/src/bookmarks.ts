@@ -24,21 +24,29 @@ export type BookmarkEntry = {
   /** Data URL of the instance's cached icon, when one could be fetched. */
   icon?: string;
   iconFetchedAt?: number;
-  /**
-   * The user answered "don't ask again" when the app offered to save a login for
-   * this instance, so opening it goes straight through and no further offer is
-   * made. It is only about the *offer*: a login saved later — from the row's own
-   * key control, or by hand in the manager — is used exactly as any other, which
-   * is also why the flag needs no way to be taken back. Saving is the way back.
-   */
-  manualAuth?: boolean;
 };
 
+/**
+ * The origin of a typed address, or a refusal.
+ *
+ * A bare host is given `https://`, which is the whole of the convenience here — and the
+ * one trap: a *spelled-out* scheme was read as a host, because the prefix went on before
+ * anything was parsed. `ftp://other.example` became the origin `https://ftp`, so a
+ * bookmark to a machine that does not exist was saved, and the guard below never ran:
+ * there is no way for `https://ftp://other.example` to be anything but HTTPS. A scheme is
+ * therefore taken off the front first, and only `http`/`https` survive it. A colon with
+ * digits after it is a port, not a scheme, so `example.test:8080` stays a host.
+ */
 export function normalizeInstanceUrl(value: string): string {
   const input = value.trim();
   if (!input) throw new Error('Enter a self-hosted Lithic instance URL.');
+  const scheme = /^([a-z][a-z0-9+.-]*):(?!\d)/i.exec(input);
+  if (scheme && !/^https?$/i.test(scheme[1])) throw new Error('Use an HTTP or HTTPS instance URL.');
   const url = new URL(/^https?:\/\//i.test(input) ? input : `https://${input}`);
   if (url.protocol !== 'http:' && url.protocol !== 'https:') throw new Error('Use an HTTP or HTTPS instance URL.');
+  // `https:foo` parses with an empty host and the origin `null`, which is not an address
+  // any fetch can be aimed at.
+  if (!url.hostname) throw new Error('Enter a self-hosted Lithic instance URL.');
   return url.origin;
 }
 
@@ -68,7 +76,10 @@ function toEntry(value: unknown): BookmarkEntry | null {
     entry.icon = record.icon;
     entry.iconFetchedAt = typeof record.iconFetchedAt === 'number' ? record.iconFetchedAt : 0;
   }
-  if (record.manualAuth === true) entry.manualAuth = true;
+  // A stored `manualAuth: true` — the old "don't ask again" — is simply not read
+  // any more: the offer it silenced is now the only place a password can be typed,
+  // and it carries "open without saving" for the answer the flag used to stand for.
+  // Entries that still carry it lose it on the next write, since this rebuilds.
   return entry;
 }
 
@@ -112,28 +123,6 @@ export function removeBookmark(value: string, storage: Storage = localStorage): 
     readBookmarkEntries(storage).filter((entry) => entry.url !== value),
     storage
   );
-}
-
-/**
- * Remember (or clear) "don't ask again" for one bookmark.
- *
- * Kept with the bookmark rather than in the vault because that is where the fact
- * belongs: it is about *opening this instance*, not about any stored credential —
- * and it has to be readable while the vault is locked, since the offer it silences
- * is made before anything is unlocked.
- */
-export function setBookmarkManualAuth(
-  value: string,
-  manual: boolean,
-  storage: Storage = localStorage
-): BookmarkEntry[] {
-  const entries = readBookmarkEntries(storage).map((entry) => {
-    if (entry.url !== value) return entry;
-    if (manual) return { ...entry, manualAuth: true };
-    const { manualAuth: _manual, ...rest } = entry;
-    return rest;
-  });
-  return writeBookmarkEntries(entries, storage);
 }
 
 /** Attach (or drop) a cached icon for one bookmark. */

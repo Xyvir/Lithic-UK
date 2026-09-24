@@ -12,8 +12,9 @@
 //! bookmarked instance costs an entry, not another secret. The consequence is
 //! worth stating plainly — the secret is the only thing between a copied vault
 //! file and every password in it — which is why it has a fixed shape (see
-//! [`PIN_LEN`]) and why the UI warns about an all-digit one: six digits is a
-//! million guesses, six letters and digits is two billion.
+//! [`PIN_LEN`]) and why the UI colours the alphabet it uses: six digits is a
+//! million guesses, six letters is three hundred million, six of both is two
+//! billion ([`secret_verdict`] carries the arithmetic).
 //!
 //! The secret is a PIN rather than a passphrase on purpose. It is typed on the way
 //! into an instance, so it has to be quick; case is folded away
@@ -419,41 +420,118 @@ pub fn validate_secret(secret: &str) -> Result<(), VaultError> {
     Ok(())
 }
 
-/// A soft warning, not a refusal: a PIN made only of digits is the one case worth
-/// saying out loud, with the cost attached to it.
+/// Which band a candidate PIN falls in.
 ///
-/// Only the all-digit PIN gets this. One letter in a six-character PIN multiplies
-/// the space by 36^6/10^6 — three thousand times — so a PIN that already has a
-/// letter in it has made the point the warning exists to make.
-pub fn weak_secret_warning(secret: &str) -> Option<String> {
+/// Decided by the alphabet the PIN actually uses, because that is what sets the
+/// guess count: six characters hold 10^6, 26^6 or 36^6 possibilities depending on
+/// whether they are digits, letters, or both. The word here is also the class the
+/// launcher colours the line with, so the two can never disagree.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SecretBand {
+    Weak,
+    Average,
+    Strong,
+}
+
+impl SecretBand {
+    /// The class name the UI colour-codes on.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            SecretBand::Weak => "weak",
+            SecretBand::Average => "average",
+            SecretBand::Strong => "strong",
+        }
+    }
+
+    fn label(self) -> &'static str {
+        match self {
+            SecretBand::Weak => "Weak",
+            SecretBand::Average => "Average",
+            SecretBand::Strong => "Strong",
+        }
+    }
+}
+
+/// What a candidate PIN is worth: its band, and the sentence that carries the
+/// arithmetic behind it.
+pub struct SecretVerdict {
+    pub band: SecretBand,
+    /// Shown verbatim by the launcher, so the estimate and the rule stay together.
+    pub detail: String,
+}
+
+/// A soft verdict, never a refusal: [`validate_secret`] has already decided the
+/// shape, and this is only what is worth saying about one that passed.
+///
+/// All three alphabets are answered rather than only the one worth warning about.
+/// Silence cannot be colour-coded, and "one letter settles it" stopped being true
+/// the moment the launcher started naming what each alphabet costs: 26^6 is six
+/// years on one core, which is a different claim from the two billion of a mix.
+/// `None` is the shape this is not about — a PIN that is not six letters or digits.
+pub fn secret_verdict(secret: &str) -> Option<SecretVerdict> {
     let pin = normalize_secret(secret);
-    if pin.chars().count() != PIN_LEN || !pin.chars().all(|character| character.is_ascii_digit()) {
+    if pin.chars().count() != PIN_LEN
+        || !pin.chars().all(|character| character.is_ascii_alphanumeric())
+    {
         return None;
     }
-    // 10^length guesses at this vault's own KDF cost. Seconds per guess is the cost
-    // of the memory setting, which is where Argon2id spends its time: 0.3 s is the
-    // measured-ish cost of 64 MiB on a desktop core, so the estimate follows
+    let has_digit = pin.chars().any(|character| character.is_ascii_digit());
+    let has_letter = pin.chars().any(|character| character.is_ascii_alphabetic());
+    // A six-character PIN is alphanumeric, so it always has one or the other; the
+    // mixed arm is the catch-all for the only case left.
+    let (alphabet, band, words, nudge) = match (has_digit, has_letter) {
+        (true, false) => (
+            10u32,
+            SecretBand::Weak,
+            "digits",
+            Some("One letter makes that number useless."),
+        ),
+        (false, true) => (
+            26,
+            SecretBand::Average,
+            "letters",
+            Some("One digit makes that number useless."),
+        ),
+        _ => (36, SecretBand::Strong, "letters and digits", None),
+    };
+    // `alphabet^length` guesses at this vault's own KDF cost. Seconds per guess is
+    // the cost of the memory setting, which is where Argon2id spends its time: 0.3 s
+    // is the measured-ish cost of 64 MiB on a desktop core, so the estimate follows
     // [`M_COST_KIB`] instead of going stale beside it.
     let per_guess = 0.3 * (M_COST_KIB as f64 / 65_536.0);
-    let space = 10f64.powi(PIN_LEN as i32);
+    let space = (alphabet as f64).powi(PIN_LEN as i32);
     let single_core = space * per_guess;
     let eight_cores = single_core / 8.0;
     let phrase = |seconds: f64| {
-        if seconds < 3600.0 {
-            format!("{} minutes", (seconds / 60.0).ceil().max(1.0))
+        let count = |unit: f64| (seconds / unit).round().max(1.0);
+        if seconds < 60.0 {
+            format!("{} seconds", count(1.0))
+        } else if seconds < 3_600.0 {
+            format!("{} minutes", count(60.0))
         } else if seconds < 86_400.0 {
-            format!("{} hours", (seconds / 3600.0).ceil())
+            format!("{} hours", count(3_600.0))
+        } else if seconds < 2_592_000.0 {
+            format!("{} days", count(86_400.0))
+        } else if seconds < 31_536_000.0 {
+            format!("{} months", count(2_592_000.0))
         } else {
-            format!("{} days", (seconds / 86_400.0).ceil())
+            format!("{} years", count(31_536_000.0))
         }
     };
-    Some(format!(
-        "{} digits is {} combinations — about {} on one core, or {} across eight. One letter makes that number useless.",
+    let mut detail = format!(
+        "{}: {} {} — {} combinations, about {} on one core or {} across eight.",
+        band.label(),
         PIN_LEN,
+        words,
         thousands(space as u64),
         phrase(single_core),
         phrase(eight_cores)
-    ))
+    );
+    if let Some(nudge) = nudge {
+        detail.push(' ');
+        detail.push_str(nudge);
+    }
+    Some(SecretVerdict { band, detail })
 }
 
 /// `1000` → `1,000`. The warning is about a number, and a number that is not
@@ -773,25 +851,6 @@ pub fn create(path: &Path, secret: &str, entries: BTreeMap<String, Credential>) 
     Ok(vault)
 }
 
-/// Re-encrypt an open vault under a new secret.
-///
-/// Only the manager can call this, and only while the vault is open: the key being
-/// replaced is already in memory, so the old secret does not have to be typed
-/// again. The new key gets a fresh salt, so the two secrets share no derivation,
-/// and every entry is re-encrypted in one write.
-pub fn rotate(path: &Path, vault: &mut Unlocked, secret: &str) -> Result<(), VaultError> {
-    let pin = normalize_secret(secret);
-    validate_secret(&pin)?;
-    let salt = random_bytes(SALT_BYTES)?;
-    let params = (M_COST_KIB, T_COST, P_COST);
-    let key = derive_key(&pin, &salt, params)?;
-    vault.key.zeroize();
-    vault.key = key;
-    vault.salt = salt;
-    vault.params = params;
-    write(path, vault)
-}
-
 /// Persist a mutation to an already-unlocked vault.
 pub fn save(path: &Path, vault: &Unlocked) -> Result<(), VaultError> {
     write(path, vault)
@@ -980,16 +1039,33 @@ mod tests {
     }
 
     #[test]
-    fn warns_about_an_all_digit_pin_only() {
-        let warning = weak_secret_warning("123456").expect("six digits is worth warning about");
-        assert!(warning.contains("1,000,000"), "the warning carries the number: {}", warning);
-        assert!(warning.contains("eight"), "and what it costs: {}", warning);
-        assert!(weak_secret_warning("l1th1c").is_none(), "one letter makes it a different question");
-        assert!(weak_secret_warning("ABC123").is_none());
+    fn every_alphabet_gets_its_own_band_and_its_own_number() {
+        let weak = secret_verdict("123456").expect("six digits is worth saying out loud");
+        assert_eq!(weak.band, SecretBand::Weak);
+        assert!(weak.detail.contains("1,000,000"), "the number: {}", weak.detail);
+        assert!(weak.detail.contains("7 days"), "and what it costs: {}", weak.detail);
+        assert!(weak.detail.contains("One letter"), "and the way out: {}", weak.detail);
+
+        let average = secret_verdict("lithic").expect("six letters is a different question");
+        assert_eq!(average.band, SecretBand::Average);
+        assert!(average.detail.contains("308,915,776"), "the number: {}", average.detail);
+        assert!(average.detail.contains("6 years"), "which is years, not days: {}", average.detail);
+        assert!(average.detail.contains("One digit"), "and the way out: {}", average.detail);
+
+        let strong = secret_verdict("l1th1c").expect("a mix is the third case");
+        assert_eq!(strong.band, SecretBand::Strong);
+        assert!(strong.detail.contains("2,176,782,336"), "the number: {}", strong.detail);
         assert!(
-            weak_secret_warning("12345").is_none(),
-            "and a PIN that is not one yet is not the warning's business"
+            !strong.detail.contains("makes that number useless"),
+            "there is nothing left to nudge: {}",
+            strong.detail
         );
+
+        assert!(
+            secret_verdict("12345").is_none(),
+            "a PIN that is not one yet is not the verdict's business"
+        );
+        assert!(secret_verdict("12345!").is_none(), "and neither is a shape it cannot hold");
     }
 
     #[test]
@@ -1061,28 +1137,6 @@ mod tests {
         assert!(!vault.forget("https://personal.lithic.uk"), "forgetting twice is not a change");
         save(&path, &vault).expect("save");
         assert_eq!(unlock(&path, SECRET).expect("unlock").summaries().len(), 1);
-    }
-
-    #[test]
-    fn rotating_the_secret_re_encrypts_everything() {
-        let dir = temporary_dir("rotate");
-        let path = dir.join(VAULT_FILE);
-        let mut vault = create(&path, SECRET, entries()).expect("create");
-        rotate(&path, &mut vault, "n3wp1n").expect("rotate");
-        assert!(
-            matches!(unlock(&path, SECRET), Err(VaultError::WrongSecret)),
-            "the old secret must stop working"
-        );
-        let opened = unlock(&path, "n3wp1n").expect("unlock with the new secret");
-        assert_eq!(
-            opened.credential_for("https://personal.lithic.uk").map(|entry| entry.password.as_str()),
-            Some(FIXTURE_PASSWORD)
-        );
-        // The rotated vault is still the same vault: the manager stays open through
-        // it, and the next save writes under the new key.
-        vault.remember("http://192.168.1.42".to_string(), "esp32".to_string(), "lan-pass".to_string());
-        save(&path, &vault).expect("save after rotate");
-        assert_eq!(unlock(&path, "n3wp1n").expect("reopen").summaries().len(), 2);
     }
 
     #[test]

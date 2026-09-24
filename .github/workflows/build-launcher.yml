@@ -47,6 +47,12 @@ jobs:
         if: ${{ inputs.virtual-headed == true }}
         run: xvfb-run -a npm run test:puppeteer:headed
 
+      # The artifact ships to instances, to USB sticks and to file:// alike, so it has to
+      # carry every byte it needs. This fails on a CDN reference, a font from somebody
+      # else's host, or any bootstrap that reaches for the network.
+      - name: Offline gate
+        run: npm run check:offline
+
       - name: Upload preview artifact
         uses: actions/upload-artifact@v5
         with:

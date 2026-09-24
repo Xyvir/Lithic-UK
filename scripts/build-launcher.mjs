@@ -1,6 +1,6 @@
 import { spawn } from 'node:child_process';
-import { readFile, writeFile, rm } from 'node:fs/promises';
-import { resolve } from 'node:path';
+import { mkdir, readFile, writeFile, rm } from 'node:fs/promises';
+import { dirname, resolve } from 'node:path';
 
 const root = resolve('launcher-ui');
 const viteBin = resolve(root, 'node_modules/vite/bin/vite.js');
@@ -12,7 +12,13 @@ const generatedCss = resolve(outputDir, 'launcher.css');
 // and this is the only launcher we emit; there is no historical-name alias and
 // no preview-only engine sibling. The TiddlyWiki engine already lives beside
 // it as src/lithic.html, which is the sibling the runtime resolves first.
-const destination = resolve(outputDir, 'launcher.html');
+// Where the assembled artifact lands. It defaults to the published path, and the
+// override exists for tooling that needs a *scratch* build: the HTML at
+// `src/launcher.html` is published (deploy/autoupdate.sh fetches it at runtime,
+// deploy/Dockerfile copies it) and is CI-only (see agents.md), so anything that
+// wants to look at unreleased UI should build somewhere else entirely rather than
+// leave a hand-built copy sitting at the path that ships.
+const destination = resolve(process.argv[2] ?? process.env.LAUNCHER_OUT ?? resolve(outputDir, 'launcher.html'));
 
 await new Promise((resolveBuild, rejectBuild) => {
   const child = spawn(process.execPath, [viteBin, 'build', '--config', 'vite.config.ts'], {
@@ -41,6 +47,7 @@ html = html
   .replace(/<script type="module"[^>]*src="[^"]+"><\/script>/g, () => `<script type="module">${js}</script>`)
   .replace(/<script type="module"[^>]*><\/script>/g, () => `<script type="module">${js}</script>`);
 
+await mkdir(dirname(destination), { recursive: true });
 await writeFile(destination, html);
 await Promise.all([rm(generatedHtml, { force: true }), rm(generatedJs, { force: true }), rm(generatedCss, { force: true })]);
 console.log(`Wrote ${destination}`);

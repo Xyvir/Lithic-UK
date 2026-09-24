@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
+  BROWSER_ONLY_HISTORY_NOTE,
   BROWSER_ONLY_TOOLTIP,
   browserOnlyMarkTitle,
   resolveStorageMode,
@@ -52,4 +53,13 @@ test('the mark says the copy is the only copy, and where to get a real one', () 
   assert.match(title, /intrinsically volatile/);
   assert.match(title, /version history/);
   assert.match(BROWSER_ONLY_TOOLTIP, /hard copies/);
+});
+
+// The tooltip is a hover, so it is no use to a phone. This is the same claim where
+// the download actually is, which is also the dialog the mark opens.
+test('the history dialog says the same thing without a pointer to hover with', () => {
+  assert.match(BROWSER_ONLY_HISTORY_NOTE, /no file/);
+  assert.match(BROWSER_ONLY_HISTORY_NOTE, /only copy/);
+  assert.match(BROWSER_ONLY_HISTORY_NOTE, /Download a version/);
+  assert.doesNotMatch(BROWSER_ONLY_HISTORY_NOTE, /hard copies/);
 });

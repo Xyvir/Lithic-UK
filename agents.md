@@ -99,6 +99,8 @@ When adding new features to Lithic, follow these principles:
 
 8. **Hardcoded colour gate (`scripts/check-colors.js`, runs in CI before anything is built):** any colour literal in `wiki/local-plugins/` outside the script's `ALLOWLIST` fails the build. Use `<<colour field>>` in wikitext (inline styles and `<style>` blocks) and `var(--lithic-c-*)` in `text/css` sheets. For alpha washes prefer the publisher's companions -- `rgba(var(--lithic-c-foreground-rgb), 0.22)` or the pre-faded `var(--lithic-c-notify-bg-alpha-12)` -- over grey/black/white literals, and remember that muting often needs no colour at all (a completed row is `opacity: 0.6`, not `color: gray`). Comments that mention colours are reported as informational and never fail. Allowlist entries each carry a reason and are deliberately narrow: palette definitions, the print stylesheet and the mermaid media-print block (paper is white), vendored single-line bundles, and content defaults that must NOT follow the wiki palette (PDF.js rendering, the 3D model material, the text-file iframe, whiteboard paste). Run `node scripts/check-colors.js --verbose` to see them. A new exception needs a reason that would survive review, and a line-level exception (a `box-shadow` neutral, say) beats a file-wide one.
 
+9. **Offline gate (`scripts/check-launcher-offline.mjs`, runs in the launcher build CI step and in `npm run check:push`):** the launcher is one file that has to behave the same on an instance, on a USB stick and over `file://`, so nothing in it may load from somebody else's host. The gate fails on any external `src`/`href`/`@import`/`url(...)` -- no allowlist for loads, because no version of this app needs one -- and on any absolute http(s) URL whose host is not declared with a reason in the script's `EXTERNAL` list, which is how a new endpoint becomes a decision rather than an accident. `--browser` adds a runtime pass: boot the artifact over `file://` with every non-local request aborted, drive search and the new-Lith entry, and fail if anything was attempted. That is the only way to judge a host assembled at runtime (`'https://' + host`), so the two passes are not redundant. `node scripts/check-launcher-offline.mjs --list` prints every URL with its declaration for review. Declared today: w3.org namespaces, Svelte's own error links, the GitHub and lithic.uk anchors a person clicks, the two swarm endpoints (`docs/swarm.json` and `intro.lith` for the ephemeral public coderunner widget, both of which fail quietly offline), and the bookmark field's placeholder.
+
 ## In-App Copy: Terse, Non-Technical, No Em Dashes
 
 **CONTEXT:**
@@ -123,6 +125,20 @@ Worked examples:
 | "Pick the icon this instance is known by. It becomes the browser tab, taskbar and phone-home-screen icon, so your instances stay distinguishable at a glance." | "This icon identifies the instance in your tab and taskbar." |
 
 When a string has to carry a count, a filename or a timestamp, keep those as data and let the sentence stay short; do not grow the prose to accommodate them.
+
+## Launcher Modal Affordances: One Dismiss Per Dialog
+
+**CONTEXT:**
+Every launcher modal that can be dismissed carries an × in its corner (`.modal-close`). A Cancel button beside it that runs the same handler is a second control for one function, and it takes the place of the decisions the dialog actually exists to make.
+
+**RULE:**
+1. **No Cancel where the × does the same thing.** Delete it; do not relabel it. The dialog may then have no action row at all — the per-instance PIN prompt is deliberately in that shape, because the sixth character is the submit and the × is the way out — and that is the target, not a gap to fill.
+2. **A "cancel" that is not the × is named for what it does.** The GitHub device flow's button abandons the authorization being waited on and leaves the dialog open where the × closes it, so it reads `Stop waiting`. The inline control in the sync progress line stops a transfer mid-flight, so it reads `Stop syncing`, never `Cancel`.
+3. **A yes/no confirmation keeps its Cancel instead of a ×**, because there both answers are decisions and neither is a dismissal: the rebuild confirmation (Cancel is the choice not to drop the rows it just listed) and the destructive confirm. Every other dialog gets the × — including the ones whose Cancel was its only dismissal beside real choices, like the session-collision prompt, whose two buttons are the ways to open and whose Cancel meant not opening at all.
+4. **Dialogs with no Cancel of any kind are left alone** (the three-way unsaved-edits prompt; `Close`/`Done` as a dialog's only action, in the vault manager's empty and list shapes and git-sync's connected view). Those buttons are handler-identical to an ×, but a shape with no action row at all should be a deliberate decision rather than a side effect of a cleanup.
+
+**ENFORCEMENT:**
+the rule is stated at `.modal-close` in `launcher-ui/src/styles.css`, and `assertNoExtraDismiss` in `scripts/test-puppeteer-launcher.mjs` fails when a dialog that owns a × carries a button whose whole label is `Cancel`. Call it for each new dialog the smoke test opens, and keep the sheet's action rows read from `ui-gallery/copy-deck.md` when trimming one.
 
 # What is a `*.lith` File?
 A `.lith` file is an extension of the vanilla TiddlyWiki `*.tid` file format, which is based on an HTTP RFC format for headers and body.
