@@ -676,18 +676,48 @@ footer > * { pointer-events: auto; }
 .modal-actions { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 18px; }
 .modal-action { flex: 1 1 auto; white-space: nowrap; padding: 10px; border: 1px solid #8ab4f8; border-radius: 7px; background: rgb(138 180 248 / 12%); color: #8ab4f8; cursor: pointer; }
 .modal-action.secondary { border-color: #454545; background: transparent; color: #ddd; }
+/*
+ * The primary action, when what it does cannot be undone: the same shape as the outlined
+ * primary in the red the rest of the app refuses in — `.vault-danger`'s colour, so the key
+ * in the manager and the question it opens never disagree about which act this is. It is
+ * not the outlined primary's opposite number; `.modal-action` is the ordinary case and this
+ * is the one a caller has to ask for, because only the caller knows what its own button
+ * costs.
+ */
+.modal-action.danger { border-color: #e08a7a; background: rgb(224 138 122 / 12%); color: #e08a7a; }
+.modal-action.danger:hover:not(:disabled) { background: rgb(224 138 122 / 20%); color: #ff9d88; }
 .recent-modal { position: relative; width: min(100%, 700px); max-height: 80vh; padding: 20px; border: 1px solid #454545; border-radius: 10px; background: #252525; box-shadow: 0 12px 40px #000; }
 .recent-modal h2 { margin: 0 0 14px; font-size: 1.5rem; }
-/* The ×, and the only dismiss a dialog carries: a Cancel button beside it runs the same
- * function, so the action row is left to the decisions the dialog exists to make — save,
- * open, forget. Where a "cancel" is not this, it is named for what it actually does: the
- * GitHub device flow's "Stop waiting" abandons an authorization and keeps the dialog open,
- * and a rebuild's "Cancel" is the choice not to drop the rows it just listed. A yes/no
- * confirmation is the one dialog with no × at all, because there both answers are decisions. */
+/* The ×, and the only dismiss a dialog carries — whatever the label would have been. A
+ * Cancel, Close or Done beside it runs the same function, so the action row is left to the
+ * decisions the dialog exists to make: save, open, forget, or nothing at all. A dialog with
+ * no decisions in it has no action row (the manager's shape before a vault exists). Where a
+ * "cancel" is not this, it is named for what it actually does: the GitHub device flow's
+ * "Stop waiting" abandons an authorization and keeps the dialog open, and a rebuild's
+ * "Cancel" is the choice not to drop the rows it just listed. A yes/no confirmation is the
+ * one dialog with no × at all, because there both answers are decisions. */
 .modal-close { position: absolute; top: 8px; right: 10px; padding: 0 8px; border: 0; background: transparent; color: #ff5555; font-size: 1.8rem; cursor: pointer; }
 /* Saved instance logins (the credential vault). The controls for it are the key in
  * the bookmark dialog (the vault as a whole) and the key on each bookmark row (one
  * instance) — see `.vault-manager-button` and `.vault-row-button`. */
+/*
+ * The bookmark dialog's two actions are the choice that dialog offers, so they take
+ * its row in equal halves. `flex: 1 1 0`, not the row's own `flex: 1 1 auto`: growing
+ * from each label's own width adds an equal *share* of the spare space to two
+ * different widths, so the shorter label stays narrower — which is how the second
+ * option reads as the lesser one rather than as the other one. At the dialog's own
+ * width that is equal to the pixel (202px and 202px), where the same row measured
+ * 198px beside 206px when the basis was the labels'.
+ *
+ * Two widths below that, the basis stops deciding, because a flex item is never
+ * narrower than its own min-content: at a 350px phone dialog the key's glyph, gap and
+ * two-word label add up to more than its half, so it holds that width and the save
+ * gives up the difference on the one line they still share. Narrow enough that the two
+ * cannot share a line at all (a 320px phone) the row wraps and each action is alone on
+ * a line, which is the same width for both again. Equal halves are a property of a
+ * dialog with the room to state them; a clipped label is never the price.
+ */
+.bookmark-modal .modal-actions > .modal-action { flex: 1 1 0; }
 /*
  * The vault's own manager, inside the dialog that owns the same thing it does: an
  * instance's address. It sits there rather than in the launcher's action row, where
@@ -698,8 +728,19 @@ footer > * { pointer-events: auto; }
  *
  * Grey is the text and the glyph, not the whole button: this one has a label on it,
  * and a labelled control that has gone uniformly grey reads as disabled.
+ *
+ * Its glyph and its label are centred as one group, because the half of the row it
+ * takes is wider than the two of them together — left-aligned they would read as a
+ * button somebody forgot to finish. It has no `flex` of its own: the row rule above
+ * sizes both of the dialog's actions.
+ *
+ * The horizontal padding is the row's own 10px, not the 14px the glyph used to get.
+ * That extra 8px was the button's whole *minimum* width — a flex item is never narrower
+ * than min-content, which for this one is padding + glyph + gap + label — and it put the
+ * minimum 4px over the half the row gives it, so the pair measured 198px beside 206px
+ * however the basis was set. The glyph has its 10px of air and the centring instead.
  */
-.modal-action.vault-manager-button { display: flex; flex: 0 0 auto; align-items: center; gap: 8px; padding: 10px 14px; color: #a5a5a5; }
+.modal-action.vault-manager-button { display: flex; align-items: center; justify-content: center; gap: 8px; padding: 10px; color: #a5a5a5; }
 .modal-action.vault-manager-button svg { flex: 0 0 auto; width: 17px; height: 17px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; overflow: visible; }
 .modal-action.vault-manager-button:hover { color: #ddd; }
 .modal-action.vault-manager-button.has-logins { color: #7ba86f; border-color: #5d8a52; }
@@ -751,7 +792,7 @@ footer > * { pointer-events: auto; }
  * behind it is the word's tooltip. Its class is the band Rust returned, so the colour
  * cannot drift from the band. Colours are the ones `.vault-check-line` already uses for
  * the instance's own answers. */
-.vault-band { margin: 0; color: #e0b341; font-size: 0.9rem; font-weight: 600; white-space: nowrap; }
+.vault-band { margin: 0 0 0 14px; color: #e0b341; font-size: 0.9rem; font-weight: 600; white-space: nowrap; }
 .vault-band.refused { color: #e08a7a; }
 .vault-band.weak { color: #e08a7a; }
 .vault-band.average { color: #e0b341; }
@@ -769,8 +810,18 @@ footer > * { pointer-events: auto; }
  * dialog on a phone, so they grow to a comfortable size and stop there rather than
  * setting a width that would push the last one onto its own line. Six boxes stop well
  * short of a desktop dialog's edge, so the row has a second column for the band word
- * and the two share a line: a word about the PIN belongs beside it. */
-.vault-pin { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; column-gap: 14px; margin-top: 12px; }
+ * and the two share a line: a word about the PIN belongs beside it.
+ *
+ * `max-content` for the first column, with the pair centred, is what makes the group's
+ * own space even. Six 46px boxes and a short word are narrower than the dialog, and
+ * whichever side the leftover went to before was arbitrary: the boxes hugged the left
+ * edge and every spare pixel sat to their right, on a dialog with no other reason to be
+ * wider on one side. The first column still shrinks on a phone (`minmax(0, ...)`), which
+ * is what lets the boxes squeeze instead of wrapping. The 14px the band sits off the
+ * boxes is a margin rather than a column-gap, because a column-gap is charged for the
+ * empty second column too in the dialogs that carry no band, putting the boxes 7px off
+ * centre in the shape that has nothing else on the line. */
+.vault-pin { display: grid; grid-template-columns: minmax(0, max-content) auto; justify-content: center; align-items: center; margin-top: 12px; }
 /* The label, and whatever belongs to the field rather than to a reader of the dialog: its
  * Show toggle. The row is as wide as the field it labels, so `space-between` parks the
  * toggle on that field's right edge — in line with the end of the characters it reveals,
@@ -871,6 +922,11 @@ footer > * { pointer-events: auto; }
 .vault-row-button:hover:enabled { color: #8ab4f8; }
 .vault-row-button.covered:hover:enabled { color: #9cc78f; }
 /*
+ * The two marks below sit left of the history control in the row's markup, nearest
+ * the name they are about: the clock is a control any row can have, while these are
+ * facts about the file behind this row. They used to sit between the clock and the
+ * remove button, which is a fact wedged between two tools for no gain.
+ *
  * Local-only mark: a Lith outside any backed-up folder. Muted on purpose — the
  * file is safe where the user put it, so this reads as information with an
  * action attached rather than a fault. It only renders once a folder *is*
@@ -1063,7 +1119,19 @@ body.drag-over::after {
 .history-list { list-style: none; margin: 0; padding: 0; max-height: 46vh; overflow: auto; }
 .history-entry {
   display: flex; align-items: center; gap: 10px;
-  padding: 8px 10px; border: 1px solid #3a3a3a; border-radius: 7px; margin-bottom: 8px; background: #2c2c2c;
+  padding: 8px 10px; border: 1px solid #3a3a3a; border-radius: 7px; background: #2c2c2c;
+}
+/*
+ * What joins two versions: the gap between two entries, with the chevron centred in it.
+ * The list runs newest at the top, so the chevron points down at the version the row above
+ * was written from — which is the one fact the panel otherwise left to the timestamps.
+ * The connector owns the spacing, which is why an entry carries no bottom margin of its own:
+ * one gap, drawn, instead of a margin plus a decoration inside it.
+ */
+.history-link { display: grid; place-items: center; height: 16px; }
+.history-link svg {
+  width: 13px; height: 8px;
+  fill: none; stroke: #6f6f6f; stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round;
 }
 .history-badge {
   flex: none; padding: 1px 6px; border-radius: 9px;

@@ -1051,7 +1051,17 @@
    * nothing that can be styled. This is the same overlay as every other dialog,
    * so a confirmation looks like it came from the launcher it is about.
    */
-  interface ConfirmationRequest { title: string; body: string; confirmLabel: string }
+  interface ConfirmationRequest {
+    title: string;
+    body: string;
+    confirmLabel: string;
+    /**
+     * The caller's own button is the destructive one. The dialog cannot tell — it renders
+     * whatever it is handed — so the red is asked for by the one place that knows the act
+     * cannot be undone, and the confirmations that only change a state stay blue.
+     */
+    danger?: boolean;
+  }
   let confirmation: ConfirmationRequest | null = null;
   let confirmationResolver: ((ok: boolean) => void) | null = null;
   let confirmationButton: HTMLButtonElement | null = null;
@@ -2919,7 +2929,10 @@
       // costs the logins.
       body:
         'The vault file is deleted, and the PIN with it. The next login you save chooses a new PIN — until then, instances will ask for a password.',
-      confirmLabel: 'Forget Everything'
+      confirmLabel: 'Forget Everything',
+      // The one confirmation in the app whose answer cannot be undone: the file is gone,
+      // and nothing here can bring it back. Disconnecting a sync only stops one.
+      danger: true
     });
     if (!confirmed) return;
     vaultBusy = true;
@@ -3356,7 +3369,6 @@
               <button class="modal-action" disabled={gitSyncBusy || gitAuthActive} on:click={reconnectGitSync}>{gitAuthActive ? 'Waiting for GitHub…' : 'Reconnect'}</button>
             {/if}
             <button class="modal-action secondary" disabled={gitSyncBusy} on:click={disconnectGitSync}>Disconnect</button>
-            <button class="modal-action secondary" on:click={closeGitSyncModal}>Done</button>
           </div>
         {/if}
       </div>
@@ -3374,7 +3386,7 @@
           <button class="modal-action" on:click={addInstanceBookmark}>Save Bookmark</button>
           {#if mode === 'tauri' && vaultStatus}
           <!--
-            Saved logins, from the dialog that owns the same thing it does: an
+            The vault, from the dialog that owns the same thing it does: an
             instance's address. It used to be a tile in the launcher's own row —
             the same pairing, but spending permanent space on the main screen for
             something you only reach for while setting an instance up. The key on
@@ -3382,6 +3394,14 @@
             itself, which is changing the secret or forgetting every login at once.
             Same two colours as those row keys: grey means nothing saved, green
             means something is.
+
+            Its label is the verb rather than the noun — manage, not the thing
+            managed — because the noun is what the dialog it opens is already called
+            (Saved Instance Logins, and the panel inside it), and the noun with a
+            count is what its tooltip says, so nothing is lost by not repeating it.
+            The row it shares is one choice stated twice, which is why the two actions
+            are the same width (`styles.css`): a key sized to its own label beside a
+            full-width save reads as the lesser option rather than as the other one.
           -->
           <button
             class="modal-action secondary vault-manager-button"
@@ -3390,7 +3410,7 @@
             aria-label={vaultManagerTitle}
             title={vaultManagerTitle}
             on:click={openSavedLoginsFromBookmarks}
-          ><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="8.2" cy="8.2" r="4.3"/><path d="m11.4 11.4 8 8"/><path d="m15.4 15.4 2.6-2.6"/><path d="m18.2 18.2 2.6-2.6"/></svg><span>Saved Logins</span></button>
+          ><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="8.2" cy="8.2" r="4.3"/><path d="m11.4 11.4 8 8"/><path d="m15.4 15.4 2.6-2.6"/><path d="m18.2 18.2 2.6-2.6"/></svg><span>Manage Credentials</span></button>
           {/if}
         </div>
       </div>
@@ -3437,13 +3457,18 @@
       <div class="launcher-modal vault-modal" role="dialog" aria-modal="true" aria-labelledby="credential-offer-title">
         <button class="modal-close" aria-label="Close the save-a-login dialog" on:click={closeCredentialOffer}>×</button>
         <h2 id="credential-offer-title">Add a saved credential?</h2>
-        <p class="vault-sub">
-          {#if credentialOffer.kind === 'row'}
-            For {instanceLabel(credentialOffer.origin)}, answered per exact address.
-          {:else}
-            {instanceLabel(credentialOffer.origin)} asks for a password.
-          {/if}
-        </p>
+        <!--
+          One line, whichever way this dialog was reached. It used to have two, and the
+          offer's said why the dialog had opened ("www.foobar.com asks for a password")
+          while the row's said what the credential is tied to ("answered per exact
+          address"). The second is the one worth keeping: the dialog's own heading
+          already says a credential is being offered, so the first was the heading again
+          with the address in it, and an address the user just clicked is not news. What
+          is not visible anywhere else is the scope — per exact address, so that a saved
+          login for one host is never offered to another — and that reads the same on
+          both paths.
+        -->
+        <p class="vault-sub">For {instanceLabel(credentialOffer.origin)}, answered per exact address.</p>
         <div class="vault-pin credential-offer-pin">
           <PinEntry
             bind:value={offerPin}
@@ -3534,7 +3559,12 @@
         <button class="modal-close" aria-label="Close saved logins dialog" on:click={closeVaultModal}>×</button>
         <h2 id="vault-title">Saved Instance Logins</h2>
         {#if vaultListOpen}
-          <p class="vault-sub">Answers an instance’s password prompt, per exact address.</p>
+          <!--
+            Nothing above the rows. The heading names the thing and the rows *are* the
+            list, so a sentence here could only restate either — and the one thing this
+            dialog cannot do, answer a password prompt, is what the dialog that writes a
+            credential says where the user is typing one.
+          -->
           {#if vaultEntries.length > 0}
             <ul class="vault-list">
               {#each vaultEntries as entry (entry.origin)}
@@ -3577,7 +3607,6 @@
                    the vault, not about whichever instance happens to be opening. -->
               <button class="modal-action secondary vault-danger" disabled={vaultBusy} on:click={destroyVault}>Forget Everything</button>
             {/if}
-            <button class="modal-action secondary" on:click={closeVaultModal}>Done</button>
           </div>
         {:else if !vaultStatus?.exists}
           <!--
@@ -3586,12 +3615,11 @@
             offer an instance's own prompt makes — so this says what the dialog is for
             instead of offering a form that would take any address at all. Where a login
             comes from is on the key that writes one, which is the only control that can
-            name an address, so this does not repeat it.
+            name an address, so this does not repeat it. There is no action row either:
+            there is nothing in here to decide, and the × is the only way out a dialog
+            like this needs.
           -->
           <p class="vault-sub">Self-host instance credentials are listed here once saved.</p>
-          <div class="modal-actions">
-            <button class="modal-action secondary" on:click={closeVaultModal}>Close</button>
-          </div>
         {:else}
           <p class="vault-sub">Enter your PIN to read these logins.</p>
           {#if vaultSavedCount > 0}
@@ -3704,7 +3732,10 @@
         {#if orphanNote}<p class="orphan-progress" role="status">{orphanNote}</p>{/if}
         <div class="modal-actions">
           <button class="modal-action secondary" on:click={() => resolveRebuildOrphans(false)}>Cancel</button>
-          <button class="modal-action" on:click={() => resolveRebuildOrphans(true)}>Proceed Anyway</button>
+          <!-- The destructive half of the question, in the red the app uses for one: the
+               rows it drops keep nothing — not the cached copy, not the history — and a
+               download from this dialog is the only way to write one of them out first. -->
+          <button class="modal-action danger" on:click={() => resolveRebuildOrphans(true)}>Proceed Anyway</button>
         </div>
       </div>
     </div>
@@ -3728,7 +3759,20 @@
           <p class="history-empty">{historyError || 'No versions saved yet.'}</p>
         {:else}
           <ul class="history-list">
-            {#each historyEntries as entry (entry.id)}
+            {#each historyEntries as entry, index (entry.id)}
+              {#if index > 0}
+                <!--
+                  What joins two versions, and the only thing that says which way the
+                  list runs. The store hands these over newest first, so the row below
+                  any entry is the state it was written from: the chevron points at it,
+                  which is also what makes a `step` read as a delta against the version
+                  underneath rather than as an unrelated row. Decorative, so it stays out
+                  of the accessibility tree, and centred in the gap it owns.
+                -->
+                <li class="history-link" aria-hidden="true">
+                  <svg viewBox="0 0 14 8" aria-hidden="true"><path d="M1.5 1.5 7 6.5l5.5-5"></path></svg>
+                </li>
+              {/if}
               <li class="history-entry">
                 {#if entry.isBase && entry.external}<span class="history-badge sync" title="Saved after a change outside this device.">sync</span>{:else if entry.isBase}<span class="history-badge" title="Complete copy from this save.">full</span>{:else}<span class="history-badge delta" title="Edits since the previous save.">step</span>{/if}
                 <span class="history-time">{entry.lastModified}</span>
@@ -3772,7 +3816,7 @@
         <h2 id="confirm-title">{confirmation.title}</h2>
         <p>{confirmation.body}</p>
         <div class="modal-actions">
-          <button bind:this={confirmationButton} class="modal-action" on:click={() => resolveConfirmation(true)}>{confirmation.confirmLabel}</button>
+          <button bind:this={confirmationButton} class="modal-action" class:danger={confirmation.danger} on:click={() => resolveConfirmation(true)}>{confirmation.confirmLabel}</button>
           <button class="modal-action secondary" on:click={() => resolveConfirmation(false)}>Cancel</button>
         </div>
       </div>
@@ -3865,11 +3909,10 @@
           {@const name = getEntryName(file)}
           <div class="recent-row">
             <button class="recent-name" on:click={() => openRecent(file)}>{name}{#if cachedEntries[name]}<span class="cached-size">{formatCacheSize(cachedEntries[name].sizeBytes)}</span>{/if}</button>
-            {#if dirtyEntries[name] || historyAvailable[name]}<button class="recent-icon-button cache-history-button" class:dirty={dirtyEntries[name]} type="button" disabled={!cachedEntries[name] && !dirtyEntries[name]} aria-label={dirtyEntries[name] ? `${name} has unsaved edits; open to recover` : `Show version history for ${name}`} title={dirtyEntries[name] ? `Unsaved edits from ${new Date(dirtyEntries[name]).toLocaleString()}` : (cachedEntries[name] ? 'Show version history' : 'No cached history')} on:click={() => openHistoryModal(name, (file as any).browserOnly === true)}>
-              <svg class="history-download-icon" viewBox="56 108 33 36" aria-hidden="true"><path class="history-icon-shape" d="m 73.595508,109.76746 c -7.198235,0 -13.103617,5.58342 -13.647229,12.64471 h -0.0072 V 138.2696 H 58.61606 l 2.32389,4.02559 2.324405,-4.02559 h -1.323433 v -15.85123 c 0.530186,-5.97937 5.534806,-10.65103 11.654586,-10.65103 6.474618,0 11.703161,5.22855 11.703161,11.70316 0,6.47462 -5.228543,11.70161 -11.703161,11.70161 -2.644513,0 -5.080809,-0.87232 -7.037814,-2.34508 v 2.39572 c 2.058162,1.23707 4.46633,1.94924 7.037814,1.94924 7.555498,0 13.703556,-6.14599 13.703556,-13.70149 0,-7.5555 -6.148058,-13.70304 -13.703556,-13.70304 z m -2.108915,7.49825 v 8.05016 h 7.125663 v -1.59836 h -5.527311 v -6.4518 z"></path></svg>
-            </button>
-            {/if}
             <!--
+              The marks sit left of the history control, nearest the name they are
+              about: the clock is a control every row can have, while these two are
+              facts about the file behind this row, and a fact reads before a control.
               The condition is written out rather than asked of a helper: Svelte
               re-evaluates a template condition when the variables it names
               change, and a function call names none of them. Through a helper
@@ -3892,6 +3935,10 @@
               <button class="recent-icon-button browser-only-button" type="button" aria-label={browserOnlyMarkTitle(name)} title={browserOnlyMarkTitle(name)} on:click={() => openHistoryModal(name, true)}>
                 <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3 2 20h20Z"></path><path d="M12 10v4.5"></path><path d="M12 17.3v.2"></path></svg>
               </button>
+            {/if}
+            {#if dirtyEntries[name] || historyAvailable[name]}<button class="recent-icon-button cache-history-button" class:dirty={dirtyEntries[name]} type="button" disabled={!cachedEntries[name] && !dirtyEntries[name]} aria-label={dirtyEntries[name] ? `${name} has unsaved edits; open to recover` : `Show version history for ${name}`} title={dirtyEntries[name] ? `Unsaved edits from ${new Date(dirtyEntries[name]).toLocaleString()}` : (cachedEntries[name] ? 'Show version history' : 'No cached history')} on:click={() => openHistoryModal(name, (file as any).browserOnly === true)}>
+              <svg class="history-download-icon" viewBox="56 108 33 36" aria-hidden="true"><path class="history-icon-shape" d="m 73.595508,109.76746 c -7.198235,0 -13.103617,5.58342 -13.647229,12.64471 h -0.0072 V 138.2696 H 58.61606 l 2.32389,4.02559 2.324405,-4.02559 h -1.323433 v -15.85123 c 0.530186,-5.97937 5.534806,-10.65103 11.654586,-10.65103 6.474618,0 11.703161,5.22855 11.703161,11.70316 0,6.47462 -5.228543,11.70161 -11.703161,11.70161 -2.644513,0 -5.080809,-0.87232 -7.037814,-2.34508 v 2.39572 c 2.058162,1.23707 4.46633,1.94924 7.037814,1.94924 7.555498,0 13.703556,-6.14599 13.703556,-13.70149 0,-7.5555 -6.148058,-13.70304 -13.703556,-13.70304 z m -2.108915,7.49825 v 8.05016 h 7.125663 v -1.59836 h -5.527311 v -6.4518 z"></path></svg>
+            </button>
             {/if}
             {#if cacheSearchMatches[name]?.preview}
               <div

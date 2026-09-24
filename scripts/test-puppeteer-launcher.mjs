@@ -623,12 +623,13 @@ try {
    *
    * Its action row is for the decisions it exists to make — save, open, forget — and a
    * button whose whole label is "Cancel" runs the same function as the × beside it, so it
-   * is refused here rather than trusted to stay deleted. What is *not* this: a yes/no
-   * confirmation keeps its Cancel (the rebuild confirmation, the destructive confirm — the
-   * two answers are both decisions, and neither of them is dismissing anything), the GitHub
-   * device flow's button says "Stop waiting" because it abandons an authorization instead of
-   * closing anything, and a "Close"/"Done" that is a dialog's only action is left alone — a
-   * shape with no action row at all is the thing to argue for on purpose, not by accident.
+   * is refused here rather than trusted to stay deleted, and that holds whatever the label
+   * would have been: `Close` and `Done` are the same function under a friendlier word. A
+   * dialog with nothing to decide therefore has no action row at all. What is *not* this: a
+   * yes/no confirmation keeps its Cancel (the rebuild confirmation, the destructive confirm
+   * — the two answers are both decisions, and neither of them is dismissing anything), and
+   * the GitHub device flow's button says "Stop waiting" because it abandons an authorization
+   * instead of closing anything.
    *
    * Named rather than counted, so a failure says which dialog grew one back.
    */
@@ -644,7 +645,7 @@ try {
     assert.ok(shape, `${where} is on screen`);
     assert.equal(shape.hasClose, true, `${where} keeps its × in the corner`);
     assert.deepEqual(
-      shape.actions.filter(label => /^cancel$/i.test(label)),
+      shape.actions.filter(label => /^(cancel|close|done)$/i.test(label)),
       [],
       `${where} leaves dismissing to the ×: ${JSON.stringify(shape.actions)}`
     );
@@ -922,17 +923,83 @@ try {
     const box = node.getBoundingClientRect();
     return {
       label: node.textContent.trim(),
+      labels: buttons.map(button => button.textContent.trim()),
+      widths: buttons.map(button => Math.round(button.getBoundingClientRect().width)),
+      // The glyph and the label are one group, centred in the half of the row the button
+      // takes: the half is wider than the two of them, so where that spare space goes is
+      // the whole of whether the button reads as finished.
+      groupCentre: Math.round(
+        (node.querySelector('svg').getBoundingClientRect().left +
+          node.querySelector('span').getBoundingClientRect().right) / 2 -
+          (box.left + box.right) / 2
+      ),
       hasGlyph: Boolean(node.querySelector('svg')),
       colour: getComputedStyle(node).color,
       onOneLine: buttons.every(button => Math.round(button.getBoundingClientRect().top) === Math.round(box.top)),
       rowOverflow: row.scrollWidth - row.clientWidth
     };
   });
-  assert.equal(managerLooks.label, 'Saved Logins', 'The manager key is labelled, so what it manages is not a guess');
+  assert.deepEqual(
+    managerLooks.labels,
+    ['Save Bookmark', 'Manage Credentials'],
+    'The dialog names both of its actions: the save, and the vault it saves into'
+  );
+  // Equal halves of the row, measured: the manager key is the shorter label, and at
+  // `flex: 1 1 auto` it was priced from its own width, which is what made the second
+  // option read as the lesser one. Equal here means equal *to the pixel*, since a
+  // shared basis makes the labels' widths irrelevant while both of them fit.
+  assert.equal(
+    managerLooks.widths[0],
+    managerLooks.widths[1],
+    `Both actions take the same width: ${JSON.stringify(managerLooks.widths)}px`
+  );
   assert.ok(managerLooks.hasGlyph, '...and keeps the key it is recognised by');
+  assert.ok(
+    Math.abs(managerLooks.groupCentre) <= 1,
+    `The key glyph and the label are centred in their half of the row, ${managerLooks.groupCentre}px off centre`
+  );
   assert.equal(managerLooks.colour, 'rgb(123, 168, 111)', 'Green is the same green a bookmark row’s key uses for a saved login');
   assert.equal(managerLooks.onOneLine, true, 'It shares the dialog’s action row rather than wrapping under it');
   assert.equal(managerLooks.rowOverflow, 0, '...without the row overflowing the dialog');
+  // The same row at the two phone widths the launcher has to hold. Equal halves are a
+  // property of a dialog wide enough to give each action half; on a phone the key's own
+  // minimum width — padding, glyph, gap and a two-word label — is most of the row, so what
+  // is asserted there is the thing that actually matters: nothing clipped, nothing past the
+  // dialog's own edge, and the two still side by side wherever they fit on one line.
+  const managerRowAt = async (width) => {
+    await vaultPage.setViewport({ width, height: 700 });
+    await new Promise(resolve => setTimeout(resolve, 60));
+    const measured = await vaultPage.evaluate(() => {
+      const modal = document.querySelector('.bookmark-modal').getBoundingClientRect();
+      const buttons = [...document.querySelectorAll('.bookmark-modal .modal-actions button')];
+      const boxes = buttons.map(button => button.getBoundingClientRect());
+      return {
+        widths: boxes.map(box => Math.round(box.width)),
+        rows: new Set(boxes.map(box => Math.round(box.top))).size,
+        clipped: buttons.filter(button => button.scrollWidth - button.clientWidth > 0).length,
+        past: Math.max(0, Math.round(Math.max(...boxes.map(box => box.right)) - (modal.right - 22)))
+      };
+    });
+    return { ...measured, width };
+  };
+  const rowAtPhone = await managerRowAt(390);
+  const rowAtNarrow = await managerRowAt(320);
+  await vaultPage.setViewport({ width: 900, height: 700 });
+  // 390px: both fit on the one line the dialog's own margin leaves, so the row is asserted
+  // to still be one row rather than two — a phone should not turn the choice into a stack
+  // while there is room to state it as a choice.
+  assert.deepEqual(
+    { clipped: rowAtPhone.clipped, past: rowAtPhone.past, rows: rowAtPhone.rows },
+    { clipped: 0, past: 0, rows: 1 },
+    `At ${rowAtPhone.width}px the two actions share one line, unclipped and inside the dialog: ${JSON.stringify(rowAtPhone)}`
+  );
+  // 320px: the labels no longer fit together, so the row wraps to a button per line — where
+  // each action is alone on its line and therefore takes the same width as the other again.
+  assert.deepEqual(
+    { clipped: rowAtNarrow.clipped, past: rowAtNarrow.past, equal: rowAtNarrow.widths[0] === rowAtNarrow.widths[1] },
+    { clipped: 0, past: 0, equal: true },
+    `At ${rowAtNarrow.width}px the two actions stack at one width, unclipped and inside the dialog: ${JSON.stringify(rowAtNarrow)}`
+  );
   // An address typed in the bookmark dialog is deliberately *not* carried into the
   // manager, because the manager has nowhere to put it: it lists and forgets, and a
   // login is written only for an instance the user was already pointing at. So there
@@ -1095,6 +1162,11 @@ try {
   const afterUnlock = await vaultPage.evaluate(() => ({
     calls: window.__lithicVault.calls,
     listed: [...document.querySelectorAll('.vault-list li')].map(row => row.textContent.replace(/\s+/g, ' ').trim()),
+    // Nothing above the rows: the heading names the list and the rows are the list, so a
+    // sentence there could only restate one of them. Read structurally, as the heading's
+    // own next sibling, so a line cannot creep back in under a different class name.
+    copyLines: document.querySelectorAll('.vault-modal .vault-sub, .vault-modal .vault-note').length,
+    headingNext: document.getElementById('vault-title')?.nextElementSibling?.tagName.toLowerCase() ?? '',
     openDialogs: [...document.querySelectorAll('.vault-modal, .launcher-modal')].length,
     bookmarkDialogClosed: document.querySelector('#bookmark-title') === null,
     greenRows: [...document.querySelectorAll('.bookmark-row .vault-row-button')].map(key => key.classList.contains('covered')),
@@ -1103,6 +1175,8 @@ try {
   const listCall = afterUnlock.calls.find(call => call.command === 'list_credentials');
   assert.deepEqual(listCall?.args, { secret: 'L1TH1C' }, 'Reading the list passes the PIN under the name Rust expects, folded to upper case');
   assert.equal(afterUnlock.listed.length, 2, 'The completed PIN opens the vault, listing what is in it');
+  assert.equal(afterUnlock.copyLines, 0, 'The list carries no copy line above the rows');
+  assert.equal(afterUnlock.headingNext, 'ul', '...the heading is followed straight by the rows');
   assert.ok(
     afterUnlock.listed.some(row => row.includes('https://personal.lithic.uk')),
     'The saved login is listed by its address'
@@ -1114,6 +1188,7 @@ try {
     afterUnlock.coveredCall.args.origins.includes('https://www.foobar.com'),
     'The rows were recoloured by asking the vault about their addresses'
   );
+  await assertNoExtraDismiss('.vault-modal', 'The manager with logins in it');
   assert.equal(
     vaultCalls.some(call => call.command === 'credential_coverage' && call.args.origins.includes('https://www.foobar.com')),
     true,
@@ -1273,7 +1348,14 @@ try {
     probes: window.__lithicVault.calls.filter(call => call.command === 'probe_instance').at(-1)?.args
   }));
   assert.equal(offered.heading, 'Add a saved credential?', 'An instance with nothing saved is offered one');
-  assert.equal(offered.sub, 'unsaved.example asks for a password.', 'The offer names the instance and why it is being made');
+  // One line on both paths into this dialog. The offer used to say *why* it had opened
+  // ("…asks for a password"), which was the heading with an address in it; what the sheet
+  // shows now is the scope, which is the part not visible anywhere else.
+  assert.equal(
+    offered.sub,
+    'For unsaved.example, answered per exact address.',
+    'The offer names the instance and the scope the credential is kept under'
+  );
   assert.equal(offered.pinBoxes, 6, 'The PIN is asked for in six boxes');
   assert.equal(offered.confirmBoxes, 0, 'A vault on disk already has a PIN, so there is nothing to confirm');
   assert.deepEqual(
@@ -1533,6 +1615,22 @@ try {
     toggleRow.gap >= 6,
     `...and ${toggleRow.gap}px clear of the label, so the two never collide on a narrow dialog`
   );
+  // Centred as a group, measured rather than assumed: six boxes and their word stop short
+  // of the dialog's own width, so something has to decide where the spare space goes, and
+  // the leftover used to sit entirely to the right of the last box.
+  const centred = await vaultPage.evaluate(() => {
+    const modal = document.querySelector('.vault-modal').getBoundingClientRect();
+    const entry = document.querySelector('.instance-unlock-pin .pin-entry').getBoundingClientRect();
+    const pad = 22; // the modal's own padding
+    return {
+      left: Math.round(entry.left - (modal.left + pad)),
+      right: Math.round(modal.right - pad - entry.right)
+    };
+  });
+  assert.ok(
+    Math.abs(centred.left - centred.right) <= 1,
+    `The PIN group sits centred in the dialog: ${centred.left}px of dead space on the left, ${centred.right}px on the right`
+  );
 
   // Six boxes have to stay six boxes on one line: the dialog is `min(100%, 560px)` with
   // padding, so on a phone they have to shrink rather than wrap, and the row must not
@@ -1649,6 +1747,17 @@ try {
     false,
     'Confirming is what deletes the vault, not the click that opened the question'
   );
+  // The question's own button is the red one: the act it performs is the only one here that
+  // cannot be undone, and the outlined primary is the colour of the confirmations that can.
+  const question = await vaultPage.evaluate(() => {
+    const button = [...document.querySelectorAll('.confirm-modal .modal-action')]
+      .find(node => node.textContent.trim() === 'Forget Everything');
+    const style = getComputedStyle(button);
+    return { colour: style.color, border: style.borderTopColor, fill: style.backgroundColor };
+  });
+  assert.equal(question.colour, 'rgb(224, 138, 122)', 'Forgetting everything is styled as the danger it is');
+  assert.equal(question.border, 'rgb(224, 138, 122)', '...border and all rather than only in its word');
+  assert.equal(question.fill, 'rgba(224, 138, 122, 0.12)', '...on the same red wash the primary wears in blue');
   // Scoped to the question itself: the dialog underneath carries a button with the
   // same wording now, and an unscoped search would answer "no" by pressing it again.
   await vaultPage.evaluate(() => {
@@ -1705,9 +1814,10 @@ try {
   assert.equal(noVault.fields, 0, 'And not one field, so there is no address to type either');
   assert.deepEqual(
     noVault.buttons,
-    ['Close'],
-    'The only thing to do with an empty vault is leave it: the ×, spelled out, because there is nothing else to press'
+    [],
+    'An empty vault offers nothing to decide, so it has no action row: the × is the way out'
   );
+  await assertNoExtraDismiss('.vault-modal', 'The manager before a vault exists');
   await vaultPage.click('.vault-modal .modal-close');
   await vaultPage.waitForFunction(() => document.querySelector('.vault-modal') === null);
 
@@ -1798,6 +1908,7 @@ try {
       const rect = word.getBoundingClientRect();
       const first = boxes[0].getBoundingClientRect();
       const last = boxes[boxes.length - 1].getBoundingClientRect();
+      const modal = document.querySelector('.vault-modal').getBoundingClientRect();
       return {
         word: word.textContent.trim(),
         classes: word.className,
@@ -1805,6 +1916,10 @@ try {
         colour: getComputedStyle(word).color,
         beside: Math.round(rect.left) >= Math.round(last.right),
         inside: rect.top >= first.top && rect.bottom <= first.bottom,
+        // The group's own space, from the modal's inner edges: the boxes and the word
+        // together, because the word is part of the line the boxes are on.
+        deadLeft: Math.round(first.left - (modal.left + 22)),
+        deadRight: Math.round(modal.right - 22 - rect.right),
         copyLines: document.querySelectorAll('.vault-modal .vault-sub, .vault-modal .vault-note').length
       };
     });
@@ -1821,6 +1936,10 @@ try {
   assert.equal(weakPin.classes, 'vault-band weak', 'And the band is the class the word is coloured by');
   assert.equal(weakPin.colour, 'rgb(224, 138, 122)', 'Weak is the red the rest of the dialog uses for a refusal');
   assert.equal(weakPin.beside, true, 'The word sits in the empty end of the boxes’ own row');
+  assert.ok(
+    Math.abs(weakPin.deadLeft - weakPin.deadRight) <= 1,
+    `...and the boxes and the word are centred as one group: ${weakPin.deadLeft}px of dead space on the left, ${weakPin.deadRight}px on the right`
+  );
   assert.equal(weakPin.inside, true, '...on the line the boxes are on, rather than on one of its own');
   assert.equal(weakPin.copyLines, 1, '...and no paragraph of the dialog explains the PIN it describes');
   // The other two alphabets, which is the whole reason a word is banded at all rather than
@@ -1929,6 +2048,77 @@ try {
     await vaultPage.evaluate(() => Boolean(document.querySelector('.vault-path')?.textContent.includes('credentials.vault'))),
     true,
     'The manager names the file the logins live in'
+  );
+  // Version history, read off the screen: the store hands the modal its versions newest
+  // first, and the list draws what joins them. Both are asserted here because the order is
+  // the whole of what that panel means, and because a chevron is not something a unit test
+  // can see — the store's own newest-first test can only prove the array it returned.
+  await vaultPage.click('.vault-modal .modal-close');
+  await vaultPage.waitForFunction(() => document.querySelector('.vault-modal') === null);
+  const chainAt = Date.UTC(2026, 8, 20, 14, 32, 8);
+  await vaultPage.evaluate(async (at) => {
+    const request = indexedDB.open('keyval-store', 1);
+    await new Promise((ok, fail) => {
+      request.onerror = () => fail(request.error);
+      request.onsuccess = () => ok();
+    });
+    const db = request.result;
+    await new Promise((ok, fail) => {
+      const tx = db.transaction('keyval', 'readwrite');
+      const store = tx.objectStore('keyval');
+      store.put([{ handle: null, tauriPath: null, name: 'chain.lith' }], 'recentFiles');
+      store.put({ text: '[]' }, 'search_cache_chain.lith');
+      // Oldest first, which is the order the chain is recorded in: the modal is what
+      // turns it round, so an ascending store is the case worth asserting.
+      store.put(
+        {
+          headId: 'v3',
+          versions: [
+            { id: 'v1', ts: at - 86_400_000, sizeBytes: 41_820, isBase: true },
+            { id: 'v2', ts: at - 3_600_000, sizeBytes: 42_360 },
+            { id: 'v3', ts: at, sizeBytes: 43_010 }
+          ]
+        },
+        'search_cache_meta_chain.lith'
+      );
+      tx.oncomplete = ok;
+      tx.onerror = () => fail(tx.error);
+    });
+    db.close();
+  }, chainAt);
+  await reopenLauncher();
+  await vaultPage.waitForSelector('.recent-row .cache-history-button');
+  await vaultPage.click('.recent-row .cache-history-button');
+  await vaultPage.waitForSelector('.history-entry');
+  const chain = await vaultPage.evaluate(() => {
+    const list = document.querySelector('.history-list');
+    const box = list.getBoundingClientRect();
+    const rows = [...list.querySelectorAll('.history-entry')].map(node => ({
+      badge: node.querySelector('.history-badge').textContent.trim(),
+      at: Date.parse(node.querySelector('.history-time').textContent.trim().replace(' UTC', 'Z').replace(' ', 'T'))
+    }));
+    return {
+      rows,
+      // Where each connector's chevron falls, as an offset from the list's own centre.
+      links: [...list.querySelectorAll('.history-link')].map(node => {
+        const chevron = node.querySelector('svg').getBoundingClientRect();
+        return Math.round(chevron.left + chevron.width / 2 - (box.left + box.width / 2));
+      })
+    };
+  });
+  assert.deepEqual(
+    chain.rows.map(row => row.badge),
+    ['step', 'step', 'full'],
+    'The chain reads newest first: the two steps down to the full save they were written from'
+  );
+  assert.ok(
+    chain.rows[0].at > chain.rows[1].at && chain.rows[1].at > chain.rows[2].at,
+    `...and the timestamps descend with them: ${JSON.stringify(chain.rows.map(row => row.at))}`
+  );
+  assert.equal(chain.links.length, chain.rows.length - 1, 'Every gap between two versions is drawn, and no more');
+  assert.ok(
+    chain.links.every(offset => Math.abs(offset) <= 1),
+    `...each one centred on the list rather than on the row it hangs from: ${JSON.stringify(chain.links)}`
   );
   await vaultPage.close();
 
