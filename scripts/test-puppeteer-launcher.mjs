@@ -19,6 +19,9 @@ import { startSelfHostStub } from './self-host-stub.mjs';
 // artifact, which CI regenerates and which is never hand-built.
 const artifact = resolve(process.env.LAUNCHER_ARTIFACT ?? 'src/launcher.html');
 assert.ok(existsSync(artifact), `Build the launcher before running this test (${artifact})`);
+// The artifact's own bytes, because one scenario has to serve a *different* launcher from
+// the same URL — the redeploy that a cached copy cannot notice by itself.
+const artifactHtml = await readFile(artifact, 'utf8');
 
 // One bookmark fixture entry deliberately has no cached icon, so the launcher
 // tries to fetch one from a host that does not exist (see the bookmark section).
@@ -738,6 +741,168 @@ try {
   await liveContext.close();
   await stub.close();
 
+  // --- The copy an instance leaves in this app's profile ------------------------
+  // Removing and re-adding a bookmark does not reach an instance's cached launcher: that
+  // copy lives under the instance's own origin, and a page may only touch its own origin's
+  // storage. The app can, because every webview in it shares one profile, so the × sends
+  // `forget_instance_copy` and Rust drops that one origin's copy through the browser's own
+  // protocol (`src-tauri/src/instance_copy.rs`). What is asserted here is that the calls it
+  // makes do that job, twice over: once against the worker a deployment really ships, and
+  // once against a webview HTTP cache holding a page a proxy is caching.
+  //
+  // The storage list is read out of the Rust source rather than written out again: the two
+  // halves have to agree, and a change there that would take an instance's cached wikis
+  // with its page has to fail *this* test, which leaves one behind on purpose.
+  const rustCopySource = await readFile(resolve('src-tauri/src/instance_copy.rs'), 'utf8');
+  const clearedStores = /const CLEARED_STORES: &str = "([^"]+)"/.exec(rustCopySource)?.[1];
+  assert.equal(
+    clearedStores,
+    'service_workers,cache_storage',
+    `The app drops the downloaded page and nothing else (instance_copy.rs says ${clearedStores})`
+  );
+  // A copy of the launcher that says it is the old one. The attribute is this harness's,
+  // not the artifact's: what has to be told apart is two documents served from one URL,
+  // which is exactly what a stale copy is.
+  const staleCopy = artifactHtml.replace('<html lang="en">', '<html lang="en" data-build="stale">');
+  assert.ok(staleCopy !== artifactHtml, 'The stale copy is marked, so which one arrived is readable');
+
+  const cachingStub = await startSelfHostStub({ artifact, serviceWorker: 'real', document: staleCopy });
+  const copyContext = await browser.createBrowserContext();
+  const copyPage = await copyContext.newPage();
+  const copyErrors = [];
+  copyPage.on('pageerror', error => copyErrors.push(error.message));
+  await copyPage.goto(`${cachingStub.origin}/`, { waitUntil: 'domcontentloaded' });
+  const workerState = await copyPage.evaluate(async () => {
+    await navigator.serviceWorker.register('/offline-service-worker.js');
+    const registration = await navigator.serviceWorker.ready;
+    return { active: Boolean(registration.active), script: registration.active?.scriptURL ?? '' };
+  });
+  assert.ok(
+    workerState.active && workerState.script.endsWith('/offline-service-worker.js'),
+    `The instance's own worker is installed: ${JSON.stringify(workerState)}`
+  );
+  const precached = await copyPage.evaluate(async () => {
+    const marked = [];
+    for (const name of await caches.keys()) {
+      const cache = await caches.open(name);
+      for (const request of await cache.keys()) {
+        const body = await (await cache.match(request)).text();
+        if (body.includes('data-build="stale"')) marked.push(request.url);
+      }
+    }
+    return marked;
+  });
+  assert.ok(
+    precached.includes(`${cachingStub.origin}/`),
+    `The worker cached the copy the instance was serving, which is what goes stale: ${JSON.stringify(precached)}`
+  );
+  // The instance's cached wiki, in its *own* storage: what the launcher's cross-instance
+  // search reads, and what dropping a page has to leave exactly where it is.
+  await copyPage.evaluate(async () => {
+    const request = indexedDB.open('keyval-store', 1);
+    await new Promise((ok, fail) => {
+      request.onsuccess = ok;
+      request.onerror = () => fail(request.error);
+    });
+    const db = request.result;
+    await new Promise((ok, fail) => {
+      const tx = db.transaction('keyval', 'readwrite');
+      tx.objectStore('keyval').put({ text: '[]' }, 'search_cache_notes.lith');
+      tx.oncomplete = ok;
+      tx.onerror = () => fail(tx.error);
+    });
+    db.close();
+  });
+  // The instance redeploys: the same URL, a launcher that no longer says it is the old one.
+  cachingStub.setLauncherDocument(artifactHtml);
+  // ...and the bookmark still opens the old one. Nothing but a cache could have answered
+  // with a document the instance is not serving any more, which is the report this exists for.
+  await copyPage.goto(`${cachingStub.origin}/`, { waitUntil: 'domcontentloaded' });
+  const staleOnRedeploy = await copyPage.evaluate(() => ({
+    build: document.documentElement.dataset.build ?? null,
+    controlled: Boolean(navigator.serviceWorker.controller)
+  }));
+  assert.equal(staleOnRedeploy.build, 'stale', 'An instance that redeployed still opens the copy the worker cached');
+  assert.equal(staleOnRedeploy.controlled, true, '...because the worker is answering, not the network');
+  // The two calls Rust makes, in the order it makes them (see `instance_copy::forget`).
+  const copyClient = await copyPage.createCDPSession();
+  await copyClient.send('Storage.clearDataForOrigin', { origin: cachingStub.origin, storageTypes: clearedStores });
+  await copyClient.send('Network.clearBrowserCache');
+  await copyClient.detach();
+  await copyPage.goto(`${cachingStub.origin}/`, { waitUntil: 'domcontentloaded' });
+  const afterClear = await copyPage.evaluate(async () => {
+    const wiki = await new Promise((resolve) => {
+      const request = indexedDB.open('keyval-store', 1);
+      request.onsuccess = () => {
+        const get = request.result.transaction('keyval', 'readonly').objectStore('keyval').get('search_cache_notes.lith');
+        get.onsuccess = () => resolve(get.result ? 'kept' : 'gone');
+        get.onerror = () => resolve('gone');
+      };
+      request.onerror = () => resolve('gone');
+    });
+    const staleLeft = [];
+    for (const name of await caches.keys()) {
+      const cache = await caches.open(name);
+      for (const request of await cache.keys()) {
+        const body = await (await cache.match(request)).text();
+        if (body.includes('data-build="stale"')) staleLeft.push(request.url);
+      }
+    }
+    return { build: document.documentElement.dataset.build ?? null, wiki, staleLeft };
+  });
+  assert.equal(afterClear.build, null, 'The next open is the launcher the instance is actually serving');
+  assert.deepEqual(
+    afterClear.staleLeft,
+    [],
+    `No cache at that origin still holds the old copy: ${JSON.stringify(afterClear.staleLeft)}`
+  );
+  assert.equal(afterClear.wiki, 'kept', 'An instance’s cached wikis are not part of a downloaded page, so they are untouched');
+  // Not one visit: the fresh launcher registers the worker again, and what that worker
+  // caches is the copy being served now — so a later open is the current launcher too.
+  await copyPage.evaluate(() => navigator.serviceWorker.ready);
+  await copyPage.goto(`${cachingStub.origin}/`, { waitUntil: 'domcontentloaded' });
+  assert.equal(
+    await copyPage.evaluate(() => document.documentElement.dataset.build ?? null),
+    null,
+    'A later open comes from a worker that cached the current copy, not the old one'
+  );
+  assert.deepEqual(copyErrors, [], `The cache flow ran without an uncaught error: ${copyErrors.join(' | ')}`);
+  await copyContext.close();
+  await cachingStub.close();
+
+  // --- The same staleness in the webview's own cache ---------------------------
+  // A deployment behind a proxy that caches the page: the copy that goes stale is in the
+  // webview's HTTP cache rather than in a worker's store, and the protocol has no
+  // per-origin clear for it. That is why the app drops the cache as a whole as well —
+  // bytes and no storage — and this is what shows that second call earns its place.
+  const proxyStub = await startSelfHostStub({ artifact, document: staleCopy, documentMaxAge: 600 });
+  const proxyContext = await browser.createBrowserContext();
+  const proxyPage = await proxyContext.newPage();
+  await proxyPage.goto(`${proxyStub.origin}/`, { waitUntil: 'domcontentloaded' });
+  assert.equal(
+    await proxyPage.evaluate(() => document.documentElement.dataset.build ?? null),
+    'stale',
+    'A page a proxy is caching arrives as the old copy on the first open'
+  );
+  proxyStub.setLauncherDocument(artifactHtml);
+  await proxyPage.goto(`${proxyStub.origin}/`, { waitUntil: 'domcontentloaded' });
+  assert.equal(
+    await proxyPage.evaluate(() => document.documentElement.dataset.build ?? null),
+    'stale',
+    '...and the cached one comes back without the instance being asked again'
+  );
+  const proxyClient = await proxyPage.createCDPSession();
+  await proxyClient.send('Network.clearBrowserCache');
+  await proxyClient.detach();
+  await proxyPage.goto(`${proxyStub.origin}/`, { waitUntil: 'domcontentloaded' });
+  assert.equal(
+    await proxyPage.evaluate(() => document.documentElement.dataset.build ?? null),
+    null,
+    'Dropping the webview’s cache is what makes the next open fetch the launcher the instance serves'
+  );
+  await proxyContext.close();
+  await proxyStub.close();
+
   // Seed a cache-only wiki. The query below is intentionally absent from the
   // filename so this exercises cached content search without file permissions.
   await page.evaluate(async () => {
@@ -844,7 +1009,6 @@ try {
   // install prompt — never in this page — so drive the markup the bundle emits.
   // The word is a hint that appears under the cursor; the ✕ is the control and
   // must neither paint anything at rest nor move when the word arrives.
-  const artifactHtml = await readFile(artifact, 'utf8');
   assert.ok(
     artifactHtml.includes('install-dismiss-label') && artifactHtml.includes('>dismiss</span>'),
     'Built launcher ships the dismiss affordance with its hover-revealed word'
@@ -1166,6 +1330,10 @@ try {
       // One saved login, for the first bookmark fixture: the rows and the manager key
       // have something to be green about without the test having to set it up first.
       entries: stored?.entries ?? [{ origin: 'https://personal.lithic.uk', user: 'keeper' }],
+      // What `forget_instance_copy` answers. The one line the × adds when a copy could
+      // not be dropped hangs off this, and the case that has to stay silent — a platform
+      // with no hook — is only reachable if a test can set the answer.
+      copyDrop: stored?.copyDrop ?? { supported: true, cleared: true },
       calls: []
     };
     // A grant is never part of the file: it is dropped on every launcher mount anyway, and
@@ -1229,6 +1397,10 @@ try {
           return args.url.includes('open.example')
             ? { state: 'lithic', status: 200 }
             : { state: 'protected', status: 401 };
+        case 'forget_instance_copy':
+          // The × on a bookmark. The copy belongs to the *instance's* origin and the app
+          // is the only side that can reach it, which is why this is a command at all.
+          return vault.copyDrop;
         case 'unlock_for_instance': {
           if (args.secret !== PIN) throw new Error('That PIN does not open the vault.');
           if (!vault.entries.some(entry => entry.origin === args.origin)) {
@@ -2686,6 +2858,113 @@ try {
     chain.links.every(offset => Math.abs(offset) <= 1),
     `...each one centred on the list rather than on the row it hangs from: ${JSON.stringify(chain.links)}`
   );
+  // --- The × on a bookmark, and the half of it this page cannot do ---------------
+  // Removing a bookmark is the launcher's own storage and needs nothing from the app.
+  // What needs the app is the *copy*: an instance's launcher page, its scripts and its
+  // icons live under that instance's origin, and a page may only touch its own origin's
+  // storage — which is why a stale instance used to survive removing and re-adding the
+  // bookmark. So the × asks Rust to drop that one origin's copy, and this is the seam the
+  // two halves meet at: the command, its one argument, and the one thing it must never do.
+  /**
+   * Set what the next launcher page finds: two bookmarked instances, one saved login (so
+   * the row that stays has something to be green about), and what the app answers about
+   * dropping a copy. The mock is rebuilt from storage on every navigation, so storage is
+   * where all of it has to live for the page about to be loaded.
+   */
+  const installFixtures = async (copyDrop) => {
+    await vaultPage.evaluate((drop) => {
+      const key = '__lithicVaultFixture';
+      const stored = JSON.parse(localStorage.getItem(key) ?? 'null') ?? {};
+      localStorage.setItem(key, JSON.stringify({
+        ...stored,
+        state: { ...(stored.state ?? {}), exists: true, granted: false, count: 1 },
+        entries: [{ origin: 'https://personal.lithic.uk', user: 'keeper' }],
+        copyDrop: drop
+      }));
+      // The second entry carries a path, which is what an entry written by an older
+      // launcher looks like. It is why the app derives the origin before naming it: an
+      // address is not an origin, and only an origin can be cleared.
+      localStorage.setItem('bookmarkedInstances', JSON.stringify([
+        { url: 'https://personal.lithic.uk', label: 'personal.lithic.uk' },
+        { url: 'https://www.foobar.com/wiki', label: 'foobar.com' }
+      ]));
+    }, copyDrop);
+    await reopenLauncher();
+    await vaultPage.waitForSelector('.bookmark-row .remove-recent');
+  };
+  const statusLine = async () => {
+    await new Promise(resolve => setTimeout(resolve, 300));
+    return vaultPage.$eval('.status-label', node => node.textContent.trim()).catch(() => null);
+  };
+  await installFixtures({ supported: true, cleared: true });
+  await waitForKeyCoverage('personal.lithic.uk', true);
+  assert.equal(
+    await vaultPage.$$eval('.bookmark-row', rows => rows.length),
+    2,
+    'Two bookmarked instances, so the row that goes and the row that stays are two rows'
+  );
+  /**
+   * Remove the row for one instance, and read what the launcher asked for.
+   *
+   * Only the calls the × itself makes: the section above has emptied and refilled the
+   * vault, and what it asked for then is not this assertion's business.
+   */
+  const removeRow = async (label) => {
+    await vaultPage.evaluate(() => { window.__lithicCopiesAt = window.__lithicVault.calls.length; });
+    await vaultPage.evaluate((text) => {
+      const row = [...document.querySelectorAll('.bookmark-row')].find(node => node.textContent.includes(text));
+      row.querySelector('.remove-recent').click();
+    }, label);
+    await vaultPage.waitForFunction((text) =>
+      ![...document.querySelectorAll('.bookmark-row')].some(node => node.textContent.includes(text)), {}, label);
+    return vaultPage.evaluate(() => ({
+      added: window.__lithicVault.calls.slice(window.__lithicCopiesAt),
+      entries: window.__lithicVault.entries,
+      rows: [...document.querySelectorAll('.bookmark-row')].map(row => row.textContent.trim()),
+      greenRows: [...document.querySelectorAll('.bookmark-row .vault-row-button')]
+        .filter(key => key.classList.contains('covered')).length
+    }));
+  };
+  const afterRemove = await removeRow('foobar.com');
+  assert.deepEqual(
+    afterRemove.added.map(call => call.command)
+      .filter(command => !['credential_coverage', 'credentials_status', 'lock_credentials'].includes(command)),
+    ['forget_instance_copy'],
+    `Removing a bookmark asks the app for the copy and tells the vault nothing: ${JSON.stringify(afterRemove.added)}`
+  );
+  assert.deepEqual(
+    afterRemove.added.find(call => call.command === 'forget_instance_copy').args,
+    { origin: 'https://www.foobar.com' },
+    'The origin is what is cleared, not the address from the row: a path is not part of one'
+  );
+  assert.equal(afterRemove.rows.length, 1, 'The row the × was on is the one that went');
+  assert.deepEqual(
+    afterRemove.entries,
+    [{ origin: 'https://personal.lithic.uk', user: 'keeper' }],
+    'The saved logins are exactly where they were: forgetting one stays the vault’s own named action'
+  );
+  assert.equal(afterRemove.greenRows, 1, '...which is why the instance that still has a login still says so');
+
+  // A copy the app could not drop is said out loud, by name: the row went, and the one
+  // thing the × promised beyond that is the thing that did not happen.
+  await installFixtures({ supported: true, cleared: false });
+  await removeRow('foobar.com');
+  await vaultPage.waitForFunction(() => document.querySelector('.status-label') !== null);
+  assert.equal(
+    await vaultPage.$eval('.status-label', node => node.textContent.trim()),
+    'Could not clear the cached copy of foobar.com',
+    'A copy that is still there is reported, naming the row it was thrown away from'
+  );
+  // And silence where this half was never on offer: a platform with no hook would
+  // otherwise be told about a failure it never attempted.
+  await installFixtures({ supported: false, cleared: false });
+  await removeRow('foobar.com');
+  assert.equal(
+    await statusLine(),
+    null,
+    'A platform without the hook says nothing about a half it never offered'
+  );
+
   await vaultPage.close();
 
   assert.deepEqual(errors, []);

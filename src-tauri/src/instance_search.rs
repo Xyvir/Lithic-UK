@@ -49,6 +49,11 @@
 
 use serde::Serialize;
 
+// The protocol plumbing this module shares with `instance_copy`, reachable only on
+// the platform that has the hook.
+#[cfg(windows)]
+use crate::cdp::call;
+
 /// The database and store every Lithic build keeps its caches in (`KeyvalStore`).
 const DATABASE: &str = "keyval-store";
 const STORE: &str = "keyval";
@@ -209,20 +214,12 @@ pub(crate) fn cached_record(payload: &str) -> Option<CachedRecord> {
 /// blocking task rather than on any thread that has to stay responsive.
 #[cfg(windows)]
 pub fn read_caches(window: &tauri::WebviewWindow, origins: &[String]) -> Vec<InstanceCacheRead> {
-    let (sender, receiver) = std::sync::mpsc::channel();
-    let window = window.clone();
     let origins: Vec<String> = origins.to_vec();
     // The webview lives on the main thread and so does every one of these calls, which
-    // is why the work is handed over rather than done here. `with_webview` returns as
-    // soon as it has posted the closure; the answer comes back on the channel below.
-    let posted = window.with_webview(move |platform| {
-        let reads = read_from(&platform.controller(), &origins);
-        let _ = sender.send(reads);
-    });
-    if posted.is_err() {
-        return Vec::new();
-    }
-    receiver.recv().unwrap_or_default()
+    // is why the work is handed over rather than done here (`cdp::with_core`) — and why
+    // this belongs on a blocking task rather than on any thread that has to stay
+    // responsive while it waits for the answer.
+    crate::cdp::with_core(window, move |core| read_from(core, &origins)).unwrap_or_default()
 }
 
 /// macOS and Linux keep no hook for this yet.
@@ -236,48 +233,13 @@ pub fn read_caches(_window: &tauri::WebviewWindow, _origins: &[String]) -> Vec<I
     Vec::new()
 }
 
-/// The whole read, on the thread that owns the webview.
+/// The whole read, for the webview's own protocol handle.
 #[cfg(windows)]
 fn read_from(
-    controller: &webview2_com::Microsoft::Web::WebView2::Win32::ICoreWebView2Controller,
+    core: &webview2_com::Microsoft::Web::WebView2::Win32::ICoreWebView2,
     origins: &[String],
 ) -> Vec<InstanceCacheRead> {
-    let Ok(core) = (unsafe { controller.CoreWebView2() }) else {
-        return Vec::new();
-    };
-    origins
-        .iter()
-        .map(|origin| read_origin(&core, origin))
-        .collect()
-}
-
-/// Send one protocol call and wait for its answer.
-///
-/// The completion handler fires on this thread — the one that owns the webview — so the
-/// wait has to keep that thread's message pump turning or the answer could never
-/// arrive. `wait_with_pump` is the helper wry uses for the same reason while it creates
-/// a webview environment.
-#[cfg(windows)]
-fn call(
-    core: &webview2_com::Microsoft::Web::WebView2::Win32::ICoreWebView2,
-    method: &str,
-    params: &str,
-) -> Option<String> {
-    use webview2_com::CallDevToolsProtocolMethodCompletedHandler;
-    use windows::core::HSTRING;
-
-    let (sender, receiver) = std::sync::mpsc::channel();
-    let handler = CallDevToolsProtocolMethodCompletedHandler::create(Box::new(move |error, result| {
-        // A refused call is an answer too: it is how a runtime without the domain, or a
-        // store that was never written, comes back — and both mean "nothing here".
-        let _ = sender.send(if error.is_ok() { Some(result) } else { None });
-        Ok(())
-    }));
-    unsafe {
-        core.CallDevToolsProtocolMethod(&HSTRING::from(method), &HSTRING::from(params), &handler)
-            .ok()?;
-    }
-    webview2_com::wait_with_pump(receiver).ok().flatten()
+    origins.iter().map(|origin| read_origin(core, origin)).collect()
 }
 
 /// One instance's cached wikis, read out of its own origin's store.

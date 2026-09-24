@@ -27,6 +27,13 @@
  *   stub.authorize();            // as the person at github.com would
  *   const asked = stub.state.asked;   // every route the page called, in order
  *   await stub.close();
+ *
+ * Two of its options exist for the cache the deployment really ships rather than for the
+ * backup conversation: `serviceWorker: 'real'` serves this repo's `offline-service-worker.js`
+ * (the default is an empty script, so nothing a test does is cached unless it asks), and
+ * `setLauncherDocument` swaps what the instance serves mid-run — which is what makes a
+ * *stale* copy reproducible at all. The paths that worker precaches are answered here too,
+ * because `cache.addAll` fails as a whole if one of them is missing.
  */
 
 import { createServer } from 'node:http';
@@ -63,6 +70,11 @@ const PIXEL_PNG = Buffer.from(
 /** The well-known files an instance serves next to its launcher. */
 const STATIC = {
   '/offline-service-worker.js': ['text/javascript; charset=utf-8', '/* the stub caches nothing */\n'],
+  // Fillers for the shipped worker's precache list. What a test is about when it turns
+  // that worker on is the cache it fills, not the documents in it.
+  '/index.html': ['text/html; charset=utf-8', '<!doctype html><title>Lithic</title>\n'],
+  '/src/lithic.html': ['text/html; charset=utf-8', '<!doctype html><title>Lithic</title>\n'],
+  '/android-chrome-192x192.png': ['image/png', PIXEL_PNG],
   '/manifest.json': ['application/json', JSON.stringify({ name: 'Lithic', short_name: 'Lithic', version: '0.0.0' })],
   '/site.webmanifest': ['application/json', JSON.stringify({ name: 'Lithic', short_name: 'Lithic' })],
   '/favicon.ico': ['image/png', PIXEL_PNG],
@@ -106,7 +118,15 @@ async function readBody(request) {
  */
 export async function startSelfHostStub(options = {}) {
   const artifact = options.artifact ?? 'src/launcher.html';
-  const html = await readFile(artifact);
+  const artifactHtml = await readFile(artifact);
+  /** What the instance serves as its launcher. Swappable, because a redeploy is. */
+  let launcherDocument = options.document ?? artifactHtml;
+  /**
+   * The worker this deployment serves, when a scenario wants the real one. The default
+   * is the empty script below: a page that registers it caches nothing, so the tests
+   * about `/api/github/*` are not also testing a cache in front of every request.
+   */
+  const worker = options.serviceWorker === 'real' ? await readFile('offline-service-worker.js') : null;
   const state = {
     /** What `/api/github/status` answers. */
     connected: false,
@@ -128,16 +148,24 @@ export async function startSelfHostStub(options = {}) {
     const url = new URL(request.url ?? '/', 'http://stub.invalid');
     const path = url.pathname;
 
-    const send = (status, type, body) => {
-      response.writeHead(status, { 'content-type': type, 'cache-control': 'no-store' });
+    const send = (status, type, body, headers = {}) => {
+      response.writeHead(status, { 'content-type': type, 'cache-control': 'no-store', ...headers });
       response.end(body);
     };
     const json = (body, status = 200) => send(status, 'application/json', JSON.stringify(body));
 
     if (path.startsWith('/api/')) state.asked.push(`${request.method} ${path}`);
 
-    if ((path === '/' || path === '/launcher.html') && request.method === 'GET') {
-      send(200, 'text/html; charset=utf-8', html);
+    if (path === '/offline-service-worker.js' && worker) {
+      send(200, 'text/javascript; charset=utf-8', worker.toString());
+      return;
+    }
+
+    if ((path === '/' || path === '/launcher.html' || path === '/src/launcher.html') && request.method === 'GET') {
+      // `documentMaxAge` is how a deployment behind a proxy that caches the page looks:
+      // the webview then answers from its own HTTP cache rather than asking again.
+      const freshness = options.documentMaxAge ? { 'cache-control': `max-age=${options.documentMaxAge}` } : {};
+      send(200, 'text/html; charset=utf-8', launcherDocument, freshness);
       return;
     }
 
@@ -242,6 +270,14 @@ export async function startSelfHostStub(options = {}) {
     /** Put a Lith in the server's store, as an upload or a git pull would. */
     addLith(name, lastModified = new Date()) {
       state.liths.push({ name, lastModified });
+    },
+    /**
+     * Serve a different launcher from the same URL, as a redeploy does — the one thing
+     * an instance's own copy cannot notice on its own, and so the setup every cache
+     * assertion starts from.
+     */
+    setLauncherDocument(text) {
+      launcherDocument = text;
     },
     close() {
       return new Promise((resolve) => {

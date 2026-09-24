@@ -11,6 +11,7 @@
   import { resolveStorageMode, storageModeOverride, browserOnlyMarkTitle, BROWSER_ONLY_HISTORY_NOTE, type StorageMode } from './browser-storage';
   import { readBookmarkEntries, saveBookmark, removeBookmark, setBookmarkIcon, refreshBookmarkIcon, verifyInstanceUrl, normalizeInstanceUrl, instanceLabel, type BookmarkEntry, type InstanceVerification } from './bookmarks';
   import { LOGIN_CHECK_LABELS, askInstanceAboutLogin, loginVerdict, loginVerdictFromError, typedLoginCheck, type LoginCheckState, type LoginVerdict } from './login-check';
+  import { copyDropNote, forgetInstanceCopy } from './instance-copy';
   import PinEntry from './PinEntry.svelte';
   import { fetchRemoteFiles, fetchRemoteWiki, probePatchApi, createLockHeartbeat, readRemoteLock, uploadRemoteFile, webdavUrl, resolveSessionId, lithUploadName, type WebdavFile } from './webdav';
   import { normalizeLithName } from './legacy-saver';
@@ -2349,9 +2350,36 @@
     else window.history.back();
   }
 
-  function removeInstanceBookmark(url: string) {
+  function removeInstanceBookmark(url: string, label: string) {
     bookmarks = removeBookmark(url);
     void refreshVaultCoverage();
+    void dropBookmarkedCopy(url, label);
+  }
+
+  /**
+   * The half of removing a bookmark that this page cannot do itself.
+   *
+   * The instance's downloaded copy — its launcher page, its scripts, its icons — sits
+   * under the instance's own origin, which is another origin's storage to this page
+   * however it asks (see `instance-copy.ts`). So the request goes to the app, which is
+   * not a page and shares one profile with every origin the window has visited. Only the
+   * page goes: the cached wikis, the instance's own settings and the saved login all stay,
+   * and the last of those stays by design — forgetting a login is the vault's own action.
+   *
+   * Nothing is said when nothing was lost, and nothing is said where this half was never
+   * on offer: a row that goes quietly is the whole of what the × does there.
+   */
+  async function dropBookmarkedCopy(url: string, label: string) {
+    if (mode !== 'tauri') return;
+    const origin = vaultOriginOf(url);
+    // An address with no readable origin is no copy to go looking for: a sentence about
+    // the one it could not clear would be about the wrong thing entirely.
+    if (!origin) return;
+    // The row's own name, not one derived from the address: an entry carried over from
+    // the legacy launcher can hold a path rather than a bare origin, and what the user
+    // just threw away is the row they clicked, whatever its address looks like.
+    const note = copyDropNote(label, await forgetInstanceCopy(origin));
+    if (note) status = note;
   }
 
   /**
@@ -4293,7 +4321,7 @@
                 on:keydown={(event) => (event.key === 'Enter' || event.key === ' ') && openBookmarkedInstance(entry.url, search.trim())}
               >{@html instanceCacheHits[entry.url].preview}</div>
             {/if}
-            <button class="recent-icon-button remove-recent" type="button" aria-label={`Remove bookmark ${entry.url}`} on:click={() => removeInstanceBookmark(entry.url)}><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m7 7 10 10M17 7 7 17"></path></svg></button>
+            <button class="recent-icon-button remove-recent" type="button" aria-label={`Remove bookmark ${entry.url}`} on:click={() => removeInstanceBookmark(entry.url, entry.label)}><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m7 7 10 10M17 7 7 17"></path></svg></button>
           </div>
         {/each}
         {#each filteredRecent as file}

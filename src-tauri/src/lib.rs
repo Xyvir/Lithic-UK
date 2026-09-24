@@ -8,6 +8,8 @@ mod credentials;
 mod webview_auth;
 mod gitcore;
 mod instance_search;
+mod instance_copy;
+mod cdp;
 
 struct StartupFile(Mutex<Option<String>>);
 
@@ -1612,6 +1614,27 @@ async fn instance_cache_search(
         .unwrap_or_default()
 }
 
+/// Drop the copy this app downloaded of one instance.
+///
+/// The × on a bookmarked instance is the gesture, and this is the half of it the
+/// launcher's own page cannot do: that copy sits under the instance's origin, which is
+/// another origin's storage to everything but the app itself (see `instance_copy`). The
+/// saved login is not involved — credentials live in the vault file, and forgetting one
+/// is the vault's own named action.
+#[tauri::command]
+async fn forget_instance_copy(app: tauri::AppHandle, origin: String) -> instance_copy::CopyDropped {
+    // The protocol calls belong to the thread that owns the webview, and they wait for it
+    // to answer, so this runs on a blocking task while the launcher stays responsive.
+    let Some(window) = tauri::Manager::get_webview_window(&app, "main") else {
+        // No window to speak to: there is nowhere left to draw a sentence about this, so
+        // it is reported as unsupported rather than as a copy that is still there.
+        return instance_copy::CopyDropped::unsupported();
+    };
+    tauri::async_runtime::spawn_blocking(move || instance_copy::forget(&window, &origin))
+        .await
+        .unwrap_or_else(|_| instance_copy::CopyDropped::unsupported())
+}
+
 #[tauri::command]
 async fn probe_instance(url: String, state: tauri::State<'_, VaultState>) -> Result<InstanceProbe, String> {
     // `Result` because a Tauri 2 async command that borrows state has to return
@@ -2701,7 +2724,8 @@ pub fn run() {
             remember_credentials,
             forget_credentials,
             destroy_credentials,
-            instance_cache_search
+            instance_cache_search,
+            forget_instance_copy
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
