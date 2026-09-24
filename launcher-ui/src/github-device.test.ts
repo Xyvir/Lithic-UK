@@ -3,6 +3,7 @@ import { test } from 'node:test';
 import {
   parseDeviceCode,
   parseDevicePoll,
+  parseServerDevicePoll,
   pollDelayMs,
   formatUserCode,
   generateRepoName,
@@ -26,6 +27,29 @@ test('parseDeviceCode rejects malformed payloads', () => {
   assert.equal(parseDeviceCode(null), null);
   assert.equal(parseDeviceCode('nope'), null);
   assert.equal(parseDeviceCode({ device_code: 'only-one' }), null);
+});
+
+test('parseServerDevicePoll reads GitHub’s raw codes, the way a self-hosted instance relays them', () => {
+  assert.deepEqual(parseServerDevicePoll({ access_token: 'gho_x' }), { kind: 'authorized', token: 'gho_x' });
+  assert.deepEqual(parseServerDevicePoll({ error: 'authorization_pending' }), { kind: 'pending', slowDown: false });
+  assert.deepEqual(parseServerDevicePoll({ error: 'slow_down' }), { kind: 'pending', slowDown: true });
+
+  // Two different refusals, and the difference matters to the person reading it:
+  // one code has run out and a new one fixes it, the other was declined.
+  const expired = parseServerDevicePoll({ error: 'expired_token' });
+  assert.equal(expired.kind, 'failed');
+  assert.match(expired.kind === 'failed' ? expired.message : '', /expired/i);
+  const denied = parseServerDevicePoll({ error: 'access_denied' });
+  assert.equal(denied.kind, 'failed');
+  assert.match(denied.kind === 'failed' ? denied.message : '', /denied/i);
+
+  assert.equal(parseServerDevicePoll(null).kind, 'failed');
+  assert.match(
+    parseServerDevicePoll({ error: 'something_new' }).kind === 'failed'
+      ? (parseServerDevicePoll({ error: 'something_new' }) as { message: string }).message
+      : '',
+    /failed or expired/i
+  );
 });
 
 test('parseDevicePoll recognizes authorized, pending, and failure shapes', () => {

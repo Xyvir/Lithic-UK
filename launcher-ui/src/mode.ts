@@ -56,6 +56,16 @@ export function hostedInApp(
 export const LAUNCHER_ORIGIN_PARAM = 'lithic-from';
 
 /**
+ * Query key carrying the words the launcher was searching for.
+ *
+ * Only ever set when the handover *is* a search: the panel beside an instance's match
+ * hands the window over with what was typed, so the instance's launcher comes up
+ * looking for it rather than with an empty box the user would have to fill in again.
+ * The reader on the other side is `handoffQuery`.
+ */
+export const LAUNCHER_QUERY_PARAM = 'q';
+
+/**
  * Hand the window to a bookmarked instance, saying what only the launcher knows.
  *
  * Two annotations ride on the URL, both of them because the page that arrives
@@ -73,17 +83,39 @@ export const LAUNCHER_ORIGIN_PARAM = 'lithic-from';
  *   with the navigation: a document outside the app's URL may not invoke Rust
  *   (see `hostedInApp`) and cannot guess the app's origin, which differs per
  *   platform (`tauri://localhost` vs `https://tauri.localhost`).
+ *
+ *   `q=<words>` — only when the handover is a search. The launcher's global search shows
+ *   one hit per instance and no more, so the instance's own launcher is where the rest of
+ *   them are read; arriving already searching is what makes that a step rather than a
+ *   retyping. An instance running an older build ignores it and simply opens.
  */
-export function withLauncherHandoff(instanceUrl: string, launcherHref: string): string {
+export function withLauncherHandoff(instanceUrl: string, launcherHref: string, query = ''): string {
   try {
     const url = new URL(instanceUrl);
     url.searchParams.set(LAUNCHER_ORIGIN_PARAM, launcherHref);
     url.searchParams.set('mode', 'self-host');
+    if (query.trim()) url.searchParams.set(LAUNCHER_QUERY_PARAM, query.trim());
     return url.href;
   } catch {
     // Nothing we can annotate (or a scheme we do not know): navigating there
     // still works, it just will not carry the instance declaration or a way back.
     return instanceUrl;
+  }
+}
+
+/**
+ * The search a page was handed, or an empty string when it was not handed one.
+ *
+ * Read once, at mount, and then taken back out of the address — see the launcher's
+ * `onMount`: the query belongs to the handover, not to the URL the instance then owns,
+ * so a reload starts on the instance's own list rather than silently searching again.
+ */
+export function handoffQuery(location: Location): string {
+  try {
+    return new URLSearchParams(location.search).get(LAUNCHER_QUERY_PARAM)?.trim() ?? '';
+  } catch {
+    // A location whose search cannot be read is a location with no query on it.
+    return '';
   }
 }
 

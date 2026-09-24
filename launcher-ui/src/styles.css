@@ -969,6 +969,14 @@ footer > * { pointer-events: auto; }
   border-color: #8ab4f8;
 }
 .cache-preview mark { color: #ff9800; background: transparent; font-weight: 700; }
+/*
+ * The mark inside the note's own name, in the install button's blue rather than the
+ * context mark's amber: the title says *which* note matched, the context says where
+ * inside it. Same blue as the button because that is already this app's "this is the
+ * thing" colour — and two marks in one panel would otherwise read as the same fact
+ * said twice. Written with the element in the selector so it outranks the rule above,
+ * which is the one that colours every other mark in the panel. */
+.cache-preview mark.cache-preview-title-mark { color: #8ab4f8; background: transparent; }
 .remove-recent { color: #ff5555; }
 .remove-recent:hover { color: #ff7777; }
 .empty { padding: 20px; color: #999; text-align: center; }
@@ -1195,25 +1203,14 @@ body.drag-over::after {
 
 /* --- Self-host: the open remote Lith and the server's list ---------------- */
 .remote-line { display: flex; align-items: center; gap: 8px; margin-top: 2px; min-width: 0; }
-/* No `.remote-pill`: the mode badge that used to open this line was a
-   troubleshooting aid, and the emoji icon beside it already says which launcher
-   you are looking at. What is left is the open Lith's name and the refresh
-   control — the heading stays a heading. */
+/* The heading line's only child, and the whole of what the heading says beyond the
+   title: the name of the open Lith. .remote-pill went first (the emoji icon already
+   says which launcher you are looking at) and .remote-refresh after it — asking the
+   server for its list again is what a page reload is, so a button for it was one more
+   control to explain in a heading. `.recent-group-label` and `.remote-dot` are gone
+   with the device's own rows: this mode lists the store and nothing else, so there is
+   no second group to head or to mark these rows apart from. */
 .remote-file { min-width: 0; color: #bbb; font-size: 0.76rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.remote-refresh {
-  flex: none; width: 24px; height: 24px; padding: 0; border: 1px solid #454545; border-radius: 6px;
-  background: #333; color: #ccc; font-size: 0.85rem; line-height: 1; cursor: pointer;
-}
-.remote-refresh:hover:not(:disabled) { background: #3d3d3d; color: #fff; }
-.remote-refresh:disabled { opacity: 0.5; cursor: default; }
-.recent-group-label {
-  margin: 4px 2px 6px; color: #888; font-size: 0.68rem; font-weight: 600;
-  letter-spacing: 0.1em; text-transform: uppercase;
-}
-.remote-dot {
-  flex: 0 0 4px; margin: 0 0 0 6px; align-self: center; width: 4px; height: 24px;
-  border-radius: 2px; background: #4d6b4d;
-}
 /* The icon lives *inside* .recent-name (see the markup): the cached instance icon
    is part of the link, so the hover and focus highlight has to cover it rather
    than stop beside it. Two consequences worth keeping: the inset comes from the

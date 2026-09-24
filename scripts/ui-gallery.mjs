@@ -7,6 +7,13 @@
  * Those PNGs are then tiled into a handful of contact sheets — a sheet being the
  * whole point: the states are only comparable side by side.
  *
+ * A pane marked `server` is the exception to `file://`, and it has to be: a
+ * self-hosted instance's backup flow is HTTP against its own origin, so it cannot
+ * be reached from a page on disk at all. Those panes are shot through the stand-in
+ * instance in `scripts/self-host-stub.mjs`, which serves this same artifact and
+ * answers the CGI the deployment routes. The copy they draw is the launcher's, so
+ * they belong on a sheet like any other.
+ *
  * It is a *review* tool, not a test. It asserts exactly one thing per pane — that
  * the state it asked for actually appeared — so a sheet can never quietly show a
  * blank pane and call it a design. Everything else about the picture is for a
@@ -60,12 +67,20 @@ import puppeteer from 'puppeteer';
 
 import { SECRET_SENTENCES } from './vault-copy.mjs';
 
+// The stand-in instance the `server` panes are shot through. Started in the entry
+// point below, because it has to be listening before the first pane is driven; the
+// panes reach it through `paneUrl` and through this handle.
+import { startSelfHostStub } from './self-host-stub.mjs';
+
 const run = promisify(execFile);
 
 const artifactArg = process.argv.find((arg) => arg.startsWith('--artifact='));
 const ARTIFACT = resolve(artifactArg ? artifactArg.slice('--artifact='.length) : (process.env.GALLERY_ARTIFACT ?? 'src/launcher.html'));
 const OUT_DIR = resolve('ui-gallery');
 const RAW_DIR = join(OUT_DIR, 'raw');
+
+/** The stand-in instance the `server` panes are shot through; started below. */
+let stub;
 
 /**
  * Viewports are presets rather than numbers at each call site, because the width a
@@ -167,6 +182,23 @@ const driftedChain = () => ({
     { id: 'v2', ts: SAVED_AT - 600_000, sizeBytes: 38_400, isBase: true, external: true }
   ]
 });
+
+/**
+ * One cached wiki, with the stamps a real cache carries.
+ *
+ * Shared by the two panes that photograph its search panel, because the whole point
+ * of the pair is that the same entry answers differently for a body query and for the
+ * note's own name. It is also the fixture behind the smoke test's stamp assertions:
+ * between the name and the body it holds `archive` and `distinctive` but not `te`,
+ * which is the token creaTE d and `text/vnd.tiddlywiki` used to match on.
+ */
+const cachedArchive = cache([{
+  title: 'Archive Box',
+  created: '20260816020116648',
+  modified: '20260816020116648',
+  type: 'text/vnd.tiddlywiki',
+  text: 'distinctive local findings'
+}]);
 
 /** A 3x2 PNG, so a bookmark row can show a cached instance icon rather than nothing. */
 const ICON =
@@ -294,6 +326,17 @@ const installRust = (page, config) =>
           state.exists = false;
           entries.length = 0;
           return { ...state, count: 0 };
+        case 'instance_cache_search':
+          // What the app's own reader answers (`instance_search.rs`): one instance with a
+          // cached wiki and one with none. The launcher's page can never read this for
+          // itself — an instance is a different origin — which is why the app reads it.
+          return args.origins.map((origin) => ({
+            origin,
+            truncated: false,
+            caches: origin === 'https://personal.lithic.uk'
+              ? [{ name: 'notes.lith', text: JSON.stringify([{ title: 'Archive Box', text: 'distinctive local findings' }]) }]
+              : []
+          }));
         case 'read_recents_sidecar':
           // The desktop app's recents are Rust's own sidecar rather than the browser store,
           // so a tauri fixture only becomes a row when it arrives this way. `null` is the
@@ -352,6 +395,39 @@ async function typePin(page, container, pin) {
   if (boxes.length !== 6) throw new Error(`${container} expected six PIN boxes, saw ${boxes.length}`);
   await boxes[0].click();
   await page.keyboard.type(pin);
+}
+
+/**
+ * Click one of a dialog's action buttons, by its label.
+ *
+ * By label rather than by position because the same dialog offers different actions
+ * in different states, and scoped to a dialog because a confirmation opened on top
+ * of one repeats the word that opened it.
+ */
+async function clickAction(page, scope, label) {
+  await page.evaluate((selector, text) => {
+    const button = [...document.querySelectorAll(selector)].find((node) => node.textContent.trim() === text);
+    if (!button) throw new Error(`no ${selector} saying ${text}`);
+    button.click();
+  }, scope, label);
+}
+
+/**
+ * Drive the self-host backup dialog to its repository picker, through the stand-in
+ * instance: the device flow's first two steps, then the person at github.com typing
+ * the code, which is the one part nothing can imitate from this side.
+ *
+ * Settled before it returns, so a pane photographs the picker rather than a spinner
+ * over one.
+ */
+async function reachRepoPicker(page) {
+  await page.click('.heading .sync-button');
+  await page.waitForSelector('.git-sync-modal');
+  await clickAction(page, '.git-sync-modal .modal-action', 'Connect to GitHub');
+  await page.waitForSelector('.git-sync-modal .user-code-display');
+  stub.authorize();
+  await page.waitForSelector('.git-sync-modal .repo-card.create', { timeout: 15000 });
+  await page.waitForFunction(() => document.querySelector('.git-sync-modal .sync-progress') === null);
 }
 
 /** The vault manager opens from the bookmark dialog, which owns the same addresses. */
@@ -519,7 +595,7 @@ const SHEETS = [
         seed: {
           recents: [handleRow('notes.lith')],
           caches: {
-            'search_cache_archive.lith': cache([{ title: 'Archive Note', text: 'distinctive cached content' }])
+            'search_cache_archive.lith': cachedArchive
           }
         },
         drive: async (page) => {
@@ -527,6 +603,25 @@ const SHEETS = [
           await settle(page, 500);
         },
         expect: '.cache-preview'
+      },
+      {
+        // The same cache, asked for by the note's name: the title is content, so it
+        // matches, and its mark is the install button's blue rather than the amber
+        // the body context uses. The stamps are the same fixture's `created`,
+        // `modified` and `type`, none of which is searchable surface.
+        name: '231-webapp-title-match',
+        view: 'wide',
+        seed: {
+          recents: [handleRow('notes.lith')],
+          caches: {
+            'search_cache_archive.lith': cachedArchive
+          }
+        },
+        drive: async (page) => {
+          await page.type('input[aria-label="Search recent Liths"]', 'Archive');
+          await settle(page, 500);
+        },
+        expect: '.cache-preview-title-mark'
       },
       {
         name: '240-fallback-marked',
@@ -563,6 +658,27 @@ const SHEETS = [
           await settle(page, 300);
         },
         expect: '.vault-row-button'
+      },
+      {
+        // A hit from another instance's own cache, standing beside the bookmark row that
+        // leads to it: the same panel, in the same place, with the same marked preview a
+        // match inside one of this device's own Liths gets. One hit per instance is the
+        // whole of it — this search orients, and the instance's own launcher is where the
+        // rest of the matches are read.
+        name: '261-instance-hit-search',
+        view: 'wide',
+        mode: 'tauri',
+        seed: { bookmarks: BOOKMARKS },
+        rust: {
+          exists: true,
+          pin: PIN,
+          entries: [{ origin: 'https://personal.lithic.uk', user: 'keeper' }]
+        },
+        drive: async (page) => {
+          await page.type('input[aria-label="Search recent Liths"]', 'Archive');
+          await settle(page, 600);
+        },
+        expect: '.bookmark-row .cache-preview mark.cache-preview-title-mark'
       }
     ]
   },
@@ -1087,7 +1203,7 @@ const SHEETS = [
       },
       {
         // The icon this deployment is known by — the only dialog in the launcher that
-        // exists for one mode, which is why this is the sheet's one self-host pane.
+        // exists for one mode.
         name: '740-instance-icon',
         view: 'dialog',
         modal: 'emoji-title',
@@ -1099,6 +1215,62 @@ const SHEETS = [
         },
         clip: '.emoji-modal',
         expect: '.emoji-grid'
+      },
+      {
+        // The same backup dialog the desktop app has, opened on a server. Photographed
+        // over `file://`, so the instance cannot be asked anything and this is the state
+        // that proves it: the server's copy, and the one line about the instance not
+        // answering. The two lines the desktop dialog owns (`Folder`, and the order to
+        // save a Lith to disk first) are deliberately absent. The other two halves of
+        // this dialog — the picker and the connected view — are the `server` panes below,
+        // which need an instance that answers.
+        name: '745-instance-github-sync',
+        view: 'dialog',
+        modal: 'gitsync-title',
+        mode: 'self-host',
+        drive: async (page) => {
+          await page.click('.heading .sync-button');
+          await page.waitForSelector('.git-sync-modal');
+          await settle(page, 300);
+        },
+        clip: '.git-sync-modal',
+        expect: '.git-sync-modal .modal-action'
+      },
+      {
+        // The picker, which is the one state of this dialog that is a decision rather
+        // than a step: the repositories the instance can see, split into the ones Lithic
+        // made and the rest, with a fresh one offered above both. Shot through the
+        // stand-in instance, because over `file://` there is nothing on the other end to
+        // list — which is why this state had no picture before it.
+        name: '746-instance-github-sync-repos',
+        view: 'dialog',
+        modal: 'gitsync-title',
+        mode: 'self-host',
+        server: true,
+        drive: (page) => reachRepoPicker(page),
+        clip: '.git-sync-modal',
+        expect: '.git-sync-modal .repo-card'
+      },
+      {
+        // A backed-up instance, settled: the repository it is on, when it last synced
+        // by its own clock, and the one thing a connected instance can be told, which is
+        // to stop. Pointing it at another repository is that, then connecting again.
+        name: '747-instance-github-sync-connected',
+        view: 'dialog',
+        modal: 'gitsync-title',
+        mode: 'self-host',
+        server: true,
+        drive: async (page) => {
+          await reachRepoPicker(page);
+          await clickAction(page, '.git-sync-modal .modal-action', 'Start Sync');
+          await page.waitForFunction(() =>
+            document.querySelector('.git-sync-modal .sync-progress') === null &&
+            [...document.querySelectorAll('.git-sync-modal .modal-action')]
+              .some((node) => node.textContent.trim() === 'Disconnect')
+          );
+        },
+        clip: '.git-sync-modal',
+        expect: '.git-sync-modal .modal-action'
       },
       {
         // Edits the launcher captured and never saw saved. Reachable here because a
@@ -1184,12 +1356,19 @@ async function applySeed(page, seed) {
   await page.reload({ waitUntil: 'domcontentloaded' });
 }
 
-/** The pane's URL: the artifact, with whatever the state needs said in the query. */
+/**
+ * The pane's URL: the artifact, with whatever the state needs said in the query.
+ *
+ * From disk, except for a `server` pane — which is served by the stand-in instance
+ * on a loopback origin, because a same-origin `/api/github/*` is the only way the
+ * backup dialog's live states exist at all.
+ */
 function paneUrl(pane) {
   const params = [];
   if (pane.mode) params.push(`mode=${pane.mode}`);
   if (pane.storage) params.push(`storage=${pane.storage}`);
-  return `file://${ARTIFACT}${params.length ? `?${params.join('&')}` : ''}`;
+  const base = pane.server ? `${stub.origin}/launcher.html` : `file://${ARTIFACT}`;
+  return `${base}${params.length ? `?${params.join('&')}` : ''}`;
 }
 
 /** Crop to the pane's element, if it asked for one, expanded by a little air. */
@@ -1487,6 +1666,11 @@ if (sheets.length === 0) {
 await rm(RAW_DIR, { recursive: true, force: true });
 await mkdir(RAW_DIR, { recursive: true });
 
+// Serves this run's artifact and the instance's CGI, so the self-host backup flow
+// has somewhere to be driven. One for the run: the panes that use it each start
+// from a fresh page, and the flow resets its own authorization on every code.
+stub = await startSelfHostStub({ artifact: ARTIFACT });
+
 const browser = await puppeteer.launch({
   headless: process.env.GALLERY_HEADED === '1' ? false : 'new',
   args: ['--no-sandbox', '--disable-setuid-sandbox']
@@ -1525,6 +1709,7 @@ try {
   }
 } finally {
   await browser.close();
+  await stub.close();
 }
 
 const coverage = dialogCoverage(await dialogsInSource(), drawnDialogs);

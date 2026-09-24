@@ -7,6 +7,7 @@ use tauri_plugin_dialog::DialogExt;
 mod credentials;
 mod webview_auth;
 mod gitcore;
+mod instance_search;
 
 struct StartupFile(Mutex<Option<String>>);
 
@@ -1588,6 +1589,29 @@ fn classify_manifest(status: u16, body: &[u8]) -> &'static str {
 }
 
 /// Is this address a Lithic instance, in a way the browser cannot check?
+/// The cached wikis other instances keep in this app's own storage.
+///
+/// The launcher asks for the addresses it bookmarked and gets back whatever their
+/// origins have cached. Nothing here reaches the network, and the argument is the
+/// limit of what can be read: an address the user did not save is never looked at.
+///
+/// Empty is a complete answer. Every way this can come to nothing — an origin with no
+/// Lithic storage, a store never written, a runtime without the protocol, a platform
+/// without the hook — is "no cached wikis here", which the launcher shows as nothing.
+#[tauri::command]
+async fn instance_cache_search(
+    app: tauri::AppHandle,
+    origins: Vec<String>,
+) -> Vec<instance_search::InstanceCacheRead> {
+    // The protocol calls belong to the thread that owns the webview, and they wait for
+    // it to answer, so this runs on a blocking task while the launcher's search stays
+    // responsive.
+    let Some(window) = tauri::Manager::get_webview_window(&app, "main") else { return Vec::new() };
+    tauri::async_runtime::spawn_blocking(move || instance_search::read_caches(&window, &origins))
+        .await
+        .unwrap_or_default()
+}
+
 #[tauri::command]
 async fn probe_instance(url: String, state: tauri::State<'_, VaultState>) -> Result<InstanceProbe, String> {
     // `Result` because a Tauri 2 async command that borrows state has to return
@@ -2676,7 +2700,8 @@ pub fn run() {
             lock_credentials,
             remember_credentials,
             forget_credentials,
-            destroy_credentials
+            destroy_credentials,
+            instance_cache_search
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

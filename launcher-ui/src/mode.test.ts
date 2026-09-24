@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
+  handoffQuery,
   hostedInApp,
   launcherReturn,
   resolveMode,
@@ -124,6 +125,20 @@ test('the handoff declares the instance and carries the way back', () => {
     kind: 'url',
     url: 'https://tauri.localhost/'
   });
+});
+
+test('a search handover carries the words, and only when there are words', () => {
+  const searched = withLauncherHandoff('https://personal.example.uk', 'https://tauri.localhost/', 'archive box');
+  assert.match(searched, /[?&]q=archive\+box/);
+  // The receiving side reads it back trimmed, which is what the launcher types into
+  // its own search box.
+  assert.equal(handoffQuery(location(searched)), 'archive box');
+  // A handover that is not a search carries nothing to search for: opening a bookmark
+  // plainly must not arrive with a query from some earlier search.
+  assert.equal(handoffQuery(location(withLauncherHandoff('https://personal.example.uk', 'https://tauri.localhost/'))), '');
+  assert.equal(handoffQuery(location(withLauncherHandoff('https://personal.example.uk', 'https://tauri.localhost/', '   '))), '');
+  assert.equal(handoffQuery(location('https://personal.example.uk/?mode=self-host&q=%20%20')), '');
+  assert.equal(handoffQuery(location('https://personal.example.uk/')), '');
 });
 
 test('the handoff keeps the address it was given and survives junk', () => {

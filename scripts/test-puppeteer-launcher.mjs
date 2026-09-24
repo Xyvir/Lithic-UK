@@ -9,6 +9,11 @@ import puppeteer from 'puppeteer';
 // imported, because a mock is serialised before it runs and closes over nothing.
 import { SECRET_SENTENCES } from './vault-copy.mjs';
 
+// A stand-in instance — the launcher artifact plus the CGI routes a deployment
+// answers — so the self-host backup flow below can be driven instead of only
+// unit-tested. See that module for what it does and does not imitate.
+import { startSelfHostStub } from './self-host-stub.mjs';
+
 // The built single-file launcher. Overridable so this can be pointed at a scratch
 // build (`node scripts/build-launcher.mjs <path>`) without overwriting the committed
 // artifact, which CI regenerates and which is never hand-built.
@@ -319,24 +324,419 @@ try {
   // into a link. Forced with the mode query the legacy launcher already accepts;
   // this page cannot reach a server over file://, so its failed fetches are
   // expected and are deliberately not collected as errors.
-  const selfHostPage = await browser.newPage();
+  // Its own browser context, not another page in the main one: the two share a `file://`
+  // origin, and storage seeded for these assertions would otherwise still be sitting in the
+  // recents and bookmark lists the rest of this test measures further down.
+  const selfHostContext = await browser.createBrowserContext();
+  const selfHostPage = await selfHostContext.newPage();
   await selfHostPage.setViewport({ width: 1000, height: 700 });
+  // Seeded on this page's own origin before the mode is asked for, so the assertions below
+  // have something that *could* have been drawn: a recent row, a cache-only row and a
+  // bookmark, all of which belong to the device rather than to the server. Self-host shows
+  // none of them, and the only way to see that it does not is to give it all three. The
+  // bookmark carries its icon, so nothing here reaches the network: an unfetched favicon
+  // would be a fetch this test then has to explain.
+  await selfHostPage.goto(`file://${artifact}`, { waitUntil: 'domcontentloaded' });
+  await selfHostPage.waitForSelector('main.container');
+  await selfHostPage.evaluate(async () => {
+    localStorage.setItem('lithic-recent-liths', JSON.stringify([{ name: 'device-only.lith', text: '' }]));
+    localStorage.setItem('bookmarkedInstances', JSON.stringify([{
+      url: 'https://personal.lithic.uk',
+      label: 'personal.lithic.uk',
+      icon: 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAMAAAACCAYAAACddGYaAAAAFUlEQVR42mP8z8Dwn4GBgYGJgYGBHgAeCgIBAAAAAElFTkSuQmCC',
+      iconFetchedAt: Date.now()
+    }]));
+    const request = indexedDB.open('keyval-store', 1);
+    await new Promise((resolve, reject) => {
+      request.onerror = () => reject(request.error);
+      request.onsuccess = () => resolve();
+    });
+    const db = request.result;
+    await new Promise((resolve, reject) => {
+      const tx = db.transaction('keyval', 'readwrite');
+      tx.objectStore('keyval').put({ text: JSON.stringify([{ title: 'Cached', text: 'cache only' }]) }, 'search_cache_cache-only.lith');
+      tx.oncomplete = resolve;
+      tx.onerror = () => reject(tx.error);
+    });
+    db.close();
+  });
   await selfHostPage.goto(`file://${artifact}?mode=self-host`, { waitUntil: 'domcontentloaded' });
   await selfHostPage.waitForSelector('main.container');
-  const selfHostMark = await selfHostPage.evaluate(() => {
+  const selfHost = await selfHostPage.evaluate(() => {
     const mark = document.querySelector('.brand-icon-wrap');
+    const refresh = document.querySelector('.remote-refresh');
     return {
       tag: mark?.tagName ?? null,
       label: mark?.getAttribute('aria-label') ?? null,
       href: mark?.getAttribute('href') ?? null,
-      disabled: mark?.hasAttribute('disabled') ?? null
+      disabled: mark?.hasAttribute('disabled') ?? null,
+      mountLabel: document.querySelector('.action-pair .mount-button')?.textContent?.trim() ?? null,
+      refresh: refresh !== null,
+      headingButtons: [...document.querySelectorAll('.heading button')].map(button => button.className),
+      // The GitHub backup button, and what it says about an instance that cannot
+      // answer: `error` with the `!` badge, and a tooltip that names the failure
+      // rather than guessing at the backup's state.
+      syncLabel: document.querySelector('.heading .sync-button')?.getAttribute('aria-label') ?? null,
+      syncTitle: document.querySelector('.heading .sync-button')?.getAttribute('title') ?? null,
+      syncGlyph: document.querySelector('.heading .sync-button .sync-glyph')?.textContent?.trim() ?? null,
+      // The device's own rows, none of which this mode draws — seeded above, so each of
+      // these counts would be non-zero without the gate that keeps them off this list.
+      bookmarkRows: document.querySelectorAll('.bookmark-row').length,
+      localRows: document.querySelectorAll('.recent-row:not(.remote-row)').length,
+      cachedRows: document.querySelectorAll('.cached-result').length,
+      // The server's rows, and the two decorations that used to separate them from the
+      // device's: a group heading and a marker per row. With no other rows there is
+      // nothing to separate them from.
+      groupLabels: document.querySelectorAll('.recent-group-label').length,
+      remoteDots: document.querySelectorAll('.remote-dot').length,
+      // Neither control of the rebuild family belongs to a list this mode does not own.
+      resetCache: document.querySelector('.reset-cache') !== null,
+      rebuildLabel: [...document.querySelectorAll('button')].map(button => button.textContent?.trim()).find(text => text?.includes('Rebuild')) ?? null,
+      empty: document.querySelector('.empty')?.textContent?.trim() ?? null,
+      error: document.querySelector('.status-line.error')?.textContent?.trim() ?? null
     };
   });
-  await selfHostPage.close();
-  assert.equal(selfHostMark.tag, 'BUTTON', 'Self-host: the mark stays the icon picker button');
-  assert.equal(selfHostMark.label, 'Set this instance’s icon', 'Self-host: the picker button is still labelled');
-  assert.equal(selfHostMark.href, null, 'Self-host: the mark does not link away from the picker');
-  assert.equal(selfHostMark.disabled, false, 'Self-host: the picker is a live control, not the old dead button');
+  assert.equal(selfHost.tag, 'BUTTON', 'Self-host: the mark stays the icon picker button');
+  assert.equal(selfHost.label, 'Set this instance’s icon', 'Self-host: the picker button is still labelled');
+  assert.equal(selfHost.href, null, 'Self-host: the mark does not link away from the picker');
+  assert.equal(selfHost.disabled, false, 'Self-host: the picker is a live control, not the old dead button');
+  assert.equal(selfHost.mountLabel, 'Upload a Lith', 'Self-host: the file action says which way the file goes');
+  assert.notEqual(selfHost.mountLabel, 'Mount a Lith', 'Self-host: it does not offer a device mount');
+  assert.equal(selfHost.refresh, false, 'Self-host: nothing in the heading re-lists the server');
+  assert.deepEqual(
+    selfHost.headingButtons,
+    ['brand-icon-wrap pickable', 'sync-button error'],
+    'Self-host: the heading holds the icon picker and the backup button, and nothing else'
+  );
+  assert.equal(selfHost.syncLabel, 'GitHub Sync', 'Self-host: the backup button is labelled for screen readers');
+  assert.match(
+    selfHost.syncTitle ?? '',
+    /did not answer/,
+    'Self-host: an instance that cannot be asked is reported, not guessed at'
+  );
+  assert.equal(selfHost.syncGlyph, '!', 'Self-host: the failure carries a non-colour badge too');
+  assert.equal(selfHost.bookmarkRows, 0, 'Self-host: bookmarks for other instances are not on this list');
+  assert.equal(selfHost.localRows, 0, 'Self-host: this device\'s own Liths are not on this list');
+  assert.equal(selfHost.cachedRows, 0, 'Self-host: neither are this device\'s cached copies');
+  assert.equal(selfHost.groupLabels, 0, 'Self-host: no group heading, because there is no second group');
+  assert.equal(selfHost.remoteDots, 0, 'Self-host: the server\'s rows carry no marker');
+  assert.equal(selfHost.resetCache, false, 'Self-host: no rebuild control for a list this device does not own');
+  assert.equal(selfHost.rebuildLabel, null, 'Self-host: and no rebuild button beside it');
+  assert.equal(selfHost.empty, null, 'Self-host: a failed list says the failure, not that the server is empty');
+  assert.match(selfHost.error ?? '', /^Could not list this server’s Liths/, 'Self-host: the failure is the one line about the list');
+
+  // The backup dialog, opened from that button. What is asserted here is that the
+  // *dialog* speaks about a server rather than a folder, and that the two things
+  // which are only meaningful on the desktop — the folder being backed up, and
+  // the order to save a Lith first — are not on it at all.
+  await selfHostPage.click('.heading .sync-button');
+  await selfHostPage.waitForSelector('.git-sync-modal');
+  const selfHostSyncDialog = await selfHostPage.evaluate(() => {
+    const modal = document.querySelector('.git-sync-modal');
+    return {
+      title: modal?.querySelector('h2')?.textContent?.trim() ?? null,
+      lines: [...modal.querySelectorAll('p')].map((line) => line.textContent.trim()),
+      actions: [...modal.querySelectorAll('.modal-action')].map((action) => action.textContent.trim()),
+      folder: modal?.querySelector('.sync-folder') !== null,
+      advanced: modal?.querySelector('.git-sync-advanced summary')?.textContent?.trim() ?? null,
+      cancel: modal?.querySelector('.sync-cancel') !== null
+    };
+  });
+  assert.equal(selfHostSyncDialog.title, 'GitHub Sync', 'Self-host: the backup dialog is titled like the desktop one');
+  assert.ok(
+    selfHostSyncDialog.lines.includes('Back up this server to GitHub. Its saves push automatically.'),
+    `Self-host: the dialog offers the server's backup, in its own words: ${JSON.stringify(selfHostSyncDialog.lines)}`
+  );
+  assert.ok(
+    selfHostSyncDialog.lines.includes('This instance did not answer about GitHub backups.'),
+    `Self-host: an unreachable instance is named in the dialog: ${JSON.stringify(selfHostSyncDialog.lines)}`
+  );
+  assert.ok(
+    !selfHostSyncDialog.lines.some((line) => /folder/i.test(line)),
+    `Self-host: no line asks about a folder on this device: ${JSON.stringify(selfHostSyncDialog.lines)}`
+  );
+  assert.equal(selfHostSyncDialog.folder, false, 'Self-host: the folder line is desktop-only');
+  assert.deepEqual(
+    selfHostSyncDialog.actions,
+    ['Connect to GitHub', 'Connect & Push'],
+    'Self-host: connect, plus the token fallback for an instance whose OAuth is blocked'
+  );
+  assert.equal(
+    selfHostSyncDialog.advanced,
+    'Advanced: connect with a personal access token',
+    'Self-host: the fallback is the same one the desktop dialog offers'
+  );
+  assert.equal(selfHostSyncDialog.cancel, false, 'Self-host: nothing to stop, so no stop control is offered');
+  await selfHostContext.close();
+
+  // --- the same launcher on an instance that answers --------------------------
+  // The page above is one half of this mode: a server that cannot be asked, which
+  // is what a plain WebDAV deployment or a reverse proxy that forwards only
+  // `/sync/` looks like. This is the other half, and the only way the backup
+  // dialog's live states can be reached at all. `scripts/self-host-stub.mjs`
+  // serves this artifact and the `/api/github/*` routes the container's generated
+  // Caddy config hands to `github-sync.sh`, so device code → poll → repo list →
+  // setup → disconnect is a conversation this test holds, rather than six unit
+  // tests on the parsing of one.
+  //
+  // Its own browser context again, and its own storage with it: the flow moves the
+  // page into the picker and back out, and none of that belongs in the recents and
+  // bookmarks the rest of this test measures.
+  const stub = await startSelfHostStub({ artifact });
+  const liveContext = await browser.createBrowserContext();
+  const livePage = await liveContext.newPage();
+  await livePage.setViewport({ width: 1000, height: 700 });
+  // Unlike the offline page, this one has an answer for every request it makes, so
+  // its console is collected and asserted clean at the end of the flow.
+  const liveErrors = [];
+  const liveNoise = (text) =>
+    text.includes('Failed to load resource') || text.includes('ERR_FILE_NOT_FOUND') || text.includes('ERR_FAILED');
+  livePage.on('pageerror', (error) => { if (!liveNoise(error.message)) liveErrors.push(error.message); });
+  livePage.on('console', (message) => {
+    if (message.type() === 'error' && !liveNoise(message.text())) liveErrors.push(message.text());
+  });
+  // Scoped to a selector, not to the document: the confirm dialog that guards the
+  // disconnect carries a `Disconnect` action of its own, and clicking the first
+  // match in the document would re-open the confirmation it is asking about.
+  const clickAction = (page, selector, label) => page.evaluate((css, text) => {
+    const button = [...document.querySelectorAll(css)].find((node) => node.textContent.trim() === text);
+    if (!button) throw new Error(`no ${css} saying ${text}`);
+    button.click();
+  }, selector, label);
+  const waitForAction = (page, selector, label) => page.waitForFunction((css, text) =>
+    [...document.querySelectorAll(css)].some((node) => node.textContent.trim() === text), {}, selector, label);
+  const readSyncDialog = (page) => page.evaluate(() => {
+    const modal = document.querySelector('.git-sync-modal');
+    if (!modal) return null;
+    return {
+      lines: [...modal.querySelectorAll('p')].map((line) => line.textContent.trim()),
+      actions: [...modal.querySelectorAll('.modal-action')].map((action) => action.textContent.trim()),
+      userCode: modal.querySelector('.user-code-display')?.textContent?.trim() ?? null,
+      note: modal.querySelector('.git-sync-note')?.textContent?.trim() ?? null,
+      repoCards: [...modal.querySelectorAll('.repo-card')].map((card) => card.textContent.trim()),
+      selected: [...modal.querySelectorAll('.repo-card.selected')].map((card) => card.textContent.trim()),
+      groupLabels: [...modal.querySelectorAll('.repo-group-label')].map((label) => label.textContent.trim()),
+      otherRepos: [...modal.querySelectorAll('.repo-list .repo-card')].map((card) => card.textContent.trim())
+    };
+  });
+
+  await livePage.goto(`${stub.origin}/launcher.html?mode=self-host`, { waitUntil: 'domcontentloaded' });
+  await livePage.waitForSelector('main.container');
+  // The status read lands before anything is drawn about it, so "idle" here is the
+  // instance's own answer and not the button's opening guess.
+  await livePage.waitForSelector('.heading .sync-button.idle');
+  const idleTitle = await livePage.$eval('.heading .sync-button', (button) => button.getAttribute('title'));
+  assert.equal(idleTitle, 'GitHub Sync', 'Live self-host: an instance with no backup shows the plain button, not a failure');
+
+  await livePage.click('.heading .sync-button');
+  await livePage.waitForSelector('.git-sync-modal');
+  const offer = await readSyncDialog(livePage);
+  assert.ok(
+    offer.lines.includes('Back up this server to GitHub. Its saves push automatically.'),
+    `Live self-host: the dialog offers the server's backup: ${JSON.stringify(offer.lines)}`
+  );
+  assert.ok(
+    !offer.lines.some((line) => line.includes('did not answer')),
+    `Live self-host: an instance that answered is not reported as unreachable: ${JSON.stringify(offer.lines)}`
+  );
+
+  // Step one of the device flow. The code is the server's, not Rust's: on an
+  // instance the *server* runs the OAuth, because the token it receives is the one
+  // it will push with.
+  await clickAction(livePage, '.git-sync-modal .modal-action', 'Connect to GitHub');
+  await livePage.waitForSelector('.git-sync-modal .user-code-display');
+  const waiting = await readSyncDialog(livePage);
+  assert.equal(waiting.userCode, 'WXYZ-9876', 'Live self-host: the code the instance issued is grouped the way GitHub shows it');
+  assert.equal(waiting.note, 'Waiting for authorization…', 'Live self-host: and the dialog says what it is doing with the code');
+  assert.ok(
+    waiting.lines.includes('1. Open github.com/login/device'),
+    `Live self-host: the instructions name the page to open: ${JSON.stringify(waiting.lines)}`
+  );
+  assert.ok(stub.state.asked.includes('GET /api/github/device-code'), 'Live self-host: the code came from the instance, not from Rust');
+
+  // Nobody has authorized yet, so the poll comes back `authorization_pending`.
+  // That is the state that must not move the dialog: "waiting" is a state, not a
+  // failure, and a poll loop that gave up on the first answer would end here.
+  await new Promise((resolve) => setTimeout(resolve, 1_400));
+  const stillWaiting = await readSyncDialog(livePage);
+  assert.equal(stillWaiting.userCode, 'WXYZ-9876', 'Live self-host: an unanswered poll leaves the code on screen');
+  assert.equal(stillWaiting.actions.length, 1, 'Live self-host: and offers exactly the one way out, which is to stop waiting');
+  assert.equal(stillWaiting.actions[0], 'Stop waiting', 'Live self-host: named for what it does, since the dialog stays open');
+
+  stub.authorize();
+  await livePage.waitForSelector('.git-sync-modal .repo-card.create', { timeout: 15000 });
+  const picker = await readSyncDialog(livePage);
+  assert.deepEqual(
+    picker.groupLabels,
+    ['Found existing Lithic sync repos', 'Advanced: your other repositories'],
+    'Live self-host: the picker separates the repositories Lithic made from the rest'
+  );
+  assert.deepEqual(
+    picker.selected,
+    ['keeper/lithic-sync-4k2p'],
+    'Live self-host: an existing sync repo is offered first, so the default is not another new one'
+  );
+  assert.deepEqual(
+    picker.repoCards.slice(1),
+    ['keeper/lithic-sync-4k2p', 'keeper/lithic-archive', 'keeper/notes', 'keeper/website'],
+    'Live self-host: every repository the instance can see is offered, managed ones first'
+  );
+  assert.deepEqual(
+    picker.otherRepos,
+    ['keeper/notes', 'keeper/website'],
+    'Live self-host: the fallback list holds only the repositories Lithic did not make'
+  );
+  assert.match(
+    picker.repoCards[0] ?? '',
+    /^\+ Create lithic-sync-[a-z0-9]{4} and sync$/,
+    'Live self-host: and a fresh repository can be made instead'
+  );
+
+  await livePage.click('.git-sync-modal .repo-card.create');
+  const chosen = await readSyncDialog(livePage);
+  assert.equal(chosen.selected.length, 1, 'Live self-host: exactly one repository is ever selected');
+  assert.match(
+    chosen.selected[0] ?? '',
+    /^\+ Create lithic-sync-[a-z0-9]{4} and sync$/,
+    'Live self-host: and picking the new one moves the selection onto it'
+  );
+  // A Lith the setup pulls down, added mid-flow on purpose: what is worth proving
+  // is not that a server row can be drawn — the offline page drew one — but that
+  // connecting re-lists the store, so the row arrives only because the setup ran.
+  stub.addLith('arrived.lith');
+  await clickAction(livePage, '.git-sync-modal .modal-action', 'Start Sync');
+  await waitForAction(livePage, '.git-sync-modal .modal-action', 'Disconnect');
+  const connected = await readSyncDialog(livePage);
+  assert.equal(stub.state.connected, true, 'Live self-host: the instance is now backing itself up');
+  assert.match(stub.state.repo, /^keeper\/lithic-sync-[a-z0-9]{4}$/, 'Live self-host: to the repository the flow created, owner and all');
+  assert.equal(
+    connected.userCode,
+    stub.state.repo,
+    'Live self-host: the dialog shows the repository the instance reports, not the name that was typed'
+  );
+  assert.match(
+    connected.note ?? '',
+    /^Last synced \d+[smh] ago\.$/,
+    `Live self-host: the instance's own clock is quoted back: ${connected.note}`
+  );
+  assert.ok(
+    connected.lines.includes(`Created ${stub.state.repo}. Backing up github.com/${stub.state.repo}.`),
+    `Live self-host: and the setup's own summary is kept: ${JSON.stringify(connected.lines)}`
+  );
+  assert.deepEqual(
+    connected.actions,
+    ['Disconnect'],
+    'Live self-host: a connected instance offers only the one thing left to want, which is stopping'
+  );
+  assert.ok(stub.state.asked.includes('POST /api/github/create-repo'), 'Live self-host: creating the repository is a route of its own');
+  assert.ok(stub.state.asked.includes('POST /api/github/setup'), 'Live self-host: and the setup is the one that lands it');
+
+  await livePage.click('.git-sync-modal .modal-close');
+  await livePage.waitForSelector('.git-sync-modal', { hidden: true });
+  await livePage.waitForFunction(
+    () => [...document.querySelectorAll('.recent-row.remote-row .recent-name')].some((row) => row.textContent.includes('arrived.lith'))
+  );
+  const afterConnect = await livePage.evaluate(() => ({
+    button: document.querySelector('.heading .sync-button')?.className ?? null,
+    title: document.querySelector('.heading .sync-button')?.getAttribute('title') ?? null,
+    rows: [...document.querySelectorAll('.recent-row.remote-row .recent-name')].map((row) => row.textContent.trim())
+  }));
+  assert.equal(afterConnect.button, 'sync-button connected', 'Live self-host: the heading button turns green once the instance reports a backup');
+  assert.match(
+    afterConnect.title ?? '',
+    /^GitHub Sync: github\.com\/keeper\/lithic-sync-[a-z0-9]{4}, last synced \d+[smh] ago$/,
+    `Live self-host: and names the repository the instance is on: ${afterConnect.title}`
+  );
+  assert.ok(
+    afterConnect.rows.some((row) => row.startsWith('arrived.lith')),
+    `Live self-host: connecting re-listed the store, so the Lith the setup pulled down is on screen: ${JSON.stringify(afterConnect.rows)}`
+  );
+
+  // And back out again. The confirmation is a second dialog, so the disconnect is
+  // two clicks: the one that asks, and the one that means it.
+  await livePage.click('.heading .sync-button');
+  await waitForAction(livePage, '.git-sync-modal .modal-action', 'Disconnect');
+  await clickAction(livePage, '.git-sync-modal .modal-action', 'Disconnect');
+  await livePage.waitForSelector('.confirm-modal');
+  const confirm = await livePage.evaluate(() => ({
+    title: document.querySelector('.confirm-modal h2')?.textContent?.trim() ?? null,
+    body: document.querySelector('.confirm-modal p')?.textContent?.trim() ?? null,
+    actions: [...document.querySelectorAll('.confirm-modal .modal-action')].map((action) => action.textContent.trim())
+  }));
+  assert.equal(confirm.title, 'Disconnect GitHub Sync?', 'Live self-host: stopping the backup asks first');
+  assert.equal(
+    confirm.body,
+    'Saves on this server stop syncing to GitHub.',
+    'Live self-host: and says what stops, which is the server it is talking to rather than this device'
+  );
+  assert.deepEqual(confirm.actions, ['Disconnect', 'Cancel'], 'Live self-host: with the answer it is asking for beside the way out');
+  await clickAction(livePage, '.confirm-modal .modal-action', 'Disconnect');
+  // Waited on through the dialog rather than the heading button: the dialog is the
+  // thing being asserted, and the button settles from the same disconnect one
+  // status read later.
+  await waitForAction(livePage, '.git-sync-modal .modal-action', 'Connect to GitHub');
+  const afterDisconnect = await readSyncDialog(livePage);
+  assert.equal(stub.state.connected, false, 'Live self-host: disconnect reached the instance');
+  assert.ok(
+    stub.state.asked.includes('GET /api/github/disconnect'),
+    'Live self-host: through the route that deletes the token its watcher pushes with'
+  );
+  assert.deepEqual(
+    afterDisconnect.actions,
+    ['Connect to GitHub', 'Connect & Push'],
+    'Live self-host: and the dialog is back at the start, ready to be pointed somewhere else'
+  );
+  assert.equal(
+    afterDisconnect.lines.some((line) => line.includes('did not answer')),
+    false,
+    `Live self-host: an instance that answered the disconnect is not reported as unreachable: ${JSON.stringify(afterDisconnect.lines)}`
+  );
+  await livePage.waitForSelector('.heading .sync-button.idle');
+
+  // The route that took the place of the connected view's own "Change Repository":
+  // stop, then connect again. Driven here rather than assumed, because removing a
+  // button is only safe if what it did is still reachable — and the second setup is
+  // aimed at a different repository, so what this proves is a re-point and not a
+  // repeat of the first connect.
+  await clickAction(livePage, '.git-sync-modal .modal-action', 'Connect to GitHub');
+  await livePage.waitForSelector('.git-sync-modal .user-code-display');
+  stub.authorize();
+  await livePage.waitForSelector('.git-sync-modal .repo-card.create', { timeout: 15000 });
+  await clickAction(livePage, '.git-sync-modal .repo-card', 'keeper/lithic-sync-4k2p');
+  const secondPick = await readSyncDialog(livePage);
+  assert.deepEqual(
+    secondPick.selected,
+    ['keeper/lithic-sync-4k2p'],
+    'Live self-host: an instance that was stopped can be pointed at another repository'
+  );
+  await clickAction(livePage, '.git-sync-modal .modal-action', 'Start Sync');
+  await waitForAction(livePage, '.git-sync-modal .modal-action', 'Disconnect');
+  assert.equal(
+    stub.state.repo,
+    'keeper/lithic-sync-4k2p',
+    'Live self-host: and the instance is on it, which is the re-point the removed button used to make'
+  );
+  assert.equal(
+    stub.state.asked.filter((entry) => entry === 'POST /api/github/setup').length,
+    2,
+    'Live self-host: through the same setup route the first connect used, so the two routes were one route'
+  );
+  await livePage.click('.git-sync-modal .modal-close');
+  await livePage.waitForSelector('.git-sync-modal', { hidden: true });
+  const repointedTitle = await livePage.$eval('.heading .sync-button', (button) => button.getAttribute('title'));
+  assert.match(
+    repointedTitle ?? '',
+    /^GitHub Sync: github\.com\/keeper\/lithic-sync-4k2p, last synced \d+[smh] ago$/,
+    `Live self-host: and the heading names it, so the move is visible outside the dialog: ${repointedTitle}`
+  );
+
+  assert.deepEqual(
+    liveErrors,
+    [],
+    `Live self-host: the whole flow ran without a console error: ${liveErrors.join(' | ')}`
+  );
+  await liveContext.close();
+  await stub.close();
 
   // Seed a cache-only wiki. The query below is intentionally absent from the
   // filename so this exercises cached content search without file permissions.
@@ -349,7 +749,19 @@ try {
     const db = request.result;
     await new Promise((resolve, reject) => {
       const tx = db.transaction('keyval', 'readwrite');
-      tx.objectStore('keyval').put({ text: JSON.stringify([{ title: 'Archive Note', text: 'distinctive cached content' }]) }, 'search_cache_archive.lith');
+      // With the stamps a real cache carries. They are why `te` used to match this
+      // entry at all: creaTE d, modified's cousin, and `text/vnd.tiddlywiki`.
+      //
+      // The name and the body are chosen so the three cases stay separable: between
+      // them they hold `archive` and `distinctive` but not `te` — which is the trap
+      // that caught this fixture twice, first in `content` and then in `Note`.
+      tx.objectStore('keyval').put({ text: JSON.stringify([{
+        title: 'Archive Box',
+        created: '20260816020116648',
+        modified: '20260816020116648',
+        type: 'text/vnd.tiddlywiki',
+        text: 'distinctive local findings'
+      }]) }, 'search_cache_archive.lith');
       tx.oncomplete = resolve;
       tx.onerror = () => reject(tx.error);
     });
@@ -359,18 +771,65 @@ try {
   await page.waitForSelector('input[aria-label="Search recent Liths"]');
   await page.type('input[aria-label="Search recent Liths"]', 'distinctive');
   await new Promise(resolve => setTimeout(resolve, 250));
-  const cachedSearch = await page.evaluate(() => ({
-    row: [...document.querySelectorAll('.recent-row')].find(row => row.textContent?.includes('archive.lith')),
-    preview: document.querySelector('.cache-preview'),
-    previewStyle: document.querySelector('.cache-preview') && getComputedStyle(document.querySelector('.cache-preview')).display,
-    previewText: document.querySelector('.cache-preview')?.textContent,
-    size: document.querySelector('.cached-size')?.textContent
-  }));
+  // One query at a time, typed the way a user changes their mind: through the
+  // inline clear, so the box is driven rather than emptied from outside.
+  // Scoped to this fixture's own row: the page holds other seeded caches, and a
+  // document-wide `querySelector('.cache-preview')` reads whichever row happens to
+  // come first — which is how this probe first "found" a panel for a query this
+  // fixture must not match at all.
+  const describeMatch = () => page.evaluate(() => {
+    const row = [...document.querySelectorAll('.recent-row')].find(entry => entry.textContent?.includes('archive.lith')) ?? null;
+    const preview = row?.querySelector('.cache-preview') ?? null;
+    const titleMark = row?.querySelector('mark.cache-preview-title-mark') ?? null;
+    const bodyMark = row?.querySelector('mark:not(.cache-preview-title-mark)') ?? null;
+    return {
+      row,
+      preview,
+      previewStyle: preview && getComputedStyle(preview).display,
+      previewText: preview?.textContent,
+      titleMarkText: titleMark?.textContent ?? null,
+      titleMarkColor: titleMark && getComputedStyle(titleMark).color,
+      bodyMarkText: bodyMark?.textContent ?? null,
+      bodyMarkColor: bodyMark && getComputedStyle(bodyMark).color,
+      size: row?.querySelector('.cached-size')?.textContent
+    };
+  });
+  const setQuery = async (query) => {
+    await page.click('.recent-search-clear');
+    await page.type('input[aria-label="Search recent Liths"]', query);
+    await new Promise(resolve => setTimeout(resolve, 250));
+    return describeMatch();
+  };
+
+  const cachedSearch = await describeMatch();
   assert.ok(cachedSearch.row, 'Cached content-only match remains visible');
   assert.match(cachedSearch.previewText ?? '', /distinctive/);
   assert.match(cachedSearch.size ?? '', /MB$/, 'Cached result displays its local cache size');
   assert.equal(cachedSearch.previewStyle, 'block', 'Desktop cached context uses a pop-out preview');
   assert.equal(await page.$('.recent-search-clear') !== null, true, 'Search exposes an inline clear button while active');
+  // A body hit marks the body, in the amber the panel has always used, and does not
+  // mark a title that does not contain the query.
+  assert.equal(cachedSearch.bodyMarkText, 'distinctive', 'The body hit carries the mark');
+  assert.equal(cachedSearch.bodyMarkColor, 'rgb(255, 152, 0)', 'Body marks stay amber');
+  assert.equal(cachedSearch.titleMarkText, null, 'A title without the query is not marked');
+
+  // The note's own name is content, so it matches and it is marked — in the install
+  // button's blue, which is the one colour this app already uses for "the thing".
+  const titleMatch = await setQuery('Archive');
+  assert.ok(titleMatch.preview, 'A title-only match still opens a preview');
+  assert.equal(titleMatch.titleMarkText, 'Archive', 'The matched title is marked, case preserved');
+  assert.equal(titleMatch.titleMarkColor, 'rgb(138, 180, 248)', 'The title mark is the install button blue');
+  assert.equal(titleMatch.bodyMarkText, null, 'A title-only match marks no body text');
+
+  // The stamps are not search surface: `te` lives in creaTE d, in modified's cousin
+  // and in `text/vnd.tiddlywiki`, and none of them may bring a row or a panel back.
+  const stampOnly = await setQuery('te');
+  assert.equal(stampOnly.preview, null, 'A stamp-only match opens no preview');
+  assert.equal(stampOnly.row, null, 'A stamp-only match shows no cached row');
+  assert.equal(stampOnly.bodyMarkText, null, 'A stamp-only match marks nothing');
+
+  const restored = await setQuery('distinctive');
+  assert.match(restored.previewText ?? '', /distinctive/, 'The body query still matches after the others');
 
   await page.setViewport({ width: 600, height: 700 });
   const mobileSearch = await page.evaluate(() => ({
@@ -837,6 +1296,17 @@ try {
           return args.origin === 'https://personal.lithic.uk'
             ? { outcome: 'accepted', status: 200, detail: 'The instance asks for a password, and accepts this login.' }
             : { outcome: 'refused', status: 401, detail: 'The instance refused this login (401).' };
+        case 'instance_cache_search':
+          // What the app's own reader answers (see `instance_search.rs`): one instance
+          // with a cached wiki and one with nothing, asked for by the addresses the
+          // launcher bookmarked and only while a search is running.
+          return args.origins.map(origin => ({
+            origin,
+            truncated: false,
+            caches: origin === 'https://personal.lithic.uk'
+              ? [{ name: 'notes.lith', text: JSON.stringify([{ title: 'Archive Box', text: 'distinctive local findings' }]) }]
+              : []
+          }));
         case 'destroy_credentials':
           vault.entries = [];
           vault.state.exists = false;
@@ -1719,6 +2189,101 @@ try {
     navigationRequests.some(url => url.includes('lithic-from=')),
     '...carrying the marker that names this launcher, so the instance has a way back'
   );
+
+  // --- What another instance cached, found from this launcher's own search ---------
+  //
+  // The one thing the launcher's page can never read for itself: an instance is a
+  // different origin, and its cached wiki lives behind that origin. The app reads it
+  // (`instance_search.rs`) and hands back one hit per instance — this is orientation, not
+  // destination, so the instance's own search is where the rest of the matches are.
+  await reopenLauncher();
+  navigationRequests.length = 0;
+  // The section above detached its own recorder on the way out, so this one attaches
+  // its own and takes it off again at the end of the click below.
+  vaultPage.on('request', recordInstanceNavigation);
+  const instanceSearchBox = 'input[aria-label="Search recent Liths"]';
+  // A wide window for the geometry below, because the panel is hidden outright on a
+  // narrow one — the same behaviour a local match panel has, and not what this section
+  // is asking about. The window goes back to what it was before anything is clicked.
+  const previousViewport = vaultPage.viewport() ?? { width: 800, height: 600 };
+  await vaultPage.setViewport({ width: 1200, height: 900 });
+  const describeInstanceHit = () => vaultPage.evaluate(() => {
+    const row = [...document.querySelectorAll('.bookmark-row')].find(node => node.textContent.includes('personal.lithic.uk')) ?? null;
+    const preview = row?.querySelector('.cache-preview') ?? null;
+    const titleMark = row?.querySelector('mark.cache-preview-title-mark') ?? null;
+    const bodyMark = row?.querySelector('mark:not(.cache-preview-title-mark)') ?? null;
+    const rowRect = row?.getBoundingClientRect() ?? null;
+    const previewRect = preview?.getBoundingClientRect() ?? null;
+    return {
+      rows: [...document.querySelectorAll('.bookmark-row')].map(node => node.textContent.trim()),
+      panel: Boolean(preview),
+      previewText: preview?.textContent ?? null,
+      previewStyle: preview ? getComputedStyle(preview).display : null,
+      titleMarkText: titleMark?.textContent ?? null,
+      titleMarkColor: titleMark ? getComputedStyle(titleMark).color : null,
+      bodyMarkText: bodyMark?.textContent ?? null,
+      bodyMarkColor: bodyMark ? getComputedStyle(bodyMark).color : null,
+      // Beside the row, not under it: the panel's left edge is past the row's right edge
+      // and its centre is the row's centre — the same placement a local match gets.
+      gap: rowRect && previewRect ? Math.round(previewRect.left - rowRect.right) : null,
+      centreOff: rowRect && previewRect ? Math.round((previewRect.top + previewRect.height / 2) - (rowRect.top + rowRect.height / 2)) : null
+    };
+  });
+
+  // The name of the cached note matches, which is content — and the row is drawn for it
+  // even though nothing about the address `foobar.com` contains the query.
+  await vaultPage.type(instanceSearchBox, 'Archive');
+  await new Promise(resolve => setTimeout(resolve, 300));
+  const titled = await describeInstanceHit();
+  assert.ok(titled.panel, `An instance's own match draws its panel (rows: ${JSON.stringify(titled.rows)})`);
+  assert.equal(titled.titleMarkText, 'Archive', 'The matched note name is marked, case preserved');
+  assert.equal(titled.titleMarkColor, 'rgb(138, 180, 248)', 'The instance panel marks the name in the install button blue');
+  assert.equal(titled.bodyMarkText, null, '...and marks no body text, which did not match');
+
+  await vaultPage.click('.recent-search-clear');
+  await vaultPage.type(instanceSearchBox, 'distinctive');
+  await new Promise(resolve => setTimeout(resolve, 300));
+  const instanceHit = await describeInstanceHit();
+  assert.ok(instanceHit.panel, 'A body match in another instance draws its panel too');
+  assert.match(instanceHit.previewText ?? '', /Archive Box/, '...naming the note it was found in');
+  assert.equal(instanceHit.bodyMarkText, 'distinctive', '...with the hit marked in the body');
+  assert.equal(instanceHit.bodyMarkColor, 'rgb(255, 152, 0)', 'Body marks stay amber, here as everywhere');
+  assert.equal(instanceHit.previewStyle, 'block', 'The instance panel is drawn on a desktop window');
+  assert.ok((instanceHit.gap ?? -1) >= 0, `The panel sits beside the row, not under it (gap ${instanceHit.gap}px)`);
+  assert.ok(
+    Math.abs(instanceHit.centreOff ?? 99) <= 1,
+    `...centred on the row it belongs to (off by ${instanceHit.centreOff}px)`
+  );
+  // One hit per instance and no more: the panel carries the single best match, and the
+  // instance it is beside is the one whose cache answered.
+  assert.equal(
+    instanceHit.rows.filter(row => row.includes('foobar.com')).length,
+    0,
+    'An instance with nothing cached is not dragged in by the query'
+  );
+
+  await vaultPage.setViewport(previousViewport);
+
+  // Clicking it hands the window over already searching, which is the whole reason the
+  // panel is a control rather than a second label: the instance's own launcher comes up
+  // looking for these words instead of with an empty box.
+  await vaultPage.evaluate(() => {
+    const row = [...document.querySelectorAll('.bookmark-row')].find(node => node.textContent.includes('personal.lithic.uk'));
+    row.querySelector('.cache-preview').click();
+  });
+  await vaultPage.waitForSelector('.instance-unlock-pin .pin-box');
+  assert.equal(
+    navigationRequests.length,
+    0,
+    'The panel goes through the unlock rather than around it'
+  );
+  await typePin(vaultPage, '.instance-unlock-pin', 'L1TH1C');
+  await new Promise(resolve => setTimeout(resolve, 400));
+  const instanceOpened = navigationRequests.find(url => url.startsWith('https://personal.lithic.uk')) ?? null;
+  assert.ok(instanceOpened, `Then the instance opens (saw ${JSON.stringify(navigationRequests)})`);
+  assert.match(instanceOpened, /[?&]q=distinctive/, '...carrying the search, through the dialog, so it arrives searching');
+  assert.match(instanceOpened, /lithic-from=/, '...and the marker that gives the instance a way back');
+  vaultPage.off('request', recordInstanceNavigation);
 
   // --- Starting over, and the one control knowing the secret cannot undo ---------
   await vaultPage.goto(`file://${artifact}?mode=tauri`, { waitUntil: 'domcontentloaded' });

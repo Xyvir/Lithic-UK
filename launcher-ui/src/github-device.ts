@@ -49,6 +49,36 @@ export function parseDevicePoll(raw: unknown): DevicePollResult {
   return { kind: 'failed', message: 'Authorization failed or expired. Generate a new code.' };
 }
 
+/**
+ * Parse one poll result from the *server's* CGI, which relays GitHub raw.
+ *
+ * The desktop app's polls are normalized in Rust (`{pending: true}`), so
+ * `parseDevicePoll` above is the shape Rust hands back. A self-hosted instance
+ * has no normalization step: the JSON here is GitHub's own, error codes and all,
+ * which is why the codes are named rather than collapsed into one failure —
+ * `expired_token` is not the same answer as `access_denied`, and only the second
+ * one means somebody said no.
+ */
+export function parseServerDevicePoll(raw: unknown): DevicePollResult {
+  if (!raw || typeof raw !== 'object') return { kind: 'failed', message: 'Unexpected response from GitHub' };
+  const record = raw as Record<string, unknown>;
+  if (typeof record.access_token === 'string' && record.access_token) {
+    return { kind: 'authorized', token: record.access_token };
+  }
+  switch (record.error) {
+    case 'authorization_pending':
+      return { kind: 'pending', slowDown: false };
+    case 'slow_down':
+      return { kind: 'pending', slowDown: true };
+    case 'expired_token':
+      return { kind: 'failed', message: 'That code expired. Start again for a new one.' };
+    case 'access_denied':
+      return { kind: 'failed', message: 'Authorization denied on GitHub.' };
+    default:
+      return { kind: 'failed', message: 'Authorization failed or expired. Generate a new code.' };
+  }
+}
+
 /** GitHub's slow_down directive adds 5 seconds to every subsequent interval (RFC 8628 §3.5). */
 export function pollDelayMs(intervalSeconds: number | undefined, slowDown: boolean): number {
   const base = Math.max(1, Math.floor(intervalSeconds ?? 5));

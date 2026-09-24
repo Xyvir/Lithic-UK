@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onMount } from 'svelte';
-  import { launcherReturn, withLauncherHandoff, type LauncherMode } from './mode';
+  import { handoffQuery, LAUNCHER_QUERY_PARAM, launcherReturn, withLauncherHandoff, type LauncherMode } from './mode';
   import { createFileBridge, tauriInvoke, tauriListen, saveTextVerifiably } from './file-bridge';
   import { orphanPill, orphanDownloadNote, type OrphanDownloadState } from './orphan-download';
   import { isScratchFileName, isHtmlMonolithName, tracksUnsavedEdits, resolveMountName, resolveScratchKind, type ScratchKind } from './scratch-editor';
@@ -15,9 +15,11 @@
   import { fetchRemoteFiles, fetchRemoteWiki, probePatchApi, createLockHeartbeat, readRemoteLock, uploadRemoteFile, webdavUrl, resolveSessionId, lithUploadName, type WebdavFile } from './webdav';
   import { normalizeLithName } from './legacy-saver';
   import { searchCachedWikis } from './cache-search';
+  import { topHits, type InstanceCacheRead, type InstanceReads } from './instance-search';
   import { computeBackupCoverage, folderOf, hasBackedUpRepo, orphanedEntries, reindexFolders, syncedDirFor, type CoverageRow, type RebuildOrphan } from './backup-coverage';
   import { parseDeviceCode, parseDevicePoll, pollDelayMs, formatUserCode, generateRepoName, partitionRepos } from './github-device';
-  import { syncIndicator, shouldHeartbeat, healthFailure, SYNC_PULSE_MS, type SyncIndicator, type HealthState } from './git-sync-health';
+  import { syncIndicator, shouldHeartbeat, healthFailure, verifiedAge, SYNC_PULSE_MS, type SyncIndicator, type HealthState } from './git-sync-health';
+  import { createServerRepo, disconnectServerSync, fetchServerSyncStatus, listServerRepos, pollServerDeviceToken, requestServerDeviceCode, serverSyncIndicator, setupServerSync, type ServerSyncStatus } from './server-git-sync';
   import { serializeJsonToLith, parseLithToJSON } from './lithic-format';
   // Inlined as a base64 data URL (assetsInlineLimit: Infinity) so the brand
   // mark survives when launcher.html is bundled into the Tauri app.
@@ -171,6 +173,16 @@
   // Advanced fallback (direct PAT), hidden behind a details toggle.
   let gitRepoInput = '';
   let gitTokenInput = '';
+
+  // The same flow, backing up an *instance* instead of a folder: there /data is
+  // the repository and the server does the git work, so all the launcher page
+  // holds is the last answer it got. Nothing about the connection is local, and
+  // no token this machine sees is used for anything except the setup request.
+  let serverSyncStatus: ServerSyncStatus | null = null;
+  let serverSyncFailed = false;
+  let serverSyncStatusTimer: ReturnType<typeof setInterval> | null = null;
+  /** Bumped by each status poll, so the button's "syncing" window can expire. */
+  let serverSyncTick = 0;
 
   // Sync health. The marker poll answers "is this folder wired to a
   // repository"; only the heartbeat answers "is the backup still working", and
@@ -451,7 +463,7 @@
   $: showBackupStatus = mode === 'tauri' && hasBackedUpRepo(backupRoots);
   // Where the list is derived rather than authored — the desktop app's synced
   // folders, and self-host's server — rebuilding beats clearing.
-  $: showRebuildControl = isSelfHost() || showBackupStatus;
+  $: showRebuildControl = showBackupStatus;
 
   /**
    * Offer to copy a Lith that no backup covers into the folder that is covered.
@@ -561,6 +573,7 @@
 
   /** Ask Rust whether the target folder is a Lithic-managed sync repo. */
   async function refreshGitSyncStatus(applyView: boolean): Promise<void> {
+    if (isSelfHost()) return refreshServerSyncStatus(applyView);
     const target = gitSyncActivePath();
     // A verdict describes one folder: re-pointing at another makes it
     // meaningless, and showing it would be worse than showing nothing. Keyed on
@@ -593,9 +606,7 @@
     gitSyncView = 'connecting';
     gitPollAborted = false;
     try {
-      const raw = await tauriInvoke<unknown>('github_device_code');
-      const parsed = parseDeviceCode(raw);
-      if (!parsed) throw new Error('GitHub did not return a device code');
+      const parsed = await requestDeviceCode();
       gitUserCode = parsed.user_code;
       void pollDeviceToken(parsed.device_code, parsed.interval);
     } catch (error) {
@@ -614,7 +625,9 @@
       await new Promise((resolve) => setTimeout(resolve, delay));
       if (gitPollAborted) return;
       try {
-        const decision = parseDevicePoll(await tauriInvoke<unknown>('github_device_poll', { deviceCode }));
+        const decision = isSelfHost()
+          ? await pollServerDeviceToken(deviceCode)
+          : parseDevicePoll(await tauriInvoke<unknown>('github_device_poll', { deviceCode }));
         if (decision.kind === 'authorized') {
           gitAuthActive = false;
           gitDeviceToken = decision.token;
@@ -647,8 +660,10 @@
     gitSyncBusy = true;
     gitSyncError = '';
     try {
-      const repos = await tauriInvoke<Array<{ full_name: string }>>('github_list_repos', { token: gitDeviceToken });
-      const partitioned = partitionRepos(Array.isArray(repos) ? repos : []);
+      const partitioned = isSelfHost()
+        ? await listServerRepos(gitDeviceToken ?? '')
+        : partitionRepos(await tauriInvoke<Array<{ full_name: string }>>('github_list_repos', { token: gitDeviceToken }));
+      if ('ok' in partitioned) throw new Error(partitioned.message);
       gitManagedRepos = partitioned.managed;
       gitOtherRepos = partitioned.other;
       gitRepoNamePending = generateRepoName();
@@ -674,7 +689,12 @@
   async function finalizeGitSync() {
     const target = gitSyncActivePath();
     const repo = gitRepoSelection();
-    if (!target || !repo || !gitDeviceToken || gitSyncBusy) return;
+    if (!repo || !gitDeviceToken || gitSyncBusy) return;
+    if (isSelfHost()) return finishServerSync(repo, gitDeviceToken, gitRepoChoice === '__create__');
+    if (!target) return;
+    // Same rule as finishServerSync, for the same reason: the create's answer is
+    // the name the remote needs, and the picked name is not it.
+    let targetRepo = repo;
     gitSyncBusy = true;
     gitSyncError = '';
     gitSyncMessage = '';
@@ -682,9 +702,10 @@
     try {
       if (gitRepoChoice === '__create__') {
         const created = await tauriInvoke<{ full_name: string }>('github_create_repo', { token: gitDeviceToken, name: repo });
+        targetRepo = created.full_name;
         gitSyncMessage = `Created ${created.full_name}. `;
       }
-      const result = await tauriInvoke<GitSyncSetupResult>('git_sync_setup', { path: target, repo, token: gitDeviceToken });
+      const result = await tauriInvoke<GitSyncSetupResult>('git_sync_setup', { path: target, repo: targetRepo, token: gitDeviceToken });
       gitSyncMessage += result?.summary || 'Synced';
       gitDeviceToken = null;
       gitSyncView = 'connected';
@@ -702,7 +723,12 @@
   /** Advanced fallback: direct token entry (original MVP path). */
   async function connectGitSync() {
     const target = gitSyncActivePath();
-    if (!target || gitSyncBusy) return;
+    if (gitSyncBusy) return;
+    // The same escape hatch, pointed at the instance: the server's setup route
+    // takes a token as readily as the device flow's, so a blocked OAuth app or a
+    // hands-off server is still reachable from the dialog.
+    if (isSelfHost()) return finishServerSync(gitRepoInput.trim(), gitTokenInput, false);
+    if (!target) return;
     gitSyncBusy = true;
     gitSyncError = '';
     gitSyncMessage = '';
@@ -725,7 +751,29 @@
 
   async function disconnectGitSync() {
     const target = gitSyncActivePath();
-    if (!target || gitSyncBusy) return;
+    if (gitSyncBusy) return;
+    if (isSelfHost()) {
+      const agreed = await askConfirmation({
+        title: 'Disconnect GitHub Sync?',
+        body: 'Saves on this server stop syncing to GitHub.',
+        confirmLabel: 'Disconnect'
+      });
+      if (!agreed) return;
+      gitSyncBusy = true;
+      try {
+        if (!(await disconnectServerSync())) {
+          gitSyncError = 'The instance did not confirm the disconnect.';
+          return;
+        }
+        gitSyncConnectedRepo = '';
+        gitSyncView = 'disconnected';
+        await refreshServerSyncStatus(false);
+      } finally {
+        gitSyncBusy = false;
+      }
+      return;
+    }
+    if (!target) return;
     const confirmed = await askConfirmation({
       title: 'Disconnect GitHub Sync?',
       body: 'Saves in this folder stop syncing to GitHub.',
@@ -759,6 +807,113 @@
     gitSyncError = '';
     gitSyncMessage = '';
     await startDeviceAuth();
+  }
+
+  // --- GitHub backup of a self-hosted instance -------------------------------
+
+  /**
+   * Ask the instance about its repository.
+   *
+   * `applyView` is the difference between the button's poll and the dialog's: a
+   * background refresh must not yank the dialog out of the flow the user is in
+   * the middle of. Nothing here can fail in a way that needs handling — an
+   * instance that never answers is a state the button renders ("did not answer")
+   * and the dialog repeats, which is why there is no throw to catch: on a plain
+   * WebDAV server this is the ordinary answer rather than a fault.
+   */
+  async function refreshServerSyncStatus(applyView: boolean): Promise<void> {
+    const status = await fetchServerSyncStatus();
+    serverSyncFailed = status === null;
+    if (status) {
+      serverSyncStatus = status;
+      // The repo name is shared with the dialog's connected view, so both ends of
+      // the same fact come from the server's answer rather than from what we
+      // asked it to do.
+      gitSyncConnectedRepo = status.connected ? status.repo : '';
+    }
+    if (applyView && gitSyncView !== 'connecting' && gitSyncView !== 'selecting') {
+      gitSyncView = status?.connected ? 'connected' : 'disconnected';
+    }
+    serverSyncTick += 1;
+  }
+
+  /**
+   * Poll the instance's status every 15s while the page is a self-hosted
+   * launcher — the legacy launcher's interval, kept for a reason that outlives
+   * parity: the *server* keeps syncing on its own, watcher passes included, so a
+   * status read only when the dialog opened would be describing the past. It is
+   * one small JSON request, and it is the only thing that lets the button say
+   * "syncing" for a sync nobody in this browser started.
+   */
+  function startServerSyncPolling(): void {
+    if (serverSyncStatusTimer || !isSelfHost()) return;
+    serverSyncStatusTimer = setInterval(() => void refreshServerSyncStatus(false), 15_000);
+  }
+
+  /**
+   * Point the instance's data directory at a repository, then re-read its list.
+   *
+   * The list matters: connecting brings down any Lith the repository has and the
+   * server did not, so the rows on screen are out of date the moment this lands.
+   * `createFirst` is the flow's "+ Create …" choice, folded in here so the whole
+   * setup — creating, pointing, pushing — is one busy state with one progress
+   * line, rather than a progress line that starts after the slow part.
+   */
+  async function finishServerSync(repo: string, token: string, createFirst: boolean): Promise<void> {
+    // The repository the instance is pointed at. A fresh repository answers with
+    // its full `owner/name`, and the setup builds a remote URL out of whatever it
+    // is given: a bare name has no owner, so there is nowhere to push. The
+    // legacy launcher passed the create's `full_name` for the same reason.
+    let targetRepo = repo;
+    gitSyncBusy = true;
+    gitSyncError = '';
+    gitSyncMessage = '';
+    startGitSyncProgress();
+    try {
+      if (createFirst) {
+        gitSyncStage = 'Creating the repository…';
+        const created = await createServerRepo(token, repo);
+        if (typeof created !== 'string') {
+          gitSyncError = created.message;
+          return;
+        }
+        targetRepo = created;
+        gitSyncMessage = `Created ${created}. `;
+      }
+      gitSyncStage = 'Setting up the backup…';
+      const result = await setupServerSync(token, targetRepo);
+      if (!result.ok) {
+        gitSyncError = result.message;
+        return;
+      }
+      gitDeviceToken = null;
+      gitSyncMessage += `Backing up github.com/${targetRepo}.`;
+      gitSyncView = 'connected';
+      await refreshServerSyncStatus(false);
+      await refreshRemoteList();
+    } finally {
+      gitSyncBusy = false;
+      endGitSyncProgress();
+    }
+  }
+
+  /**
+   * The device code, from whichever side is doing the authorizing.
+   *
+   * Rust runs the desktop flow; on an instance the *server* asks GitHub, with its
+   * own client id, because the token it receives is the one it will push with.
+   * Both failures are raised the same way so the caller's catch renders one
+   * message from one code path.
+   */
+  async function requestDeviceCode() {
+    if (isSelfHost()) {
+      const code = await requestServerDeviceCode();
+      if ('ok' in code) throw new Error(code.message);
+      return code;
+    }
+    const parsed = parseDeviceCode(await tauriInvoke<unknown>('github_device_code'));
+    if (!parsed) throw new Error('GitHub did not return a device code');
+    return parsed;
   }
 
   /** The last step of a reconnect: land the token on the existing remote. */
@@ -820,6 +975,28 @@
     gitSyncIconState = indicator.state;
     gitSyncIconTitle = indicator.title;
   }
+
+  /**
+   * The heading's cloud button, in whichever mode is showing it.
+   *
+   * One control with two sources, because they answer the same question about
+   * different subjects: on the desktop it is this machine's folder, on an
+   * instance it is that server's own repository. `serverSyncTick` is named so the
+   * self-host reading is recomputed on each poll — the "syncing" window is
+   * derived from the clock, and nothing else would move it along.
+   */
+  $: serverSync = (() => {
+    void serverSyncTick;
+    return serverSyncIndicator(serverSyncStatus, Date.now(), serverSyncFailed);
+  })();
+  $: headingSyncState = isSelfHost() ? serverSync.state : gitSyncIconState;
+  $: headingSyncTitle = isSelfHost() ? serverSync.title : gitSyncIconTitle;
+
+  /** How long ago the instance last synced, or null when it never has. */
+  $: serverSyncAge = (() => {
+    void serverSyncTick;
+    return serverSyncStatus?.lastSync ? verifiedAge(serverSyncStatus.lastSync, Date.now()) : null;
+  })();
 
   /** Whether the dialog should offer a way out of the current state. */
   $: gitSyncHealthBroken =
@@ -1153,6 +1330,47 @@
     }
   }
 
+  /**
+   * Other instances' cached wikis, read once per instance per session.
+   *
+   * A cached wiki lives in the storage of the instance it belongs to, and this page can
+   * never read that: an instance is a different origin. The app can, because every one of
+   * its webviews shares one profile — so the reading is done for it, by its own runtime
+   * (`instance_search.rs`), and the addresses it is asked about are exactly the bookmarks
+   * below. Nothing is asked for an address the user did not save.
+   */
+  let instanceReads: InstanceReads = {};
+  let instanceReadBusy = false;
+  $: bookmarkOrigins = bookmarks.map((entry) => entry.url);
+  // One hit per instance for whatever is typed right now — recomputed from what was
+  // already read, so typing never asks the app for anything again.
+  $: instanceCacheHits = topHits(instanceReads, search);
+  // Only while a search is running, and only for addresses not read yet: no search
+  // means no reason to hold anybody's cache in memory.
+  $: if (mode === 'tauri' && search.trim() && bookmarkOrigins.length > 0) void readInstanceCaches(bookmarkOrigins);
+
+  async function readInstanceCaches(origins: string[]) {
+    const missing = origins.filter((origin) => !(origin in instanceReads));
+    if (missing.length === 0 || instanceReadBusy) return;
+    instanceReadBusy = true;
+    try {
+      const reads = await tauriInvoke<InstanceCacheRead[]>('instance_cache_search', { origins: missing });
+      const next = { ...instanceReads };
+      for (const read of reads) next[read.origin] = read;
+      instanceReads = next;
+    } catch {
+      // No such command in this build, or a runtime that refused it: no instance hits,
+      // which is what the launcher showed before any of this existed. The addresses are
+      // recorded as read anyway, so a build without the command is not asked on every
+      // keystroke for an answer it will never give.
+      const next = { ...instanceReads };
+      for (const origin of missing) next[origin] = { origin, caches: [], truncated: false };
+      instanceReads = next;
+    } finally {
+      instanceReadBusy = false;
+    }
+  }
+
   $: filteredRecent = recentFiles.filter((file) => {
     const name = getEntryName(file);
     return name.toLowerCase().includes(search.toLowerCase()) || Boolean(cacheSearchMatches[name]?.preview);
@@ -1161,6 +1379,21 @@
   // Self-host: the server's own Liths are the primary list, filtered by the
   // same search box as the local recents.
   $: filteredRemote = remoteFiles.filter((file) => file.name.toLowerCase().includes(search.toLowerCase()));
+
+  /**
+   * Bookmark rows to draw: the address matches, *or* the instance holds a cached wiki
+   * that matches.
+   *
+   * The second half is the rule `filteredRecent` already follows for this device's own
+   * caches, and it has to be followed here too — without it a query that appears only
+   * inside an instance's wiki renders no row, which is the one case the whole search is
+   * for.
+   */
+  $: filteredBookmarks = bookmarks.filter((entry) =>
+    entry.label.toLowerCase().includes(search.toLowerCase()) ||
+    entry.url.toLowerCase().includes(search.toLowerCase()) ||
+    Boolean(instanceCacheHits[entry.url]?.preview)
+  );
 
   $: filteredCached = Object.values(cachedEntries).filter((entry) => {
     const isRecent = recentFiles.some((file) => getEntryName(file) === entry.name);
@@ -1511,7 +1744,17 @@
     }
   }
 
+  /**
+   * The one button's two jobs, decided by the mode rather than offered as a choice.
+   *
+   * On a device with files, mounting a Lith means opening one from disk and working on it
+   * there. A self-hosted instance has no such Lith to open: the server's store *is* the
+   * library, so the useful direction is the other one — send a file up and open it from the
+   * server. A local file opened *in* self-host mode would be a Lith from another mode's
+   * world sitting in this one's list, which is what this mode deliberately does not do.
+   */
   async function mountFromDisk() {
+    if (mode === 'self-host') return uploadLithToServer();
     busy = true; status = 'Opening…';
     try {
       const result = await files.open();
@@ -1521,6 +1764,43 @@
       status = `Mounted ${result.name}`;
     } catch (error) { status = `Open failed: ${error instanceof Error ? error.message : String(error)}`; }
     finally { busy = false; }
+  }
+
+  /**
+   * Put a chosen file on the server, then open it from there.
+   *
+   * Uploads land as `.lith` by the same rule the create path uses, and the list is re-read
+   * before opening, because a Lith that is on the server but not in the list is one nobody
+   * could find again. An upload over a name the server already holds replaces it, and since
+   * that copy exists nowhere else — this mode keeps no local recents to fall back on — it is
+   * asked about first, in the one colour this app uses for an act that cannot be undone.
+   */
+  async function uploadLithToServer(): Promise<void> {
+    busy = true; status = 'Opening…';
+    try {
+      const result = await files.open();
+      if (!result) { status = ''; return; }
+      const name = lithUploadName(result.name);
+      if (remoteFiles.some((file) => file.name.toLowerCase() === name.toLowerCase())) {
+        status = ''; busy = false;
+        const replace = await askConfirmation({
+          title: 'Replace this Lith?',
+          body: `${name} is already on this server. Uploading replaces it.`,
+          confirmLabel: 'Replace',
+          danger: true
+        });
+        if (!replace) return;
+        busy = true;
+      }
+      status = `Uploading ${name}…`;
+      await uploadRemoteFile(name, result.text);
+      await refreshRemoteList();
+      busy = false;
+      await openRemoteFile(name);
+    } catch (error) {
+      remoteError = `Could not upload: ${error instanceof Error ? error.message : String(error)}`;
+      busy = false;
+    }
   }
 
   async function openRecent(recent: RecentEntry | { name?: string; path?: string; text?: string; handle?: any }) {
@@ -2246,6 +2526,14 @@
       let orphans: RebuildOrphan[] = [];
 
       if (isSelfHost()) {
+        // Unreachable from the launcher as it stands: self-host draws neither rebuild
+        // control, because the list on screen is the server's and the caches this branch
+        // repairs are the device's, which that mode no longer lists. Kept because the
+        // second pass below — reading each server Lith and indexing it — is the only way
+        // this device ever learns the contents of a server wiki it has not saved, and a
+        // mode-specific control for that (something that says it indexes, rather than
+        // "Rebuild Recents") is the obvious way to bring it back.
+        //
         // The server *is* the list here, so rebuilding means re-reading it.
         // Writing the server's names into the local recents would list every
         // wiki twice.
@@ -2455,6 +2743,23 @@
   }
 
   onMount(() => {
+    // A window handed over *by* a search starts searching. This launcher is the one an
+    // instance serves as well as the one this device runs, so the same code answers
+    // both: the query rode in on the handoff (see `handoffQuery`), and it is taken back
+    // out of the address because it belongs to the handover rather than to the URL the
+    // instance then owns — a reload should show the list, not repeat a finished search.
+    const handedQuery = handoffQuery(window.location);
+    if (handedQuery) {
+      search = handedQuery;
+      try {
+        const cleared = new URL(window.location.href);
+        cleared.searchParams.delete(LAUNCHER_QUERY_PARAM);
+        window.history.replaceState(null, '', cleared.href);
+      } catch {
+        // An address that cannot be rewritten still carries the search, which is the
+        // part of this that matters.
+      }
+    }
     loadRecent();
     bookmarks = readBookmarkEntries();
     // The emoji favicon is the instance's identity in the tab, so restore it
@@ -2462,6 +2767,11 @@
     restoreInstanceIcon();
     if (mode === 'self-host') {
       void refreshRemoteList();
+      // Whether this instance is backed up, which is a question only the instance
+      // can answer — and one that keeps changing on its own, because the server
+      // commits and pushes without this page doing anything at all.
+      void refreshServerSyncStatus(false);
+      startServerSyncPolling();
     } else {
       // Meta-launcher: only the local modes keep a list of remote instances.
       void refreshBookmarkIcons();
@@ -2716,7 +3026,7 @@
    * it when this launcher comes back, so opening the same instance again asks
    * again.
    */
-  let instanceUnlock: { origin: string; address: string } | null = null;
+  let instanceUnlock: { origin: string; address: string; query: string } | null = null;
   let instanceSecret = '';
   let instanceUnlockError = '';
   let instanceUnlockBusy = false;
@@ -2732,7 +3042,7 @@
    * an arbitrary address — the manager is a list and does not add — so a credential can
    * only ever be written for an instance the user was already pointing at.
    */
-  let credentialOffer: { origin: string; address: string; kind: 'prompt' | 'row' } | null = null;
+  let credentialOffer: { origin: string; address: string; kind: 'prompt' | 'row'; query: string } | null = null;
   let offerPin = '';
   let offerPinConfirm = '';
   let offerUser = '';
@@ -2963,23 +3273,46 @@
    * dialog that can save a login or lend one for this load alone. Anything else simply
    * opens, because there is nothing the app could answer with and nothing worth
    * interrupting for.
+   *
+   * `query` is the words this open is a search for, and only the panel beside an
+   * instance's match passes one. It rides the handoff through every one of those three
+   * paths, including the dialogs: an instance that asks for a login before it opens must
+   * still arrive searching once it has been answered, or the one gesture that saves the
+   * retyping would be the one gesture that loses it.
    */
-  async function openBookmarkedInstance(url: string) {
+  /**
+   * Whether the list is empty, and what to say about it.
+   *
+   * Self-host and the modes with files enumerate different things — the server's store
+   * versus this device — so emptiness is two questions rather than one condition that has
+   * to stay right for both. The read counts as empty until it lands, since "nothing on this
+   * server yet" while the list is still arriving would be a lie — and it stays empty when
+   * the read *failed*, because there the error line above already says what happened and
+   * "no Liths yet" would be a second, wrong answer to the same question.
+   */
+  $: listEmpty = mode === 'self-host'
+    ? filteredRemote.length === 0 && !remoteBusy && !remoteError
+    : filteredRecent.length === 0 && filteredCached.length === 0 && filteredRemote.length === 0 && filteredBookmarks.length === 0;
+  $: emptyMessage = mode === 'self-host'
+    ? (search.trim() ? 'No matching Liths.' : 'No Liths on this server yet.')
+    : (search.trim() ? 'No matching Liths.' : 'No recent Liths.');
+
+  async function openBookmarkedInstance(url: string, query = '') {
     const origin = vaultOriginOf(url);
     if (mode === 'tauri' && vaultStatus && origin) {
       if (vaultCoverage.has(origin)) {
-        instanceUnlock = { origin, address: url };
+        instanceUnlock = { origin, address: url, query };
         instanceSecret = '';
         instanceUnlockError = '';
         instanceSecretReset += 1;
         return;
       }
       if (await asksForPassword(url)) {
-        openCredentialOffer(origin, url, 'prompt');
+        openCredentialOffer(origin, url, 'prompt', query);
         return;
       }
     }
-    window.location.href = withLauncherHandoff(url, window.location.href);
+    window.location.href = withLauncherHandoff(url, window.location.href, query);
   }
 
   /**
@@ -3023,7 +3356,7 @@
       await tauriInvoke('unlock_for_instance', { origin: target.origin, secret: pin });
       instanceSecret = '';
       instanceUnlock = null;
-      window.location.href = withLauncherHandoff(target.address, window.location.href);
+      window.location.href = withLauncherHandoff(target.address, window.location.href, target.query);
     } catch (error) {
       instanceUnlockError = error instanceof Error ? error.message : String(error);
       // A refused PIN is typed again rather than edited, so the boxes go back to empty.
@@ -3047,8 +3380,8 @@
    * The address is passed in rather than typed: both entries know it already, which is
    * the whole reason there is no form anywhere that would accept any address at all.
    */
-  function openCredentialOffer(origin: string, address: string, kind: 'prompt' | 'row') {
-    credentialOffer = { origin, address, kind };
+  function openCredentialOffer(origin: string, address: string, kind: 'prompt' | 'row', query = '') {
+    credentialOffer = { origin, address, kind, query };
     offerPin = '';
     offerPinConfirm = '';
     offerUser = '';
@@ -3152,7 +3485,7 @@
       // rewrote: a stale set would leave it grey for a login that now exists.
       void refreshVaultStatus();
       void refreshVaultCoverage();
-      window.location.href = withLauncherHandoff(target.address, window.location.href);
+      window.location.href = withLauncherHandoff(target.address, window.location.href, target.query);
     } catch (error) {
       offerError = error instanceof Error ? error.message : String(error);
       offerPinReset += 1;
@@ -3199,7 +3532,7 @@
       credentialOffer = null;
       // Nothing was written, so no row colour changes and no coverage needs asking
       // again: the vault holds exactly what it held a moment ago.
-      window.location.href = withLauncherHandoff(target.address, window.location.href);
+      window.location.href = withLauncherHandoff(target.address, window.location.href, target.query);
     } catch (error) {
       offerError = error instanceof Error ? error.message : String(error);
     } finally {
@@ -3247,13 +3580,14 @@
     <div class="heading-copy">
       <h1>Lithic - Launcher</h1>
       {#if isSelfHost()}
-        <!-- The heading names the open Lith and offers the refresh control,
-             nothing else: which launcher you are in is evident from the page,
-             and how a save is transmitted is the server's business. The mount
-             status line says whether the patch API answered. -->
+        <!-- The heading names the open Lith and nothing else: which launcher you are in is
+             evident from the page, and how a save is transmitted is the server's business.
+             There is no re-list control either — asking the server again is what the
+             browser's own reload is for, and an in-page button for it was one more thing to
+             explain for a job the address bar already does. The status line below says
+             whether the patch API answered. -->
         <div class="remote-line">
           {#if activeRemote}<span class="remote-file">{activeRemote.name}</span>{/if}
-          <button class="remote-refresh" type="button" on:click={refreshRemoteList} disabled={remoteBusy} title="Re-list this server’s Liths" aria-label="Refresh the server’s Lith list">{remoteBusy ? '…' : '⟳'}</button>
         </div>
       {/if}
       {#if remoteNotice}<div class="status-line">{remoteNotice}</div>{/if}
@@ -3263,7 +3597,15 @@
     </div>
     <div class="heading-actions">
     {#if launcherReturnTarget}<button class="back-to-launcher" type="button" data-target={launcherReturnTarget.kind === 'url' ? launcherReturnTarget.url : 'history'} aria-label="Back to the main launcher" title="Back to the main launcher" on:click={backToLauncher}><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M19 12H5"/><path d="m11 18-6-6 6-6"/></svg></button>{/if}
-    {#if mode === 'webapp'}<button class="help-button" aria-label="View Introduction" title="View Introduction" on:click={openIntro}>{introBusy ? '…' : '?'}</button>{:else if mode === 'tauri'}<button class="sync-button {gitSyncIconState}" aria-label="GitHub Sync" title={gitSyncIconTitle} on:click={openGitSyncModal}><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 17.6A5 5 0 0 0 18 8h-1.3A8 8 0 1 0 4 16.3"/><path d="M12 12v9"/><path d="m8.5 15.5 3.5-3.5 3.5 3.5"/></svg>{#if gitSyncIconState === 'checking'}<span class="sync-glyph ring" aria-hidden="true"></span>{:else if gitSyncIconState === 'error'}<span class="sync-glyph alert" aria-hidden="true">!</span>{:else if gitSyncIconState === 'connected'}<span class="sync-glyph dot" aria-hidden="true"></span>{/if}</button>{/if}
+    <!--
+      The backup button, on the desktop and on an instance alike. The legacy launcher
+      only revealed it once the server had answered with its file list — a proxy for
+      "this instance speaks the Lithic API" — and that gate is dropped here on purpose:
+      the button's own answer now distinguishes ok from inaccessible (the state is
+      `error` with the reason in its tooltip), so an offline instance is told apart from
+      a server that cannot do this at all instead of the control silently not existing.
+    -->
+    {#if mode === 'webapp'}<button class="help-button" aria-label="View Introduction" title="View Introduction" on:click={openIntro}>{introBusy ? '…' : '?'}</button>{:else if mode === 'tauri' || isSelfHost()}<button class="sync-button {headingSyncState}" aria-label="GitHub Sync" title={headingSyncTitle} on:click={openGitSyncModal}><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 17.6A5 5 0 0 0 18 8h-1.3A8 8 0 1 0 4 16.3"/><path d="M12 12v9"/><path d="m8.5 15.5 3.5-3.5 3.5 3.5"/></svg>{#if headingSyncState === 'checking'}<span class="sync-glyph ring" aria-hidden="true"></span>{:else if headingSyncState === 'error'}<span class="sync-glyph alert" aria-hidden="true">!</span>{:else if headingSyncState === 'connected'}<span class="sync-glyph dot" aria-hidden="true"></span>{/if}</button>{/if}
     </div>
   </header>
   {#if pendingImports.length > 0}
@@ -3283,24 +3625,31 @@
     <div class="modal-overlay" role="presentation" on:click={(event) => event.currentTarget === event.target && closeGitSyncModal()}>
       <div class="launcher-modal git-sync-modal" role="dialog" aria-modal="true" aria-labelledby="gitsync-title">          <button class="modal-close" aria-label="Close GitHub sync dialog" on:click={closeGitSyncModal}>×</button>
         <h2 id="gitsync-title">GitHub Sync</h2>
-        {#if gitSyncFolder}
+        {#if mode === 'tauri' && gitSyncFolder}
           <p class="sync-folder" title={gitSyncFolder}><span class="sync-folder-label">Folder</span> {gitSyncFolder}</p>
         {/if}
         {#if showBackupStatus && backupCoverage.localOnlyPaths.length > 0}
           <p class="backup-status" role="status">{backupCoverage.backedUp} of {backupCoverage.tracked} recent liths backed up</p>
         {/if}
-        {#if !gitSyncActivePath()}
+        {#if mode === 'tauri' && !gitSyncActivePath()}
           <p class="status-line error" role="alert">Save a Lith to disk first, since sync backs up its folder.</p>
         {:else if gitSyncView === 'disconnected'}
-          <p>Back up this folder to GitHub. Saves push automatically.</p>
+          {#if isSelfHost()}
+            <p>Back up this server to GitHub. Its saves push automatically.</p>
+            {#if serverSyncFailed}
+              <p class="status-line error" role="alert">This instance did not answer about GitHub backups.</p>
+            {/if}
+          {:else}
+            <p>Back up this folder to GitHub. Saves push automatically.</p>
+          {/if}
           {#if gitSyncError}<p class="status-line error" role="alert">{gitSyncError}</p>{/if}
-          {#if gitSyncBusy}<p class="sync-progress" role="status"><span class="sync-spinner" aria-hidden="true"></span><span>{gitSyncStage || 'Working…'}</span><span class="sync-elapsed">{gitSyncElapsed}s</span>{#if !gitAuthActive}<button type="button" class="sync-cancel" on:click={cancelGitSync}>{gitSyncCancelling ? 'Stopping…' : 'Stop syncing'}</button>{/if}</p>{/if}
+          {#if gitSyncBusy}<p class="sync-progress" role="status"><span class="sync-spinner" aria-hidden="true"></span><span>{gitSyncStage || 'Working…'}</span><span class="sync-elapsed">{gitSyncElapsed}s</span>{#if !gitAuthActive && mode === 'tauri'}<button type="button" class="sync-cancel" on:click={cancelGitSync}>{gitSyncCancelling ? 'Stopping…' : 'Stop syncing'}</button>{/if}</p>{/if}
           <div class="modal-actions"><button class="modal-action" disabled={gitSyncBusy} on:click={startDeviceAuth}>{gitSyncBusy ? '…' : 'Connect to GitHub'}</button></div>
           <details class="git-sync-advanced">
             <summary>Advanced: connect with a personal access token</summary>
             <input bind:value={gitRepoInput} aria-label="GitHub repository (owner/name)" placeholder="owner/repository" on:keydown={(event) => event.key === 'Enter' && connectGitSync()} />
             <input bind:value={gitTokenInput} type="password" aria-label="GitHub token" placeholder="Fine-grained or classic token with push access" on:keydown={(event) => event.key === 'Enter' && connectGitSync()} />
-            {#if gitSyncBusy}<p class="sync-progress" role="status"><span class="sync-spinner" aria-hidden="true"></span><span>{gitSyncStage || 'Working…'}</span><span class="sync-elapsed">{gitSyncElapsed}s</span>{#if !gitAuthActive}<button type="button" class="sync-cancel" on:click={cancelGitSync}>{gitSyncCancelling ? 'Stopping…' : 'Stop syncing'}</button>{/if}</p>{/if}
+            {#if gitSyncBusy}<p class="sync-progress" role="status"><span class="sync-spinner" aria-hidden="true"></span><span>{gitSyncStage || 'Working…'}</span><span class="sync-elapsed">{gitSyncElapsed}s</span>{#if !gitAuthActive && mode === 'tauri'}<button type="button" class="sync-cancel" on:click={cancelGitSync}>{gitSyncCancelling ? 'Stopping…' : 'Stop syncing'}</button>{/if}</p>{/if}
             <div class="modal-actions"><button class="modal-action" disabled={!gitRepoInput || !gitTokenInput || gitSyncBusy} on:click={connectGitSync}>{gitSyncBusy ? 'Connecting…' : 'Connect & Push'}</button></div>
           </details>
         {:else if gitSyncView === 'connecting'}
@@ -3348,7 +3697,7 @@
           {/if}
           {#if gitSyncError}<p class="status-line error" role="alert">{gitSyncError}</p>{/if}
           {#if gitSyncMessage}<p class="status-line" role="status">{gitSyncMessage}</p>{/if}
-          {#if gitSyncBusy}<p class="sync-progress" role="status"><span class="sync-spinner" aria-hidden="true"></span><span>{gitSyncStage || 'Working…'}</span><span class="sync-elapsed">{gitSyncElapsed}s</span>{#if !gitAuthActive}<button type="button" class="sync-cancel" on:click={cancelGitSync}>{gitSyncCancelling ? 'Stopping…' : 'Stop syncing'}</button>{/if}</p>{/if}
+          {#if gitSyncBusy}<p class="sync-progress" role="status"><span class="sync-spinner" aria-hidden="true"></span><span>{gitSyncStage || 'Working…'}</span><span class="sync-elapsed">{gitSyncElapsed}s</span>{#if !gitAuthActive && mode === 'tauri'}<button type="button" class="sync-cancel" on:click={cancelGitSync}>{gitSyncCancelling ? 'Stopping…' : 'Stop syncing'}</button>{/if}</p>{/if}
           <div class="modal-actions">
             <button class="modal-action" disabled={gitSyncBusy || !gitRepoSelection()} on:click={finalizeGitSync}>{gitSyncBusy ? 'Syncing…' : 'Start Sync'}</button>
             <button class="modal-action secondary" on:click={resetGitSyncFlow}>Back</button>
@@ -3356,16 +3705,28 @@
         {:else}
           <p>Connected repository</p>
           <p class="user-code-display" style="font-size:1.05rem; letter-spacing:0.02em;">{gitSyncConnectedRepo || '—'}</p>
-          {#if gitSyncHealthNote}
+          {#if isSelfHost()}
+            <!--
+              The server's own clock, not this device's opinion of it: the sync happens
+              there, and the only thing the page knows is when the server said it last did.
+            -->
+            <p class="git-sync-note">{serverSyncAge ? `Last synced ${serverSyncAge} ago.` : 'No sync yet.'}</p>
+          {:else if gitSyncHealthNote}
             <p class="status-line {gitSyncHealthBroken ? 'error' : ''}" role={gitSyncHealthBroken ? 'alert' : 'status'}>{gitSyncHealthNote}</p>
           {:else}
             <p class="git-sync-note">Saves in this folder push to GitHub automatically.</p>
           {/if}
           {#if gitSyncError}<p class="status-line error" role="alert">{gitSyncError}</p>{/if}
           {#if gitSyncMessage}<p class="status-line" role="status">{gitSyncMessage}</p>{/if}
-          {#if gitSyncBusy}<p class="sync-progress" role="status"><span class="sync-spinner" aria-hidden="true"></span><span>{gitSyncStage || 'Working…'}</span><span class="sync-elapsed">{gitSyncElapsed}s</span>{#if !gitAuthActive}<button type="button" class="sync-cancel" on:click={cancelGitSync}>{gitSyncCancelling ? 'Stopping…' : 'Stop syncing'}</button>{/if}</p>{/if}
+          {#if gitSyncBusy}<p class="sync-progress" role="status"><span class="sync-spinner" aria-hidden="true"></span><span>{gitSyncStage || 'Working…'}</span><span class="sync-elapsed">{gitSyncElapsed}s</span>{#if !gitAuthActive && mode === 'tauri'}<button type="button" class="sync-cancel" on:click={cancelGitSync}>{gitSyncCancelling ? 'Stopping…' : 'Stop syncing'}</button>{/if}</p>{/if}
           <div class="modal-actions">
-            {#if gitSyncHealthBroken}
+            <!--
+              One action, because there is one thing left to want: stopping. Pointing the
+              instance at a different repository is this, then Connect to GitHub again, which
+              runs the same device flow over the same setup route — a second button would
+              have been the same journey with the backup left running while it was abandoned.
+            -->
+            {#if !isSelfHost() && gitSyncHealthBroken}
               <button class="modal-action" disabled={gitSyncBusy || gitAuthActive} on:click={reconnectGitSync}>{gitAuthActive ? 'Waiting for GitHub…' : 'Reconnect'}</button>
             {/if}
             <button class="modal-action secondary" disabled={gitSyncBusy} on:click={disconnectGitSync}>Disconnect</button>
@@ -3836,7 +4197,7 @@
       {:else}
         <button class="action-button" on:click={openNewLithModal} disabled={busy}>New Blank Lith</button>
       {/if}
-      <button class="action-button mount-button" on:click={mountFromDisk} disabled={busy}>Mount a Lith</button>
+      <button class="action-button mount-button" on:click={mountFromDisk} disabled={busy}>{mode === 'self-host' ? 'Upload a Lith' : 'Mount a Lith'}</button>
       {#if mode !== 'self-host'}
       <button class="bookmark-button" aria-label="Bookmark a self-hosted instance" title="Bookmark a Remote Instance" on:click={openBookmarkModal}><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 21V5a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v16l-6-4z" /></svg></button>
       {/if}
@@ -3853,17 +4214,27 @@
         {#if isSelfHost()}
           {#if remoteBusy && remoteFiles.length === 0}
             <p class="empty">Reading this server’s Liths…</p>
-          {:else if filteredRemote.length > 0}
-            <p class="recent-group-label">On this server</p>
           {/if}
+          <!--
+            The server's files, and nothing else, with no group heading over them and no
+            marker beside them: both existed to separate these rows from this device's own,
+            and in this mode there are no others to separate them from. The list is the
+            store; a Lith somewhere on this machine belongs to the mode that owns that
+            machine.
+          -->
           {#each filteredRemote as file (file.name)}
             <div class="recent-row remote-row">
-              <span class="remote-dot" aria-hidden="true"></span>
               <button class="recent-name" title="Open from this server" on:click={() => openRemoteFile(file.name)}>{file.name}{#if file.lastModified}<span class="cached-size">{file.lastModified.toLocaleDateString()}</span>{/if}</button>
             </div>
           {/each}
         {/if}
-        {#each bookmarks.filter((entry) => entry.label.toLowerCase().includes(search.toLowerCase()) || entry.url.toLowerCase().includes(search.toLowerCase())) as entry (entry.url)}
+        {#if listEmpty}
+          <p class="empty">{emptyMessage}</p>
+        {/if}
+        <!-- The device's own lists: recents, caches, bookmarks. Never drawn in self-host,
+             for the same reason the server's rows are drawn only there. -->
+        {#if mode !== 'self-host'}
+        {#each filteredBookmarks as entry (entry.url)}
           <div class="recent-row bookmark-row">
             <!--
               The cached instance icon belongs to the link, not beside it: inside
@@ -3899,10 +4270,32 @@
                 on:click={() => (origin && (vaultCoverage.has(origin) ? openVaultModal() : openCredentialOffer(origin, entry.url, 'row')))}
               ><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="8.2" cy="8.2" r="4.3"/><path d="m11.4 11.4 8 8"/><path d="m15.4 15.4 2.6-2.6"/><path d="m18.2 18.2 2.6-2.6"/></svg></button>
             {/if}
+            <!--
+              Beside the row, exactly as a match inside one of this device's own Liths is
+              drawn — same panel, same place, same marked preview — because it is the same
+              fact: these words are somewhere this row leads to. What it cannot be is the
+              local panel's pin. That click writes a pending tiddler into the document the
+              launcher is about to rewrite in place, and an instance's wiki is at another
+              origin with no such document to write into. So the gesture hands the window
+              over carrying the query instead, and the instance's own search — which is
+              where the rest of the matches are, this being one hit per instance and no
+              more — takes it from there.
+            -->
+            {#if instanceCacheHits[entry.url]?.preview}
+              <div
+                use:positionCachePreview
+                class="cache-preview"
+                role="button"
+                tabindex="0"
+                aria-label={`Open ${entry.label} searching for “${search.trim()}”`}
+                title={`Open ${entry.label} and search for this`}
+                on:click={() => openBookmarkedInstance(entry.url, search.trim())}
+                on:keydown={(event) => (event.key === 'Enter' || event.key === ' ') && openBookmarkedInstance(entry.url, search.trim())}
+              >{@html instanceCacheHits[entry.url].preview}</div>
+            {/if}
             <button class="recent-icon-button remove-recent" type="button" aria-label={`Remove bookmark ${entry.url}`} on:click={() => removeInstanceBookmark(entry.url)}><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m7 7 10 10M17 7 7 17"></path></svg></button>
           </div>
         {/each}
-        {#if filteredRecent.length === 0 && filteredCached.length === 0 && filteredRemote.length === 0 && bookmarks.filter((entry) => entry.label.toLowerCase().includes(search.toLowerCase()) || entry.url.toLowerCase().includes(search.toLowerCase())).length === 0}<p class="empty">{isSelfHost() && remoteFiles.length === 0 ? 'No Liths on this server yet.' : (search.trim() ? 'No matching Liths.' : 'No recent Liths.')}</p>{/if}
         {#each filteredRecent as file}
           {@const name = getEntryName(file)}
           <div class="recent-row">
@@ -3974,21 +4367,24 @@
             {/if}
           </div>
         {/each}
+        {/if}
       </div>
       <!--
-        In the index-db-only fallback neither control means what it says, so
-        neither is offered. Nothing on disk can be re-listed, and "Reset" there
-        is not "clear a list, your files stay" — the cache *is* the files, so
-        one click would take every Lith on the device with it. Site data is the
-        browser's own way to do that, and its friction is the point: it is worth
-        requiring a deliberate trip through the browser's settings to erase
-        everything the launcher holds.
+        Two modes have neither control, for different reasons.
+
+        In the index-db-only fallback neither means what it says, so neither is offered.
+        Nothing on disk can be re-listed, and "Reset" there is not "clear a list, your files
+        stay" — the cache *is* the files, so one click would take every Lith on the device
+        with it. Site data is the browser's own way to do that, and its friction is the
+        point: it is worth requiring a deliberate trip through the browser's settings to
+        erase everything the launcher holds.
+
+        Self-host has no list of its own to rebuild or reset: the one on screen is the
+        server's, and reloading the page is how it is asked for again.
       -->
-      {#if !indexDbOnly}
+      {#if !indexDbOnly && mode !== 'self-host'}
         {#if showRebuildControl}
-          <button class="reset-cache" on:click={rebuildRecents} disabled={rebuildBusy} title={isSelfHost()
-            ? 'Rebuild this list from the server'
-            : 'Rebuild this list from the files on disk'}>{
+          <button class="reset-cache" on:click={rebuildRecents} disabled={rebuildBusy} title="Rebuild this list from the files on disk">{
             rebuildBusy ? 'Re-indexing…' : 'Rebuild Recents'
           }</button>
         {:else}
