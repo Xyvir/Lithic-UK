@@ -3458,17 +3458,15 @@
         <button class="modal-close" aria-label="Close the save-a-login dialog" on:click={closeCredentialOffer}>×</button>
         <h2 id="credential-offer-title">Add a saved credential?</h2>
         <!--
-          One line, whichever way this dialog was reached. It used to have two, and the
+          One line, whichever way this dialog was reached. It used to have two: the
           offer's said why the dialog had opened ("www.foobar.com asks for a password")
-          while the row's said what the credential is tied to ("answered per exact
-          address"). The second is the one worth keeping: the dialog's own heading
-          already says a credential is being offered, so the first was the heading again
-          with the address in it, and an address the user just clicked is not news. What
-          is not visible anywhere else is the scope — per exact address, so that a saved
-          login for one host is never offered to another — and that reads the same on
-          both paths.
+          and the row's what the credential was tied to ("answered per exact address").
+          The first was the heading again with an address in it, and an address the user
+          just clicked is not news. The second read as a scope the user might weigh, when
+          it is only how the vault decides what to offer. What is left is the one fact
+          this dialog cannot do without: which instance the credential is for.
         -->
-        <p class="vault-sub">For {instanceLabel(credentialOffer.origin)}, answered per exact address.</p>
+        <p class="vault-sub">For {instanceLabel(credentialOffer.origin)}.</p>
         <div class="vault-pin credential-offer-pin">
           <PinEntry
             bind:value={offerPin}

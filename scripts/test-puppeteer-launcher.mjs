@@ -1349,12 +1349,13 @@ try {
   }));
   assert.equal(offered.heading, 'Add a saved credential?', 'An instance with nothing saved is offered one');
   // One line on both paths into this dialog. The offer used to say *why* it had opened
-  // ("…asks for a password"), which was the heading with an address in it; what the sheet
-  // shows now is the scope, which is the part not visible anywhere else.
+  // ("…asks for a password"), which was the heading with an address in it, and the line
+  // used to add the scope the credential is kept under. Both are gone: what is left is
+  // the one fact the dialog cannot do without, which the offer and the sheet share.
   assert.equal(
     offered.sub,
-    'For unsaved.example, answered per exact address.',
-    'The offer names the instance and the scope the credential is kept under'
+    'For unsaved.example.',
+    'The offer names the instance the credential is for, and says nothing else'
   );
   assert.equal(offered.pinBoxes, 6, 'The PIN is asked for in six boxes');
   assert.equal(offered.confirmBoxes, 0, 'A vault on disk already has a PIN, so there is nothing to confirm');

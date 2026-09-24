@@ -181,9 +181,9 @@ const bookmark = (url, extra = {}) => ({ url, label: url.replace(/^https?:\/\//,
  * addresses, because the verdict is the instance's, not the dialog's.
  *
  * `www.foobar.com` rather than a reserved `.example` host, because these fixtures are copy:
- * an address a dialog prints ("For www.foobar.com, answered per exact address.") has to read
- * as an address, and the reserved name this one used to carry was read as the words "other
- * example". Two of the three share a domain on purpose, so the sheet shows that a login is
+ * an address a dialog prints ("For www.foobar.com.") has to read as an address, and the
+ * reserved name this one used to carry was read as the words "other example". Two of the
+ * three share a domain on purpose, so the sheet shows that a login is
  * kept per exact address rather than per site. Neither name is ever fetched or navigated to
  * — every endpoint behind these dialogs is the stand-in — which is also why the unit tests,
  * whose strings nobody reads off a sheet, keep their reserved names.
