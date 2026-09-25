@@ -25,7 +25,20 @@ export const LITHIC_API_BASE = '/api/lithic/';
 export const LOCK_STALE_MS = 60_000;
 export const LOCK_HEARTBEAT_MS = 30_000;
 
-export type WebdavFile = { name: string; href: string; lastModified: Date | null };
+export type WebdavFile = {
+  name: string;
+  href: string;
+  lastModified: Date | null;
+  /**
+   * What the store says the file weighs, or null when it did not say.
+   *
+   * The launcher draws this beside the row instead of the date: a store is written to
+   * constantly, so its own timestamps all read "today" and tell a reader nothing about
+   * which Lith they are about to open. A store that answers without the length is not a
+   * failure — the row simply says a name and no more, which is what it did before.
+   */
+  sizeBytes: number | null;
+};
 export type WebdavLock = { user?: string; timestamp?: number; sessionId?: string };
 export type RemoteVersion = { rev: string; ts: number; author: string; subject: string };
 export type RemoteWiki = { text: string; digest: string; rev: string };
@@ -56,6 +69,10 @@ function firstElementText(block: string, name: string): string | null {
 /**
  * Parse a PROPFIND multistatus body into the `.lith` files it advertises.
  *
+ * Both facts a row draws are read here and neither is required: the stamp orders the list,
+ * the content length is what the row shows, and a store that omits either leaves that one
+ * null rather than dropping the file.
+ *
  * Deliberately hand-rolled rather than DOMParser-based: it keeps the listing
  * unit-testable in plain Node, and the servers we target (Caddy's webdav and
  * lighttpd's mod_webdav) emit simple, predictable multistatus XML. Namespace
@@ -82,7 +99,14 @@ export function parsePropfindXml(xml: string): WebdavFile[] {
     if (!name) continue;
     const stamp = firstElementText(block, 'getlastmodified');
     const parsed = stamp ? new Date(decodeXmlEntities(stamp.trim())) : null;
-    files.push({ name, href, lastModified: parsed && !Number.isNaN(parsed.getTime()) ? parsed : null });
+    const length = firstElementText(block, 'getcontentlength');
+    const size = length ? Number(decodeXmlEntities(length.trim())) : NaN;
+    files.push({
+      name,
+      href,
+      lastModified: parsed && !Number.isNaN(parsed.getTime()) ? parsed : null,
+      sizeBytes: Number.isFinite(size) && size >= 0 ? size : null
+    });
   }
   files.sort((a, b) => (b.lastModified?.getTime() ?? 0) - (a.lastModified?.getTime() ?? 0));
   return files;

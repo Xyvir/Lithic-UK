@@ -45,11 +45,11 @@ const PROPFIND = `<?xml version="1.0" encoding="utf-8"?>
   </D:response>
   <D:response>
     <D:href>/sync/Older.lith</D:href>
-    <D:propstat><D:prop><D:getlastmodified>Mon, 01 Jan 2024 10:00:00 GMT</D:getlastmodified></D:prop></D:propstat>
+    <D:propstat><D:prop><D:getlastmodified>Mon, 01 Jan 2024 10:00:00 GMT</D:getlastmodified><D:getcontentlength>51204</D:getcontentlength></D:prop></D:propstat>
   </D:response>
   <D:response>
     <D:href>/sync/my%20work%20wiki.lith</D:href>
-    <D:propstat><D:prop><D:getlastmodified>Fri, 18 Sep 2026 12:00:00 GMT</D:getlastmodified></D:prop></D:propstat>
+    <D:propstat><D:prop><D:getlastmodified>Fri, 18 Sep 2026 12:00:00 GMT</D:getlastmodified><D:getcontentlength>2048</D:getcontentlength></D:prop></D:propstat>
   </D:response>
   <D:response>
     <D:href>/sync/notes.txt</D:href>
@@ -69,6 +69,21 @@ test('parsePropfindXml lists only .lith files, newest first, skipping the collec
   );
   assert.equal(files[0].lastModified?.toISOString(), '2026-09-18T12:00:00.000Z');
   assert.equal(files[2].lastModified, null, 'a missing getlastmodified sorts last rather than dropping the file');
+  assert.equal(files[0].sizeBytes, 2048, 'the row is told what the file weighs, which is what it draws');
+  assert.equal(files[1].sizeBytes, 51204, 'and every row gets its own answer, not the first one');
+  assert.equal(files[2].sizeBytes, null, 'a store that does not report a length leaves it unknown rather than zero');
+});
+
+test('parsePropfindXml reads a length of zero, and refuses a length that is not a count', () => {
+  const xml = `<D:multistatus xmlns:D="DAV:">
+    <D:response><D:href>/sync/empty.lith</D:href><D:propstat><D:prop><D:getcontentlength>0</D:getcontentlength></D:prop></D:propstat></D:response>
+    <D:response><D:href>/sync/unmeasured.lith</D:href><D:propstat><D:prop><D:getcontentlength>not a number</D:getcontentlength></D:prop></D:propstat></D:response>
+    <D:response><D:href>/sync/odd.lith</D:href><D:propstat><D:prop><D:getcontentlength></D:getcontentlength></D:prop></D:propstat></D:response>
+  </D:multistatus>`;
+  const byName = new Map(parsePropfindXml(xml).map((file) => [file.name, file.sizeBytes]));
+  assert.equal(byName.get('empty.lith'), 0, 'a file of no bytes is a size, not an absent one');
+  assert.equal(byName.get('unmeasured.lith'), null, 'a non-numeric length is treated as no answer');
+  assert.equal(byName.get('odd.lith'), null, 'and so is an empty element, which Number would read as zero');
 });
 
 test('parsePropfindXml tolerates other namespace forms and escaped entities', () => {

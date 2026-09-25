@@ -74,6 +74,37 @@ export const ICON_TARGETS: Array<{ path: string; size: number }> = [
 /** The write the watcher watches for; must be the final PUT. */
 export const ICON_DOORBELL = 'custom.ico';
 
+/**
+ * The mark an instance's own header draws: the largest of the renders it publishes.
+ *
+ * One of `ICON_TARGETS`, so it is a file the picker writes and the deployment's watcher
+ * copies into the public directory — which is what makes it the instance's current icon
+ * rather than a picture of one. The shipped set lives at the same address, so an instance
+ * that has never had an icon picked still answers here.
+ */
+export const INSTANCE_MARK_FILE = '/mstile-150x150.png';
+
+/**
+ * Where to read that mark from, or null when there is no instance to ask.
+ *
+ * Root-absolute and same-origin on purpose: the launcher page is served *by* the instance,
+ * so this is the instance's own file. The legacy launcher's header was this exact
+ * `<img src="/mstile-150x150.png">` with an `onerror` fallback, and it read the same address
+ * for the same reason — the mark beside the title is the instance's identity, and a client
+ * that draws the project's own mark there makes every instance look alike.
+ *
+ * Null is the page with no instance behind it at all (a downloaded copy, the desktop app's
+ * own): a file has no root to read this from. An instance that answers 404 — a store whose
+ * icon set was never published — is the other half of the same question, and is handled at
+ * the image, which is the only place that can tell the difference.
+ */
+export function instanceMarkUrl(
+  loc: { protocol?: string } | null | undefined = typeof location === 'undefined' ? undefined : location
+): string | null {
+  const protocol = loc?.protocol;
+  return protocol === 'http:' || protocol === 'https:' ? INSTANCE_MARK_FILE : null;
+}
+
 export const INSTANCE_EMOJI_KEY = 'lithic-icon-emoji';
 /** Legacy background behind the glyph — every generated icon matches it. */
 export const ICON_BACKGROUND = '#333';

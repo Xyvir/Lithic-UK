@@ -12,6 +12,8 @@ import {
   writeServerEmoji,
   deleteServerEmoji,
   emojiFaviconUrl,
+  INSTANCE_MARK_FILE,
+  instanceMarkUrl,
   applyFavicon,
   readInstanceEmoji,
   saveInstanceEmoji,
@@ -302,6 +304,20 @@ test('applyFavicon creates the icon link and can restore the shipped one', () =>
   applyFavicon(null, doc);
   assert.equal(existing.href, '/favicon.ico');
   assert.deepEqual(existing.removed, ['type']);
+});
+
+test('instanceMarkUrl names the instance\'s own file, and null when there is no instance', () => {
+  // The address is the file the picker publishes, read from the root of the page's own
+  // origin: the instance's mark, not this build's.
+  assert.equal(instanceMarkUrl({ protocol: 'https:' }), INSTANCE_MARK_FILE);
+  assert.equal(instanceMarkUrl({ protocol: 'http:' }), '/mstile-150x150.png');
+  assert.ok(ICON_TARGETS.some((target) => `/${target.path}` === INSTANCE_MARK_FILE), 'and it is one of the renders the set writes');
+  // A page with no instance behind it has no root to read that from, and the caller draws
+  // the shipped mark instead — which is what the desktop app and every file:// copy get.
+  assert.equal(instanceMarkUrl({ protocol: 'file:' }), null);
+  assert.equal(instanceMarkUrl({ protocol: 'tauri:' }), null);
+  assert.equal(instanceMarkUrl(null), null);
+  assert.equal(instanceMarkUrl(undefined), null, 'and a context with no location at all asks nobody');
 });
 
 test('the emoji shortlist matches the legacy picker categories', () => {

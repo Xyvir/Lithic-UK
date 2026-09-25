@@ -6,7 +6,7 @@
   import { isScratchFileName, isHtmlMonolithName, tracksUnsavedEdits, resolveMountName, resolveScratchKind, type ScratchKind } from './scratch-editor';
   import { pwaInstall, promptPwaInstall } from './pwa-install';
   import { bootLegacyWiki, bootLegacyHtml, type RemoteTarget } from './legacy-launcher-runtime';
-  import { EMOJI_LIST, uploadInstanceIcon, clearInstanceIcon, emojiFaviconUrl, applyFavicon, bustIconCache, readInstanceEmoji, readServerEmoji, saveInstanceEmoji, clearInstanceEmoji } from './instance-icon';
+  import { EMOJI_LIST, uploadInstanceIcon, clearInstanceIcon, emojiFaviconUrl, applyFavicon, bustIconCache, readInstanceEmoji, readServerEmoji, saveInstanceEmoji, clearInstanceEmoji, instanceMarkUrl } from './instance-icon';
   import { getRecentFiles, addRecentFile, removeRecentFile, addBrowserOnlyRecent, removeBrowserOnlyRecent, clearAllRecentFiles, purgeOldestCachesIfNeeded, saveSearchCache, forgetWikiCache, cachedWikiNames, idb, getSearchCacheText, listWikiVersions, wikiHasHistory, downloadWikiVersion, getDirtyState, clearDirtyState, listDirtyRecoveries, isWikiDriftedFromHead, isInstallDismissed, setInstallDismissed, recentDiskPath, type RecentEntry } from './storage';
   import { resolveStorageMode, storageModeOverride, browserOnlyMarkTitle, BROWSER_ONLY_HISTORY_NOTE, type StorageMode } from './browser-storage';
   import { readBookmarkEntries, saveBookmark, removeBookmark, setBookmarkIcon, refreshBookmarkIcon, verifyInstanceUrl, normalizeInstanceUrl, instanceLabel, type BookmarkEntry, type InstanceVerification } from './bookmarks';
@@ -57,6 +57,17 @@
    * its cached copy in this browser *is* the document.
    */
   const indexDbOnly = storageMode === 'index-db';
+  /**
+   * The instance's own mark, or null where there is no instance to read one from (see
+   * `instanceMarkUrl`). Settled at boot like the storage mode, and for the same reason:
+   * which address served this page cannot change while the page lives.
+   */
+  const instanceMark = isSelfHost() ? instanceMarkUrl() : null;
+  /**
+   * Set when that mark cannot be read. An instance whose icon set was never published is
+   * the one case the address cannot answer for, and the shipped mark is what is left.
+   */
+  let instanceMarkMissing = false;
   const RECENT_KEY = 'lithic-recent-liths';
   let lithText = '';
   let fileName = 'untitled.lith';
@@ -159,6 +170,30 @@
   type GitSyncView = 'disconnected' | 'connecting' | 'selecting' | 'connected';
   let showGitSyncModal = false;
   let gitSyncView: GitSyncView = 'disconnected';
+  /**
+   * Monotonic counter: every status read takes the next ticket as it is issued, and every
+   * decision about the dialog's view takes one as it is made.
+   */
+  let syncReadTicket = 0;
+  /** The ticket of the read or decision that last set the view. */
+  let syncViewTicket = 0;
+
+  /**
+   * Set the dialog's view, and record where the answer came from.
+   *
+   * Two things write this view — the flow's own steps, and the answers to status reads —
+   * and the network does not order the second kind against the first: the status read the
+   * dialog makes on the way in can be answered *after* a disconnect lands, and believing it
+   * puts the dialog back on the connected view, with the repository filled in from a world
+   * the user has just stopped. So a decision takes a ticket as it is made (superseding every
+   * read already in flight), a read that applies its answer passes its own ticket, and
+   * `refreshServerSyncStatus` and `refreshGitSyncStatus` discard anything older than the
+   * ticket this records.
+   */
+  function setGitSyncView(view: GitSyncView, ticket: number = ++syncReadTicket): void {
+    gitSyncView = view;
+    syncViewTicket = ticket;
+  }
   let gitSyncBusy = false;
   let gitSyncMessage = '';
   let gitSyncError = '';
@@ -290,7 +325,7 @@
       // rather than showing a dead "waiting for authorization" screen.
       gitPollAborted = true;
       gitAuthActive = false;
-      gitSyncView = 'disconnected';
+      setGitSyncView('disconnected');
       gitUserCode = '';
     }
     showGitSyncModal = true;
@@ -315,7 +350,7 @@
     gitReconnectMode = false;
     gitDeviceToken = null;
     gitUserCode = '';
-    gitSyncView = 'disconnected';
+    setGitSyncView('disconnected');
     gitSyncError = '';
     gitSyncMessage = '';
     gitSyncBusy = false;
@@ -462,9 +497,11 @@
   // Coverage only means something once something is backed up: with nothing,
   // every row is un-backed-up and the marks would say nothing about any of them.
   $: showBackupStatus = mode === 'tauri' && hasBackedUpRepo(backupRoots);
-  // Where the list is derived rather than authored — the desktop app's synced
-  // folders, and self-host's server — rebuilding beats clearing.
-  $: showRebuildControl = showBackupStatus;
+  // Where the list is derived rather than authored — the desktop app's synced folders,
+  // and self-host's server — rebuilding beats clearing. The desktop app only learns its
+  // own list is a view rather than a catalogue once a folder is backed up; on an instance
+  // there was never any doubt, the server is the only list there is.
+  $: showRebuildControl = showBackupStatus || isSelfHost();
 
   /**
    * Offer to copy a Lith that no backup covers into the folder that is covered.
@@ -575,6 +612,9 @@
   /** Ask Rust whether the target folder is a Lithic-managed sync repo. */
   async function refreshGitSyncStatus(applyView: boolean): Promise<void> {
     if (isSelfHost()) return refreshServerSyncStatus(applyView);
+    // The same ticket as the self-host read: a `git_sync_status` call is not ordered
+    // against the disconnect that follows it, and the window here is the wider of the two.
+    const ticket = ++syncReadTicket;
     const target = gitSyncActivePath();
     // A verdict describes one folder: re-pointing at another makes it
     // meaningless, and showing it would be worse than showing nothing. Keyed on
@@ -586,13 +626,20 @@
       return;
     }
     try {
-      foldGitSyncStatus(await tauriInvoke<GitSyncStatus | null>('git_sync_status', { path: target }));
+      const status = await tauriInvoke<GitSyncStatus | null>('git_sync_status', { path: target });
+      // An answer asked for before the last decision about this dialog describes a folder
+      // that decision has left, and is discarded rather than folded in — the same rule the
+      // instance's own read follows, and the reason for it is the same one (see
+      // `setGitSyncView`).
+      if (ticket < syncViewTicket) return;
+      foldGitSyncStatus(status);
     } catch (error) {
+      if (ticket < syncViewTicket) return;
       foldGitSyncStatus(null, true);
       noteGitSyncStatusFailure(error);
     }
     if (applyView && gitSyncView !== 'connecting' && gitSyncView !== 'selecting') {
-      gitSyncView = gitSyncConnectedRepo ? 'connected' : 'disconnected';
+      setGitSyncView(gitSyncConnectedRepo ? 'connected' : 'disconnected', ticket);
     }
   }
 
@@ -604,7 +651,7 @@
     gitSyncBusy = true;
     gitAuthActive = true;
     gitSyncError = '';
-    gitSyncView = 'connecting';
+    setGitSyncView('connecting');
     gitPollAborted = false;
     try {
       const parsed = await requestDeviceCode();
@@ -612,7 +659,7 @@
       void pollDeviceToken(parsed.device_code, parsed.interval);
     } catch (error) {
       gitSyncError = error instanceof Error ? error.message : String(error);
-      gitSyncView = 'disconnected';
+      setGitSyncView('disconnected');
       gitAuthActive = false;
     } finally {
       gitSyncBusy = false;
@@ -647,7 +694,7 @@
         }
         gitAuthActive = false;
         gitSyncError = decision.message;
-        gitSyncView = 'disconnected';
+        setGitSyncView('disconnected');
         return;
       } catch (error) {
         // Transient network hiccups shouldn't kill the flow; keep polling.
@@ -670,10 +717,10 @@
       gitRepoNamePending = generateRepoName();
       gitRepoChoice = gitManagedRepos[0] ?? '';
       gitCustomRepoInput = '';
-      gitSyncView = 'selecting';
+      setGitSyncView('selecting');
     } catch (error) {
       gitSyncError = error instanceof Error ? error.message : String(error);
-      gitSyncView = 'disconnected';
+      setGitSyncView('disconnected');
       gitAuthActive = false;
     } finally {
       gitSyncBusy = false;
@@ -709,7 +756,7 @@
       const result = await tauriInvoke<GitSyncSetupResult>('git_sync_setup', { path: target, repo: targetRepo, token: gitDeviceToken });
       gitSyncMessage += result?.summary || 'Synced';
       gitDeviceToken = null;
-      gitSyncView = 'connected';
+      setGitSyncView('connected');
       markGitSyncActivity();
       void refreshGitSyncStatus(false);
       await adoptSyncedWikis(result?.recents);
@@ -738,7 +785,7 @@
       const result = await tauriInvoke<GitSyncSetupResult>('git_sync_setup', { path: target, repo: gitRepoInput, token: gitTokenInput });
       gitSyncMessage = result?.summary || 'Synced';
       gitTokenInput = '';
-      gitSyncView = 'connected';
+      setGitSyncView('connected');
       markGitSyncActivity();
       void refreshGitSyncStatus(false);
       await adoptSyncedWikis(result?.recents);
@@ -767,7 +814,7 @@
           return;
         }
         gitSyncConnectedRepo = '';
-        gitSyncView = 'disconnected';
+        setGitSyncView('disconnected');
         await refreshServerSyncStatus(false);
       } finally {
         gitSyncBusy = false;
@@ -785,7 +832,7 @@
     try {
       await tauriInvoke('git_sync_disconnect', { path: target });
       gitSyncConnectedRepo = '';
-      gitSyncView = 'disconnected';
+      setGitSyncView('disconnected');
       void refreshBackupCoverage();
       // That folder is no longer attached, so what Rust prefers may have moved.
       void resolveSyncFolder(gitSyncSubject);
@@ -823,7 +870,15 @@
    * WebDAV server this is the ordinary answer rather than a fault.
    */
   async function refreshServerSyncStatus(applyView: boolean): Promise<void> {
+    const ticket = ++syncReadTicket;
     const status = await fetchServerSyncStatus();
+    // An answer asked for before the last decision about this dialog is describing the
+    // world that decision left, and every word of it is wrong now: `connected: true,
+    // repo: X` is exactly what a disconnect has just said is no longer true. Discarded
+    // rather than folded, because the decision's own read follows it and answers. This is
+    // how a status read that was in flight when the repository was stopped is stopped
+    // from putting the dialog back on it.
+    if (ticket < syncViewTicket) return;
     serverSyncFailed = status === null;
     if (status) {
       serverSyncStatus = status;
@@ -832,8 +887,11 @@
       // asked it to do.
       gitSyncConnectedRepo = status.connected ? status.repo : '';
     }
+    // Every in-flight read is older than this decision, so none of them can undo it — but a
+    // read issued *after* it passes the ticket check, and `connecting` and `selecting` are
+    // steps no read may interrupt.
     if (applyView && gitSyncView !== 'connecting' && gitSyncView !== 'selecting') {
-      gitSyncView = status?.connected ? 'connected' : 'disconnected';
+      setGitSyncView(status?.connected ? 'connected' : 'disconnected', ticket);
     }
     serverSyncTick += 1;
   }
@@ -889,7 +947,7 @@
       }
       gitDeviceToken = null;
       gitSyncMessage += `Backing up github.com/${targetRepo}.`;
-      gitSyncView = 'connected';
+      setGitSyncView('connected');
       await refreshServerSyncStatus(false);
       await refreshRemoteList();
     } finally {
@@ -925,7 +983,7 @@
     gitReconnectMode = false;
     if (!target || !repo || !token) {
       gitSyncError = 'Could not resolve the folder or repository to reconnect.';
-      gitSyncView = 'disconnected';
+      setGitSyncView('disconnected');
       return;
     }
     gitSyncBusy = true;
@@ -935,14 +993,14 @@
       await tauriInvoke('git_sync_reauth', { path: target, repo, token });
       gitDeviceToken = null;
       gitSyncMessage = `Reconnected github.com/${repo}`;
-      gitSyncView = 'connected';
+      setGitSyncView('connected');
       // Proven by construction: the token that just authenticated is the one
       // now sitting in the remote, so the next save has somewhere to go.
       markGitSyncVerified();
       void runGitSyncHeartbeat(true);
     } catch (error) {
       gitSyncError = error instanceof Error ? error.message : String(error);
-      gitSyncView = 'disconnected';
+      setGitSyncView('disconnected');
     } finally {
       gitSyncBusy = false;
       endGitSyncProgress();
@@ -1167,6 +1225,21 @@
     const megabytes = bytes / (1024 * 1024);
     if (megabytes < 0.01) return '<0.01 MB';
     return `${megabytes.toFixed(2).replace(/\.?(0+)$/, '')} MB`;
+  }
+
+  /**
+   * How big a Lith on the server is, in the server's own bytes.
+   *
+   * Terse and at most one decimal: this sits beside a name, and the question it answers is
+   * which of these is the big one, which does not need a digit of precision. Below a
+   * kilobyte the count is the honest answer rather than a rounded nothing.
+   */
+  function formatLithSize(bytes: number): string {
+    if (bytes < 1024) return `${bytes} B`;
+    const kilobytes = bytes / 1024;
+    if (kilobytes < 1024) return `${kilobytes < 10 ? kilobytes.toFixed(1) : Math.round(kilobytes)} KB`;
+    const megabytes = kilobytes / 1024;
+    return `${megabytes < 10 ? megabytes.toFixed(1) : Math.round(megabytes)} MB`;
   }
 
   /**
@@ -2263,6 +2336,10 @@
     clearInstanceEmoji();
     brandEmoji = '';
     applyFavicon(null);
+    // The set changed here too, and the header and the tab read those files rather than the
+    // choice: the same doorbell the save path rings, for the same reason. The delay inside
+    // it is also what gives the deployment's watcher time to publish the restored set.
+    bustIconCache();
     emojiStatus = (await clearInstanceIcon()) ? '✓ Default icon restored server-wide.' : 'Restored on this device only.';
   }
 
@@ -2612,17 +2689,12 @@
       let orphans: RebuildOrphan[] = [];
 
       if (isSelfHost()) {
-        // Unreachable from the launcher as it stands: self-host draws neither rebuild
-        // control, because the list on screen is the server's and the caches this branch
-        // repairs are the device's, which that mode no longer lists. Kept because the
-        // second pass below — reading each server Lith and indexing it — is the only way
-        // this device ever learns the contents of a server wiki it has not saved, and a
-        // mode-specific control for that (something that says it indexes, rather than
-        // "Rebuild Recents") is the obvious way to bring it back.
-        //
-        // The server *is* the list here, so rebuilding means re-reading it.
-        // Writing the server's names into the local recents would list every
-        // wiki twice.
+        // The server *is* the list here, so rebuilding means re-reading it. Writing the
+        // server's names into the local recents would list every wiki twice, so the row
+        // list is left where it is and only the caches move: this is also the one pass
+        // that indexes Liths this device has never saved, which is what the instance's
+        // half of search reads. Re-reading is not free — one request per Lith — but it is
+        // the launcher asking for exactly what it is about to index.
         patchApiAvailable = await probePatchApi();
         remoteFiles = await fetchRemoteFiles();
         // The server is the source of truth here, so a cached copy it doesn't
@@ -3652,8 +3724,20 @@
         on:click={() => openEmojiPicker()}
       >
         {#if brandEmoji}
+          <!-- The instance's recorded choice, drawn here rather than fetched: it is the
+               same picture the published renders hold, and it is an answer an instance
+               that cannot be asked still has. -->
           <span class="brand-emoji" aria-hidden="true">{brandEmoji}</span>
+        {:else if instanceMark && !instanceMarkMissing}
+          <!-- The instance's own file, at the address the legacy launcher's header read.
+               Whatever it holds is what this instance currently serves as its mark —
+               published renders, an icon dropped in by hand — which is not something a
+               build of this page can know. -->
+          <img class="brand-icon" src={instanceMark} alt="Lithic" on:error={() => (instanceMarkMissing = true)} />
         {:else}
+          <!-- Nothing to read: an instance that answered 404 for the published set, or a
+               page with no instance behind it. The shipped mark is the truth there, and
+               it is also the whole of what the other modes draw. -->
           <img class="brand-icon" src={mstile150} alt="Lithic" />
         {/if}
       </button>
@@ -4320,7 +4404,14 @@
           -->
           {#each filteredRemote as file (file.name)}
             <div class="recent-row remote-row">
-              <button class="recent-name" title="Open from this server" on:click={() => openRemoteFile(file.name)}>{file.name}{#if file.lastModified}<span class="cached-size">{file.lastModified.toLocaleDateString()}</span>{/if}</button>
+              <!--
+                The row's suffix is the file's size on the server, not its date: on this
+                list the dates of a store are its least interesting fact (the server
+                commits constantly, so they all read "today"), while the size is the one
+                thing a name cannot tell you about a Lith you are about to open. Absent
+                when the store does not report it, rather than shown as a zero.
+              -->
+              <button class="recent-name" title="Open from this server" on:click={() => openRemoteFile(file.name)}>{file.name}{#if file.sizeBytes !== null}<span class="cached-size">{formatLithSize(file.sizeBytes)}</span>{/if}</button>
               <!--
                 The × the legacy store carried on every remote row, kept: on an instance
                 the launcher's list is the store, and a Lith that can only be added is a
@@ -4473,21 +4564,21 @@
         {/if}
       </div>
       <!--
-        Two modes have neither control, for different reasons.
+        One mode has neither control: in the index-db-only fallback neither means what it
+        says. Nothing on disk can be re-listed, and "Reset" there is not "clear a list,
+        your files stay" — the cache *is* the files, so one click would take every Lith on
+        the device with it. Site data is the browser's own way to do that, and its friction
+        is the point: it is worth requiring a deliberate trip through the browser's
+        settings to erase everything the launcher holds.
 
-        In the index-db-only fallback neither means what it says, so neither is offered.
-        Nothing on disk can be re-listed, and "Reset" there is not "clear a list, your files
-        stay" — the cache *is* the files, so one click would take every Lith on the device
-        with it. Site data is the browser's own way to do that, and its friction is the
-        point: it is worth requiring a deliberate trip through the browser's settings to
-        erase everything the launcher holds.
-
-        Self-host has no list of its own to rebuild or reset: the one on screen is the
-        server's, and reloading the page is how it is asked for again.
+        Self-host keeps the rebuild, because the caches it repairs are this device's even
+        though the list is the server's: re-reading the store is also what indexes each of
+        its Liths here, and that index is what search reads. Reset is not kept — the list
+        is not this device's to clear, and re-reading it is the rebuild it already has.
       -->
-      {#if !indexDbOnly && mode !== 'self-host'}
+      {#if !indexDbOnly}
         {#if showRebuildControl}
-          <button class="reset-cache" on:click={rebuildRecents} disabled={rebuildBusy} title="Rebuild this list from the files on disk">{
+          <button class="reset-cache" on:click={rebuildRecents} disabled={rebuildBusy} title={isSelfHost() ? 'Read this server again and index its Liths here' : 'Rebuild this list from the files on disk'}>{
             rebuildBusy ? 'Re-indexing…' : 'Rebuild Recents'
           }</button>
         {:else}

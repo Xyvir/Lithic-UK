@@ -61,6 +61,19 @@ const ACCESS_TOKEN = 'gho_fixture_token';
  */
 const SYNCED_AGO_SECONDS = 120;
 
+/** The address an instance's own launcher reads its mark from. */
+const INSTANCE_MARK_PATH = '/mstile-150x150.png';
+
+/**
+ * The instance's own mark, 2x2: small enough that it is unmistakably this file, and
+ * deliberately not the 150x150 the build ships, so an assertion can tell the bytes the
+ * instance served from the mark the page would fall back to.
+ */
+const INSTANCE_MARK_PNG = Buffer.from(
+  'iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAYAAABytg0kAAAAEUlEQVR4nGM4YKX1H4QZYAwAS6QIjYg+ilEAAAAASUVORK5CYII=',
+  'base64'
+);
+
 /** A 1x1 PNG, so the icon fetches an instance really makes are answers, not 404s. */
 const PIXEL_PNG = Buffer.from(
   'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==',
@@ -84,13 +97,20 @@ const STATIC = {
   '/src/app-icon.png': ['image/png', PIXEL_PNG]
 };
 
-/** One WebDAV `<response>` for a file in the fixture store. */
-function propfindEntry(name, lastModified) {
+/**
+ * One WebDAV `<response>` for a file in the fixture store.
+ *
+ * A file put here without a size answers the way a store that does not report content
+ * lengths does: a name and a date, which is what the launcher draws a row from when there
+ * is no length to show.
+ */
+function propfindEntry(name, lastModified, sizeBytes = null) {
   return [
     '<D:response>',
     `<D:href>/sync/${encodeURIComponent(name)}</D:href>`,
     '<D:propstat><D:prop>',
     `<D:getlastmodified>${lastModified.toUTCString()}</D:getlastmodified>`,
+    Number.isFinite(sizeBytes) ? `<D:getcontentlength>${sizeBytes}</D:getcontentlength>` : '',
     '</D:prop><D:status>HTTP/1.1 200 OK</D:status></D:propstat>',
     '</D:response>'
   ].join('');
@@ -145,11 +165,27 @@ export async function startSelfHostStub(options = {}) {
     lastSync: 0,
     /** Whether the next poll is authorized. */
     authorized: false,
+    /**
+     * Milliseconds to hold the *next* `/api/github/status` answer open for, consumed as it
+     * is used. Zero is an instance that answers immediately, which is every other test.
+     */
+    statusDelayMs: 0,
+    /** The holds that were actually applied, in order, so a test can prove it got one. */
+    statusHolds: [],
     userCode: options.userCode ?? DEFAULT_USER_CODE,
     deviceCode: options.deviceCode ?? DEFAULT_DEVICE_CODE,
     repos: (options.repos ?? DEFAULT_REPOS).map((repo) => ({ ...repo })),
-    /** The WebDAV store's Liths: `{ name, lastModified }`. */
+    /**
+     * The WebDAV store's Liths: `{ name, lastModified, sizeBytes, text }`. `text` is what
+     * the patch API's read route answers with, and null means the fixture body for it.
+     */
     liths: options.liths ?? [],
+    /**
+     * Whether the instance serves its own mark at `/mstile-150x150.png`. True is what a
+     * deployment looks like once its icon set has been published; false is one whose
+     * public directory never got the set, which is the launcher's fallback case.
+     */
+    instanceMark: options.instanceMark !== false,
     /**
      * The rest of the store, by name: the instance's icon renders and its
      * `favicon.conf` choice, which is anything PUT into `/sync/` that is not a
@@ -158,7 +194,11 @@ export async function startSelfHostStub(options = {}) {
      * so a listing here that carried the icons is what proves the client filters them out.
      */
     files: new Map(),
-    /** Every `/api/...` and `/sync/...` request the page made, as `METHOD /path`. */
+    /**
+     * Every `/api/...` and `/sync/...` request the page made, as `METHOD /path`, with the
+     * query appended where there was one — the request line a server sees. It is what
+     * tells a read of one file apart from a read of another.
+     */
     asked: []
   };
 
@@ -172,7 +212,9 @@ export async function startSelfHostStub(options = {}) {
     };
     const json = (body, status = 200) => send(status, 'application/json', JSON.stringify(body));
 
-    if (path.startsWith('/api/') || path.startsWith('/sync/')) state.asked.push(`${request.method} ${path}`);
+    if (path.startsWith('/api/') || path.startsWith('/sync/')) {
+      state.asked.push(`${request.method} ${path}${url.search}`);
+    }
 
     if (path === '/offline-service-worker.js' && worker) {
       send(200, 'text/javascript; charset=utf-8', worker.toString());
@@ -187,6 +229,17 @@ export async function startSelfHostStub(options = {}) {
       return;
     }
 
+    // The instance's own mark, at the address its header reads — or the 404 a deployment
+    // whose icon set was never published answers with.
+    if (path === INSTANCE_MARK_PATH && request.method === 'GET') {
+      if (!state.instanceMark) {
+        send(404, 'text/plain; charset=utf-8', 'this instance has published no icon set\n');
+        return;
+      }
+      send(200, 'image/png', INSTANCE_MARK_PNG);
+      return;
+    }
+
     const asset = STATIC[path];
     if (asset && request.method === 'GET') {
       send(200, asset[0], asset[1]);
@@ -198,10 +251,41 @@ export async function startSelfHostStub(options = {}) {
       json({ service: 'lithic-sync' });
       return;
     }
+    if (path === '/api/lithic/file' && request.method === 'GET') {
+      // The patch API's read route, which is how a launcher indexes a Lith it has never
+      // opened: the wiki comes back with the digest and revision a later save would be
+      // checked against. What matters here is that a Lith in the store is readable as
+      // *content*, since that is what the indexing pass is for.
+      const name = url.searchParams.get('file') ?? '';
+      const lith = state.liths.find((entry) => entry.name === name);
+      if (!lith) {
+        send(404, 'application/json', JSON.stringify({ error: `no ${name} in this store` }));
+        return;
+      }
+      send(
+        200,
+        'text/plain; charset=utf-8',
+        lith.text ?? `created: 20260920090000000\ntitle: ${name.replace(/\.lith$/i, '')}\ntype: text/vnd.tiddlywiki\n\nfrom this instance\n`,
+        { 'x-lithic-digest': 'stub-digest', 'x-lithic-rev': 'stub-rev' }
+      );
+      return;
+    }
 
     // --- the backup CGI ------------------------------------------------------
     if (path === '/api/github/status') {
-      json({ connected: state.connected, repo: state.repo, last_sync: state.lastSync });
+      // The answer is composed now and delivered later, which is what a slow instance does
+      // and what makes an ordering testable: a one-shot delay here holds one read's answer
+      // open past the step that supersedes it, without changing what that answer says —
+      // the state is read before the wait, exactly as a server that answered quickly but
+      // whose reply arrived slowly would have it.
+      const body = { connected: state.connected, repo: state.repo, last_sync: state.lastSync };
+      const delay = state.statusDelayMs;
+      state.statusDelayMs = 0;
+      if (delay > 0) {
+        state.statusHolds.push(delay);
+        await new Promise((resolve) => setTimeout(resolve, delay));
+      }
+      json(body);
       return;
     }
     if (path === '/api/github/device-code') {
@@ -253,10 +337,14 @@ export async function startSelfHostStub(options = {}) {
       // Everything the root holds, Liths and icons alike: the client's own filter is what
       // keeps a `favicon-32x32.png` out of the list of Liths, and this is where that shows.
       const entries = [
-        ...state.liths.map((lith) => ({ name: lith.name, lastModified: lith.lastModified })),
-        ...[...state.files.values()].map((file) => ({ name: file.name, lastModified: file.lastModified }))
+        ...state.liths.map((lith) => ({ name: lith.name, lastModified: lith.lastModified, sizeBytes: lith.sizeBytes })),
+        ...[...state.files.values()].map((file) => ({
+          name: file.name,
+          lastModified: file.lastModified,
+          sizeBytes: file.bytes?.length ?? null
+        }))
       ]
-        .map((entry) => propfindEntry(entry.name, entry.lastModified ?? new Date(0)))
+        .map((entry) => propfindEntry(entry.name, entry.lastModified ?? new Date(0), entry.sizeBytes))
         .join('');
       send(
         207,
@@ -284,14 +372,21 @@ export async function startSelfHostStub(options = {}) {
     }
     if (path.startsWith('/sync/') && request.method === 'PUT') {
       const name = decodeURIComponent(path.slice('/sync/'.length));
+      const body = await readRawBody(request);
       // A `.lith` is a Lith the list draws; anything else — the icon renders, the
       // `favicon.conf` choice — is a file of the store that is only ever read.
       if (name.endsWith('.lith')) {
+        // The store knows how big the file it just wrote is, and reports it like any
+        // other length: a row drawn from an upload shows what was uploaded.
         const existing = state.liths.find((lith) => lith.name === name);
-        if (existing) existing.lastModified = new Date();
-        else state.liths.push({ name, lastModified: new Date() });
+        if (existing) {
+          existing.lastModified = new Date();
+          existing.sizeBytes = body.length;
+        } else {
+          state.liths.push({ name, lastModified: new Date(), sizeBytes: body.length });
+        }
       } else {
-        state.files.set(name, { name, lastModified: new Date(), bytes: await readRawBody(request) });
+        state.files.set(name, { name, lastModified: new Date(), bytes: body });
       }
       send(201, 'text/plain; charset=utf-8', '');
       return;
@@ -324,9 +419,14 @@ export async function startSelfHostStub(options = {}) {
     authorize() {
       state.authorized = true;
     },
-    /** Put a Lith in the server's store, as an upload or a git pull would. */
-    addLith(name, lastModified = new Date()) {
-      state.liths.push({ name, lastModified });
+    /**
+     * Put a Lith in the server's store, as an upload or a git pull would.
+     *
+     * `sizeBytes` is optional because the store is allowed to answer without a length;
+     * passing one is how a test says what the server reports about a file it holds.
+     */
+    addLith(name, lastModified = new Date(), sizeBytes = null, text = null) {
+      state.liths.push({ name, lastModified, sizeBytes, text });
     },
     /**
      * Put a file that is not a Lith in the store, as the instance's own icon flow and a

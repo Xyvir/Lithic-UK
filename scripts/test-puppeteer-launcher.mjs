@@ -376,6 +376,12 @@ try {
   });
   await selfHostPage.goto(`file://${artifact}?mode=self-host`, { waitUntil: 'domcontentloaded' });
   await selfHostPage.waitForSelector('main.container');
+  // The mark is read once its bytes have arrived, so what is asserted below is the image
+  // that actually rendered rather than a src on its way somewhere.
+  await selfHostPage.waitForFunction(() => {
+    const image = document.querySelector('.brand-icon-wrap img.brand-icon');
+    return Boolean(image && image.complete && image.naturalWidth > 0);
+  }, POLL);
   const selfHost = await selfHostPage.evaluate(() => {
     const mark = document.querySelector('.brand-icon-wrap');
     const refresh = document.querySelector('.remote-refresh');
@@ -384,6 +390,8 @@ try {
       label: mark?.getAttribute('aria-label') ?? null,
       href: mark?.getAttribute('href') ?? null,
       disabled: mark?.hasAttribute('disabled') ?? null,
+      markSrc: mark?.querySelector('img.brand-icon')?.getAttribute('src') ?? null,
+      markWidth: mark?.querySelector('img.brand-icon')?.naturalWidth ?? null,
       mountLabel: document.querySelector('.action-pair .mount-button')?.textContent?.trim() ?? null,
       refresh: refresh !== null,
       headingButtons: [...document.querySelectorAll('.heading button')].map(button => button.className),
@@ -403,7 +411,10 @@ try {
       // nothing to separate them from.
       groupLabels: document.querySelectorAll('.recent-group-label').length,
       remoteDots: document.querySelectorAll('.remote-dot').length,
-      // Neither control of the rebuild family belongs to a list this mode does not own.
+      // The rebuild control, which this mode keeps: the list is the server's, but the
+      // caches it repairs are this device's, and reading the store again is also what
+      // indexes it here. Reset is the half that does not belong to a list this device
+      // does not own.
       resetCache: document.querySelector('.reset-cache') !== null,
       rebuildLabel: [...document.querySelectorAll('button')].map(button => button.textContent?.trim()).find(text => text?.includes('Rebuild')) ?? null,
       empty: document.querySelector('.empty')?.textContent?.trim() ?? null,
@@ -414,6 +425,14 @@ try {
   assert.equal(selfHost.label, 'Set this instance’s icon', 'Self-host: the picker button is still labelled');
   assert.equal(selfHost.href, null, 'Self-host: the mark does not link away from the picker');
   assert.equal(selfHost.disabled, false, 'Self-host: the picker is a live control, not the old dead button');
+  // This page is a file with no instance behind it, so there is no mark to read: the
+  // shipped mark is the answer, and its 150px is how this tells the two apart.
+  assert.notEqual(
+    selfHost.markSrc,
+    '/mstile-150x150.png',
+    `Self-host: a page with no instance behind it asks no address for a mark, and falls back to the one it carries: ${JSON.stringify(selfHost.markSrc?.slice(0, 40))}`
+  );
+  assert.equal(selfHost.markWidth, 150, 'Self-host: which is the 150px mark this build ships, drawn and whole');
   assert.equal(selfHost.mountLabel, 'Upload a Lith', 'Self-host: the file action says which way the file goes');
   assert.notEqual(selfHost.mountLabel, 'Mount a Lith', 'Self-host: it does not offer a device mount');
   assert.equal(selfHost.refresh, false, 'Self-host: nothing in the heading re-lists the server');
@@ -434,8 +453,8 @@ try {
   assert.equal(selfHost.cachedRows, 0, 'Self-host: neither are this device\'s cached copies');
   assert.equal(selfHost.groupLabels, 0, 'Self-host: no group heading, because there is no second group');
   assert.equal(selfHost.remoteDots, 0, 'Self-host: the server\'s rows carry no marker');
-  assert.equal(selfHost.resetCache, false, 'Self-host: no rebuild control for a list this device does not own');
-  assert.equal(selfHost.rebuildLabel, null, 'Self-host: and no rebuild button beside it');
+  assert.equal(selfHost.resetCache, true, 'Self-host: the rebuild control stays, since the caches it rebuilds are this device\'s');
+  assert.equal(selfHost.rebuildLabel, 'Rebuild Recents', 'Self-host: and it is offered as the rebuild rather than as a reset');
   assert.equal(selfHost.empty, null, 'Self-host: a failed list says the failure, not that the server is empty');
   assert.match(selfHost.error ?? '', /^Could not list this server’s Liths/, 'Self-host: the failure is the one line about the list');
 
@@ -536,6 +555,52 @@ try {
 
   await livePage.goto(`${stub.origin}/launcher.html?mode=self-host`, { waitUntil: 'domcontentloaded' });
   await livePage.waitForSelector('main.container');
+
+  // The mark in the heading, before this flow touches anything: it is the instance's own
+  // file, read from the address the legacy launcher's header read, so what it draws is
+  // whatever this instance currently serves — not the mark the build ships. The fixture is
+  // 2x2 on purpose, so the size the image actually rendered is proof of *which* bytes
+  // arrived: 2 is the instance's own, 150 is this build's. A deployment whose icon set was
+  // never published answers 404, which is the one case the address cannot answer for, and
+  // that is driven too — the shipped mark is what is left there.
+  const readHeadingMark = async () => {
+    await livePage.waitForFunction(() => {
+      const image = document.querySelector('.brand-icon-wrap img.brand-icon');
+      return Boolean(image && image.complete && image.naturalWidth > 0);
+    }, POLL);
+    return livePage.evaluate(() => {
+      const image = document.querySelector('.brand-icon-wrap img.brand-icon');
+      return { src: image?.getAttribute('src') ?? null, width: image?.naturalWidth ?? null };
+    });
+  };
+  const servedMark = await readHeadingMark();
+  assert.equal(
+    servedMark.src,
+    '/mstile-150x150.png',
+    'Live self-host: the heading reads the mark the instance publishes, at the file the icon set writes'
+  );
+  assert.equal(
+    servedMark.width,
+    2,
+    `Live self-host: and draws the bytes the instance served rather than this build's mark: ${JSON.stringify(servedMark)}`
+  );
+  stub.state.instanceMark = false;
+  await livePage.reload({ waitUntil: 'domcontentloaded' });
+  await livePage.waitForSelector('main.container');
+  const fallbackMark = await readHeadingMark();
+  assert.notEqual(
+    fallbackMark.src,
+    '/mstile-150x150.png',
+    `Live self-host: an instance that published no icon set is not left pointing at the address that failed: ${JSON.stringify(fallbackMark)}`
+  );
+  assert.equal(
+    fallbackMark.width,
+    150,
+    `Live self-host: it draws the shipped mark instead, which is the same answer a page with no instance behind it gives: ${JSON.stringify(fallbackMark)}`
+  );
+  stub.state.instanceMark = true;
+  await livePage.reload({ waitUntil: 'domcontentloaded' });
+  await livePage.waitForSelector('main.container');
   // The status read lands before anything is drawn about it, so "idle" here is the
   // instance's own answer and not the button's opening guess.
   await livePage.waitForSelector('.heading .sync-button.idle');
@@ -617,7 +682,9 @@ try {
   // A Lith the setup pulls down, added mid-flow on purpose: what is worth proving
   // is not that a server row can be drawn — the offline page drew one — but that
   // connecting re-lists the store, so the row arrives only because the setup ran.
-  stub.addLith('arrived.lith');
+  // Its size is part of the fixture: the row draws what the store reports about the file,
+  // so the server has to report something for there to be anything to prove. 200 KB.
+  stub.addLith('arrived.lith', new Date(), 204800);
   await clickAction(livePage, '.git-sync-modal .modal-action', 'Start Sync');
   await waitForAction(livePage, '.git-sync-modal .modal-action', 'Disconnect');
   const connected = await readSyncDialog(livePage);
@@ -654,7 +721,8 @@ try {
   const afterConnect = await livePage.evaluate(() => ({
     button: document.querySelector('.heading .sync-button')?.className ?? null,
     title: document.querySelector('.heading .sync-button')?.getAttribute('title') ?? null,
-    rows: [...document.querySelectorAll('.recent-row.remote-row .recent-name')].map((row) => row.textContent.trim())
+    rows: [...document.querySelectorAll('.recent-row.remote-row .recent-name')].map((row) => row.textContent.trim()),
+    size: document.querySelector('.recent-row.remote-row .recent-name .cached-size')?.textContent?.trim() ?? null
   }));
   assert.equal(afterConnect.button, 'sync-button connected', 'Live self-host: the heading button turns green once the instance reports a backup');
   assert.match(
@@ -665,6 +733,57 @@ try {
   assert.ok(
     afterConnect.rows.some((row) => row.startsWith('arrived.lith')),
     `Live self-host: connecting re-listed the store, so the Lith the setup pulled down is on screen: ${JSON.stringify(afterConnect.rows)}`
+  );
+
+  // What a row says about the file beside its name, which is its size on the server rather
+  // than the date the store last touched it. The stamp is the one fact a store cannot
+  // help telling you and the one a reader already knows — every file in a store this size
+  // was written this week — while the size is what a name cannot say.
+  assert.equal(
+    afterConnect.size,
+    '200 KB',
+    `Live self-host: the row shows what the server says the file weighs: ${JSON.stringify(afterConnect.size)}`
+  );
+  assert.ok(
+    !afterConnect.rows.some((row) => /\d\/\d\/\d{4}/.test(row)),
+    `Live self-host: and no row carries a date instead: ${JSON.stringify(afterConnect.rows)}`
+  );
+
+  // --- Re-reading the server, and indexing it here ----------------------------
+  // The rebuild control stays on an instance, which is the mode whose list is derived
+  // rather than authored. Rebuilding here is two things at once: the store is read again,
+  // and each Lith in it is indexed into this device's caches — which is what search reads
+  // for a Lith this browser never opened, and what it otherwise never learns. The reset
+  // half is not offered: the list is not this device's to clear.
+  const rebuildControl = await livePage.evaluate(() => {
+    const button = document.querySelector('.reset-cache');
+    return { label: button?.textContent?.trim() ?? null, title: button?.getAttribute('title') ?? null };
+  });
+  assert.equal(rebuildControl.label, 'Rebuild Recents', 'Live self-host: the rebuild control is offered on a server');
+  assert.equal(
+    rebuildControl.title,
+    'Read this server again and index its Liths here',
+    `Live self-host: and says what it does in this mode rather than talking about files on disk: ${JSON.stringify(rebuildControl)}`
+  );
+  const propfinds = () => stub.state.asked.filter((entry) => entry === 'PROPFIND /sync/').length;
+  const propfindsBefore = propfinds();
+  await livePage.click('.reset-cache');
+  await livePage.waitForFunction(
+    () => [...document.querySelectorAll('.status-line')].some((line) => line.textContent.includes('Re-indexed')),
+    POLL
+  );
+  assert.equal(propfinds(), propfindsBefore + 1, 'Live self-host: rebuilding asks the server for its list again');
+  assert.ok(
+    stub.state.asked.includes('GET /api/lithic/file?file=arrived.lith'),
+    `Live self-host: and reads each Lith it is about to index: ${JSON.stringify(stub.state.asked.slice(-8))}`
+  );
+  const rebuildLine = await livePage.evaluate(() =>
+    [...document.querySelectorAll('.status-line')].map((line) => line.textContent.trim()).find((text) => text.includes('Re-indexed')) ?? null
+  );
+  assert.match(
+    rebuildLine ?? '',
+    /^Re-indexed 1 lith/,
+    `Live self-host: and the count is the index it just wrote on this device: ${rebuildLine}`
   );
 
   // --- Deleting a Lith from the server ----------------------------------------
@@ -745,7 +864,16 @@ try {
   );
 
   // And back out again. The confirmation is a second dialog, so the disconnect is
-  // two clicks: the one that asks, and the one that means it.
+  // two clicks: the one that asks, and the one that means it. The status read the dialog
+  // makes on the way in is held open on purpose, so its answer — composed while the
+  // instance was still backing itself up — arrives *after* the disconnect has landed. That
+  // ordering is the one that matters here: the answer is about a world the disconnect has
+  // just left, and believing it would put the dialog back on the repository the user has
+  // just stopped, with the repository filled in from that dead world. An instance whose
+  // reply simply arrives late is what makes this deterministic instead of a race the run
+  // sometimes wins.
+  const STATUS_HOLD_MS = 1500;
+  stub.state.statusDelayMs = STATUS_HOLD_MS;
   await livePage.click('.heading .sync-button');
   await waitForAction(livePage, '.git-sync-modal .modal-action', 'Disconnect');
   await clickAction(livePage, '.git-sync-modal .modal-action', 'Disconnect');
@@ -768,6 +896,22 @@ try {
   // status read later.
   await waitForAction(livePage, '.git-sync-modal .modal-action', 'Connect to GitHub');
   const afterDisconnect = await readSyncDialog(livePage);
+  // Nothing has been clicked since the disconnect, so the held-back answer has landed on a
+  // dialog that is sitting on the start of the flow — which is the state the stale answer
+  // must leave alone. Waited out rather than polled: the answer lands on its own schedule,
+  // and what is being asserted is the state after it has.
+  await new Promise((resolve) => setTimeout(resolve, STATUS_HOLD_MS));
+  assert.deepEqual(
+    stub.state.statusHolds,
+    [STATUS_HOLD_MS],
+    `Live self-host: the read the disconnect had to outlive is the one that was held open: ${JSON.stringify(stub.state.statusHolds)}`
+  );
+  const afterStaleAnswer = await readSyncDialog(livePage);
+  assert.deepEqual(
+    afterStaleAnswer.actions,
+    ['Connect to GitHub', 'Connect & Push'],
+    `Live self-host: an answer composed before the disconnect does not put the dialog back on the repository it stopped: ${JSON.stringify(afterStaleAnswer)}`
+  );
   assert.equal(stub.state.connected, false, 'Live self-host: disconnect reached the instance');
   assert.ok(
     stub.state.asked.includes('GET /api/github/disconnect'),

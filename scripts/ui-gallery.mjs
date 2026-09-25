@@ -653,8 +653,10 @@ const SHEETS = [
         mode: 'self-host',
         server: true,
         drive: async (page) => {
-          stub.addLith('keeper-notes.lith', new Date('2026-09-20T09:00:00Z'));
-          stub.addLith('scratchpad.lith', new Date('2026-09-18T09:00:00Z'));
+          // Sizes, because that is what a row draws beside a name: the store reports them
+          // and the date it last touched the file is the one fact a reader already knows.
+          stub.addLith('keeper-notes.lith', new Date('2026-09-20T09:00:00Z'), 48000);
+          stub.addLith('scratchpad.lith', new Date('2026-09-18T09:00:00Z'), 1_678_000);
           await page.reload({ waitUntil: 'domcontentloaded' });
           await page.waitForSelector('.recent-row.remote-row .remove-remote');
           await settle(page, 300);
@@ -1317,7 +1319,7 @@ const SHEETS = [
         mode: 'self-host',
         server: true,
         drive: async (page) => {
-          stub.addLith('journal.lith', new Date('2026-09-16T09:00:00Z'));
+          stub.addLith('journal.lith', new Date('2026-09-16T09:00:00Z'), 12288);
           await page.reload({ waitUntil: 'domcontentloaded' });
           await page.waitForSelector('.recent-row.remote-row .remove-remote');
           await page.click('.recent-row.remote-row .remove-remote');
@@ -1326,6 +1328,33 @@ const SHEETS = [
         },
         clip: '.confirm-modal',
         expect: '.confirm-modal .modal-action.danger'
+      },
+      {
+        // What a rebuild on an instance asks before it drops something. The scan re-reads
+        // the store and compares it with what this device cached: a cached Lith the server
+        // does not hold is a copy search can find and nothing can open, so it is named and
+        // left to the reader. It is the same dialog the desktop app raises for a Lith
+        // missing from a folder; this is the half of it the mock could not reach until the
+        // server below started answering its own listing.
+        name: '749-instance-rebuild-orphan',
+        view: 'dialog',
+        modal: 'orphan-title',
+        mode: 'self-host',
+        server: true,
+        seed: {
+          caches: { 'search_cache_ghost.lith': cache([{ title: 'Ghost', text: 'a copy the server does not hold' }]) }
+        },
+        // No Lith is added here: the store the panes above already filled is the listing
+        // the scan compares the cache against, and a name in it twice is a list with two
+        // rows of the same Lith.
+        drive: async (page) => {
+          await page.waitForSelector('.reset-cache');
+          await page.click('.reset-cache');
+          await page.waitForSelector('.orphan-modal');
+          await settle(page, 300);
+        },
+        clip: '.orphan-modal',
+        expect: '.orphan-modal .modal-action.danger'
       },
       {
         // Edits the launcher captured and never saw saved. Reachable here because a
@@ -1544,9 +1573,15 @@ async function runPane(browser, pane) {
 const UNPHOTOGRAPHED = {
   'collision-title':
     'needs a second writer on a live server: it appears only when somebody else holds the lock on a remote Lith, and there is no server under `file://`.',
-  'orphan-title':
-    'is gated behind a rebuild scan, and the scan reads the world it is about: on disk a folder listing from Rust, on a server the file list. A fixture has neither — seeding the caches the scan then looks for does not produce an orphan, because the scan never gets that far — so this dialog is reachable by hand and not by this harness. A pane for it means teaching the mock to answer the listing, not seeding a state.'
 };
+
+/*
+ * `orphan-title` was here, for as long as self-host hid the rebuild control. The scan's
+ * listing comes from Rust on disk and from the store on a server, and the fixture — which
+ * is a file, or a server with nothing behind the two paths it was asked for — answered
+ * neither. It answers the store's listing now, which is why
+ * `749-instance-rebuild-orphan` can photograph what the scan asks.
+ */
 
 /**
  * Every dialog the launcher declares, read out of `App.svelte`.
