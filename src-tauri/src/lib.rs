@@ -63,6 +63,11 @@ fn dialog_start_dir() -> Option<PathBuf> {
 // while the dialog's own callback (which fires on the main thread) delivers the
 // chosen path. Same modality guarantee as v1's sync command, without the
 // deadlock.
+//
+// Kept even though `open_lith_files` supersedes it on the launcher's side: the
+// committed launcher artifact is rebuilt by CI, so the copy in flight still calls
+// this name, and a Mount that answered "unknown command" would be a broken button
+// for the minutes in between.
 #[tauri::command]
 async fn open_lith_file(app: tauri::AppHandle) -> Result<Option<LithFile>, String> {
     let (sender, receiver) = std::sync::mpsc::channel();
@@ -86,6 +91,46 @@ async fn open_lith_file(app: tauri::AppHandle) -> Result<Option<LithFile>, Strin
         path: path.to_string_lossy().into_owned(),
         text,
     }))
+}
+
+/// The dialog's answer to "which files", and nothing more.
+///
+/// Deliberately not `LithFile`: a multi-select is a list of liths nobody has
+/// opened yet, each one a whole wiki, so the bytes are read when something
+/// actually needs them — `read_lith_path` for the one that is opened, or for
+/// each one that is uploaded.
+#[derive(serde::Serialize)]
+struct LithPick {
+    name: String,
+    path: String,
+}
+
+/// Multi-select mount: several liths in one trip through the dialog.
+#[tauri::command]
+async fn open_lith_files(app: tauri::AppHandle) -> Result<Option<Vec<LithPick>>, String> {
+    let (sender, receiver) = std::sync::mpsc::channel();
+    let mut picker = app
+        .dialog()
+        .file()
+        .add_filter("Lithic files", &["lith"])
+        .add_filter("Text & data files", &["md", "txt", "tid", "json", "ipynb", "html", "htm"])
+        .add_filter("All files", &["*"]);
+    if let Some(dir) = dialog_start_dir() {
+        picker = picker.set_directory(dir);
+    }
+    picker.pick_files(move |files| {
+        let _ = sender.send(files);
+    });
+    let Some(files) = receiver.recv().ok().flatten() else { return Ok(None); };
+    let mut picks = Vec::with_capacity(files.len());
+    for file in files {
+        let path = file.into_path().map_err(|error| error.to_string())?;
+        picks.push(LithPick {
+            name: path.file_name().unwrap_or_default().to_string_lossy().into_owned(),
+            path: path.to_string_lossy().into_owned(),
+        });
+    }
+    Ok(Some(picks))
 }
 
 #[tauri::command]
@@ -2946,6 +2991,7 @@ pub fn run() {
             get_cli_args,
             read_lith_path,
             open_lith_file,
+            open_lith_files,
             save_lith_file,
             write_text_path,
             copy_lith_to_synced_dir,

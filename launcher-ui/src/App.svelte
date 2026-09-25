@@ -1893,51 +1893,100 @@
    * library, so the useful direction is the other one — send a file up and open it from the
    * server. A local file opened *in* self-host mode would be a Lith from another mode's
    * world sitting in this one's list, which is what this mode deliberately does not do.
+   *
+   * A Lith is a file, so the dialog picks several where the platform can name them
+   * afterwards. One file is what the button promises — add it and open it — so that is
+   * what happens, with nothing in between. Several files are a list rather than a
+   * decision: they are all added to Recents and none of them is opened, because the
+   * picker answered the question "which Liths are mine" and not "which one am I reading".
+   * The list is already the mechanism for opening one of several, so nothing has to be
+   * asked here: pick them all up in one trip, then click the row you want.
    */
   async function mountFromDisk() {
     if (mode === 'self-host') return uploadLithToServer();
     busy = true; status = 'Opening…';
     try {
-      const result = await files.open();
-      if (!result) { status = ''; return; }
-      lithText = result.text; fileName = result.name; filePath = result.path;
-      await mountWiki(result.text, result.name, result.path, result.handle);
-      status = `Mounted ${result.name}`;
+      const picks = await files.openMany();
+      if (picks.length === 0) { status = ''; return; }
+      if (picks.length === 1) {
+        const [only] = picks;
+        // The picker named the file; the bytes are read here, once, for the one Lith
+        // that is about to be opened. A multi-file pick never gets this far.
+        const text = await files.readText(only);
+        lithText = text; fileName = only.name; filePath = only.path;
+        await mountWiki(text, only.name, only.path, only.handle);
+        status = `Mounted ${only.name}`;
+        return;
+      }
+      // In reverse, because every row goes to the head of the list: folding the last
+      // pick in last leaves the list reading in the order the dialog listed them. A
+      // pick with no path and no handle could never be reopened from its row, so it is
+      // not one — the browser whose picker can only answer that way is offered a single
+      // file instead.
+      for (const pick of [...picks].reverse()) {
+        if (!pick.path && !pick.handle) continue;
+        await remember(pick);
+      }
+      // No full stop: the status line strips trailing punctuation, because the
+      // activity dots sit right after it.
+      status = `Added ${picks.length} Liths to Recents`;
     } catch (error) { status = `Open failed: ${error instanceof Error ? error.message : String(error)}`; }
     finally { busy = false; }
   }
 
   /**
-   * Put a chosen file on the server, then open it from there.
+   * Put the picked files on the server, then open one of them from there.
    *
    * Uploads land as `.lith` by the same rule the create path uses, and the list is re-read
    * before opening, because a Lith that is on the server but not in the list is one nobody
    * could find again. An upload over a name the server already holds replaces it, and since
    * that copy exists nowhere else — this mode keeps no local recents to fall back on — it is
    * asked about first, in the one colour this app uses for an act that cannot be undone.
+   *
+   * Every picked file goes up, because putting files on the server is what this button is
+   * for and one trip through the picker should not cost one trip per file. Which of them
+   * is opened is decided the same way it is on a device: one file is what the button
+   * promises, so it opens; several are a list, so they are uploaded and none is opened,
+   * and the list the server answers with is how one of them is read next.
    */
   async function uploadLithToServer(): Promise<void> {
     busy = true; status = 'Opening…';
     try {
-      const result = await files.open();
-      if (!result) { status = ''; return; }
-      const name = lithUploadName(result.name);
-      if (remoteFiles.some((file) => file.name.toLowerCase() === name.toLowerCase())) {
+      const picks = await files.openMany();
+      if (picks.length === 0) { status = ''; return; }
+      // A Lith lands under the server's name for it, so everything said about the
+      // uploads below — the replace question and the progress line — uses that name.
+      const uploaded = picks.map((pick) => ({ ...pick, name: lithUploadName(pick.name) }));
+      // One question for the batch, and it names exactly the files it would replace.
+      const clashes = uploaded.filter((pick) =>
+        remoteFiles.some((file) => file.name.toLowerCase() === pick.name.toLowerCase())
+      );
+      if (clashes.length > 0) {
         status = ''; busy = false;
         const replace = await askConfirmation({
-          title: 'Replace this Lith?',
-          body: `${name} is already on this server. Uploading replaces it.`,
+          title: clashes.length === 1 ? 'Replace this Lith?' : 'Replace these Liths?',
+          body: clashes.length === 1
+            ? `${clashes[0].name} is already on this server. Uploading replaces it.`
+            : `${clashes.map((pick) => pick.name).join(', ')} are already on this server. Uploading replaces them.`,
           confirmLabel: 'Replace',
           danger: true
         });
         if (!replace) return;
         busy = true;
       }
-      status = `Uploading ${name}…`;
-      await uploadRemoteFile(name, result.text);
+      status = uploaded.length === 1 ? `Uploading ${uploaded[0].name}…` : `Uploading ${uploaded.length} Liths…`;
+      for (const pick of uploaded) {
+        await uploadRemoteFile(pick.name, await files.readText(pick));
+      }
       await refreshRemoteList();
       busy = false;
-      await openRemoteFile(name);
+      if (uploaded.length > 1) {
+        // A list, not a decision: the uploads are the work and the list below is how
+        // one of them is opened, so nothing opens by itself here.
+        status = `Uploaded ${uploaded.length} Liths`;
+        return;
+      }
+      await openRemoteFile(uploaded[0].name);
     } catch (error) {
       remoteError = `Could not upload: ${error instanceof Error ? error.message : String(error)}`;
       busy = false;
@@ -4593,7 +4642,15 @@
         {#each filteredRecent as file}
           {@const name = getEntryName(file)}
           <div class="recent-row">
-            <button class="recent-name" on:click={() => openRecent(file)}>{name}{#if cachedEntries[name]}<span class="cached-size">{formatCacheSize(cachedEntries[name].sizeBytes)}</span>{/if}</button>
+            <!--
+              The hover answers the one question a row cannot show: where this Lith lives
+              on disk. Only a row with a path can answer it — a browser's picker hands over a
+              handle, which is a permission rather than an address — and a Lith that has never
+              been saved has no path at all, so those rows name no place rather than the wrong
+              one. The path is what the app would open, unshortened: `~` or an ellipsis would
+              be a second thing to decode on the one line that exists to be exact.
+            -->
+            <button class="recent-name" title={recentDiskPath(file as any) ?? undefined} on:click={() => openRecent(file)}>{name}{#if cachedEntries[name]}<span class="cached-size">{formatCacheSize(cachedEntries[name].sizeBytes)}</span>{/if}</button>
             <!--
               The marks sit left of the history control, nearest the name they are
               about: the clock is a control every row can have, while these two are

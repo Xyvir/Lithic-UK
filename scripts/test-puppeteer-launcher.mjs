@@ -28,6 +28,36 @@ const artifactHtml = await readFile(artifact, 'utf8');
 const missingIconHost = 'no-icon.example.com';
 
 /**
+ * What the Mount a Lith section's picker comes back with, in the order it lists them.
+ *
+ * All three only ever become Recents rows — a multi-file pick opens nothing — so their
+ * text is never read. The section's single-file leg picks `solo.html`, an HTML monolith,
+ * because that one does open and a monolith mounts as-is: a `.lith` would send the
+ * launcher looking for the wiki engine, and over `file://` that fetch is not the subject
+ * of this section.
+ */
+const MULTI_MOUNT_PICKS = [
+  { name: 'first.lith', path: 'C:/fixture/first.lith', text: '' },
+  { name: 'alpha.lith', path: 'C:/fixture/alpha.lith', text: '' },
+  { name: 'beta.lith', path: 'C:/fixture/beta.lith', text: '' }
+];
+
+/**
+ * What the Upload a Lith section's picker comes back with.
+ *
+ * None of the names is a `.lith`, because a file picked off a disk rarely is and the
+ * instance names the Lith it stores. The three bodies are deliberately different lengths:
+ * the picker names files without reading them, so each upload has to ask for its own
+ * contents, and a body that arrived empty is then a size of zero rather than a size that
+ * happens to match its neighbour.
+ */
+const UPLOAD_PICKS = [
+  { name: 'alpha.txt', text: 'A'.repeat(120) },
+  { name: 'beta.md', text: 'B'.repeat(340) },
+  { name: 'gamma.lith', text: 'C'.repeat(560) }
+];
+
+/**
  * How every `waitForFunction` in this file polls.
  *
  * Puppeteer's default is `raf`, and an animation frame is only delivered to the page the
@@ -180,7 +210,8 @@ try {
       gap: getComputedStyle(row).gap,
       border: getComputedStyle(row).borderWidth,
       height: row.getBoundingClientRect().height,
-      icons: row.querySelectorAll('.recent-icon-button').length
+      icons: row.querySelectorAll('.recent-icon-button').length,
+      title: row.querySelector('.recent-name')?.getAttribute('title') ?? null
     }))
   }));
 
@@ -240,6 +271,14 @@ try {
   assert.ok((result.historyRect?.width ?? 99) <= 20, 'History/download icon is visually smaller than its control');
   assert.ok(result.mountBookmark && result.mountBookmark.height === 60, 'Bookmark control matches the main action height');
   assert.ok(result.recentRows.every(row => row.gap === '0px' && row.height === 52 && row.icons >= 1), 'Recent rows use shared height and gapless inline icon controls');
+  // The location hover is for a row that has a location. This page runs with no file
+  // behind its fixture row — and a browser could not name one anyway, since its picker
+  // hands over a handle rather than a path — so the honest tooltip is no tooltip.
+  assert.deepEqual(
+    result.recentRows.map(row => row.title),
+    [null],
+    `A row with no path on disk hovers as nothing rather than a place it is not: ${JSON.stringify(result.recentRows.map(row => row.title))}`
+  );
 
   await page.type('input[aria-label="Search recent Liths"]', 'fixture');
   await page.keyboard.press('Escape');
@@ -3606,6 +3645,191 @@ try {
   );
 
   await vaultPage.close();
+
+  // --- Mount a Lith, several at a time -------------------------------------------
+  //
+  // A Lith is a file, so the picker can hand back several in one trip — the desktop app
+  // through `open_lith_files` (Tauri's `pick_files`), the browser through Chromium's own
+  // multi-select. Each pick arrives with a path or a handle, which is what a Recents row
+  // needs to be openable again later. The rule is implicit rather than asked about: one
+  // file is what the button promises, so it is added *and* opened; several are a list,
+  // so every one of them is added to Recents and none of them is opened. The list is
+  // already how one Lith is opened out of many, which is why nothing has to be asked
+  // here — and why the assertion that matters is that the launcher is *still there*
+  // after a multi-file pick, with the files in its list.
+  //
+  // A browser of its own, because this section owns the recents it reads: the vault
+  // section above leaves a stored list behind, and the list under test has to be the
+  // one this mount wrote.
+  const mountContext = await browser.createBrowserContext();
+  const mountPage = await mountContext.newPage();
+  await mountPage.setViewport({ width: 900, height: 700 });
+  mountPage.on('pageerror', error => errors.push(`mount: ${error.message}`));
+  const mountCalls = [];
+  await mountPage.exposeFunction('__lithicMountCall', entry => mountCalls.push(entry));
+  await mountPage.evaluateOnNewDocument((picks) => {
+    window.__lithicMountPicks = picks;
+    window.__TAURI__ = {
+      core: {
+        invoke: (command, args) => {
+          window.__lithicMountCall({ command, args });
+          // Read at call time rather than closed over, because the launcher's bridge
+          // keeps the `invoke` it found at import: a mock swapped afterwards is never
+          // asked again, which is a trap worth leaving closed here.
+          // Names and paths, never bytes: that is the real command's contract, and the
+          // launcher reads the one file it opens with `read_lith_path` below.
+          if (command === 'open_lith_files') {
+            return Promise.resolve(window.__lithicMountPicks.map(({ name, path }) => ({ name, path })));
+          }
+          if (command === 'read_lith_path') {
+            const pick = window.__lithicMountPicks.find((entry) => entry.path === args.path);
+            return Promise.resolve(pick ? { name: pick.name, path: pick.path, text: pick.text } : null);
+          }
+          if (command === 'read_recents_sidecar') return Promise.resolve([]);
+          // Not the mode's default `null`: the launcher dereferences this map (it is
+          // keyed by path), and these rows are the first in this suite to carry one.
+          if (command === 'git_sync_coverage') return Promise.resolve({});
+          if (command === 'git_sync_folder') return Promise.resolve({ folder: null, overridden: false });
+          return Promise.resolve(null);
+        }
+      },
+      event: { listen: () => Promise.resolve(() => {}) }
+    };
+  }, MULTI_MOUNT_PICKS);
+  const mountedRows = () => mountPage.evaluate(() =>
+    [...document.querySelectorAll('.recent-row:not(.remote-row)')].map(row =>
+      row.querySelector('.recent-name')?.textContent?.trim() ?? ''
+    )
+  );
+  const rowTooltips = () => mountPage.evaluate(() =>
+    [...document.querySelectorAll('.recent-row:not(.remote-row)')].map(row =>
+      row.querySelector('.recent-name')?.getAttribute('title') ?? null
+    )
+  );
+  const openLauncher = async () => {
+    await mountPage.goto(`file://${artifact}?mode=tauri`, { waitUntil: 'domcontentloaded' });
+    await mountPage.waitForSelector('.mount-button');
+  };
+  await openLauncher();
+
+  // Three files: all three are added, nothing is opened, and the launcher never goes
+  // away — no dialog, no boot, just three more rows than there were.
+  await mountPage.click('.mount-button');
+  await mountPage.waitForFunction(() => document.querySelectorAll('.recent-row').length === 3, POLL);
+  const afterMulti = await mountedRows();
+  assert.deepEqual(
+    afterMulti,
+    ['first.lith', 'alpha.lith', 'beta.lith'],
+    `The picked files are the rows, in the order the dialog listed them: ${JSON.stringify(afterMulti)}`
+  );
+  assert.equal(
+    await mountPage.$('.mount-button') === null,
+    false,
+    'A multi-file pick opens nothing: the launcher is still the page, so the rows are what was wanted'
+  );
+  assert.equal(
+    await mountPage.evaluate(() => document.querySelector('.status-label')?.textContent?.trim() ?? null),
+    'Added 3 Liths to Recents',
+    '...and it says what it did, so a list that grew is not a mystery'
+  );
+  assert.deepEqual(
+    await rowTooltips(),
+    ['C:/fixture/first.lith', 'C:/fixture/alpha.lith', 'C:/fixture/beta.lith'],
+    `Every row hovers as the file it will open, in the same order: ${JSON.stringify(await rowTooltips())}`
+  );
+  assert.equal(
+    mountCalls.filter(call => call.command === 'open_lith_files').length,
+    1,
+    'One trip through the picker for all three, which is the whole point of the change'
+  );
+
+  // One file: added and opened, exactly as the button has always promised, and the row
+  // it leaves is the one on top.
+  await mountPage.evaluate(() => {
+    window.__lithicMountPicks = [
+      { name: 'solo.html', path: 'C:/fixture/solo.html', text: '<!doctype html><title>solo</title>' }
+    ];
+  });
+  await mountPage.click('.mount-button');
+  // The mount spends the document it was clicked in — `bootLegacyHtml` writes the picked
+  // page over it — so waiting for the button to disappear is what says it happened,
+  // rather than a sleep that is either long enough to be slow or short enough to be
+  // flaky.
+  await mountPage.waitForFunction(() => document.querySelector('.mount-button') === null, POLL);
+  await openLauncher();
+  await mountPage.waitForFunction(() => document.querySelectorAll('.recent-row').length === 4, POLL);
+  const afterSingle = await mountedRows();
+  assert.deepEqual(
+    afterSingle,
+    ['solo.html', 'first.lith', 'alpha.lith', 'beta.lith'],
+    `A single picked file opens, adding exactly one row at the head: ${JSON.stringify(afterSingle)}`
+  );
+  await mountContext.close();
+
+  // --- Upload a Lith, several at a time ------------------------------------------
+  //
+  // The same rule on an instance, decided the same way: one file is added and opened,
+  // several are all uploaded and none is opened. What differs is where they are added
+  // *to* — the server's store — so this needs the stub, because the uploads are PUTs and
+  // only something speaking the store's protocol can say whether all three arrived.
+  //
+  // Chromium's picker only opens with a person in front of it, so it is stood in for
+  // here. That puts the launcher's own half under test, which is the point: the picker
+  // names the files and reads none of them, so each upload has to ask for its contents,
+  // and a size of zero is what says one of them was never read.
+  const uploadStub = await startSelfHostStub({ artifact });
+  const uploadContext = await browser.createBrowserContext();
+  const uploadPage = await uploadContext.newPage();
+  await uploadPage.setViewport({ width: 1000, height: 700 });
+  const uploadNoise = (text) => text.includes('Failed to load resource') || text.includes('ERR_');
+  uploadPage.on('pageerror', (error) => { if (!uploadNoise(error.message)) errors.push(`upload: ${error.message}`); });
+  uploadPage.on('console', (message) => {
+    if (message.type() === 'error' && !uploadNoise(message.text())) errors.push(`upload: ${message.text()}`);
+  });
+  await uploadPage.evaluateOnNewDocument((files) => {
+    window.showOpenFilePicker = async () =>
+      files.map((entry) => ({
+        name: entry.name,
+        getFile: async () => new File([entry.text], entry.name, { type: 'application/x-lith' })
+      }));
+  }, UPLOAD_PICKS);
+  await uploadPage.goto(`${uploadStub.origin}/launcher.html?mode=self-host`, { waitUntil: 'domcontentloaded' });
+  await uploadPage.waitForSelector('.mount-button');
+  assert.equal(
+    await uploadPage.$eval('.mount-button', (node) => node.textContent.trim()),
+    'Upload a Lith',
+    'An instance page sends the file up rather than mounting from the device'
+  );
+  await uploadPage.click('.mount-button');
+  await uploadPage.waitForFunction(
+    () => document.querySelector('.status-label')?.textContent?.trim() === 'Uploaded 3 Liths',
+    POLL
+  );
+  assert.equal(
+    await uploadPage.$('.mount-button') === null,
+    false,
+    'Three uploaded files open nothing: the launcher is still the page'
+  );
+  const uploadedRows = await uploadPage.$$eval(
+    '.recent-row.remote-row .recent-name',
+    (rows) => rows.map((row) => row.firstChild?.textContent?.trim() ?? '')
+  );
+  assert.deepEqual(
+    [...uploadedRows].sort(),
+    ['alpha.lith', 'beta.lith', 'gamma.lith'],
+    `...and the store is what grew, under the names the instance gives them: ${JSON.stringify(uploadedRows)}`
+  );
+  assert.deepEqual(
+    uploadStub.state.liths.map((lith) => ({ name: lith.name, size: lith.sizeBytes })),
+    [
+      { name: 'alpha.lith', size: 120 },
+      { name: 'beta.lith', size: 340 },
+      { name: 'gamma.lith', size: 560 }
+    ],
+    `Every picked file was uploaded with its own contents, not one file three times and not three empty bodies: ${JSON.stringify(uploadStub.state.liths.map((lith) => [lith.name, lith.sizeBytes]))}`
+  );
+  await uploadContext.close();
+  await uploadStub.close();
 
   assert.deepEqual(errors, []);
   console.log(`Puppeteer launcher smoke passed (${process.env.HEADED === '1' ? 'headed' : 'headless'})`);

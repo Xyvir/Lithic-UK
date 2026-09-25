@@ -1,5 +1,26 @@
+/**
+ * One file out of a picker.
+ *
+ * A pick is a *reference* to a file, not its contents: it carries a `path` (the
+ * desktop app) or a `handle` (the browser's own picker), which is what opening or
+ * reading it again later needs. `text` is filled only where the picker had no
+ * other way to hand the file over — the classic `<input type=file>` gives names
+ * and bytes and nothing else — and is otherwise read on demand by `readText`.
+ * That distinction is the point of it: a multi-file pick is a list of liths
+ * nobody has opened, and each one is a whole wiki.
+ */
+export interface PickedLith {
+  name: string;
+  path?: string;
+  text: string;
+  handle?: unknown;
+}
+
 export interface FileBridge {
-  open(): Promise<{ name: string; path?: string; text: string; handle?: unknown } | null>;
+  /** The files one trip through the picker chose, in the order it listed them. */
+  openMany(): Promise<PickedLith[]>;
+  /** The pick's contents, read now when the picker only named the file. */
+  readText(pick: PickedLith): Promise<string>;
   save(text: string, suggestedName: string, path?: string): Promise<{ name: string; path?: string }>;
   loadUrl(url: string): Promise<string>;
 }
@@ -152,6 +173,61 @@ async function fetchText(url: string): Promise<string> {
   return response.text();
 }
 
+const OPEN_TYPES = [
+  { description: 'Lithic Monolith', accept: { 'application/x-lith': ['.lith'] } },
+  { description: 'Lithic JSON Backups', accept: { 'application/json': ['.json'] } },
+  { description: 'Lithic HTML Files', accept: { 'text/html': ['.html', '.htm'] } },
+  { description: 'Editable text files', accept: { 'text/plain': ['.md', '.txt', '.tid'] } },
+  { description: 'Jupyter Notebooks', accept: { 'application/x-ipynb+json': ['.ipynb'] } }
+];
+
+/**
+ * The browser's two pickers behind one call.
+ *
+ * Only Chromium's `showOpenFilePicker` can answer with several files that stay
+ * openable: each one comes back as a handle, which is what a Recents row needs
+ * to find the file again — and a handle is also how its contents are read later,
+ * so nothing is read here. The classic `<input type=file>` hands over names and
+ * bytes and nothing else, so it stays single-select rather than offering a
+ * multi-select whose extra picks could never be reopened.
+ */
+async function browserPicks(): Promise<PickedLith[]> {
+  if (typeof window !== 'undefined' && (window as any).showOpenFilePicker) {
+    try {
+      const handles = (await (window as any).showOpenFilePicker({ multiple: true, types: OPEN_TYPES })) as Array<{
+        getFile: () => Promise<File>;
+      }>;
+      const picks: PickedLith[] = [];
+      for (const handle of handles) {
+        // The name comes off the file, not the handle: both carry it, but the picker
+        // below has only the file, and one spelling of a name is enough.
+        const file = await handle.getFile();
+        picks.push({ name: file.name, text: '', handle });
+      }
+      return picks;
+    } catch (err: any) {
+      if (err && typeof err === 'object' && err.name === 'AbortError') {
+        return [];
+      }
+      // Fall back to standard file input
+    }
+  }
+  return new Promise((resolve, reject) => {
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.accept = '.lith,.html,.htm,.json,.md,.txt,.tid,.ipynb,text/plain,text/html';
+    input.onchange = () => {
+      const file = input.files?.[0];
+      if (!file) return resolve([]);
+      const reader = new FileReader();
+      reader.onerror = () => reject(reader.error ?? new Error('Unable to read file'));
+      reader.onload = () => resolve([{ name: file.name, text: String(reader.result ?? '') }]);
+      reader.readAsText(file);
+    };
+    input.click();
+  });
+}
+
 function browserBridge(): FileBridge {
   return {
     loadUrl: fetchText,
@@ -182,43 +258,16 @@ function browserBridge(): FileBridge {
       URL.revokeObjectURL(url);
       return { name: anchor.download };
     },
-    async open() {
-      if (typeof window !== 'undefined' && (window as any).showOpenFilePicker) {
-        try {
-          const openOptions = {
-            types: [
-              { description: 'Lithic Monolith', accept: { 'application/x-lith': ['.lith'] } },
-              { description: 'Lithic JSON Backups', accept: { 'application/json': ['.json'] } },
-              { description: 'Lithic HTML Files', accept: { 'text/html': ['.html', '.htm'] } },
-              { description: 'Editable text files', accept: { 'text/plain': ['.md', '.txt', '.tid'] } },
-              { description: 'Jupyter Notebooks', accept: { 'application/x-ipynb+json': ['.ipynb'] } }
-            ]
-          };
-          const [fileHandle] = await (window as any).showOpenFilePicker(openOptions);
-          const file = await fileHandle.getFile();
-          const text = await file.text();
-          return { name: file.name, text, handle: fileHandle };
-        } catch (err: any) {
-          if (err && typeof err === 'object' && err.name === 'AbortError') {
-            return null;
-          }
-          // Fall back to standard file input
-        }
-      }
-      return new Promise((resolve, reject) => {
-        const input = document.createElement('input');
-        input.type = 'file';
-        input.accept = '.lith,.html,.htm,.json,.md,.txt,.tid,.ipynb,text/plain,text/html';
-        input.onchange = () => {
-          const file = input.files?.[0];
-          if (!file) return resolve(null);
-          const reader = new FileReader();
-          reader.onerror = () => reject(reader.error ?? new Error('Unable to read file'));
-          reader.onload = () => resolve({ name: file.name, text: String(reader.result ?? '') });
-          reader.readAsText(file);
-        };
-        input.click();
-      });
+    openMany() {
+      return browserPicks();
+    },
+    async readText(pick) {
+      // The classic input has already read its one file; anything out of Chromium's
+      // picker is read here, from the handle, when something needs it.
+      if (pick.text) return pick.text;
+      const handle = pick.handle as { getFile: () => Promise<File> } | undefined;
+      if (!handle) return '';
+      return (await handle.getFile()).text();
     }
   };
 }
@@ -232,9 +281,20 @@ export function createFileBridge(): FileBridge {
       const result = await invoke('save_lith_file', { text, suggestedName, path });
       return result as { name: string; path?: string };
     },
-    async open() {
-      const result = await invoke('open_lith_file');
-      return (result as { name: string; path: string; text: string } | null) ?? null;
+    async openMany() {
+      // Rust answers with names and paths, never bytes: a pick is a list of liths
+      // nobody has opened yet, and each one is a whole wiki to push through the
+      // IPC bridge for nothing. `readText` reads the one that is actually needed.
+      const result = await invoke('open_lith_files');
+      return ((result as Array<{ name: string; path: string }> | null) ?? []).map(
+        (pick) => ({ name: pick.name, path: pick.path, text: '' })
+      );
+    },
+    async readText(pick) {
+      if (pick.text) return pick.text;
+      if (!pick.path) return '';
+      const result = (await invoke('read_lith_path', { path: pick.path })) as { text?: string } | null;
+      return result?.text ?? '';
     }
   };
 }
