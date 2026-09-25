@@ -92,6 +92,16 @@ jobs:
              $tag = "v$(Get-Date -Format 'yyyy.MM.dd-HHmm')"
            }
            echo "date=$tag" >> $env:GITHUB_OUTPUT
+           # The executable is named after the date and time only, with no mode
+           # in it: one Windows build is published, so "Online"/"Offline" would
+           # be a distinction with nothing on the other side of it. Anything
+           # unparseable falls back to the whole tag so a build never fails here.
+           if ($tag -match '(\d{4})\.(\d{2})\.(\d{2})-(\d{4})') {
+             $exe = "Lithic-$($Matches[2]).$($Matches[3]).$($Matches[1].Substring(2))-$($Matches[4]).exe"
+           } else {
+             $exe = "Lithic-$tag.exe"
+           }
+           echo "exe=$exe" >> $env:GITHUB_OUTPUT
            # Semver for the exe's FileVersion/ProductVersion resources:
            # tauri-build derives them from the config's top-level `version`
            # (it moved out of `package` in Tauri 2), which we patch via
@@ -106,7 +116,7 @@ jobs:
            echo "version=$ver" >> $env:GITHUB_OUTPUT
            echo ('tauri_config={"version":"' + $ver + '"}') >> $env:GITHUB_OUTPUT
 
-      - name: Build Offline Executable
+      - name: Build Executable
         run: npm run tauri build
         env:
           TAURI_CONFIG: ${{ steps.tag.outputs.tauri_config }}
@@ -127,42 +137,17 @@ jobs:
             "| $($file.Name) | $mb MB |" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append
           }
 
-      - name: Rename Offline Artifact
+      - name: Rename Artifact
         run: |
           $exe = Get-ChildItem -Path "src-tauri/target/release" -Filter "*.exe" -Recurse | Where-Object { $_.FullName -notmatch "deps" -and $_.FullName -notmatch "build" } | Select-Object -First 1
           if ($exe) {
             Write-Host "Found EXE at: $($exe.FullName)"
-            Copy-Item $exe.FullName -Destination "Lithic-Offline-${{ steps.tag.outputs.date }}.exe"
-            Write-Host "Created Lithic-Offline-${{ steps.tag.outputs.date }}.exe"
+            Copy-Item $exe.FullName -Destination "${{ steps.tag.outputs.exe }}"
+            Write-Host "Created ${{ steps.tag.outputs.exe }}"
           } else {
             Write-Error "Build failed: No .exe found in target/release folder."
             exit 1
           }
-
-      # --- ONLINE BUILD DISABLED ---
-      # - name: Switch Config to Online Mode
-      #   run: |
-      #     $configPath = "src-tauri/tauri.conf.json"
-      #     $json = Get-Content $configPath -Raw | ConvertFrom-Json
-      #
-      #     # Change entry point to website
-      #     if ($json.tauri -and $json.tauri.windows) {
-      #        $json.tauri.windows[0].url = "https://lithic.uk"
-      #     }
-      #
-      #     $json | ConvertTo-Json -Depth 10 | Set-Content $configPath
-
-      # - name: Build Online Executable
-      #   run: npm run tauri build
-
-      # - name: Rename Online Artifact
-      #   run: |
-      #     $exe = Get-ChildItem -Path "src-tauri/target/release/*.exe" | Select-Object -First 1
-      #     if ($exe) {
-      #       Move-Item $exe.FullName -Destination "Lithic-Online.exe"
-      #        Write-Host "Created Lithic-Online.exe"
-      #     }
-      # -----------------------------
 
       - name: Create Release
         uses: softprops/action-gh-release@v3
@@ -173,5 +158,4 @@ jobs:
           draft: false
           prerelease: false
           files: |
-            Lithic-Offline-${{ steps.tag.outputs.date }}.exe
-            # Lithic-Online.exe
+            ${{ steps.tag.outputs.exe }}
