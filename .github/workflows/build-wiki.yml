@@ -304,9 +304,14 @@ jobs:
           name: Build ${{ steps.tag.outputs.date }}
           draft: false
           prerelease: false
+          # One asset per artifact. The flagship used to be attached twice — as
+          # wiki/output/lith.html and as the identical copy the run commits to
+          # variants/prod.html — which reads as two releases of the same file.
+          # src/lithic.html is the same bytes and already under the name the
+          # release publishes, so the download matches the file the app embeds.
           files: |
-            wiki/output/lith.html
-            variants/prod.html
+            src/lithic.html
+            src/launcher.html
             variants/lithic-light.html
             wiki/output/lithic-light.html.gz
             wiki.zip
