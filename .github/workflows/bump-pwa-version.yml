@@ -13,7 +13,10 @@ name: Bump PWA Version
 #
 # Consequence worth knowing: pushing src/launcher.html no longer bumps the
 # version on its own, so an installed PWA keeps its cached launcher shell until
-# something bumps the service-worker version.
+# something bumps the service-worker version. That something is now the release:
+# a push to main that changes load-bearing code starts build-wiki.yml, which
+# rebuilds the launcher and bumps this version in the same commit. The artifact
+# path itself is excluded from that trigger on purpose -- it is an output.
 on:
   workflow_dispatch:
 

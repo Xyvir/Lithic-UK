@@ -1,5 +1,5 @@
 name: Build and Release TiddlyWiki
-run-name: Build ${{ inputs.create_release == true && '(Release)' || '(Dry Run)' }}
+run-name: Build ${{ (github.event_name == 'push' || inputs.create_release == true) && '(Release)' || '(Dry Run)' }}
 
 on:
   workflow_dispatch:
@@ -21,14 +21,66 @@ on:
         - all
         - light
 
+  # A push to main is a RELEASE. The local gates (scripts/pre-push-check.mjs, the
+  # Puppeteer smoke, cargo, svelte-check) run before anything lands, so what
+  # reaches main is what should be built, tagged and published; nobody has to
+  # remember to dispatch this by hand afterwards. Dispatch is still how you get
+  # the other configs (pre/dev/all/light) and a dry run.
+  #
+  # The filter is a BLACKLIST, deliberately: everything that lands on main is
+  # load-bearing for at least one artifact (the wiki, the launcher, the desktop
+  # app, the server image), so a new directory of shipping code is picked up
+  # without anyone remembering to come back here. What is out:
+  #
+  #   * the files THIS RUN WRITES (see "Commit Built Wiki and Bump PWA" below).
+  #     A run whose own commit triggers another run never ends, so every path
+  #     the release commits is excluded here by name.
+  #   * docs, the licence and CI config: nothing in them reaches an artifact.
+  #     That is also why editing this file does not run it — dispatch it.
+  #   * the local-only harness (the push gate, the gallery, the Puppeteer smoke,
+  #     the offline/artifact checks, the self-host stub): no build step runs
+  #     them, and none of them ships.
+  push:
+    branches:
+      - main
+    paths:
+      - '**'
+      - '!src/lithic.html'
+      - '!src/launcher.html'
+      - '!variants/**'
+      - '!manifest.json'
+      - '!offline-service-worker.js'
+      - '!*.md'
+      - '!**/*.md'
+      - '!LICENSE'
+      - '!.github/**'
+      - '!scripts/pre-push-check.mjs'
+      - '!scripts/ui-gallery.mjs'
+      - '!scripts/self-host-stub.mjs'
+      - '!scripts/vault-copy.mjs'
+      - '!scripts/test-*'
+      - '!scripts/_*'
+      - '!scripts/check-launcher-*.mjs'
+      - '!scripts/check-light-artifact.mjs'
+
 permissions:
   contents: write
   packages: write
+
+# What this run IS. A push is always a prod release, a dispatch builds exactly
+# what was asked for. Resolved once here because a push carries no inputs, so
+# every prod/release gate below reads these two rather than branching on the
+# event at each of the twenty-odd steps that care.
+env:
+  BUILD_CONFIG: ${{ github.event_name == 'push' && 'prod' || inputs.build_config }}
+  CREATE_RELEASE: ${{ github.event_name == 'push' || inputs.create_release }}
 
 # One writer to main at a time, repo-wide: concurrency groups are shared across
 # workflows, and bump-pwa-version.yml deliberately names this same group.
 # cancel-in-progress stays OFF — by the time this job reaches its push it has
 # already built, and cancelling it is how you lose a finished release to nothing.
+# A push release makes that matter more: three pushes in a row queue three runs
+# rather than one being cancelled, and each is rebuilt from its own commit.
 # A group only serializes workflows against each other; a person pushing while
 # this runs is covered by scripts/ci-push-main.sh.
 concurrency:
@@ -40,6 +92,10 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       tag_name: ${{ steps.tag.outputs.date }}
+      # Read by the two chained jobs at the bottom: their `if` may use only
+      # github/needs/vars/inputs, so the plan has to travel as an output.
+      config: ${{ env.BUILD_CONFIG }}
+      release: ${{ env.CREATE_RELEASE }}
     steps:
       - name: Checkout Code
         uses: actions/checkout@v5
@@ -66,18 +122,18 @@ jobs:
         run: node scripts/flatten-plugins.js
 
       - name: Generate All Plugin Info
-        if: inputs.build_config == 'all'
+        if: env.BUILD_CONFIG == 'all'
         run: node scripts/generate-all-info.js
 
       - name: Generate Build Config
-        run: node scripts/generate-config.js ${{ inputs.build_config }}
+        run: node scripts/generate-config.js $BUILD_CONFIG
 
       - name: Build Launcher (Svelte)
-        if: inputs.build_config == 'prod'
+        if: env.BUILD_CONFIG == 'prod'
         run: npm run build:launcher
 
       - name: Verify Launcher Artifact (prod only)
-        if: inputs.build_config == 'prod'
+        if: env.BUILD_CONFIG == 'prod'
         run: npm run test:launcher
 
       - name: Build TiddlyWiki (uglified for prod and light, plain otherwise)
@@ -85,9 +141,9 @@ jobs:
           TIDDLYWIKI_PLUGIN_PATH: '${{ github.workspace }}/wiki:${{ github.workspace }}/wiki/plugins'
           TIDDLYWIKI_THEME_PATH: '${{ github.workspace }}/wiki/themes'
         run: |
-          if [ "${{ inputs.build_config }}" = "prod" ]; then
+          if [ "$BUILD_CONFIG" = "prod" ]; then
             set -o pipefail && npx tiddlywiki wiki --uglify --build index 2>&1 | tee wiki/tiddlywiki.log
-          elif [ "${{ inputs.build_config }}" = "light" ]; then
+          elif [ "$BUILD_CONFIG" = "light" ]; then
             # A published artifact like prod, so it is uglified too; it renders
             # through its own target so it cannot clobber the full build's output.
             set -o pipefail && npx tiddlywiki wiki --uglify --build light 2>&1 | tee wiki/tiddlywiki.log
@@ -96,7 +152,7 @@ jobs:
           fi
 
       - name: Verify Uglified Artifact (prod only)
-        if: ${{ inputs.build_config == 'prod' }}
+        if: ${{ env.BUILD_CONFIG == 'prod' }}
         run: |
           # The uglify pass must actually engage: artifact should shrink
           # materially versus an uncompressed build (typically ~30%).
@@ -124,11 +180,11 @@ jobs:
           fi
 
       - name: Rename Output
-        if: ${{ inputs.build_config != 'light' }}
+        if: ${{ env.BUILD_CONFIG != 'light' }}
         run: mv wiki/output/index.html wiki/output/lith.html
 
       - name: Brand Output
-        if: ${{ inputs.build_config != 'light' }}
+        if: ${{ env.BUILD_CONFIG != 'light' }}
         run: |
           sed -i 's/content="TiddlyWiki"/content="Lithic PKMS"/g' wiki/output/lith.html
 
@@ -137,7 +193,7 @@ jobs:
       # drift apart. Built after the full build so the full build's own output is
       # already on disk; the light target writes its own filename.
       - name: Build Lithic Light (alongside prod)
-        if: inputs.build_config == 'prod'
+        if: env.BUILD_CONFIG == 'prod'
         env:
           TIDDLYWIKI_PLUGIN_PATH: '${{ github.workspace }}/wiki:${{ github.workspace }}/wiki/plugins'
           TIDDLYWIKI_THEME_PATH: '${{ github.workspace }}/wiki/themes'
@@ -146,7 +202,7 @@ jobs:
           set -o pipefail && npx tiddlywiki wiki --uglify --build light 2>&1 | tee wiki/tiddlywiki.log
 
       - name: Verify Lithic Light Artifact
-        if: ${{ inputs.build_config == 'prod' || inputs.build_config == 'light' }}
+        if: ${{ env.BUILD_CONFIG == 'prod' || env.BUILD_CONFIG == 'light' }}
         run: |
           OUT=wiki/output/lithic-light.html
           if [ ! -f "$OUT" ]; then
@@ -181,7 +237,7 @@ jobs:
           exit 0
 
       - name: Commit Built Wiki and Bump PWA (prod release)
-        if: ${{ inputs.create_release == true && inputs.build_config == 'prod' }}
+        if: ${{ env.CREATE_RELEASE == 'true' && env.BUILD_CONFIG == 'prod' }}
         run: |
           mkdir -p variants
           cp wiki/output/lith.html variants/prod.html
@@ -203,11 +259,11 @@ jobs:
           bash scripts/ci-push-main.sh
 
       - name: Commit Built Wiki to variants (non-prod)
-        if: ${{ inputs.build_config != 'prod' }}
+        if: ${{ env.BUILD_CONFIG != 'prod' }}
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          if [ "${{ inputs.build_config }}" = "light" ]; then
+          if [ "$BUILD_CONFIG" = "light" ]; then
             # The light distribution publishes to variants/, beside the other
             # distributions. It must not sit in src/: that directory is the
             # desktop app's frontendDist, so a file there is embedded in the
@@ -218,9 +274,9 @@ jobs:
             git diff --cached --quiet || git commit -m "Update variants/lithic-light.html from build"
           else
             mkdir -p variants
-            cp wiki/output/lith.html variants/${{ inputs.build_config }}.html
-            git add variants/${{ inputs.build_config }}.html
-            git diff --cached --quiet || git commit -m "Update variants/${{ inputs.build_config }}.html from build"
+            cp wiki/output/lith.html variants/$BUILD_CONFIG.html
+            git add variants/$BUILD_CONFIG.html
+            git diff --cached --quiet || git commit -m "Update variants/$BUILD_CONFIG.html from build"
           fi
           bash scripts/ci-push-main.sh
 
@@ -228,12 +284,12 @@ jobs:
         run: zip -r wiki.zip wiki
 
       - name: Generate Release Tag
-        if: ${{ inputs.create_release == true && inputs.build_config == 'prod' }}
+        if: ${{ env.CREATE_RELEASE == 'true' && env.BUILD_CONFIG == 'prod' }}
         id: tag
         run: echo "date=$(date +'%Y.%m.%d-%H%M')" >> $GITHUB_OUTPUT
 
       - name: Upload Built Wiki Artifact
-        if: ${{ inputs.create_release == true && inputs.build_config == 'prod' }}
+        if: ${{ env.CREATE_RELEASE == 'true' && env.BUILD_CONFIG == 'prod' }}
         uses: actions/upload-artifact@v5
         with:
           name: built-wiki
@@ -241,7 +297,7 @@ jobs:
           retention-days: 1
 
       - name: Create Release
-        if: ${{ inputs.create_release == true && inputs.build_config == 'prod' }}
+        if: ${{ env.CREATE_RELEASE == 'true' && env.BUILD_CONFIG == 'prod' }}
         uses: softprops/action-gh-release@v3
         with:
           tag_name: build-${{ steps.tag.outputs.date }}
@@ -257,7 +313,7 @@ jobs:
             wiki/flatten-manifest.log
 
       - name: Upload Build Artifacts (Dry Run)
-        if: ${{ inputs.create_release == false }}
+        if: ${{ env.CREATE_RELEASE == 'false' }}
         uses: actions/upload-artifact@v5
         with:
           name: build-artifacts-dry-run
@@ -267,7 +323,7 @@ jobs:
             wiki/output/lithic-light.html.gz
 
       - name: Upload Built Launcher (prod only)
-        if: inputs.build_config == 'prod'
+        if: env.BUILD_CONFIG == 'prod'
         uses: actions/upload-artifact@v5
         with:
           name: launcher-html
@@ -286,7 +342,7 @@ jobs:
 
   build-tauri:
     needs: build
-    if: ${{ inputs.create_release == true && inputs.build_config == 'prod' }}
+    if: needs.build.outputs.release == 'true' && needs.build.outputs.config == 'prod'
     uses: ./.github/workflows/windows-release.yaml
     with:
       tag_name: build-${{ needs.build.outputs.tag_name }}
@@ -294,7 +350,7 @@ jobs:
 
   build-server:
     needs: build
-    if: ${{ inputs.create_release == true && inputs.build_config == 'prod' }}
+    if: needs.build.outputs.release == 'true' && needs.build.outputs.config == 'prod'
     uses: ./.github/workflows/build-server.yml
     with:
       tag_name: build-${{ needs.build.outputs.tag_name }}

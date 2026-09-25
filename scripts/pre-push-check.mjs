@@ -8,11 +8,14 @@
  *   3. lockfile sync (every dep in package.json is the spec the lock records,
  *      so `npm ci` cannot fail with EUSAGE in CI)
  *   4. workflow YAML sanity (js-yaml parse of every .github/workflows file)
- *   5. the light distribution guard (variants/lithic-light.html against
+ *   5. the release trigger (every path the release commits is excluded from the
+ *      push trigger that starts it — otherwise a run's own commit starts
+ *      another run, forever)
+ *   6. the light distribution guard (variants/lithic-light.html against
  *      src/lithic.html: same core, same plugin versions, still flash-sized)
- *   6. cargo check (Rust type/borrow check — catches the recent E07xx class
+ *   7. cargo check (Rust type/borrow check — catches the recent E07xx class
  *      of release-workflow failures)
- *   7. cargo clippy (Rust lint pass, warnings are failures)
+ *   8. cargo clippy (Rust lint pass, warnings are failures)
  *
  * Usage: npm run check:push   (or: node scripts/pre-push-check.mjs)
  * Exit 0 = safe to push; nonzero = fix before pushing.
@@ -53,6 +56,67 @@ function checkWorkflowYaml() {
  * exactly, with no registry access and no semver arithmetic. Which versions npm
  * would then resolve is a separate question from whether it will even try.
  */
+/**
+ * A push to main runs the release now (.github/workflows/build-wiki.yml,
+ * `on.push`). That run COMMITS the artifacts it just built, so any path it
+ * stages has to be excluded from the trigger that started it: otherwise its own
+ * commit starts another run, which commits the same files again, forever.
+ *
+ * The trigger is a blacklist over `**`, so a path is live unless it is named in
+ * `on.push.paths` — adding one line to the release's `git add` is all it takes
+ * to start the loop. That is what this checks, from the two sides that matter:
+ * every staged path is excluded (by name or by `dir/**`), and the filter still
+ * has a positive pattern (GitHub runs nothing for a filter of exclusions only,
+ * so the release would silently never fire on push at all).
+ *
+ * Returns null when the trigger is safe, else the failure message.
+ */
+function checkReleaseTrigger() {
+  const file = '.github/workflows/build-wiki.yml';
+  let doc;
+  try {
+    doc = loadYaml(fs.readFileSync(file, 'utf8'));
+  } catch (error) {
+    return `${file}: ${String(error.message).split(/\r?\n/)[0]}`;
+  }
+  // js-yaml reads a bare `on:` as the YAML 1.1 boolean true.
+  const on = (doc && (doc.on || doc[true])) || {};
+  const paths = on.push && on.push.paths;
+  if (!Array.isArray(paths) || paths.length === 0) {
+    return `${file}: no on.push.paths — a push to main would not start a release`;
+  }
+  if (!paths.some((entry) => !String(entry).startsWith('!'))) {
+    return `${file}: on.push.paths is exclusions only — GitHub will not run the workflow for a filter without a positive pattern`;
+  }
+  const steps = (doc.jobs && doc.jobs.build && doc.jobs.build.steps) || [];
+  const prodCommit = steps.find((step) => /Commit Built Wiki and Bump PWA/.test(step.name || ''));
+  if (!prodCommit) {
+    return `${file}: the prod commit step ("Commit Built Wiki and Bump PWA") is gone — point this check at whatever replaced it`;
+  }
+  const addLine = String(prodCommit.run || '')
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .find((line) => line.startsWith('git add '));
+  if (!addLine) {
+    return `${file}: no \`git add\` in the prod commit step — point this check at whatever replaced it`;
+  }
+  const staged = addLine.slice('git add '.length).trim().split(/\s+/);
+  const unresolved = staged.filter((entry) => entry.includes('$'));
+  if (unresolved.length > 0) {
+    return `${file}: the prod commit stages ${unresolved.join(', ')}, which this check cannot resolve — keep that path list literal`;
+  }
+  const excluded = paths
+    .filter((entry) => String(entry).startsWith('!'))
+    .map((entry) => String(entry).slice(1));
+  const uncovered = staged.filter(
+    (entry) => !excluded.some((pattern) => pattern === entry || (pattern.endsWith('/**') && entry.startsWith(pattern.slice(0, -2)))),
+  );
+  if (uncovered.length > 0) {
+    return `${file}: the release commits ${uncovered.join(', ')}, which on.push.paths does not exclude — the run's own commit would start another run, forever`;
+  }
+  return null;
+}
+
 const lockProjects = [
   { dir: '.', label: 'package.json' },
   { dir: 'launcher-ui', label: 'launcher-ui/package.json' },
@@ -174,6 +238,16 @@ if (yamlProblems === null) {
   failed = true;
   console.log('FAILED');
   console.log('  ' + yamlProblems);
+}
+
+process.stdout.write('> release trigger                ');
+const triggerProblem = checkReleaseTrigger();
+if (triggerProblem === null) {
+  console.log('OK');
+} else {
+  failed = true;
+  console.log('FAILED');
+  console.log('  ' + triggerProblem);
 }
 
 if (checkCargoAvailable()) {
