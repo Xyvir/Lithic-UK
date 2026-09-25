@@ -1782,6 +1782,30 @@ try {
     // unlock, so every command that needs the PIN takes it and checks it itself.
     const PIN = 'L1TH1C';
     window.__lithicVault = vault;
+    // The folder a GitHub backup acts on. `automatic` stands in for the folder Rust works
+    // out for itself (the open Lith, else the newest recent row, else a library folder with
+    // a repository in it) and `picked` for the one the user chose in the OS picker, which
+    // Rust keeps in the recents sidecar beside the exe. Per document, because the choice is
+    // recorded by the command that takes it and read back by the next one.
+    // `none` models the machine where Rust has nothing to propose either — a portable
+    // bundle with no install folder and no Lith beside the program. It has to be read here
+    // rather than set by the test, because the launcher asks for the folder as it mounts,
+    // before any test code could run. Guarded, because this script also runs on documents
+    // with no storage at all: the error page a handoff to an unresolvable host leaves.
+    let nothingToPropose = false;
+    try {
+      nothingToPropose = localStorage.getItem('__lithicSyncFolderNone') === '1';
+    } catch {
+      // No storage here: the fixture's own folder stands.
+    }
+    const syncFolder = {
+      automatic: nothingToPropose ? null : 'C:/Users/fixture/Documents/Lithic',
+      picked: null,
+      picks: 0,
+      clears: 0,
+      openedAt: null
+    };
+    window.__lithicSyncFolder = syncFolder;
     const answer = (command, args) => {
       vault.calls.push({ command, args });
       if (typeof window.__lithicRecord === 'function') window.__lithicRecord({ command, args });
@@ -1918,6 +1942,24 @@ try {
           // behind, which is why the launcher calls it on every mount.
           vault.state.granted = false;
           return { ...vault.state, count: vault.entries.length };
+        case 'git_sync_folder':
+          // Which folder the backup acts on, and whether it is the user's own pick — the
+          // flag is what draws the way back to the automatic one.
+          return { folder: syncFolder.picked ?? syncFolder.automatic, overridden: syncFolder.picked !== null };
+        case 'pick_sync_folder':
+          // The OS folder picker, imitated. Rust writes what was chosen into the recents
+          // sidecar and answers with the path it wrote, which is what the next read of
+          // `git_sync_folder` reports — so the dialog is re-read rather than assumed. What
+          // the command is handed is the folder the dialog is naming, which is where the
+          // picker opens.
+          syncFolder.picks += 1;
+          syncFolder.openedAt = args.current ?? null;
+          syncFolder.picked = 'D:/Lithic';
+          return syncFolder.picked;
+        case 'clear_sync_folder_override':
+          syncFolder.clears += 1;
+          syncFolder.picked = null;
+          return null;
         default:
           // Everything else the launcher asks for in this mode: no answer, which
           // every caller already treats as "absent".
@@ -3287,6 +3329,175 @@ try {
     chain.links.every(offset => Math.abs(offset) <= 1),
     `...each one centred on the list rather than on the row it hangs from: ${JSON.stringify(chain.links)}`
   );
+  // --- The folder a backup acts on, and the picker that changes it ---------------
+  // The dialog named a folder nobody chose: it was inferred from the open Lith, else the
+  // newest recent row, else a library folder Lithic already had a repository in, and moving
+  // a backup meant disconnecting first. What is pinned here is the contract with Rust — the
+  // read that says whether the folder in force is the user's own pick, the picker command,
+  // and the way back. That the file itself is spelled portably is Rust's own test
+  // (`the_picked_folder_rides_in_the_recents_sidecar`); this is the half that names it.
+  await reopenLauncher();
+  await vaultPage.waitForSelector('.heading .sync-button');
+  await vaultPage.click('.heading .sync-button');
+  await vaultPage.waitForSelector('.git-sync-modal .sync-folder');
+
+  const folderLine = await vaultPage.evaluate(() => {
+    const row = document.querySelector('.git-sync-modal .sync-folder');
+    return {
+      tag: row.tagName,
+      disabled: row.disabled,
+      label: row.querySelector('.sync-folder-label')?.textContent.trim() ?? '',
+      path: row.querySelector('.sync-folder-path')?.textContent.trim() ?? '',
+      tooltip: row.querySelector('.sync-folder-path')?.getAttribute('title') ?? '',
+      hint: row.querySelector('.sync-folder-change')?.textContent.trim() ?? '',
+      title: row.getAttribute('title') ?? '',
+      reset: document.querySelector('.git-sync-modal .sync-folder-reset')?.textContent.trim() ?? null
+    };
+  });
+  assert.equal(folderLine.tag, 'BUTTON', 'The folder line is a control, not a label');
+  assert.equal(folderLine.disabled, false, '...enabled while nothing is running');
+  assert.equal(folderLine.label, 'Folder', '...labelled the way it always was');
+  assert.equal(folderLine.path, 'C:/Users/fixture/Documents/Lithic', '...naming the folder the backup acts on');
+  assert.equal(folderLine.tooltip, folderLine.path, 'The line ellipsizes, so the full path stays readable on it');
+  assert.equal(folderLine.hint, 'Change', '...and the row says what clicking it does');
+  assert.equal(
+    folderLine.title,
+    'Change the folder GitHub Sync backs up',
+    '...in the tooltip, for a pointer anywhere on the row'
+  );
+  assert.equal(folderLine.reset, null, 'Nothing to undo: a folder Lithic worked out is not a choice anyone made');
+
+  // Clicking it opens the OS picker, through Rust, which is also what records the answer.
+  await vaultPage.click('.git-sync-modal .sync-folder');
+  await vaultPage.waitForFunction(() =>
+    document.querySelector('.git-sync-modal .sync-folder-path')?.textContent.trim() === 'D:/Lithic'
+  );
+  const picked = await vaultPage.evaluate(() => ({
+    picks: window.__lithicSyncFolder.picks,
+    openedAt: window.__lithicSyncFolder.openedAt,
+    reads: window.__lithicVault.calls.filter(call => call.command === 'git_sync_folder').length,
+    path: document.querySelector('.git-sync-modal .sync-folder-path')?.textContent.trim() ?? '',
+    reset: document.querySelector('.git-sync-modal .sync-folder-reset')?.textContent.trim() ?? null
+  }));
+  assert.equal(picked.picks, 1, 'Clicking the folder line asks the OS once, and through Rust');
+  assert.equal(
+    picked.openedAt,
+    'C:/Users/fixture/Documents/Lithic',
+    '...handing it the folder the dialog is naming, so the picker opens where the dialog points'
+  );
+  assert.equal(picked.path, 'D:/Lithic', '...and the dialog names the folder the pick recorded');
+  assert.ok(picked.reads >= 2, `The folder is re-read rather than assumed (reads: ${picked.reads})`);
+  assert.equal(picked.reset, 'Use the automatic folder', 'A folder the user chose can be given back');
+
+  // The way back, which exists only while there is a choice to undo.
+  await vaultPage.click('.git-sync-modal .sync-folder-reset button');
+  await vaultPage.waitForFunction(() => window.__lithicSyncFolder.clears === 1);
+  await vaultPage.waitForFunction(() =>
+    document.querySelector('.git-sync-modal .sync-folder-path')?.textContent.trim() === 'C:/Users/fixture/Documents/Lithic'
+  );
+  const restoredFolder = await vaultPage.evaluate(() => ({
+    clears: window.__lithicSyncFolder.clears,
+    reset: document.querySelector('.git-sync-modal .sync-folder-reset') ?? null,
+    path: document.querySelector('.git-sync-modal .sync-folder-path')?.textContent.trim() ?? ''
+  }));
+  assert.equal(restoredFolder.clears, 1, 'Putting the automatic folder back is one command');
+  assert.equal(restoredFolder.path, 'C:/Users/fixture/Documents/Lithic', '...and the dialog is back on it');
+  assert.equal(restoredFolder.reset, null, '...with the line that offered the way back gone with the choice');
+  // The rule this dialog already followed, checked again because a control was added to it.
+  await assertNoExtraDismiss('.git-sync-modal', 'The sync dialog with a folder override');
+  await vaultPage.click('.git-sync-modal .modal-close');
+  await vaultPage.waitForFunction(() => document.querySelector('.git-sync-modal') === null);
+
+  // --- A fresh download, where Lithic has nothing of its own to go on -----------
+  // No open Lith, no recents on this machine and nothing to propose: Rust answers with no
+  // folder at all, which is the state a new install starts in. The folder line used to be
+  // absent here and the dialog's whole body was one sentence telling the user to save a Lith
+  // first, with no way to answer it. The empty line is that way out.
+  //
+  // Reloaded first, because that is what makes this a fresh install rather than a stale
+  // dialog: the app asks Rust as it mounts, and opening the dialog again would have kept
+  // the answer the last open worked out.
+  await vaultPage.evaluate(() => localStorage.setItem('__lithicSyncFolderNone', '1'));
+  await reopenLauncher();
+  await vaultPage.click('.heading .sync-button');
+  await vaultPage.waitForSelector('.git-sync-modal .sync-folder');
+  const noFolderYet = await vaultPage.evaluate(() => {
+    const row = document.querySelector('.git-sync-modal .sync-folder');
+    return {
+      tag: row.tagName,
+      empty: row.classList.contains('empty'),
+      disabled: row.disabled,
+      label: row.querySelector('.sync-folder-label')?.textContent.trim() ?? '',
+      path: row.querySelector('.sync-folder-path')?.textContent.trim() ?? '',
+      tooltip: row.querySelector('.sync-folder-path')?.getAttribute('title') ?? null,
+      hint: row.querySelector('.sync-folder-change')?.textContent.trim() ?? '',
+      style: getComputedStyle(row.querySelector('.sync-folder-path')).fontStyle,
+      title: row.getAttribute('title') ?? '',
+      aria: row.getAttribute('aria-label') ?? '',
+      advice: document.querySelector('.git-sync-modal .status-line.error')?.textContent.trim() ?? '',
+      connect: document.querySelector('.git-sync-modal .modal-actions .modal-action')?.textContent.trim() ?? null
+    };
+  });
+  assert.equal(noFolderYet.tag, 'BUTTON', 'The line is a control even with no folder to name');
+  assert.equal(noFolderYet.empty, true, '...and says so where a path would be');
+  assert.equal(noFolderYet.disabled, false, '...so the way out of a fresh install is reachable');
+  assert.equal(noFolderYet.label, 'Folder', '...under the label it always had');
+  assert.equal(noFolderYet.path, 'No folder yet', 'Nothing is named, because nothing could be worked out');
+  assert.equal(noFolderYet.tooltip, null, 'There is no path to carry as a tooltip, so the placeholder has none');
+  assert.equal(noFolderYet.style, 'italic', '...and it is drawn as a placeholder rather than as a folder named that');
+  assert.equal(noFolderYet.hint, 'Choose', 'The hint says what clicking it does when there is nothing to change');
+  assert.equal(noFolderYet.title, 'Choose the folder GitHub Sync backs up', '...in the tooltip, for a pointer anywhere on the row');
+  assert.equal(
+    noFolderYet.aria,
+    'Choose the folder GitHub Sync backs up',
+    '...and to a screen reader, which has no path to read out either'
+  );
+  assert.equal(
+    noFolderYet.advice,
+    'Save a Lith to disk first, since sync backs up its folder.',
+    'Nothing is synced yet, and the dialog still says so'
+  );
+  assert.equal(noFolderYet.connect, null, '...with no Connect offered over an empty folder');
+
+  // The row is the way out: one click, and the dialog has a folder to act on.
+  await vaultPage.click('.git-sync-modal .sync-folder');
+  await vaultPage.waitForFunction(() =>
+    document.querySelector('.git-sync-modal .sync-folder-path')?.textContent.trim() === 'D:/Lithic'
+  );
+  const chosenFromNothing = await vaultPage.evaluate(() => ({
+    picks: window.__lithicSyncFolder.picks,
+    openedAt: window.__lithicSyncFolder.openedAt,
+    path: document.querySelector('.git-sync-modal .sync-folder-path')?.textContent.trim() ?? '',
+    empty: document.querySelector('.git-sync-modal .sync-folder')?.classList.contains('empty') ?? null,
+    hint: document.querySelector('.git-sync-modal .sync-folder-change')?.textContent.trim() ?? '',
+    reset: document.querySelector('.git-sync-modal .sync-folder-reset')?.textContent.trim() ?? null,
+    advice: document.querySelector('.git-sync-modal .status-line.error')?.textContent.trim() ?? '',
+    connect: document.querySelector('.git-sync-modal .modal-actions .modal-action')?.textContent.trim() ?? null
+  }));
+  assert.equal(chosenFromNothing.picks, 1, 'A fresh install picks its folder through the same one command');
+  assert.equal(chosenFromNothing.openedAt, null, '...with nothing to open at, so the picker decides where to start');
+  assert.equal(chosenFromNothing.path, 'D:/Lithic', '...and the dialog names the folder the pick recorded');
+  assert.equal(chosenFromNothing.empty, false, '...drawn as a folder rather than as a placeholder');
+  assert.equal(chosenFromNothing.hint, 'Change', '...and the hint goes back to naming what a second click does');
+  assert.equal(chosenFromNothing.reset, 'Use the automatic folder', 'A folder chosen from nothing can be given back too');
+  assert.equal(
+    chosenFromNothing.advice,
+    '',
+    'The advice goes with the state it described: there is a folder to back up now'
+  );
+  assert.equal(
+    chosenFromNothing.connect,
+    'Connect to GitHub',
+    '...and the pick was worth making: the dialog now offers to use it'
+  );
+  await assertNoExtraDismiss('.git-sync-modal', 'The sync dialog with an empty folder line');
+  await vaultPage.click('.git-sync-modal .modal-close');
+  await vaultPage.waitForFunction(() => document.querySelector('.git-sync-modal') === null);
+  // Reloaded again, which is also what puts the fixture's folder and its unrecorded pick
+  // back: nothing below this point sees a fresh install or the folder just chosen.
+  await vaultPage.evaluate(() => localStorage.removeItem('__lithicSyncFolderNone'));
+  await reopenLauncher();
+
   // --- The × on a bookmark, and the half of it this page cannot do ---------------
   // Removing a bookmark is the launcher's own storage and needs nothing from the app.
   // What needs the app is the *copy*: an instance's launcher page, its scripts and its

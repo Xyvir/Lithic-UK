@@ -477,22 +477,75 @@ h1 { flex: none; min-width: 0; margin: 0; color: #f4edf5; font-size: 1.8rem; fon
    this line is what keeps a folder the user never picked from being backed up by
    accident. One line, truncated rather than wrapped: the title attribute carries
    the full path for a long one. */
+/* The folder line. A button since 2026-09-25: it is the one thing in the dialog the user
+   can change about what is being backed up, and it used to be plain text, which left
+   Disconnect as the only way to aim the backup elsewhere. It keeps the plain look it had —
+   a boxed row would read as a form field rather than as the current answer — so the
+   affordance is the hint on the right and the hover. */
 .sync-folder {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  width: 100%;
   margin: 2px 0 10px;
-  overflow: hidden;
+  padding: 0;
+  border: 0;
+  background: none;
   color: #b3acb5;
+  font: inherit;
   font-size: 0.78rem;
   line-height: 1.3;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  text-align: left;
+  cursor: pointer;
 }
+.sync-folder:hover:not(:disabled) { color: #ded8e0; }
+.sync-folder:focus-visible { outline: 1px solid #7a6f7f; outline-offset: 2px; }
+.sync-folder:disabled { cursor: default; }
 .sync-folder-label {
-  margin-right: 6px;
+  flex: 0 0 auto;
   color: #8f8892;
   font-size: 0.68rem;
   letter-spacing: 0.06em;
   text-transform: uppercase;
 }
+/* min-width, not just overflow: a flex item will not shrink below its content without it,
+   and a deep path would then push the hint out of the dialog instead of ellipsizing. */
+.sync-folder-path {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+/* Nothing was worked out, so there is no path to name: the line says so in the place a
+   path would be, dimmer and oblique so it does not read as a folder called that. */
+.sync-folder.empty .sync-folder-path {
+  color: #7d7680;
+  font-style: italic;
+}
+.sync-folder-change {
+  flex: 0 0 auto;
+  margin-left: auto;
+  padding-left: 6px;
+  color: #8f8892;
+  font-size: 0.68rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+.sync-folder:hover:not(:disabled) .sync-folder-change { color: #b3acb5; text-decoration: underline; }
+/* The way back to the automatic folder, and the only way there is: it appears only while
+   an override is in force, so the dialog is a line shorter when nothing was picked. */
+.sync-folder-reset { margin: -6px 0 10px; text-align: right; }
+.sync-folder-reset button {
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: #8f8892;
+  font: inherit;
+  font-size: 0.72rem;
+  cursor: pointer;
+}
+.sync-folder-reset button:hover:not(:disabled) { color: #ded8e0; text-decoration: underline; }
 .sync-elapsed { margin-left: auto; color: #9a9a9a; font-variant-numeric: tabular-nums; }
 /* Bare text, inside the progress line it stops: a first connect to a large
    folder is minutes long, and waiting is not the only reasonable answer. */

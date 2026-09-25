@@ -66,6 +66,7 @@ Self hosting instructions can be found in [self-host.md](https://github.com/Xyvi
 The GitHub button in the launcher links the folder holding your wikis to a repository. Every save of a file in that folder is committed and pushed to `main`, so the repository is a backup you can restore from.
 
 * **Your folder is the source of truth.** GitHub is only read when the folder does not have a file yet. When a wiki exists in both places with different content, the copy in your folder is published and the remote copy stays where it is, in the repository's commit history.
+* **You can choose which folder that is.** The folder line in the dialog is a button: pick any folder on this machine and that becomes the one saves are pushed from, with `Use the automatic folder` to hand it back. Lithic works the folder out for itself when nothing is chosen — the Lith you have open, else the newest recent one, else the folder your wikis live in. The choice is kept beside the program, so a bundle on a thumb drive keeps backing up its own folder when the drive is plugged into another PC. On a fresh install with nothing to go on, the line reads `No folder yet` and the button is how you answer it; Lithic only proposes a folder of its own when that folder already holds your wikis.
 * **First connect merges both ways.** Wikis that exist only on GitHub are downloaded into the folder, and everything in the folder is pushed up.
 * **Deletions do not propagate.** Removing a wiki from the folder leaves it on GitHub, and removing it on GitHub does not delete your local copy.
 

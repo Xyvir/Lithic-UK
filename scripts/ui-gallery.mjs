@@ -343,6 +343,12 @@ const installRust = (page, config) =>
           // mock's answer everywhere this is not configured, which the app already treats
           // as "no sidecar".
           return cfg.sidecarRecents ?? null;
+        case 'git_sync_folder':
+          // Which folder the dialog names, and whether it is the user's own pick — the
+          // state the "Use the automatic folder" line exists for. The mock's default is
+          // `null` everywhere this is not configured, which the app reads as "keep the
+          // folder I derived", so panes about anything else are unchanged.
+          return cfg.syncFolder ?? null;
         case 'git_sync_coverage':
           // Folder path → the repository root that covers it. No fixture is inside a
           // repository, so the honest answer is an empty map — `null` would be a read
@@ -1403,6 +1409,47 @@ const SHEETS = [
         },
         clip: '.git-sync-modal',
         expect: '.git-sync-advanced'
+      },
+      {
+        // The folder the user picked for the backup, and the way back to the automatic one.
+        // This is the one control in this dialog that changes what is being backed up rather
+        // than how, and it is the only state where the reset line is drawn: the line itself
+        // is always there, so a sheet with no override is the pane above.
+        name: '771-github-sync-folder',
+        view: 'dialog',
+        modal: 'gitsync-title',
+        mode: 'tauri',
+        // `syncFolder` rides in `rust` because that object is the mock's config bag for
+        // every command, which is where `verdicts` and `checkDelayMs` are set too.
+        rust: { exists: false, pin: PIN, entries: [], path: VAULT_PATH, syncFolder: { folder: 'D:\\Lithic', overridden: true } },
+        seed: { recents: [diskRow('notes.lith')] },
+        drive: async (page) => {
+          await page.click('.sync-button');
+          await page.waitForSelector('.git-sync-modal .sync-folder-reset');
+          await settle(page, 300);
+        },
+        clip: '.git-sync-modal',
+        expect: '.sync-folder-reset'
+      },
+      {
+        // The fresh download: no recents, no open Lith, and nothing for Rust to propose
+        // either — a portable bundle with no install folder and no Lith beside the program.
+        // The folder line is drawn empty rather than hidden, because this is the one state
+        // where the picker is the only way to give the dialog something to back up. A pane
+        // of its own for that reason: it is the state the two above cannot show, and the one
+        // a new install starts in.
+        name: '772-github-sync-no-folder',
+        view: 'dialog',
+        modal: 'gitsync-title',
+        mode: 'tauri',
+        rust: { exists: false, pin: PIN, entries: [], path: VAULT_PATH },
+        drive: async (page) => {
+          await page.click('.sync-button');
+          await page.waitForSelector('.git-sync-modal .sync-folder.empty');
+          await settle(page, 300);
+        },
+        clip: '.git-sync-modal',
+        expect: '.sync-folder.empty'
       }
     ]
   }

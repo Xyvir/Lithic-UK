@@ -405,6 +405,16 @@
    * here.
    */
   let gitSyncPreferredFolder: string | null = null;
+  /**
+   * Whether that folder is the one the user picked, rather than one Lithic worked out
+   * from the open Lith and the library folders. Only an override can be put back, so
+   * this is what decides whether the dialog offers to.
+   */
+  let gitSyncFolderOverridden = false;
+  /** A picker is open, or its answer is on the way. */
+  let gitSyncPicking = false;
+  /** A folder pick that failed, said under the line it happened to. */
+  let gitSyncFolderError = '';
   /** The derived path the resolution already ran for; undefined before any. */
   let gitSyncResolvedFor: string | null | undefined = undefined;
   let gitSyncResolveToken = 0;
@@ -425,16 +435,17 @@
       gitSyncPreferredFolder = null;
       return;
     }
-    let folder: string | null = null;
+    let answer: { folder: string | null; overridden: boolean } | null = null;
     try {
-      folder = await tauriInvoke<string | null>('git_sync_folder', { derived });
+      answer = await tauriInvoke<{ folder: string | null; overridden: boolean } | null>('git_sync_folder', { derived });
     } catch {
-      folder = null;
+      answer = null;
     }
     // A newer subject is already being resolved, and its answer is the one to
     // keep: this one describes a file nobody is looking at any more.
     if (token !== gitSyncResolveToken) return;
-    gitSyncPreferredFolder = folder;
+    gitSyncPreferredFolder = answer?.folder ?? null;
+    gitSyncFolderOverridden = answer?.overridden ?? false;
     // The icon, the heartbeat and the dialog all read the resolved folder, so the
     // answers that depend on it are only now knowable.
     refreshGitSyncIcon();
@@ -451,6 +462,62 @@
    * tracks the variables a reactive statement reads.
    */
   $: gitSyncFolder = (gitSyncPreferredFolder ?? folderOf(gitSyncSubject ?? '')).replace(/[\\/]+$/, '');
+
+  /**
+   * Nothing to act on at all: no folder was worked out and none is picked.
+   *
+   * A variable rather than `!gitSyncActivePath()` asked in the markup, because Svelte only
+   * re-runs a block when a variable it *names* changes and a function call names none. The
+   * line the block draws is the one that says to save a Lith first, and it has to go when a
+   * pick from the empty line gives the dialog something to act on — which is the one route
+   * out of this state that exists.
+   */
+  $: gitSyncNoTarget = mode === 'tauri' && !(gitSyncPreferredFolder ?? gitSyncSubject);
+
+  /**
+   * Ask the OS for the folder to back up, instead of the one Lithic worked out.
+   *
+   * The line in the dialog named a folder nobody chose: it came from the open Lith, else
+   * the newest recent row, else a folder Lithic already had a repository in. That is right
+   * until it is not, and until now moving a backup meant disconnecting first.
+   *
+   * Rust keeps the choice in the recents sidecar beside the exe, spelled relative to the
+   * bundle when it lives under it, so a thumb drive keeps backing up its own folder on a
+   * machine that gives the drive another letter.
+   */
+  async function chooseSyncFolder(): Promise<void> {
+    if (gitSyncPicking || gitSyncBusy) return;
+    gitSyncPicking = true;
+    gitSyncFolderError = '';
+    try {
+      const picked = await tauriInvoke<string | null>('pick_sync_folder', { current: gitSyncFolder || null });
+      if (picked) {
+        // Re-read rather than trust the path we were handed: Rust is the one that spells
+        // the folder portably, and the read is also what moves the override flag.
+        await resolveSyncFolder(gitSyncSubject);
+        // Another folder is another question, so the verdict and the repository the dialog
+        // is showing belong to a folder that is no longer the one in force.
+        await refreshGitSyncStatus(true);
+      }
+    } catch (error) {
+      gitSyncFolderError = error instanceof Error ? error.message : String(error);
+    } finally {
+      gitSyncPicking = false;
+    }
+  }
+
+  /** Put the folder Lithic works out back, dropping the recorded choice. */
+  async function clearSyncFolderOverride(): Promise<void> {
+    if (gitSyncBusy) return;
+    gitSyncFolderError = '';
+    try {
+      await tauriInvoke('clear_sync_folder_override');
+      await resolveSyncFolder(gitSyncSubject);
+      await refreshGitSyncStatus(true);
+    } catch (error) {
+      gitSyncFolderError = error instanceof Error ? error.message : String(error);
+    }
+  }
 
   /**
    * Ask the running connect to stop. The outcome arrives as `git_sync_setup`
@@ -3803,13 +3870,46 @@
     <div class="modal-overlay" role="presentation" on:click={(event) => event.currentTarget === event.target && closeGitSyncModal()}>
       <div class="launcher-modal git-sync-modal" role="dialog" aria-modal="true" aria-labelledby="gitsync-title">          <button class="modal-close" aria-label="Close GitHub sync dialog" on:click={closeGitSyncModal}>×</button>
         <h2 id="gitsync-title">GitHub Sync</h2>
-        {#if mode === 'tauri' && gitSyncFolder}
-          <p class="sync-folder" title={gitSyncFolder}><span class="sync-folder-label">Folder</span> {gitSyncFolder}</p>
+        {#if mode === 'tauri'}
+          <!--
+            A button, not a label: this is the one thing in the dialog the user can change
+            about what is being backed up, and it used to be read-only — which left
+            Disconnect as the only way to aim the backup somewhere else. It keeps the plain
+            look the line had, so the affordance is the hint on the right plus the hover.
+
+            Drawn even when no folder could be worked out, which is the state a fresh
+            download starts in: the line used to be hidden then, and the dialog's whole
+            body was one sentence telling the user to save a Lith first — with no way to
+            answer it. The empty line is that way out, and the hint says which.
+          -->
+          <button
+            class="sync-folder"
+            class:empty={!gitSyncFolder}
+            type="button"
+            title={gitSyncFolder ? 'Change the folder GitHub Sync backs up' : 'Choose the folder GitHub Sync backs up'}
+            aria-label={gitSyncFolder
+              ? `Change the folder GitHub Sync backs up: ${gitSyncFolder}`
+              : 'Choose the folder GitHub Sync backs up'}
+            disabled={gitSyncBusy || gitSyncPicking}
+            on:click={chooseSyncFolder}
+          >
+            <span class="sync-folder-label">Folder</span>
+            <!-- The path keeps the tooltip it had: the line ellipsizes, and the full path is
+                 the one thing a person checking which folder this is needs to read. There is
+                 no tooltip to carry when there is no path, so the placeholder has none. -->
+            <span class="sync-folder-path" title={gitSyncFolder || undefined}>{gitSyncFolder || 'No folder yet'}</span>
+            <span class="sync-folder-change">{gitSyncPicking ? 'Choosing…' : gitSyncFolder ? 'Change' : 'Choose'}</span>
+          </button>
+          {#if gitSyncFolderOverridden}
+            <!-- Only an override can be undone, so this line is absent otherwise. -->
+            <p class="sync-folder-reset"><button type="button" disabled={gitSyncBusy} on:click={clearSyncFolderOverride}>Use the automatic folder</button></p>
+          {/if}
+          {#if gitSyncFolderError}<p class="status-line error" role="alert">{gitSyncFolderError}</p>{/if}
         {/if}
         {#if showBackupStatus && backupCoverage.localOnlyPaths.length > 0}
           <p class="backup-status" role="status">{backupCoverage.backedUp} of {backupCoverage.tracked} recent liths backed up</p>
         {/if}
-        {#if mode === 'tauri' && !gitSyncActivePath()}
+        {#if gitSyncNoTarget}
           <p class="status-line error" role="alert">Save a Lith to disk first, since sync backs up its folder.</p>
         {:else if gitSyncView === 'disconnected'}
           {#if isSelfHost()}

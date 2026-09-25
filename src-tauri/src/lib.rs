@@ -996,6 +996,12 @@ fn attached_root_for(dir: &Path) -> Option<PathBuf> {
     walk_up(dir).find(|candidate| is_attached(candidate))
 }
 
+/// The folder the app installs itself into — `Documents\Lithic`, or the fallback
+/// `install_target` names when Documents is not available.
+fn install_folder() -> Option<PathBuf> {
+    install_target().and_then(|target| target.parent().map(Path::to_path_buf))
+}
+
 /// Where a Lithic library lives, best first.
 ///
 /// `Documents\Lithic` is the folder the app installs into and the one liths are
@@ -1005,7 +1011,7 @@ fn attached_root_for(dir: &Path) -> Option<PathBuf> {
 /// mount dialog starts looking.
 fn library_folders() -> Vec<PathBuf> {
     let mut folders: Vec<PathBuf> = Vec::new();
-    if let Some(dir) = install_target().and_then(|target| target.parent().map(Path::to_path_buf)) {
+    if let Some(dir) = install_folder() {
         folders.push(dir);
     }
     if let Some(dir) = exe_dir() {
@@ -1038,13 +1044,106 @@ fn preferred_sync_folder(derived: Option<&Path>, libraries: &[PathBuf]) -> Optio
     libraries.iter().find(|dir| is_left_repository(dir)).cloned()
 }
 
-/// The folder the desktop app's backup should act on, given the path the launcher
-/// derived for itself. `None` means nothing is attached near either, and the
-/// launcher keeps the folder it derived — see `preferred_sync_folder`.
+/// The folder the backup should act on, with the user's own pick in front of Lithic's
+/// inference.
+///
+/// A separate function rather than a rule inside `preferred_sync_folder` on purpose: that
+/// one is Lithic working out which folder the user means from evidence, and this is the
+/// user having said so. The order is deliberate and so is the check — a recorded folder
+/// that is not on this machine falls through to the inference instead of naming a path
+/// that is not there.
+fn resolved_sync_folder(chosen: Option<&Path>, derived: Option<&Path>, libraries: &[PathBuf]) -> Option<PathBuf> {
+    if let Some(dir) = chosen.filter(|dir| dir.is_dir()) {
+        return Some(dir.to_path_buf());
+    }
+    preferred_sync_folder(derived, libraries)
+}
+
+/// Whether a folder keeps a Lith of its own. Flat, because that is how every other
+/// reader here lists a folder: a wiki in a subfolder belongs to that subfolder.
+fn holds_a_lith(dir: &Path) -> bool {
+    !list_lith_wikis(dir, 1).is_empty()
+}
+
+/// The folder to propose when Lithic has nothing of its own to go on: a fresh download
+/// with no recents, no open Lith and no repository anywhere.
+///
+/// The running exe's own folder, but only where that folder is evidence rather than an
+/// accident of where the program was unzipped. Evidence is the app's own install folder
+/// (`Documents\Lithic`, where liths are meant to live, and where the installer puts the
+/// program) or a bundle that already keeps a Lith beside the program, which is the
+/// portable case this rule exists for. Anywhere else says nothing about where the liths
+/// are: a Downloads folder, an extracted zip, a `Program Files` install. And a proposal
+/// is not free, because the first connect commits what it finds and a repository that
+/// exists is what every rule above it prefers from then on — the measured version of
+/// that mistake being a first connect aimed at a Downloads folder of 3,910 files.
+/// Failing both, the folder the app installs into, when it is on disk; failing that,
+/// nothing, and the dialog asks instead of guessing.
+fn proposed_sync_folder(exe: Option<&Path>, install: Option<&Path>) -> Option<PathBuf> {
+    if let Some(dir) = exe {
+        if install == Some(dir) || holds_a_lith(dir) {
+            return Some(dir.to_path_buf());
+        }
+    }
+    install.filter(|dir| dir.is_dir()).map(Path::to_path_buf)
+}
+
+/// The folder the backup acts on, in the order the answers outrank each other: the pick
+/// recorded in the sidecar, then Lithic's inference, then — only when the launcher had no
+/// subject of its own — the proposed folder.
+///
+/// The proposal is last and conditional, which is the whole reason it is here rather than
+/// another rule inside `preferred_sync_folder`: a derived path is the launcher saying which
+/// Lith the user is looking at, and the folder that path implies beats a proposal about the
+/// program's own folder. A proposal that outranked it would aim the backup at the folder
+/// the app happens to sit in while the user was working somewhere else entirely.
+fn answer_folder(
+    chosen: Option<&Path>,
+    derived: Option<&Path>,
+    libraries: &[PathBuf],
+    proposal: Option<&Path>,
+) -> Option<PathBuf> {
+    if let Some(dir) = resolved_sync_folder(chosen, derived, libraries) {
+        return Some(dir);
+    }
+    if derived.is_some() {
+        return None;
+    }
+    proposal.map(Path::to_path_buf)
+}
+
+/// What `git_sync_folder` answers, and why it is two fields rather than one: the dialog
+/// names the folder it is about to act on, and it also has to know whether that folder is
+/// the user's own pick — the only case where offering to go back to the automatic one makes
+/// sense.
+#[derive(serde::Serialize)]
+struct SyncFolderAnswer {
+    /// `None` means nothing is attached near either and nothing can be proposed, and the
+    /// launcher draws the folder line empty — see `preferred_sync_folder` and
+    /// `proposed_sync_folder`.
+    folder: Option<String>,
+    /// The folder in force is the one the sidecar records, not one Lithic worked out.
+    overridden: bool,
+}
+
+/// The folder the desktop app's backup should act on, given the path the launcher derived
+/// for itself.
 #[tauri::command]
-fn git_sync_folder(derived: Option<String>) -> Option<String> {
-    preferred_sync_folder(derived.as_deref().map(Path::new), &library_folders())
-        .map(|dir| dir.to_string_lossy().into_owned())
+fn git_sync_folder(derived: Option<String>) -> SyncFolderAnswer {
+    let chosen = chosen_sync_folder();
+    // An empty string is a launcher with nothing to name, not a folder called nothing.
+    let derived = derived.filter(|path| !path.trim().is_empty());
+    let proposal = proposed_sync_folder(exe_dir().as_deref(), install_folder().as_deref());
+    let folder = answer_folder(
+        chosen.as_deref(),
+        derived.as_deref().map(Path::new),
+        &library_folders(),
+        proposal.as_deref(),
+    );
+    SyncFolderAnswer {
+        folder: folder.map(|dir| dir.to_string_lossy().into_owned()),
+        overridden: chosen.is_some(),
+    }
 }
 
 /// Every `.lith` under a folder, for the launcher's re-index.
@@ -2142,15 +2241,27 @@ fn relative_to(target: &std::path::Path, base: &std::path::Path) -> Option<PathB
 /// reliable), and paths that no longer exist on this machine are dropped so
 /// a moved thumb drive only ever offers files that are actually present.
 /// Missing sidecar simply yields an empty list — optional by design.
+///
+/// The file also carries settings lines (`dismissed=`, `sync-folder=`). Those are not
+/// paths and never become rows: the picked folder is read back by `chosen_sync_folder`.
 #[tauri::command]
 fn read_recents_sidecar() -> Vec<String> {
     let Some(dir) = exe_dir() else { return Vec::new(); };
+    read_recents_in(&dir)
+}
+
+/// The sidecar's recent paths, resolved for `dir`.
+///
+/// Split out from the command because the folder a backup acts on rides in the same
+/// file: both halves have to agree about which lines are paths, and this is where a
+/// path line is decided.
+fn read_recents_in(dir: &Path) -> Vec<String> {
     let Ok(text) = fs::read_to_string(dir.join("recents.txt")) else {
         return Vec::new();
     };
     text.lines()
         .map(|line| line.trim())
-        .filter(|line| !line.is_empty() && !line.starts_with('#'))
+        .filter(|line| !line.is_empty() && !line.starts_with('#') && !line.starts_with(SYNC_FOLDER_MARKER))
         .filter_map(|line| {
             let path = PathBuf::from(line);
             let resolved = if path.is_absolute() { path } else { dir.join(path) };
@@ -2173,21 +2284,170 @@ fn read_recents_sidecar() -> Vec<String> {
 #[tauri::command]
 fn write_recents_sidecar(paths: Vec<String>, dismissed: bool) -> Result<(), String> {
     let Some(dir) = exe_dir() else { return Ok(()); };
-    let mut lines = vec![
-        "# Lithic recent files (portable). One path per line, most recent first.".to_string(),
-    ];
+    write_recents_in(&dir, paths, dismissed)
+}
+
+/// Write the sidecar for `dir`.
+///
+/// Whatever else the file holds is carried across, which is why the picked folder is
+/// read back here rather than taken as an argument: the launcher knows the recents and
+/// the dismissal and nothing about that folder, and a recents save must not be the
+/// thing that forgets the user's own choice.
+fn write_recents_in(dir: &Path, paths: Vec<String>, dismissed: bool) -> Result<(), String> {
+    let mut lines = vec![RECENTS_HEADER.to_string()];
     if dismissed {
         lines.push("dismissed=1".to_string());
     }
+    if let Some(value) = sync_folder_value_in(dir) {
+        lines.push(format!("{}{}", SYNC_FOLDER_MARKER, portable_form(Path::new(&value), dir)));
+    }
     for path in paths.into_iter().take(20) {
         let target = PathBuf::from(&path);
-        if let Some(rel) = relative_to(&target, &dir) {
+        if let Some(rel) = relative_to(&target, dir) {
             lines.push(rel.to_string_lossy().into_owned());
         } else {
             lines.push(path);
         }
     }
     fs::write(dir.join("recents.txt"), lines.join("\n") + "\n").map_err(|error| error.to_string())
+}
+
+/// The sidecar's opening line, shared by both of its writers so a file created by a
+/// folder pick and one created by a recents save say the same thing.
+const RECENTS_HEADER: &str = "# Lithic recent files (portable). One path per line, most recent first.";
+
+/// The sidecar's setting line for the folder GitHub Sync acts on.
+///
+/// In this file deliberately: a portable bundle already travels with `recents.txt` beside
+/// it, and where it syncs is part of what makes it portable. A third sidecar would be a
+/// third thing to keep beside the exe, and the settings shape is one the file already has
+/// (`dismissed=1` was the first).
+const SYNC_FOLDER_MARKER: &str = "sync-folder=";
+
+/// A path the way the sidecar spells it: relative to the exe's folder when it lives under
+/// it, so a thumb drive names its own folder on whatever machine it is plugged into, and
+/// absolute when it does not — there is nothing to be relative to.
+fn portable_form(path: &Path, dir: &Path) -> String {
+    if !path.is_absolute() {
+        return path.to_string_lossy().into_owned();
+    }
+    if path == dir {
+        // The app's own folder is a legitimate pick ("back up everything here"), and `.`
+        // is the one relative spelling that means it on every machine.
+        return ".".to_string();
+    }
+    relative_to(path, dir)
+        .map(|rel| rel.to_string_lossy().into_owned())
+        .unwrap_or_else(|| path.to_string_lossy().into_owned())
+}
+
+/// The path a sidecar line names, on this machine: a relative one is relative to the exe's
+/// folder, because the process CWD is not reliable on Windows.
+///
+/// No existence check here. The caller asks that question, and keeping it out of the
+/// resolution is what stops a rewrite from dropping a line whose folder is simply not
+/// mounted at the moment — a thumb drive that is not plugged in is not a folder the user
+/// un-picked.
+fn resolve_sidecar_path(value: &str, dir: &Path) -> PathBuf {
+    if value == "." {
+        return dir.to_path_buf();
+    }
+    let path = PathBuf::from(value);
+    if path.is_absolute() {
+        path
+    } else {
+        dir.join(path)
+    }
+}
+
+/// The folder the sidecar's `sync-folder=` line names, spelled the way the file spells it.
+fn sync_folder_value_in(dir: &Path) -> Option<String> {
+    let text = fs::read_to_string(dir.join("recents.txt")).ok()?;
+    text.lines()
+        .map(str::trim)
+        .find_map(|line| line.strip_prefix(SYNC_FOLDER_MARKER))
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+}
+
+/// The folder the user picked, resolved here.
+///
+/// `None` when nothing is recorded, or when the folder is not on this machine any more —
+/// a drive that was not plugged in hands the dialog back to the automatic rules rather
+/// than naming a path that is not there.
+fn chosen_sync_folder() -> Option<PathBuf> {
+    chosen_sync_folder_in(&exe_dir()?)
+}
+
+/// The picked folder as it resolves for `dir` — the half of the question that does not
+/// need a running executable, so it can be tested.
+fn chosen_sync_folder_in(dir: &Path) -> Option<PathBuf> {
+    let path = resolve_sidecar_path(&sync_folder_value_in(dir)?, dir);
+    path.is_dir().then_some(path)
+}
+
+/// Record — or clear — the folder the user picked, leaving every other line of the sidecar
+/// exactly as it was: the file is also the recents list and the install-offer marker, and
+/// a folder choice is not licence to rewrite either.
+fn set_sync_folder_in(dir: &Path, picked: Option<&Path>) -> Result<(), String> {
+    let mut lines: Vec<String> = match fs::read_to_string(dir.join("recents.txt")) {
+        Ok(text) => text
+            .lines()
+            .map(|line| line.trim().to_string())
+            .filter(|line| !line.starts_with(SYNC_FOLDER_MARKER))
+            .collect(),
+        Err(_) => vec![RECENTS_HEADER.to_string()],
+    };
+    if let Some(path) = picked {
+        lines.push(format!("{}{}", SYNC_FOLDER_MARKER, portable_form(path, dir)));
+    }
+    fs::write(dir.join("recents.txt"), lines.join("\n") + "\n").map_err(|error| error.to_string())
+}
+
+/// Ask the OS which folder to back up, instead of the one Lithic worked out.
+///
+/// The dialog's folder line answers "which folder is this about", and it was inferred: the
+/// open Lith, else the newest recent row, else a library folder with a repository in it.
+/// That is right most of the time and wrong when the liths live somewhere else, which used
+/// to leave Disconnect as the only way to move a backup.
+///
+/// Async, and that is load-bearing: a command runs on the main thread, and Tauri 2's
+/// blocking pickers must not be called there. This one parks on a channel while the
+/// dialog's own callback (which fires on the main thread) delivers the chosen folder.
+#[tauri::command]
+async fn pick_sync_folder(app: tauri::AppHandle, current: Option<String>) -> Result<Option<String>, String> {
+    let (sender, receiver) = std::sync::mpsc::channel();
+    let mut picker = app.dialog().file();
+    // Opens where the dialog already points, so changing the folder is a step from the
+    // answer on screen rather than from wherever the OS last happened to be. The page sends
+    // the folder it is naming, and the fallbacks are for a caller that sends nothing.
+    let start = current
+        .as_deref()
+        .map(Path::new)
+        .filter(|dir| dir.is_dir())
+        .map(Path::to_path_buf)
+        .or_else(chosen_sync_folder)
+        .or_else(exe_dir);
+    if let Some(dir) = start {
+        picker = picker.set_directory(dir);
+    }
+    picker.pick_folder(move |folder| {
+        let _ = sender.send(folder);
+    });
+    let Some(folder) = receiver.recv().ok().flatten() else { return Ok(None) };
+    let path = folder.into_path().map_err(|error| error.to_string())?;
+    if let Some(dir) = exe_dir() {
+        set_sync_folder_in(&dir, Some(&path))?;
+    }
+    Ok(Some(path.to_string_lossy().into_owned()))
+}
+
+/// Go back to the folder Lithic works out for itself. The recents and the install-offer
+/// marker are left alone, and the next read answers with the automatic folder.
+#[tauri::command]
+fn clear_sync_folder_override() -> Result<(), String> {
+    let Some(dir) = exe_dir() else { return Ok(()) };
+    set_sync_folder_in(&dir, None)
 }
 
 /// Current install-offer state for the launcher: whether an install exists
@@ -2223,7 +2483,7 @@ fn set_install_dismissed(dismissed: bool) -> Result<(), String> {
             .map(|text| {
                 text.lines()
                     .map(|line| line.trim())
-                    .filter(|line| !line.is_empty() && !line.starts_with('#') && *line != "dismissed=1")
+                    .filter(|line| !line.is_empty() && !line.starts_with('#') && *line != "dismissed=1" && !line.starts_with(SYNC_FOLDER_MARKER))
                     .map(|line| {
                         let path = PathBuf::from(line);
                         if path.is_absolute() {
@@ -2707,6 +2967,8 @@ pub fn run() {
             git_sync_heartbeat,
             git_sync_reauth,
             git_sync_folder,
+            pick_sync_folder,
+            clear_sync_folder_override,
             git_sync_coverage,
             list_folder_liths,
             probe_instance,
@@ -3378,6 +3640,170 @@ mod tests {
         // No derived path at all — a fresh install with empty recents — is still
         // enough to answer.
         assert_eq!(preferred_sync_folder(None, &[library.clone()]), Some(library));
+
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    /// A folder the user picked in the dialog outranks both automatic rules: the derived
+    /// path and the library folder a previous attachment left behind.
+    #[test]
+    fn a_picked_folder_outranks_the_automatic_answers() {
+        let root = scratch("picked");
+        let library = root.join("Documents/Lithic");
+        write(&library, "notes.lith", "notes\n");
+        attach(&library);
+
+        let downloads = root.join("Downloads");
+        write(&downloads, "tiddlers.lith", "stray\n");
+
+        let picked = root.join("Notes");
+        fs::create_dir_all(&picked).unwrap();
+
+        assert_eq!(
+            resolved_sync_folder(Some(&picked), Some(&downloads.join("tiddlers.lith")), &[library.clone()]),
+            Some(picked)
+        );
+        // Picking the folder Lithic would have inferred is not a special case: the choice
+        // is the answer either way, which is what keeps the dialog from arguing with a
+        // user who picked what was already there.
+        assert_eq!(
+            resolved_sync_folder(Some(&library), Some(&downloads.join("tiddlers.lith")), &[library.clone()]),
+            Some(library.clone())
+        );
+        // A folder that is not on this machine is not an answer — the drive it was on is
+        // unplugged, or the bundle was copied without it. The dialog goes back to the
+        // folder Lithic works out instead of naming a path that is not there.
+        assert_eq!(
+            resolved_sync_folder(Some(&root.join("gone")), Some(&downloads.join("tiddlers.lith")), &[library.clone()]),
+            Some(library.clone())
+        );
+        // With nothing picked, the automatic answer stands.
+        assert_eq!(
+            resolved_sync_folder(None, Some(&downloads.join("tiddlers.lith")), &[library.clone()]),
+            Some(library)
+        );
+
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    /// A fresh download with nothing to go on: no recents, no open Lith and no repository
+    /// anywhere. The proposal is the program's own folder, and only where that folder is
+    /// evidence rather than an accident of where the program was unzipped to.
+    #[test]
+    fn a_fresh_download_proposes_the_programs_own_folder_only_as_evidence() {
+        let root = scratch("propose");
+        let bundle = root.join("Lithic");
+        fs::create_dir_all(&bundle).unwrap();
+        let install = root.join("Documents/Lithic");
+        fs::create_dir_all(&install).unwrap();
+
+        // A bundle that already keeps a Lith beside the program: what a thumb drive is, and
+        // the portable answer this rule exists for.
+        write(&bundle, "notes.lith", "notes\n");
+        assert_eq!(
+            proposed_sync_folder(Some(&bundle), Some(&install)),
+            Some(bundle.clone())
+        );
+
+        // The installed app runs from its own install folder, Lith or no Lith: that folder
+        // is where liths are meant to live, so it is evidence whatever is in it — which is
+        // the empty `Documents\Lithic` a fresh install starts with.
+        assert_eq!(
+            proposed_sync_folder(Some(&install), Some(&install)),
+            Some(install.clone())
+        );
+
+        // Somewhere the program was merely unzipped to. No Lith, not the install folder, so
+        // it says nothing about where the liths are and the install folder answers instead.
+        let downloads = root.join("Downloads");
+        fs::create_dir_all(&downloads).unwrap();
+        assert_eq!(
+            proposed_sync_folder(Some(&downloads), Some(&install)),
+            Some(install.clone())
+        );
+
+        // Neither on disk: nothing to propose, and the dialog asks rather than naming a path
+        // that is not there.
+        assert_eq!(proposed_sync_folder(Some(&downloads), Some(&root.join("gone"))), None);
+        assert_eq!(proposed_sync_folder(None, None), None);
+
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    /// The proposal fills the case where the launcher had nothing of its own, and no case
+    /// where it had something: the derived folder is the one the user is working in, and a
+    /// proposal about the program's own folder must not outrank it.
+    #[test]
+    fn the_proposal_only_fills_the_empty_case() {
+        let root = scratch("propose-fill");
+        let app = root.join("Lithic");
+        fs::create_dir_all(&app).unwrap();
+        let downloads = root.join("Downloads");
+        write(&downloads, "tiddlers.lith", "stray\n");
+
+        // Nothing derived at all: the proposal is the answer, so a fresh download ends up
+        // with a folder on the line instead of an empty one.
+        assert_eq!(answer_folder(None, None, &[], Some(&app)), Some(app.clone()));
+        // A derived path and no evidence anywhere: the launcher keeps the folder it worked
+        // out, exactly as it did before this rule existed.
+        assert_eq!(
+            answer_folder(None, Some(&downloads.join("tiddlers.lith")), &[], Some(&app)),
+            None
+        );
+        // And a pick outranks the proposal, which is the one thing that must not be true of
+        // a folder nobody chose.
+        let picked = root.join("Notes");
+        fs::create_dir_all(&picked).unwrap();
+        assert_eq!(
+            answer_folder(Some(&picked), None, &[], Some(&app)),
+            Some(picked)
+        );
+
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    /// The picked folder rides in `recents.txt`, spelled relative to the app's own folder
+    /// when it lives under it. That spelling is the whole point: a thumb drive gets a
+    /// different letter on the next machine, and a relative line still names the folder
+    /// beside the executable, which an absolute one would not.
+    #[test]
+    fn the_picked_folder_rides_in_the_recents_sidecar() {
+        let root = scratch("sidecar-folder");
+        let app = root.join("Lithic");
+        fs::create_dir_all(app.join("liths")).unwrap();
+        let elsewhere = root.join("Notes");
+        fs::create_dir_all(&elsewhere).unwrap();
+
+        // Under the app's folder: relative, so the bundle keeps its own folder.
+        set_sync_folder_in(&app, Some(&app.join("liths"))).unwrap();
+        assert_eq!(sync_folder_value_in(&app).as_deref(), Some("liths"));
+        assert_eq!(chosen_sync_folder_in(&app), Some(app.join("liths")));
+        // The app's folder itself is `.`, not its absolute path.
+        set_sync_folder_in(&app, Some(&app)).unwrap();
+        assert_eq!(sync_folder_value_in(&app).as_deref(), Some("."));
+        assert_eq!(chosen_sync_folder_in(&app), Some(app.clone()));
+
+        // Outside it there is nothing to be relative to, so it stays absolute — and a
+        // machine that does not have that folder gets the automatic answer instead.
+        set_sync_folder_in(&app, Some(&elsewhere)).unwrap();
+        assert_eq!(sync_folder_value_in(&app).as_deref(), Some(elsewhere.to_string_lossy().as_ref()));
+
+        // A recents save carries the choice across rather than sweeping it away, and the
+        // marker never becomes a row.
+        fs::write(app.join("one.lith"), "one\n").unwrap();
+        write_recents_in(&app, vec![app.join("one.lith").to_string_lossy().into_owned()], true).unwrap();
+        let text = fs::read_to_string(app.join("recents.txt")).unwrap();
+        assert!(text.contains("sync-folder="), "{text}");
+        assert!(text.contains("dismissed=1"), "{text}");
+        assert_eq!(read_recents_in(&app).len(), 1, "{text}");
+
+        // Clearing it takes only that line: the recents and the dismissal stay.
+        set_sync_folder_in(&app, None).unwrap();
+        let text = fs::read_to_string(app.join("recents.txt")).unwrap();
+        assert!(!text.contains("sync-folder="), "{text}");
+        assert!(text.contains("dismissed=1"), "{text}");
+        assert_eq!(read_recents_in(&app).len(), 1, "{text}");
+        assert_eq!(chosen_sync_folder_in(&app), None);
 
         let _ = fs::remove_dir_all(&root);
     }
