@@ -41,6 +41,7 @@ export type LauncherHandoff = {
 };
 
 const HANDOFF_KEY = 'lithic-launcher-file';
+const ACTIVE_FILE_KEY = 'lithic-active-file';
 const ONLINE_ENGINE_URL = 'https://lithic.uk/src/lithic.html';
 const CACHED_ENGINE_KEY = 'cachedOnlineCoreEngine';
 
@@ -1042,7 +1043,11 @@ export async function bootLegacyWiki(
   const engine = await fetchEngine();
   const html = buildEngineHtml(engine, handoff, extraTiddlers, engineGlobals, options);
 
-  sessionStorage.setItem('lithic-active-file', JSON.stringify(handoff));
+  // A pointer, not the document: the injected saver reads a name and a path from here and never
+  // the body, which is what the monolith branch below has always recorded. This used to be handed
+  // the whole handoff — body and all — so it threw on the line after the launcher's own, on the
+  // same mount, for the same reason (see writeHandoff).
+  setActiveFile({ name: handoff.name, path: handoff.path });
   // Boot the engine into the current document so the launcher URL stays in
   // the address bar — a plain refresh / "return to launcher" lands back on
   // the launcher UI. This mirrors the legacy launcher.html boot path, which
@@ -1068,7 +1073,7 @@ export function bootLegacyHtml(html: string, suggestedFileName?: string, path?: 
     // saver resolves its target from here, and without it a monolith adopted
     // whatever handoff the previously mounted wiki had left, writing this page
     // over an unrelated file.
-    sessionStorage.setItem('lithic-active-file', JSON.stringify({ name: suggestedFileName, path }));
+    setActiveFile({ name: suggestedFileName, path });
   }
   // Same in-place boot as bootLegacyWiki: the mounted HTML replaces the
   // launcher document, keeping the real launcher URL in the address bar.
@@ -1085,5 +1090,49 @@ export function readHandoff(): LauncherHandoff | null {
     return JSON.parse(raw) as LauncherHandoff;
   } catch {
     return null;
+  }
+}
+
+/**
+ * Leave the handoff the legacy `?mount` boot reads, as far as the session store will take it.
+ *
+ * This build does not rely on it: the engine boots into the launcher's own document and the
+ * payload is already in the page `buildEngineHtml` writes, and nothing navigates to the engine
+ * with `?mount` any more. It is kept for the reader that is left — an engine cached from an older
+ * build — and it is exactly what broke a big file. A session store's whole budget is a few
+ * megabytes, and this key was handed the entire document: a 10 MB Lith failed its own mount with
+ * `QuotaExceededError`, surfaced as "Could not open …", on an instance and in the desktop app
+ * alike. Note this is not the key `persistRecentRows` fixed — that one was the recents mirror, and
+ * the mount died here first.
+ *
+ * A handoff is bookkeeping, and bookkeeping may never cost a mount, so this never throws: a
+ * handoff the store will not take is one no reader would have been able to read either.
+ */
+export function writeHandoff(handoff: LauncherHandoff): void {
+  storeInSession(HANDOFF_KEY, handoff);
+}
+
+/**
+ * The file this engine is mounted on, as its own injected saver reads it: a name and a path.
+ *
+ * Never the body. The saver resolves its write target from these two fields, and the body is what
+ * the store cannot hold (see `writeHandoff`).
+ */
+function setActiveFile(pointer: { name?: string; path?: string }): void {
+  storeInSession(ACTIVE_FILE_KEY, pointer);
+}
+
+/**
+ * Write a session-store entry, or leave it unwritten.
+ *
+ * What these entries hold can be re-read from disk or the server, so a store that refuses one — a
+ * full quota, a quarantined storage area — must not be able to stop a mount. The failures here are
+ * the store's business, not the mount's.
+ */
+function storeInSession(key: string, value: unknown): void {
+  try {
+    sessionStorage.setItem(key, JSON.stringify(value));
+  } catch {
+    // Nothing to do: the mount does not depend on it.
   }
 }

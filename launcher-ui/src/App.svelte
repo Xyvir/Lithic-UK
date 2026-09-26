@@ -5,7 +5,7 @@
   import { orphanPill, orphanDownloadNote, type OrphanDownloadState } from './orphan-download';
   import { isScratchFileName, isHtmlMonolithName, tracksUnsavedEdits, resolveMountName, resolveScratchKind, type ScratchKind } from './scratch-editor';
   import { pwaInstall, promptPwaInstall } from './pwa-install';
-  import { bootLegacyWiki, bootLegacyHtml, type RemoteTarget } from './legacy-launcher-runtime';
+  import { bootLegacyWiki, bootLegacyHtml, writeHandoff, type RemoteTarget } from './legacy-launcher-runtime';
   import { EMOJI_LIST, uploadInstanceIcon, clearInstanceIcon, emojiFaviconUrl, applyFavicon, bustIconCache, readInstanceEmoji, readServerEmoji, saveInstanceEmoji, clearInstanceEmoji, instanceMarkUrl } from './instance-icon';
   import { getRecentFiles, addRecentFile, removeRecentFile, addBrowserOnlyRecent, removeBrowserOnlyRecent, clearAllRecentFiles, purgeOldestCachesIfNeeded, saveSearchCache, forgetWikiCache, cachedWikiNames, idb, getSearchCacheText, listWikiVersions, wikiHasHistory, downloadWikiVersion, getDirtyState, clearDirtyState, listDirtyRecoveries, isWikiDriftedFromHead, isInstallDismissed, setInstallDismissed, recentDiskPath, type RecentEntry } from './storage';
   import { resolveStorageMode, storageModeOverride, browserOnlyMarkTitle, BROWSER_ONLY_HISTORY_NOTE, type StorageMode } from './browser-storage';
@@ -1871,7 +1871,10 @@
       return;
     }
     const handoff = { name: safeName, path, text: contents };
-    sessionStorage.setItem('lithic-launcher-file', JSON.stringify(handoff));
+    // The legacy `?mount` handoff, offered to the session store rather than forced on it: this
+    // line used to put the whole document into a key with a few megabytes to spend, which is what
+    // made a 10 MB Lith fail its own mount with `QuotaExceededError`. See writeHandoff.
+    writeHandoff(handoff);
     const scratchKind: ScratchKind | null = resolveScratchKind(safeName);
     const scratchMode = isScratch && scratchKind ? scratchKind : undefined;
     // Inject the Ephemeral integration on every wiki mount, then drain

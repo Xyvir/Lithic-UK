@@ -1115,6 +1115,56 @@ try {
     [],
     `Live self-host: the whole flow ran without a console error: ${liveErrors.join(' | ')}`
   );
+
+  // A Lith bigger than the session store can hold still opens on an instance.
+  //
+  // The recents mirror was fixed for exactly this file once, and it still would not open. The
+  // failure names the key it died on: `Could not open Final_Semester.lith: Failed to execute
+  // 'setItem' on 'Storage': Setting the value of 'lithic-launcher-file' exceeded the quota.` The
+  // launcher's own handoff key was handed the whole document, and the engine mount wrote a second
+  // copy of it under `lithic-active-file` — a session store's budget is a few megabytes, so both
+  // writes threw and the mount died before an engine was ever asked for. **The mount section above
+  // cannot catch this**, which is why it shipped twice: it mounts an HTML monolith, and a monolith
+  // takes the branch that boots no engine and records only a pointer. This leg is here, on the one
+  // harness in this file with an engine to fetch, and it mounts a `.lith` precisely because a
+  // `.lith` is the mount that has a handoff to write.
+  const BIG_BODY = 'x'.repeat(6 * 1024 * 1024);
+  const bigLith = `title: $:/StoryList\nlist: [[Big]]\n⁂⁂⁂\ntitle: Big\ntype: text/vnd.tiddlywiki\n\n${BIG_BODY}`;
+  stub.addLith('huge.lith', new Date(), Buffer.byteLength(bigLith, 'utf8'), bigLith);
+  await livePage.reload({ waitUntil: 'domcontentloaded' });
+  await livePage.waitForFunction(
+    () => [...document.querySelectorAll('.recent-row.remote-row .recent-name')].some((row) => row.textContent.includes('huge.lith')),
+    POLL
+  );
+  await livePage.evaluate(() => {
+    [...document.querySelectorAll('.recent-row.remote-row .recent-name')]
+      .find((row) => row.textContent.includes('huge.lith'))
+      .click();
+  });
+  // The engine boots into this document, so the launcher's own controls going away is what says it
+  // opened — the same signal the monolith leg uses, and the status line is where a failure landed.
+  await livePage.waitForFunction(() => document.querySelector('.recent-row') === null, POLL);
+  const bigOpen = await livePage.evaluate(() => ({
+    alert: document.querySelector('.status-line.error')?.textContent?.trim() ?? null,
+    handoff: sessionStorage.getItem('lithic-launcher-file')?.length ?? 0,
+    active: sessionStorage.getItem('lithic-active-file')
+  }));
+  assert.equal(
+    bigOpen.alert,
+    null,
+    `Live self-host: a Lith bigger than the session store mounts instead of failing its own storage write: ${JSON.stringify(bigOpen)}`
+  );
+  assert.equal(
+    bigOpen.handoff,
+    0,
+    'Live self-host: ...and its body is not written to a key it cannot fit'
+  );
+  assert.deepEqual(
+    JSON.parse(bigOpen.active ?? 'null'),
+    { name: 'huge.lith' },
+    `Live self-host: while the engine's own entry stays the pointer its saver reads: ${JSON.stringify(bigOpen.active)}`
+  );
+
   await liveContext.close();
   await stub.close();
 

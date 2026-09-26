@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { resolveEngineCandidates, bootLegacyHtml, bootLegacyWiki, buildEngineHtml } from './legacy-launcher-runtime.ts';
+import { resolveEngineCandidates, bootLegacyHtml, bootLegacyWiki, buildEngineHtml, writeHandoff } from './legacy-launcher-runtime.ts';
 
 test('resolves lithic.html as a sibling for file URLs', () => {
   assert.deepEqual(resolveEngineCandidates('file:///C:/Lithic/src/launcher.html'), [
@@ -388,6 +388,77 @@ test('mounting an HTML monolith records its own file as the save target', () => 
     name: 'page.html',
     path: 'C:/docs/page.html'
   });
+});
+
+// The engine's own entry has to stay a pointer. The injected saver reads a name and a path from it
+// and never the body, and it was handed the whole handoff — so the second write of the same mount
+// spent a session store's few megabytes on a document too, and a 10 MB Lith died there as well.
+// This is the leg that was missing when the recents mirror was fixed for the same 10 MB file.
+test('the engine mount records the save target rather than the document', async () => {
+  const store = new Map<string, string>();
+  const engineStub = '<html><head></head><body><script class="tiddlywiki-tiddler-store" type="application/json">[]</script></body></html>';
+  const globals = globalThis as any;
+  const saved = {
+    window: globals.window,
+    localStorage: globals.localStorage,
+    sessionStorage: globals.sessionStorage,
+    fetch: globals.fetch,
+    document: globals.document
+  };
+  globals.window = { location: { href: 'https://example.test/src/launcher.html' } };
+  globals.localStorage = {
+    getItem: (key: string) => (key === 'cachedOnlineCoreEngine' ? engineStub : null),
+    setItem: () => {}
+  };
+  globals.sessionStorage = {
+    // A session store's real behaviour in the one respect that matters here: it refuses what it
+    // cannot hold.
+    setItem: (key: string, value: string) => {
+      if (value.length > 4 * 1024 * 1024) throw new Error('QuotaExceededError');
+      store.set(key, value);
+    },
+    getItem: (key: string) => store.get(key) ?? null,
+    removeItem: (key: string) => store.delete(key)
+  };
+  globals.fetch = async () => { throw new Error('network unavailable'); };
+  globals.document = { open() {}, write() {}, close() {} };
+  try {
+    await bootLegacyWiki({
+      name: 'huge.lith',
+      path: 'C:/docs/huge.lith',
+      text: 'x'.repeat(6 * 1024 * 1024)
+    });
+  } finally {
+    if (saved.window !== undefined) globals.window = saved.window; else delete globals.window;
+    if (saved.localStorage !== undefined) globals.localStorage = saved.localStorage; else delete globals.localStorage;
+    if (saved.sessionStorage !== undefined) globals.sessionStorage = saved.sessionStorage; else delete globals.sessionStorage;
+    if (saved.fetch !== undefined) globals.fetch = saved.fetch; else delete globals.fetch;
+    if (saved.document !== undefined) globals.document = saved.document; else delete globals.document;
+  }
+  const pointer = store.get('lithic-active-file') ?? '';
+  assert.deepEqual(JSON.parse(pointer || 'null'), { name: 'huge.lith', path: 'C:/docs/huge.lith' });
+  assert.ok(pointer.length < 1024, `the entry is a pointer and not a document: ${pointer.length} bytes`);
+});
+
+// The launcher's own handoff key, which is what the reported failure named. It is bookkeeping —
+// the engine boots from the page this launcher writes, not from this key — so a store that will
+// not take it may not cost the mount. The teeth: with the write unguarded this throws, and the
+// mount dies with `QuotaExceededError` under "Could not open …".
+test('a handoff the session store refuses may not cost the mount', () => {
+  const globals = globalThis as any;
+  const saved = globals.sessionStorage;
+  globals.sessionStorage = {
+    setItem: () => { throw new Error('QuotaExceededError'); },
+    getItem: () => null,
+    removeItem: () => {}
+  };
+  try {
+    assert.doesNotThrow(() =>
+      writeHandoff({ name: 'huge.lith', path: 'C:/docs/huge.lith', text: 'x'.repeat(6 * 1024 * 1024) })
+    );
+  } finally {
+    if (saved !== undefined) globals.sessionStorage = saved; else delete globals.sessionStorage;
+  }
 });
 
 test('ipynb scratch mode injects the notebook runtime and parses notebook cells', () => {
