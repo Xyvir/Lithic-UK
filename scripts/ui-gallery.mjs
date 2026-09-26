@@ -576,6 +576,29 @@ const SHEETS = [
           await settle(page, 300);
         },
         expect: '.new-lith-warn'
+      },
+      {
+        // The icon picker where its size is hardest to satisfy: 70 glyphs are nine rows on a
+        // phone against seven on a desktop, and the dialog is meant to show all of them
+        // without a scrollbar. Left uncropped on purpose, because a crop cannot show a
+        // dialog that ran past the bottom of the screen — which is the one thing this pane
+        // exists to show. The instance carries the herb, one of the 42 glyphs the shortlist
+        // no longer offers, so the pane carries the other half of the cull too: that icon
+        // still shows in the heading, still previews, and leads the grid as the chosen cell
+        // rather than being a dialog with nothing selected in it.
+        name: '080-instance-icon',
+        view: 'phone',
+        mode: 'self-host',
+        server: true,
+        drive: async (page) => {
+          stub.addFile('favicon.conf', '🌿');
+          await page.reload({ waitUntil: 'domcontentloaded' });
+          await page.waitForSelector('.brand-emoji');
+          await page.click('.brand-icon-wrap.pickable');
+          await page.waitForSelector('.emoji-modal');
+          await settle(page, 300);
+        },
+        expect: '.emoji-btn.selected'
       }
     ]
   },
@@ -1343,7 +1366,9 @@ const SHEETS = [
         // than a step: the repositories the instance can see, split into the ones Lithic
         // made and the rest, with a fresh one offered above both. Shot through the
         // stand-in instance, because over `file://` there is nothing on the other end to
-        // list — which is why this state had no picture before it.
+        // list — which is why this state had no picture before it. The rest of the account
+        // is behind its disclosure and closed, which is the default and so the state worth
+        // a picture; the smoke leg is what opens it and picks from it.
         name: '746-instance-github-sync-repos',
         view: 'dialog',
         modal: 'gitsync-title',

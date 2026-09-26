@@ -2474,6 +2474,17 @@
     showEmojiPicker = true;
   }
 
+  /*
+   * The grid's contents: `EMOJI_LIST`, with the instance's current icon in front of it
+   * when that icon is not one of them. It can be: the list is a curated shortlist (it lost
+   * 42 glyphs on 2026-09-26), while what an instance carries is whatever was saved on it,
+   * and a dialog that highlighted nothing while previewing the icon the instance is
+   * actually using would read as broken rather than as a shortlist. The extra cell is the
+   * choice itself, so it is the selected one, and it disappears the moment the choice
+   * changes to something the list holds.
+   */
+  $: emojiGrid = emojiChoice && !EMOJI_LIST.includes(emojiChoice) ? [emojiChoice, ...EMOJI_LIST] : EMOJI_LIST;
+
   function closeEmojiPicker(): void {
     showEmojiPicker = false;
   }
@@ -4118,15 +4129,25 @@
               {/each}
             </ul>
           {/if}
-          <p class="repo-group-label">Advanced: your other repositories</p>
-          <input bind:value={gitCustomRepoInput} class="repo-filter" aria-label="Custom repository (owner/name)" placeholder="owner/name" on:input={() => (gitRepoChoice = gitCustomRepoInput.trim() ? '__custom__' : gitRepoChoice)} />
-          {#if gitOtherRepos.length > 0}
-            <ul class="repo-list">
-              {#each gitOtherRepos.filter((repo) => !gitCustomRepoInput || repo.toLowerCase().includes(gitCustomRepoInput.toLowerCase())) as repo (repo)}
-                <li><button type="button" class="repo-card" class:selected={gitRepoChoice === repo} on:click={() => { gitCustomRepoInput = repo; gitRepoChoice = repo; }}>{repo}</button></li>
-              {/each}
-            </ul>
-          {/if}
+          <!--
+            The rest of the account's repositories, behind a disclosure and closed by default,
+            the way the token form above is: choosing between the repositories Lithic made and
+            making a new one is the decision this screen is for, while every other repository
+            in somebody's GitHub account is a list nobody needs on screen to make it. The
+            triangle the browser draws is the affordance; the name typed inside still picks a
+            repository that is not in the list at all.
+          -->
+          <details class="git-sync-advanced">
+            <summary>Advanced: your other repositories</summary>
+            <input bind:value={gitCustomRepoInput} class="repo-filter" aria-label="Custom repository (owner/name)" placeholder="owner/name" on:input={() => (gitRepoChoice = gitCustomRepoInput.trim() ? '__custom__' : gitRepoChoice)} />
+            {#if gitOtherRepos.length > 0}
+              <ul class="repo-list">
+                {#each gitOtherRepos.filter((repo) => !gitCustomRepoInput || repo.toLowerCase().includes(gitCustomRepoInput.toLowerCase())) as repo (repo)}
+                  <li><button type="button" class="repo-card" class:selected={gitRepoChoice === repo} on:click={() => { gitCustomRepoInput = repo; gitRepoChoice = repo; }}>{repo}</button></li>
+                {/each}
+              </ul>
+            {/if}
+          </details>
           {#if gitSyncError}<p class="status-line error" role="alert">{gitSyncError}</p>{/if}
           {#if gitSyncMessage}<p class="status-line" role="status">{gitSyncMessage}</p>{/if}
           {#if gitSyncBusy}<p class="sync-progress" role="status"><span class="sync-spinner" aria-hidden="true"></span><span>{gitSyncStage || 'Working…'}</span><span class="sync-elapsed">{gitSyncElapsed}s</span>{#if !gitAuthActive && mode === 'tauri'}<button type="button" class="sync-cancel" on:click={cancelGitSync}>{gitSyncCancelling ? 'Stopping…' : 'Stop syncing'}</button>{/if}</p>{/if}
@@ -4467,7 +4488,7 @@
         <p>This icon belongs to the instance. Everyone who opens this address sees it.</p>
         <div class="emoji-preview" aria-hidden="true">{emojiChoice || '🎨'}</div>
         <div class="emoji-grid" role="listbox" aria-label="Choose an instance icon">
-          {#each EMOJI_LIST as emoji}
+          {#each emojiGrid as emoji}
             <button
               type="button"
               class="emoji-btn"
@@ -4630,7 +4651,7 @@
     </div>
   {/if}
   <section class="launcher-actions" aria-label="Launcher actions">
-    <div class="action-card action-pair">
+    <div class="action-card action-pair" class:new-lith-open={showNewLithModal}>
       {#if showNewLithModal}
         <div class="new-lith-inline" role="dialog" aria-label="Enter a title">
           <div class="new-lith-row">

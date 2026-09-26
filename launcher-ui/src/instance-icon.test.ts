@@ -320,9 +320,20 @@ test('instanceMarkUrl names the instance\'s own file, and null when there is no 
   assert.equal(instanceMarkUrl(undefined), null, 'and a context with no location at all asks nobody');
 });
 
-test('the emoji shortlist matches the legacy picker categories', () => {
-  assert.ok(EMOJI_LIST.length > 100);
-  assert.ok(EMOJI_LIST.includes('🎨'));
-  assert.equal(new Set(EMOJI_LIST).size, EMOJI_LIST.length);
+test('the emoji shortlist is the culled one, and small enough for its grid', () => {
+  // 70 of the legacy 112, culled 2026-09-26: the list decides how tall the grid is, and
+  // the dialog is meant to show the whole of it without a scrollbar.
+  assert.equal(EMOJI_LIST.length, 70);
+  assert.ok(EMOJI_LIST.includes('🎨'), 'the shipped default is still offered');
+  assert.equal(new Set(EMOJI_LIST).size, EMOJI_LIST.length, 'no glyph is offered twice');
   assert.ok(EMOJI_LIST.every((emoji) => emoji.length > 0));
+  // What the cull took, spelled out so it cannot drift back in one glyph at a time: the
+  // near-duplicates (one of each pair or three kept), every face, and the speaking head.
+  const dropped = [
+    '📍', '📈', '📉', '⚗️', '🖥️', '🌎', '🌏', '⚡', '🔥', '❄️', '🌿', '🌺', '🌻',
+    '🏛️', '🏰', '⛩️', '🗼', '⏰', '⌚', '🕰️', '🔑', '🖌️', '🗳️', '🖋️', '🎆', '🎇', '🗣️',
+    '😊', '😄', '😂', '😍', '🤔', '😎', '🤓', '😤', '😠', '😢', '😴', '🥳', '🤯', '😇', '🥶'
+  ];
+  assert.equal(dropped.length, 42, 'the cull was 42 of the 112');
+  assert.deepEqual(dropped.filter((emoji) => EMOJI_LIST.includes(emoji)), [], 'and none of them is offered');
 });

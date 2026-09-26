@@ -26,20 +26,34 @@
  */
 import { WEBDAV_BASE } from './webdav.ts';
 
-/** Legacy emoji shortlist, grouped the same way as the picker grid. */
+/**
+ * The glyphs the picker offers, in the order (and the groups) they are laid out in.
+ *
+ * Curated, not exhaustive: an instance's icon is the way one instance is told from another
+ * at a glance, and a list long enough to scroll spends more of the dialog on the choosing
+ * than the choice is worth. The legacy shortlist held 112 and drew thirteen rows inside a
+ * `max-height: 80vh` dialog, so its last rows were always below the fold. Forty-two went on
+ * 2026-09-26: the near-duplicates, one of each pair or three (the other two globes, the
+ * other two clocks, the two charts beside the bar chart, the other two flowers beside the
+ * cherry blossom, the two fireworks, the second pin, the paintbrush and the fountain pen),
+ * then every face, then the speaking head, which is a face wearing a mask. The 70 that
+ * remain fit the grid without a scrollbar. See the bullet in agents.md.
+ *
+ * What is gone from here is gone from the offer only: an instance carrying an icon from the
+ * old list still shows it (the choice is text in `favicon.conf`, read as it is written),
+ * and `confirmEmojiIcon` does not care whether this list knows the character.
+ */
 export const EMOJI_LIST: string[] = [
   // Study & Work
-  '📚', '📖', '📝', '📋', '🗒️', '📁', '🗂️', '📦', '🔖', '📌', '📍', '🗃️', '🗄️', '📊', '📈', '📉',
+  '📚', '📖', '📝', '📋', '🗒️', '📁', '🗂️', '📦', '🔖', '📌', '🗃️', '🗄️', '📊',
   // Science & Tech
-  '🔬', '🔭', '⚗️', '🧪', '🧫', '🧬', '💡', '🔋', '🔌', '💻', '🖥️', '⌨️', '📱', '📡', '🛰️', '🤖', '🧲', '⚙️', '🔩', '🧰',
+  '🔬', '🔭', '🧪', '🧫', '🧬', '💡', '🔋', '🔌', '💻', '⌨️', '📱', '📡', '🛰️', '🤖', '🧲', '⚙️', '🔩', '🧰',
   // World & Nature
-  '🌐', '🗺️', '🧭', '🌍', '🌎', '🌏', '⭐', '🌙', '☀️', '🌊', '⚡', '🔥', '❄️', '🌿', '🌱', '🌸', '🌺', '🌻', '🍃', '🌴',
+  '🌐', '🗺️', '🧭', '🌍', '⭐', '🌙', '☀️', '🌊', '🌱', '🌸', '🍃', '🌴',
   // Places & Things
-  '🏛️', '🏰', '⛩️', '🗼', '⏰', '⌚', '🕰️', '🔐', '🔑', '🗝️', '🔮', '🎯', '🧩', '🎲', '♟️', '🎺', '🗿',
+  '🔐', '🗝️', '🔮', '🎯', '🧩', '🎲', '♟️', '🎺', '🗿',
   // Art & Creative
-  '🎨', '🖌️', '🖍️', '🗳️', '🗯️', '✏️', '🖊️', '🖋️', '📷', '📸', '🎥', '🎞️', '🏗️', '🎭', '🎬', '🎤', '🎧', '🎈', '🎆', '🎇', '✨', '🌈', '🗣️', '🐞',
-  // Faces (just a few)
-  '😊', '😄', '😂', '😍', '🤔', '😎', '🤓', '😤', '😠', '😢', '😴', '🥳', '🤯', '😇', '🥶'
+  '🎨', '🖍️', '🗯️', '✏️', '🖊️', '📷', '📸', '🎥', '🎞️', '🏗️', '🎭', '🎬', '🎤', '🎧', '🎈', '✨', '🌈', '🐞'
 ];
 
 /**

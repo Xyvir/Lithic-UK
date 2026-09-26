@@ -1114,6 +1114,17 @@ footer > * { pointer-events: auto; }
   .action-pair { flex-wrap: nowrap; }
   .action-pair .action-button { flex: 1 1 auto; }
   .action-pair .bookmark-button { flex: 0 0 48px; }
+  /*
+   * A title being typed is the whole point of the row while that dialog is up, so
+   * the mount button and the bookmark tile stand down and the field takes their
+   * width: beside them it was left about half the card, and a Lith's name is the
+   * one thing the row is asking for. The dialog owns the row only for as long as it
+   * is open, it always has a way out of its own (the × inside the field, or Escape),
+   * and both tiles come back the moment it closes. So the vault the bookmark tile
+   * reaches is never more than that one dismiss away.
+   */
+  .action-pair.new-lith-open .mount-button,
+  .action-pair.new-lith-open .bookmark-button { display: none; }
   /* The mark above carries the same link, so on a phone the footer copy is the
    * one that goes. Webapp mode only: the desktop app has never had this
    * button, it syncs from the header instead. */
@@ -1341,10 +1352,28 @@ body.drag-over::after {
   border-radius: 6px; background: #f4f4f4; font-size: 1.7rem; line-height: 1;
 }
 .brand-icon-wrap.pickable:hover .brand-emoji { border-color: #ffb74d; }
-.emoji-modal { width: min(100%, 440px); }
+/*
+ * 90vh rather than the 80vh the other dialogs take: this one is a grid of 70 glyphs, and
+ * the whole of it is the thing being reviewed — the cull above left it 7 rows on a
+ * desktop and 9 on a phone, which is a dialog that fits a 700px window and a 390x800 one,
+ * but the last row of which was still below the fold on a 390x700. The overlay's 20px
+ * padding is what keeps a dialog off the edges of the window, and 90vh clears that on
+ * every screen this runs on; a phone short enough to break that (360x640, where 70 glyphs
+ * need twelve rows) keeps its scrollbar, which is the honest answer there.
+ */
+.emoji-modal { width: min(100%, 440px); max-height: 90vh; }
 .emoji-preview { margin: 6px 0 10px; font-size: 2rem; line-height: 1; text-align: center; }
 .emoji-grid {
-  display: grid; grid-template-columns: repeat(auto-fill, minmax(38px, 1fr)); gap: 4px;
+  /*
+   * 32px, not 38: the minimum is not the size of a cell (every column is `1fr`, so the
+   * cells stretch to fill whatever the dialog is wide) but the point at which another
+   * column fits, and the list it holds wants as many as it can get. It is what decides
+   * how many rows the grid is, and so whether the dialog scrolls: at 38 a 390px phone
+   * got 7 columns and 10 rows, at 32 it gets 8 and 9, and a desktop dialog 11 and 7
+   * instead of 9 and 8. The glyph is 1.15rem inside a 34px-tall cell, so a cell a third
+   * narrower than it was still has room for what goes in it.
+   */
+  display: grid; grid-template-columns: repeat(auto-fill, minmax(32px, 1fr)); gap: 4px;
   /* No inner scroll region: the modal owns the only scrollbar (same reason as
      .repo-list — two scrollbars a few pixels apart is unusable). */
   padding: 6px; border: 1px solid #3a3a3a;

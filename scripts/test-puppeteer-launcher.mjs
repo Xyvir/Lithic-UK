@@ -347,6 +347,75 @@ try {
   assert.equal(tinyRow?.sameLine, false, '...by taking a line of its own, since the text buttons do not shrink below their labels');
   assert.equal(tinyRow?.overflow, 0, '...and the row still does not overflow');
 
+  // While a title is being typed the two tiles above stand down and the field takes
+  // the row. They are not dropped from the app, only lent out for the length of that
+  // dialog, and the dialog has a way out of its own (the × inside the field, or
+  // Escape), so the vault the tile opens is never more than one dismiss away.
+  const readTypingRow = async (width) => {
+    await page.setViewport({ width, height: 700 });
+    await page.evaluate(() => {
+      [...document.querySelectorAll('button')].find((button) => button.textContent?.includes('New Blank Lith'))?.click();
+    });
+    await page.waitForSelector('.new-lith-inline');
+    // The field arrives with a 0.18s scale-up, and a rect read during it measures the
+    // transform rather than the layout (334px of row reads as 314). Let it land.
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    return page.evaluate(() => {
+      const card = document.querySelector('.action-pair');
+      const inline = card?.querySelector('.new-lith-inline');
+      const field = card?.querySelector('.new-lith-field');
+      const shown = (node) => (node ? getComputedStyle(node).display !== 'none' : null);
+      const cardStyle = getComputedStyle(card);
+      return {
+        cardWidth: Math.round(card.getBoundingClientRect().width),
+        contentWidth: Math.round(
+          card.clientWidth - parseFloat(cardStyle.paddingLeft) - parseFloat(cardStyle.paddingRight)
+        ),
+        inlineWidth: Math.round(inline.getBoundingClientRect().width),
+        fieldWidth: Math.round(field.getBoundingClientRect().width),
+        mountShown: shown(card?.querySelector('.mount-button')),
+        tileShown: shown(card?.querySelector('.bookmark-button'))
+      };
+    });
+  };
+  const closeTypingRow = async () => {
+    await page.click('.new-lith-close');
+    await page.waitForFunction(() => document.querySelector('.new-lith-inline') === null);
+  };
+  const typingRow = await readTypingRow(390);
+  assert.equal(typingRow?.mountShown, false, 'The mount button leaves the row while a title is being typed');
+  assert.equal(typingRow?.tileShown, false, '...and the bookmark tile leaves it with them');
+  assert.ok(
+    typingRow.inlineWidth >= typingRow.contentWidth - 2,
+    `...handing the field the card's whole content box (${typingRow.inlineWidth} of ${typingRow.contentWidth})`
+  );
+  assert.ok(
+    typingRow.fieldWidth > typingRow.cardWidth * 0.7,
+    `...most of which is the field itself (${typingRow.fieldWidth} of ${typingRow.cardWidth})`
+  );
+  await closeTypingRow();
+  const restoredRow = await page.evaluate(() => {
+    const card = document.querySelector('.action-pair');
+    const shown = (node) => (node ? getComputedStyle(node).display !== 'none' : false);
+    return {
+      mountShown: shown(card?.querySelector('.mount-button')),
+      tileShown: shown(card?.querySelector('.bookmark-button'))
+    };
+  });
+  assert.equal(restoredRow.mountShown, true, 'Closing the dialog hands the row back to the mount button');
+  assert.equal(restoredRow.tileShown, true, '...including the tile that reaches the vault');
+
+  // The same dialog on a wide launcher keeps both, because this is a rule about the
+  // width and not about the dialog: there the field shares the row with them.
+  const wideTypingRow = await readTypingRow(900);
+  assert.equal(wideTypingRow?.mountShown, true, 'A wide launcher keeps the mount button beside the field');
+  assert.equal(wideTypingRow?.tileShown, true, '...and the bookmark tile with it');
+  assert.ok(
+    wideTypingRow.fieldWidth < wideTypingRow.contentWidth * 0.7,
+    `...where the field shares the row rather than taking it (${wideTypingRow.fieldWidth} of ${wideTypingRow.contentWidth})`
+  );
+  await closeTypingRow();
+
   // Webapp mode: the mark is the project link, so the footer's copy of it is
   // the one that goes on mobile — the mark always fits. This file:// document
   // resolves to webapp (no Tauri global, no instance marker).
@@ -590,7 +659,18 @@ try {
       repoCards: [...modal.querySelectorAll('.repo-card')].map((card) => card.textContent.trim()),
       selected: [...modal.querySelectorAll('.repo-card.selected')].map((card) => card.textContent.trim()),
       groupLabels: [...modal.querySelectorAll('.repo-group-label')].map((label) => label.textContent.trim()),
-      otherRepos: [...modal.querySelectorAll('.repo-list .repo-card')].map((card) => card.textContent.trim())
+      otherRepos: [...modal.querySelectorAll('.repo-list .repo-card')].map((card) => card.textContent.trim()),
+      // The disclosure the other repositories live behind, and whether what is inside it can
+      // actually be seen. `open` is the attribute; `shown` is the pixels, because a closed
+      // `<details>` keeps its contents in the DOM *and* keeps their layout boxes (Chromium
+      // hides the slot with `content-visibility: hidden`), so a rect or a textContent read
+      // would call a list nobody can see a list on screen. `checkVisibility()` is the one
+      // that answers the question asked.
+      disclosures: [...modal.querySelectorAll('details.git-sync-advanced')].map((node) => ({
+        summary: node.querySelector('summary')?.textContent.trim() ?? null,
+        open: node.open,
+        shown: [...node.querySelectorAll('.repo-card, input')].some((child) => child.checkVisibility())
+      }))
     };
   });
 
@@ -688,8 +768,13 @@ try {
   const picker = await readSyncDialog(livePage);
   assert.deepEqual(
     picker.groupLabels,
-    ['Found existing Lithic sync repos', 'Advanced: your other repositories'],
+    ['Found existing Lithic sync repos'],
     'Live self-host: the picker separates the repositories Lithic made from the rest'
+  );
+  assert.deepEqual(
+    picker.disclosures,
+    [{ summary: 'Advanced: your other repositories', open: false, shown: false }],
+    'Live self-host: the rest of the account is behind a closed disclosure rather than on screen'
   );
   assert.deepEqual(
     picker.selected,
@@ -705,6 +790,24 @@ try {
     picker.otherRepos,
     ['keeper/notes', 'keeper/website'],
     'Live self-host: the fallback list holds only the repositories Lithic did not make'
+  );
+  // Revealed on request, and the list is still a list: the disclosure stands between the
+  // account and the choosing, not in the way of it.
+  await livePage.evaluate(() => {
+    document.querySelector('.git-sync-modal details.git-sync-advanced summary')?.click();
+  });
+  const revealed = await readSyncDialog(livePage);
+  assert.deepEqual(
+    revealed.disclosures,
+    [{ summary: 'Advanced: your other repositories', open: true, shown: true }],
+    'Live self-host: opening the disclosure puts the rest of the account back on screen'
+  );
+  await clickAction(livePage, '.git-sync-modal .repo-list .repo-card', 'keeper/notes');
+  const pickedOther = await readSyncDialog(livePage);
+  assert.deepEqual(
+    pickedOther.selected,
+    ['keeper/notes'],
+    'Live self-host: and a repository outside the Lithic-made ones can still be chosen'
   );
   assert.match(
     picker.repoCards[0] ?? '',
@@ -1073,12 +1176,28 @@ try {
     'This icon belongs to the instance. Everyone who opens this address sees it.',
     'and says whose icon it is, which is what makes the choice a setting rather than a theme'
   );
+  // The instance's icon is not in the shortlist any more (that is the point of the cull),
+  // and the dialog still has to show it as the chosen one: the choice leads the grid.
+  const offList = await iconPage.evaluate(() => ({
+    buttons: document.querySelectorAll('.emoji-btn').length,
+    first: document.querySelector('.emoji-btn')?.textContent?.trim() ?? null,
+    firstSelected: document.querySelector('.emoji-btn')?.classList.contains('selected') ?? false
+  }));
+  assert.equal(offList.first, '🌿', 'An icon the shortlist no longer offers leads the grid rather than going missing');
+  assert.equal(offList.firstSelected, true, '...as the chosen one');
+  assert.equal(offList.buttons, 71, `...in front of the 70 the shortlist holds (saw ${offList.buttons})`);
 
   await iconPage.evaluate(() => {
     const button = [...document.querySelectorAll('.emoji-btn')].find((node) => node.textContent.trim() === '🎨');
     if (!button) throw new Error('no 🎨 in the grid');
     button.click();
   });
+  const recast = await iconPage.evaluate(() => ({
+    buttons: document.querySelectorAll('.emoji-btn').length,
+    first: document.querySelector('.emoji-btn')?.textContent?.trim() ?? null
+  }));
+  assert.equal(recast.buttons, 70, 'Picking something the shortlist does hold drops the spare cell');
+  assert.equal(recast.first, '📚', '...so the grid is the shortlist itself again');
   await clickAction(iconPage, '.emoji-modal .modal-action', 'Save Icon');
   await iconPage.waitForFunction(
     () => document.querySelector('.emoji-modal .status-line')?.textContent?.includes('Saved') ?? false,
