@@ -36,8 +36,11 @@ import { WEBDAV_BASE } from './webdav.ts';
  * 2026-09-26: the near-duplicates, one of each pair or three (the other two globes, the
  * other two clocks, the two charts beside the bar chart, the other two flowers beside the
  * cherry blossom, the two fireworks, the second pin, the paintbrush and the fountain pen),
- * then every face, then the speaking head, which is a face wearing a mask. The 70 that
- * remain fit the grid without a scrollbar. See the bullet in agents.md.
+ * then every face, then the speaking head, which is a face wearing a mask. The lightning
+ * bolt came straight back, because it is the one whose absence showed: on a 390px phone the
+ * grid draws eight columns, and 71 glyphs beside the instance's own icon when that icon is
+ * off-list are exactly the nine full rows it shows, where 70 left the last one a cell
+ * short. The 71 that remain fit the grid without a scrollbar. See the bullet in agents.md.
  *
  * What is gone from here is gone from the offer only: an instance carrying an icon from the
  * old list still shows it (the choice is text in `favicon.conf`, read as it is written),
@@ -49,7 +52,7 @@ export const EMOJI_LIST: string[] = [
   // Science & Tech
   '🔬', '🔭', '🧪', '🧫', '🧬', '💡', '🔋', '🔌', '💻', '⌨️', '📱', '📡', '🛰️', '🤖', '🧲', '⚙️', '🔩', '🧰',
   // World & Nature
-  '🌐', '🗺️', '🧭', '🌍', '⭐', '🌙', '☀️', '🌊', '🌱', '🌸', '🍃', '🌴',
+  '🌐', '🗺️', '🧭', '🌍', '⭐', '🌙', '☀️', '🌊', '⚡', '🌱', '🌸', '🍃', '🌴',
   // Places & Things
   '🔐', '🗝️', '🔮', '🎯', '🧩', '🎲', '♟️', '🎺', '🗿',
   // Art & Creative

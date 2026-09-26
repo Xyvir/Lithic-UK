@@ -17,7 +17,7 @@
   import { normalizeLithName } from './legacy-saver';
   import { searchCachedWikis } from './cache-search';
   import { topHits, type InstanceCacheRead, type InstanceReads } from './instance-search';
-  import { computeBackupCoverage, folderNameOf, folderOf, hasBackedUpRepo, orphanedEntries, reindexFolders, syncedDirFor, type CoverageRow, type RebuildOrphan } from './backup-coverage';
+  import { computeBackupCoverage, folderOf, hasBackedUpRepo, orphanedEntries, reindexFolders, syncedDirFor, type CoverageRow, type RebuildOrphan } from './backup-coverage';
   import { parseDeviceCode, parseDevicePoll, pollDelayMs, formatUserCode, generateRepoName, partitionRepos } from './github-device';
   import { syncIndicator, shouldHeartbeat, healthFailure, verifiedAge, SYNC_PULSE_MS, type SyncIndicator, type HealthState } from './git-sync-health';
   import { createServerRepo, disconnectServerSync, fetchServerSyncStatus, listServerRepos, pollServerDeviceToken, requestServerDeviceCode, serverSyncIndicator, setupServerSync, type ServerSyncStatus } from './server-git-sync';
@@ -2476,8 +2476,8 @@
 
   /*
    * The grid's contents: `EMOJI_LIST`, with the instance's current icon in front of it
-   * when that icon is not one of them. It can be: the list is a curated shortlist (it lost
-   * 42 glyphs on 2026-09-26), while what an instance carries is whatever was saved on it,
+   * when that icon is not one of them. It can be: the list is a curated shortlist (42 glyphs
+   * went on 2026-09-26), while what an instance carries is whatever was saved on it,
    * and a dialog that highlighted nothing while previewing the icon the instance is
    * actually using would read as broken rather than as a shortlist. The extra cell is the
    * choice itself, so it is the selected one, and it disappears the moment the choice
@@ -2722,13 +2722,6 @@
   })();
   /** The folder that offer would copy into, named rather than promised. */
   $: historySyncedFolder = historyLocalOnlyPath ? syncedDirFor(recentRows(), backupRoots) ?? '' : '';
-  /**
-   * The same folder as a button can name it. `D:\\backups\\archive` is the fact;
-   * "Copy to archive" is the offer, and the offer has to fit beside the sentence
-   * that says what it does or the header stops being one line.
-   */
-  $: historySyncedFolderName = historySyncedFolder ? folderNameOf(historySyncedFolder) : '';
-
   /**
    * Open the per-wiki version history modal. The history icon no longer
    * downloads a single cache blob — it lists every timestamped version
@@ -4570,7 +4563,7 @@
         {#if historyLocalOnlyPath && historySyncedFolder}
           <div class="history-backup-offer" role="group" aria-label="Back up this Lith">
             <p title={historySyncedFolder}>Not backed up. Copy it into {historySyncedFolder} to have it synced.</p>
-            <button class="modal-action" on:click={() => offerCopyToSyncedDir(historyName, historyLocalOnlyPath)}>Copy to {historySyncedFolderName}</button>
+            <button class="modal-action" on:click={() => offerCopyToSyncedDir(historyName, historyLocalOnlyPath)}>Copy</button>
           </div>
         {/if}
         {#if historyBrowserOnly}

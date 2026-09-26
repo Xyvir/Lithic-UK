@@ -1185,7 +1185,7 @@ try {
   }));
   assert.equal(offList.first, '🌿', 'An icon the shortlist no longer offers leads the grid rather than going missing');
   assert.equal(offList.firstSelected, true, '...as the chosen one');
-  assert.equal(offList.buttons, 71, `...in front of the 70 the shortlist holds (saw ${offList.buttons})`);
+  assert.equal(offList.buttons, 72, `...in front of the 71 the shortlist holds (saw ${offList.buttons})`);
 
   await iconPage.evaluate(() => {
     const button = [...document.querySelectorAll('.emoji-btn')].find((node) => node.textContent.trim() === '🎨');
@@ -1196,7 +1196,7 @@ try {
     buttons: document.querySelectorAll('.emoji-btn').length,
     first: document.querySelector('.emoji-btn')?.textContent?.trim() ?? null
   }));
-  assert.equal(recast.buttons, 70, 'Picking something the shortlist does hold drops the spare cell');
+  assert.equal(recast.buttons, 71, 'Picking something the shortlist does hold drops the spare cell');
   assert.equal(recast.first, '📚', '...so the grid is the shortlist itself again');
   await clickAction(iconPage, '.emoji-modal .modal-action', 'Save Icon');
   await iconPage.waitForFunction(

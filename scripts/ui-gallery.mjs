@@ -578,11 +578,14 @@ const SHEETS = [
         expect: '.new-lith-warn'
       },
       {
-        // The icon picker where its size is hardest to satisfy: 70 glyphs are nine rows on a
-        // phone against seven on a desktop, and the dialog is meant to show all of them
-        // without a scrollbar. Left uncropped on purpose, because a crop cannot show a
+        // The icon picker where its size is hardest to satisfy: 71 glyphs are nine rows on a
+        // phone against eight on a desktop, and the dialog is meant to show all of them
+        // without a scrollbar. (The bolt that makes it 71 rather than 70 is here for exactly
+        // this pane: a phone's grid draws eight columns, and 70 left its last row a cell
+        // short, which is what the empty cell in this picture was.) Left uncropped on
+        // purpose, because a crop cannot show a
         // dialog that ran past the bottom of the screen — which is the one thing this pane
-        // exists to show. The instance carries the herb, one of the 42 glyphs the shortlist
+        // exists to show. The instance carries the herb, one of the glyphs the shortlist
         // no longer offers, so the pane carries the other half of the cull too: that icon
         // still shows in the heading, still previews, and leads the grid as the chosen cell
         // rather than being a dialog with nothing selected in it.
