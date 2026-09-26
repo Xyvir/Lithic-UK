@@ -321,21 +321,24 @@ test('instanceMarkUrl names the instance\'s own file, and null when there is no 
 });
 
 test('the emoji shortlist is the culled one, and small enough for its grid', () => {
-  // 71 of the legacy 112: 42 were culled on 2026-09-26 and one of them came back the same
-  // day, so the 41 named below are what is still gone. The list decides how tall the grid
-  // is, and the dialog is meant to show the whole of it without a scrollbar.
-  assert.equal(EMOJI_LIST.length, 71);
+  // 80 of the legacy 112: 42 were culled on 2026-09-26 and ten of them came back the same
+  // day, so the 32 named below are what is still gone. The count is not incidental: a grid
+  // fills only when it divides the column count, and 80 divides both the phone's eight and
+  // the dialog's ten, so the whole list shows without a scrollbar.
+  assert.equal(EMOJI_LIST.length, 80);
   assert.ok(EMOJI_LIST.includes('🎨'), 'the shipped default is still offered');
   assert.equal(new Set(EMOJI_LIST).size, EMOJI_LIST.length, 'no glyph is offered twice');
   assert.ok(EMOJI_LIST.every((emoji) => emoji.length > 0));
   // What the cull still keeps out, spelled out so it cannot drift back one glyph at a time:
   // the near-duplicates (one of each pair or three kept), every face, and the speaking head.
-  // The lightning bolt is not on it: that one was asked back the same day (see the list).
+  // The ten that came back are not on it: the lightning bolt (its absence showed), a globe,
+  // and the eight that carry the count to 80 — the fire, the snowflake, the herb, four
+  // buildings and the ballot box (see the list).
   const dropped = [
-    '📍', '📈', '📉', '⚗️', '🖥️', '🌎', '🌏', '🔥', '❄️', '🌿', '🌺', '🌻',
-    '🏛️', '🏰', '⛩️', '🗼', '⏰', '⌚', '🕰️', '🔑', '🖌️', '🗳️', '🖋️', '🎆', '🎇', '🗣️',
+    '📍', '📈', '📉', '⚗️', '🖥️', '🌏', '🌺', '🌻',
+    '⏰', '⌚', '🕰️', '🔑', '🖌️', '🖋️', '🎆', '🎇', '🗣️',
     '😊', '😄', '😂', '😍', '🤔', '😎', '🤓', '😤', '😠', '😢', '😴', '🥳', '🤯', '😇', '🥶'
   ];
-  assert.equal(dropped.length, 41, 'the cull was 42 of the 112, and the lightning bolt is the one that came back');
+  assert.equal(dropped.length, 32, 'the cull was 42 of the 112, and ten of them came back');
   assert.deepEqual(dropped.filter((emoji) => EMOJI_LIST.includes(emoji)), [], 'and none of them is offered');
 });

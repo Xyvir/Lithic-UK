@@ -578,17 +578,22 @@ const SHEETS = [
         expect: '.new-lith-warn'
       },
       {
-        // The icon picker where its size is hardest to satisfy: 71 glyphs are nine rows on a
-        // phone against eight on a desktop, and the dialog is meant to show all of them
-        // without a scrollbar. (The bolt that makes it 71 rather than 70 is here for exactly
-        // this pane: a phone's grid draws eight columns, and 70 left its last row a cell
-        // short, which is what the empty cell in this picture was.) Left uncropped on
-        // purpose, because a crop cannot show a
-        // dialog that ran past the bottom of the screen — which is the one thing this pane
-        // exists to show. The instance carries the herb, one of the glyphs the shortlist
-        // no longer offers, so the pane carries the other half of the cull too: that icon
-        // still shows in the heading, still previews, and leads the grid as the chosen cell
-        // rather than being a dialog with nothing selected in it.
+        // The icon picker at the width where it is hardest to satisfy: the 80 glyphs are ten
+        // rows of eight on a phone and eight rows of ten in the 440px dialog, and both are
+        // meant to show all of them without a scrollbar. The count is 80 rather than 79 for
+        // exactly this pane: a grid fills only when the glyph count divides its column count,
+        // 80 is what divides both eight and ten, and a phone's grid draws eight columns. Left
+        // uncropped on purpose, because a crop cannot show a dialog that ran past the bottom
+        // of the screen, which is the one thing this pane exists to show. The instance carries
+        // the herb, one of the ten the cull gave back, so the grid here is the shortlist
+        // itself with its own choice highlighted in place. **What this pane deliberately does
+        // not photograph** is the other half of that contract: an instance whose icon the
+        // shortlist does not offer still shows it in the heading and still previews it, and it
+        // leads the grid as the chosen cell — but leading it makes the count 81, and no cell
+        // count and its successor both divide eight, so a picture of that state is a picture
+        // of the single-cell last row this count was chosen to remove. The smoke leg seeds the
+        // hibiscus and asserts the 81 cells with the first one selected, then 80 led by 📚 once
+        // 🎨 is picked, which is where that contract is proved now.
         name: '080-instance-icon',
         view: 'phone',
         mode: 'self-host',

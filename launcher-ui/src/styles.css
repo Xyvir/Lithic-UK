@@ -1353,15 +1353,22 @@ body.drag-over::after {
 }
 .brand-icon-wrap.pickable:hover .brand-emoji { border-color: #ffb74d; }
 /*
- * 90vh rather than the 80vh the other dialogs take: this one is a grid of 71 glyphs, and
- * the whole of it is the thing being reviewed — the list leaves it 8 rows on a desktop
- * and 9 on a phone, which is a dialog that fits a 700px window and a 390x800 one,
- * but the last row of which was still below the fold on a 390x700. The overlay's 20px
- * padding is what keeps a dialog off the edges of the window, and 90vh clears that on
- * every screen this runs on; a phone short enough to break that (360x640, where 71 glyphs
- * need twelve rows) keeps its scrollbar, which is the honest answer there.
+ * 440px, not the 460 the other dialogs take, and the width is load-bearing: it decides how
+ * many columns the grid below draws, and the picker's 80 glyphs fill ten of them exactly.
+ * At 460 it would draw eleven and leave eight cells alone on an eighth row; at 400 it would
+ * draw nine and leave the same eight alone sooner. The phone is unaffected: `min(100%,
+ * 440px)` resolves to the screen there, which is narrower than either number.
+ *
+ * `calc(100vh - 40px)` rather than the 80vh the other dialogs take, and rather than a
+ * rounder 90vh: the whole grid is the thing being reviewed, and this is the tallest state
+ * the picker has — ten rows on a phone, where 80vh cut the last row off a 390x700 and 90vh
+ * was nineteen pixels short of it. Forty is the overlay's own padding, 20px on each side,
+ * which is what keeps a dialog off the edges of the window, so this asks for every pixel the
+ * window can spare and still takes none of them. A phone short enough to outrun even that
+ * (360x640, where the same 80 glyphs need twelve rows) keeps its scrollbar, which is the
+ * honest answer there.
  */
-.emoji-modal { width: min(100%, 440px); max-height: 90vh; }
+.emoji-modal { width: min(100%, 440px); max-height: calc(100vh - 40px); }
 .emoji-preview { margin: 6px 0 10px; font-size: 2rem; line-height: 1; text-align: center; }
 .emoji-grid {
   /*
@@ -1369,9 +1376,9 @@ body.drag-over::after {
    * cells stretch to fill whatever the dialog is wide) but the point at which another
    * column fits, and the list it holds wants as many as it can get. It is what decides
    * how many rows the grid is, and so whether the dialog scrolls: at 38 a 390px phone
-   * got 7 columns and 10 rows, at 32 it gets 8 and 9, and a desktop dialog 10 and 8
-   * instead of 9 and 8. The glyph is 1.15rem inside a 34px-tall cell, so a cell a third
-   * narrower than it was still has room for what goes in it.
+   * got 7 columns and 12 rows where 32 gives it 8 and 10, and the 440px dialog got 9 and 9
+   * where 32 gives it 10 and 8. The glyph is 1.15rem inside a 34px-tall cell, so a cell a
+   * third narrower than it was still has room for what goes in it.
    */
   display: grid; grid-template-columns: repeat(auto-fill, minmax(32px, 1fr)); gap: 4px;
   /* No inner scroll region: the modal owns the only scrollbar (same reason as

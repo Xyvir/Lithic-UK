@@ -1142,7 +1142,7 @@ try {
   await iconPage.setViewport({ width: 1000, height: 700 });
   // Set on the instance, never in this context: this is the browser whose mark used to be
   // wrong, and this context's own storage starts empty on purpose.
-  iconStub.addFile(iconSetting, '🌿');
+  iconStub.addFile(iconSetting, '🌺');
   const settingReads = () => iconStub.state.asked.filter((entry) => entry === `GET /sync/${iconSetting}`).length;
   await iconPage.goto(`${iconStub.origin}/launcher.html?mode=self-host`, { waitUntil: 'domcontentloaded' });
   await iconPage.waitForSelector('.brand-emoji');
@@ -1155,10 +1155,10 @@ try {
     mirror: localStorage.getItem('lithic-icon-emoji')
   }));
   assert.equal(settingReads() > 0, true, 'A launcher on an instance asks the instance for its icon');
-  assert.equal(inherited.glyph, '🌿', `A browser that never picked an icon shows the instance's own: ${JSON.stringify(inherited)}`);
+  assert.equal(inherited.glyph, '🌺', `A browser that never picked an icon shows the instance's own: ${JSON.stringify(inherited)}`);
   assert.match(inherited.mark ?? '', /brand-emoji-wrap/, 'and the mark reads as set rather than as the shipped tile');
   assert.match(inherited.favicon ?? '', /^data:image\/png;base64,/, 'with the tab following the instance rather than the bundled favicon');
-  assert.equal(inherited.mirror, '🌿', 'and the choice mirrored locally, so an instance that cannot be asked later still shows it');
+  assert.equal(inherited.mirror, '🌺', 'and the choice mirrored locally, so an instance that cannot be asked later still shows it');
 
   // The picker agrees, which is what makes the icon a setting the owner can change rather
   // than a value the page happened to render.
@@ -1169,8 +1169,8 @@ try {
     preview: document.querySelector('.emoji-preview')?.textContent?.trim() ?? null,
     line: document.querySelector('.emoji-modal p')?.textContent?.trim() ?? null
   }));
-  assert.deepEqual(pickerOpen.selected, ['🌿'], 'The picker opens on the instance’s icon, not on an empty choice');
-  assert.equal(pickerOpen.preview, '🌿', 'and previews it');
+  assert.deepEqual(pickerOpen.selected, ['🌺'], 'The picker opens on the instance’s icon, not on an empty choice');
+  assert.equal(pickerOpen.preview, '🌺', 'and previews it');
   assert.equal(
     pickerOpen.line,
     'This icon belongs to the instance. Everyone who opens this address sees it.',
@@ -1183,9 +1183,9 @@ try {
     first: document.querySelector('.emoji-btn')?.textContent?.trim() ?? null,
     firstSelected: document.querySelector('.emoji-btn')?.classList.contains('selected') ?? false
   }));
-  assert.equal(offList.first, '🌿', 'An icon the shortlist no longer offers leads the grid rather than going missing');
+  assert.equal(offList.first, '🌺', 'An icon the shortlist no longer offers leads the grid rather than going missing');
   assert.equal(offList.firstSelected, true, '...as the chosen one');
-  assert.equal(offList.buttons, 72, `...in front of the 71 the shortlist holds (saw ${offList.buttons})`);
+  assert.equal(offList.buttons, 81, `...in front of the 80 the shortlist holds (saw ${offList.buttons})`);
 
   await iconPage.evaluate(() => {
     const button = [...document.querySelectorAll('.emoji-btn')].find((node) => node.textContent.trim() === '🎨');
@@ -1196,7 +1196,7 @@ try {
     buttons: document.querySelectorAll('.emoji-btn').length,
     first: document.querySelector('.emoji-btn')?.textContent?.trim() ?? null
   }));
-  assert.equal(recast.buttons, 71, 'Picking something the shortlist does hold drops the spare cell');
+  assert.equal(recast.buttons, 80, 'Picking something the shortlist does hold drops the spare cell');
   assert.equal(recast.first, '📚', '...so the grid is the shortlist itself again');
   await clickAction(iconPage, '.emoji-modal .modal-action', 'Save Icon');
   await iconPage.waitForFunction(

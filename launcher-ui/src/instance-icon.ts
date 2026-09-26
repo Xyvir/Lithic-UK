@@ -36,11 +36,21 @@ import { WEBDAV_BASE } from './webdav.ts';
  * 2026-09-26: the near-duplicates, one of each pair or three (the other two globes, the
  * other two clocks, the two charts beside the bar chart, the other two flowers beside the
  * cherry blossom, the two fireworks, the second pin, the paintbrush and the fountain pen),
- * then every face, then the speaking head, which is a face wearing a mask. The lightning
- * bolt came straight back, because it is the one whose absence showed: on a 390px phone the
- * grid draws eight columns, and 71 glyphs beside the instance's own icon when that icon is
- * off-list are exactly the nine full rows it shows, where 70 left the last one a cell
- * short. The 71 that remain fit the grid without a scrollbar. See the bullet in agents.md.
+ * then every face, then the speaking head, which is a face wearing a mask. Ten came back the
+ * same day, and the count is the reason every time: a grid fills only when the glyph count
+ * divides its column count, and one count has to divide both the phone's eight columns and
+ * the dialog's ten, where under a hundred only 40 and 80 do. The lightning bolt came back
+ * first, because it is the one whose absence showed — on a 390px phone 70 glyphs left the
+ * last row a cell short, which reads as a missing icon rather than as the end of a list —
+ * and a globe with it to reach 72, which fills a nine-column grid but not the ten-column one
+ * the dialog is drawn at. The owner then asked for the count that fills both, so the list is
+ * 80: ten full eight-wide rows on a phone, eight full ten-wide rows in a 440px dialog,
+ * neither a scrollbar. (At 400 the dialog would draw nine columns, which 80 does not divide;
+ * at 460 it would draw eleven.) The eight that came back for it are the
+ * ones that read as a subject of their own rather than as a second version of something
+ * already offered — the fire, the snowflake, the herb, four buildings and the ballot box —
+ * so the cull's real work, the near-duplicates and the faces, stands as it did. See
+ * agents.md.
  *
  * What is gone from here is gone from the offer only: an instance carrying an icon from the
  * old list still shows it (the choice is text in `favicon.conf`, read as it is written),
@@ -52,9 +62,9 @@ export const EMOJI_LIST: string[] = [
   // Science & Tech
   '🔬', '🔭', '🧪', '🧫', '🧬', '💡', '🔋', '🔌', '💻', '⌨️', '📱', '📡', '🛰️', '🤖', '🧲', '⚙️', '🔩', '🧰',
   // World & Nature
-  '🌐', '🗺️', '🧭', '🌍', '⭐', '🌙', '☀️', '🌊', '⚡', '🌱', '🌸', '🍃', '🌴',
+  '🌐', '🗺️', '🧭', '🌍', '🌎', '⭐', '🌙', '☀️', '🌊', '⚡', '🔥', '❄️', '🌱', '🌿', '🌸', '🍃', '🌴',
   // Places & Things
-  '🔐', '🗝️', '🔮', '🎯', '🧩', '🎲', '♟️', '🎺', '🗿',
+  '🔐', '🗝️', '🗳️', '🔮', '🎯', '🧩', '🎲', '♟️', '🎺', '🏛️', '🏰', '⛩️', '🗼', '🗿',
   // Art & Creative
   '🎨', '🖍️', '🗯️', '✏️', '🖊️', '📷', '📸', '🎥', '🎞️', '🏗️', '🎭', '🎬', '🎤', '🎧', '🎈', '✨', '🌈', '🐞'
 ];
