@@ -69,6 +69,15 @@
    */
   let instanceMarkMissing = false;
   const RECENT_KEY = 'lithic-recent-liths';
+  /**
+   * The largest row text worth writing into the recents key.
+   *
+   * That key is localStorage, whose whole budget is a few megabytes — measured, about 5 MB
+   * over `file://`, so a document big enough to be worth quoting could never fit beside the
+   * rows that name it. A text over this is left in memory for the session and not mirrored,
+   * which keeps the row itself; see `persistRecentRows`.
+   */
+  const RECENT_TEXT_LIMIT = 512 * 1024;
   let lithText = '';
   let fileName = 'untitled.lith';
   let filePath: string | undefined;
@@ -1671,6 +1680,39 @@
       .catch(() => { /* best effort */ });
   }
 
+  /**
+   * Mirror the recents into the one key localStorage has.
+   *
+   * A row's own text rides along only where it is the row's last copy: a row with a path is
+   * re-read from disk, and a Lith's content is in the search cache the mount's own saver
+   * writes, so those bodies are weight this key cannot afford — the failure this exists for
+   * was a 10 MB Lith that broke its own mount with `QuotaExceededError`, under
+   * "Could not open …", from a store whose whole budget is a few megabytes.
+   *
+   * A full store must never cost a mount, so this does not throw: a write that would not fit
+   * is retried with the texts dropped, and a list of names and paths is what is left. The
+   * in-memory list is the copy that matters either way; this is the mirror beside it.
+   */
+  function persistRecentRows(): void {
+    const rows = recentFiles.map(({ name, path, text }) => ({
+      name,
+      path,
+      ...(text && !path && text.length <= RECENT_TEXT_LIMIT ? { text } : {})
+    }));
+    if (writeRecentRows(rows)) return;
+    writeRecentRows(rows.map(({ name, path }) => ({ name, path })));
+  }
+
+  /** One attempt at the recents key; false when the store will not take it. */
+  function writeRecentRows(rows: Array<{ name?: string; path?: string; text?: string }>): boolean {
+    try {
+      localStorage.setItem(RECENT_KEY, JSON.stringify(rows));
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
   async function remember(file: { name: string; path?: string; text?: string; handle?: any }) {
     if (file.handle) {
       recentFiles = await addRecentFile(file.handle, file.path ?? null);
@@ -1689,7 +1731,7 @@
     } else {
       const name = file.name;
       recentFiles = [file, ...recentFiles.filter((item) => getEntryName(item) !== name)].slice(0, 20);
-      localStorage.setItem(RECENT_KEY, JSON.stringify(recentFiles.map(({ name, path, text }) => ({ name, path, text }))));
+      persistRecentRows();
       persistRecentsSidecar();
     }
     // A save can land in a folder never seen before, which is the moment its
@@ -2065,6 +2107,12 @@
         // made outside the app are picked up.
         await mountTauriPath(recentDiskPath(recent) as string);
         return;
+      } else {
+        // Nothing left to open it from: the row has no path this build can read and
+        // no body to mount — the case a store too small to mirror a large Lith leaves
+        // behind (`persistRecentRows`). Said out loud rather than left as a click that
+        // does nothing, which is what it looked like from the outside.
+        status = 'No file path recorded. Open it once via Mount to re-link it.';
       }
     } catch (error) {
       status = `Open failed: ${error instanceof Error ? error.message : String(error)}`;
@@ -3018,7 +3066,7 @@
       recentFiles = await removeRecentFile((file as any).handle);
     } else {
       recentFiles = recentFiles.filter((item) => item !== file);
-      localStorage.setItem(RECENT_KEY, JSON.stringify(recentFiles.map((f: any) => ({ name: f.name, path: f.path, text: f.text }))));
+      persistRecentRows();
     }
     await forgetWikiCache(name);
     delete cachedEntries[name];

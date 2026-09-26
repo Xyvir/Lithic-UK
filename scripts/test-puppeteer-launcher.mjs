@@ -3909,6 +3909,49 @@ try {
     ['solo.html', 'first.lith', 'alpha.lith', 'beta.lith'],
     `A single picked file opens, adding exactly one row at the head: ${JSON.stringify(afterSingle)}`
   );
+
+  // A Lith larger than the recents key can hold still opens.
+  //
+  // The row's own body used to be mirrored into `lithic-recent-liths`, whose whole budget
+  // is a few megabytes: a 10 MB Lith therefore failed its *own mount* with
+  // `QuotaExceededError`, reported as "Could not open …", on the desktop and on an instance
+  // alike — measured on the user's machine, and the reason this leg exists. A body is weight
+  // the key cannot afford when the row has a path to be re-read from, and a mirror that will
+  // not fit may never cost a mount. The monolith is the mount that needs no wiki engine: it
+  // is written over this document, so the button going away is what says it opened.
+  const BIG_MONOLITH = `<!doctype html><title>huge</title><!--${'a'.repeat(6 * 1024 * 1024)}-->`;
+  await mountPage.evaluate((text) => {
+    window.__lithicMountPicks = [{ name: 'huge.html', path: 'C:/fixture/huge.html', text }];
+  }, BIG_MONOLITH);
+  await mountPage.click('.mount-button');
+  await mountPage.waitForFunction(() => document.querySelector('.mount-button') === null, POLL);
+  await openLauncher();
+  await mountPage.waitForFunction(() => document.querySelectorAll('.recent-row').length === 5, POLL);
+  const afterBig = await mountedRows();
+  assert.deepEqual(
+    afterBig,
+    ['huge.html', 'solo.html', 'first.lith', 'alpha.lith', 'beta.lith'],
+    `A Lith too big to mirror mounts and keeps its row: ${JSON.stringify(afterBig)}`
+  );
+  const mirror = await mountPage.evaluate(() => {
+    const raw = localStorage.getItem('lithic-recent-liths') ?? '';
+    const rows = JSON.parse(raw);
+    const big = rows.find((row) => row.name === 'huge.html') ?? null;
+    return {
+      bytes: raw.length,
+      names: rows.map((row) => row.name),
+      bigPath: big?.path ?? null,
+      bigText: typeof big?.text === 'string' ? big.text.length : 0,
+      texted: rows.filter((row) => typeof row.text === 'string' && row.text).map((row) => row.name)
+    };
+  });
+  assert.equal(mirror.bigPath, 'C:/fixture/huge.html', 'The row is mirrored with the path it can be re-read from');
+  assert.equal(mirror.bigText, 0, '...and not with the 6 MB body that used to break the write');
+  assert.deepEqual(mirror.texted, [], 'No row spends the key on a body it has a path for');
+  assert.ok(
+    mirror.bytes < 64 * 1024,
+    `...so the whole mirror stays the size of a list: ${mirror.bytes} bytes for ${JSON.stringify(mirror.names)}`
+  );
   await mountContext.close();
 
   // --- Upload a Lith, several at a time ------------------------------------------
