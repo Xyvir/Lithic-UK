@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { folderOf, computeBackupCoverage, hasBackedUpRepo, folderTargets, reindexFolders, orphanedEntries, syncedDirFor } from './backup-coverage.ts';
+import { folderOf, folderNameOf, computeBackupCoverage, hasBackedUpRepo, folderTargets, reindexFolders, orphanedEntries, syncedDirFor } from './backup-coverage.ts';
 
 test('folderOf keeps the separator and tolerates either OS', () => {
   assert.equal(folderOf('C:\\Users\\me\\Documents\\Lithic\\work.lith'), 'C:\\Users\\me\\Documents\\Lithic\\');
@@ -11,6 +11,14 @@ test('folderOf handles a drive root, a trailing slash and a bare name', () => {
   assert.equal(folderOf('C:\\work.lith'), 'C:\\');
   assert.equal(folderOf('/data/lithic/'), '/data/');
   assert.equal(folderOf('work.lith'), '');
+});
+
+test('folderNameOf names the folder, wherever it came from', () => {
+  assert.equal(folderNameOf('D:\\backups\\archive'), 'archive');
+  assert.equal(folderNameOf('/home/me/lithic/'), 'lithic');
+  // The drive root has no name to give but its own, and a bare name is already one.
+  assert.equal(folderNameOf('C:\\'), 'C:');
+  assert.equal(folderNameOf('archive'), 'archive');
 });
 
 test('coverage counts only rows that record a disk path', () => {

@@ -1004,29 +1004,23 @@ footer > * { pointer-events: auto; }
 .vault-row-button:hover:enabled { color: #8ab4f8; }
 .vault-row-button.covered:hover:enabled { color: #9cc78f; }
 /*
- * The two marks below sit left of the history control in the row's markup, nearest
- * the name they are about: the clock is a control any row can have, while these are
- * facts about the file behind this row. They used to sit between the clock and the
- * remove button, which is a fact wedged between two tools for no gain.
- *
- * Local-only mark: a Lith outside any backed-up folder. Muted on purpose — the
- * file is safe where the user put it, so this reads as information with an
- * action attached rather than a fault. It only renders once a folder *is*
- * backed up, which is what gives the contrast meaning.
+ * One mark sits left of the history control, nearest the name it is about: the
+ * clock is a control any row can have, while this is a fact about the file
+ * behind the row, and a fact reads before a control. It used to be three marks
+ * — a grey exclamation for a Lith outside the backed-up folder, an amber one for
+ * a Lith with no file at all, and a red clock for edits never saved. They all
+ * open the same history dialog, and the dialog now answers each in turn, so the
+ * row carries one icon instead: the history control with an exclamation where
+ * the clock hands sit, in yellow. Yellow rather than the old clock's warning
+ * red, because two of the three states are not faults — the file is safe where
+ * the user put it, it simply is not where the backup is.
  */
-.local-only-button { color: #8a8a8a; }
-.local-only-button:hover { color: #f0c674; }
-/*
- * Browser-storage-only mark: a Lith with no file anywhere. Amber rather than
- * the local-only mark's grey, and not muted on hover — that one is information
- * about a file that is safe where it is, while this one is the standing truth
- * that the copy on screen is the only copy there is.
- */
-.browser-only-button { color: #d8a93c; }
-.browser-only-button svg { fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linecap: round; }
-.browser-only-button:hover { color: #f0c674; }
+.cache-history-button.modified,
+.cache-history-button.modified:hover { color: #e0b347; }
+.cache-history-button.modified:disabled { opacity: 1; }
 .history-download-icon { width: 19px !important; height: 21px !important; overflow: visible; }
-.history-icon-shape { fill: currentColor; stroke: none; }
+.history-icon-shape,
+.history-icon-mark { fill: currentColor; stroke: none; }
 .cache-preview {
   position: fixed;
   display: none;
@@ -1235,10 +1229,33 @@ body.drag-over::after {
 .history-download-button { flex: 0 0 32px; color: #8ab4f8; border-radius: 6px; }
 .history-download-button:hover { background: rgb(138 180 248 / 16%); color: #8ab4f8; }
 .history-note { margin-top: 14px; color: #888; font-size: 0.8em; line-height: 1.45; }
-/* The fallback's claim, at the only place it can still be read on a touch screen:
- * the dialog a browser-only row's mark opens, above the versions to download. Tinted
- * like that mark, because it is the same fact. */
-.browser-only-history-note { margin: 0 0 12px; color: #e2c07c; font-size: 0.8rem; line-height: 1.45; }
+/*
+ * The history dialog's two notices, above the versions and in the yellow of the
+ * row mark that opened it: the fallback's claim, at the only place a touch screen
+ * can still read it, and the adaptive header's offer to copy a Lith that sits
+ * outside every backed-up folder into the folder that is backed up. One box,
+ * because they are one kind of statement — a fact about this Lith that the
+ * versions below are the answer to. Scoped to the dialog so they outrank the
+ * plain grey every other `.launcher-modal` paragraph wears.
+ */
+.history-modal .browser-only-history-note,
+.history-modal .history-backup-offer {
+  margin: 0 0 14px; padding: 10px 12px; border: 1px solid #6b5a2a; border-radius: 7px;
+  background: rgb(224 179 71 / 10%);
+  color: #e2c07c; font-size: 0.82rem; line-height: 1.45;
+}
+/*
+ * Only the offer carries an action, and the button sits at the end of the sentence
+ * it answers — the shape of the history rows below, so the offer reads as one more
+ * row of the same list. The sentence is given the room and the button keeps its
+ * size, so the label never wraps into a stack.
+ */
+.history-modal .history-backup-offer { display: flex; align-items: center; gap: 10px; }
+/* The colour has to be said again here, and to this depth: `.launcher-modal p` names
+ * the paragraph itself, so inheriting from the box above is not enough and the
+ * sentence would quietly paint in the dialog's ordinary grey. */
+.history-modal .history-backup-offer p { flex: 1; min-width: 0; margin: 0; color: #e2c07c; }
+.history-modal .history-backup-offer .modal-action { flex: 0 0 auto; margin: 0; padding: 8px 12px; }
 
 /* The launcher's own confirmation, replacing `window.confirm`, which the desktop
  * app renders as an OS message box with no styling hook. Sized like the other
@@ -1277,11 +1294,6 @@ body.drag-over::after {
 .orphan-pill.unverified { background: rgb(224 179 65 / 16%); color: #e6c46a; }
 /* "2 of 5 saved" — the line that says when Proceed is safe. */
 .orphan-progress { margin: 10px 0 0; color: #9ede94; font-size: 0.8rem; text-align: center; }
-/* Unsaved edits are signaled by a red history/download icon instead of an
-   inline text badge (hover shows the capture timestamp via the title). */
-.cache-history-button.dirty,
-.cache-history-button.dirty:hover { color: #ff9d80; }
-.cache-history-button.dirty:disabled { opacity: 1; }
 
 /* --- Self-host: the open remote Lith and the server's list ---------------- */
 .remote-line { display: flex; align-items: center; gap: 8px; margin-top: 2px; min-width: 0; }

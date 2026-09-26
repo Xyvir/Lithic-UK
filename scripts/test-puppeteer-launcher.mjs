@@ -194,7 +194,8 @@ try {
     searchIcon: document.querySelector('.recent-search-icon') !== null,
     historyIcon: document.querySelector('.history-download-icon') !== null,
     historyViewBox: document.querySelector('.history-download-icon')?.getAttribute('viewBox'),
-    historyPaths: [...document.querySelectorAll('.history-download-icon path')].map(path => path.getAttribute('class')),
+    historyPaths: [...document.querySelectorAll('.history-download-icon:not(.modified) path')].map(path => path.getAttribute('class')),
+    modifiedIcons: document.querySelectorAll('.history-download-icon.modified').length,
     historyShape: document.querySelector('.history-icon-shape')?.getAttribute('d'),
     historyRect: document.querySelector('.history-download-icon')?.getBoundingClientRect().toJSON(),
     searchPaddingLeft: getComputedStyle(document.querySelector('.recent-search')).paddingLeft,
@@ -230,6 +231,7 @@ try {
   assert.equal(result.historyIcon, true, 'Recent rows include the history/download icon');
   assert.equal(result.historyViewBox, '56 108 33 36', 'History/download icon uses the supplied design proportions');
   assert.deepEqual(result.historyPaths, ['history-icon-shape']);
+  assert.equal(result.modifiedIcons, 0, 'A plain row keeps the clock icon, not the marked one');
   assert.match(result.historyShape ?? '', /73\.595508/ , 'History/download icon uses the supplied vector path');
   assert.equal(result.searchPaddingLeft, '42px', 'Search text clears the magnifying-glass icon');
   assert.equal(result.searchPaddingRight, '42px', 'Search text leaves room for the clear control');
@@ -3389,6 +3391,72 @@ try {
     chain.links.every(offset => Math.abs(offset) <= 1),
     `...each one centred on the list rather than on the row it hangs from: ${JSON.stringify(chain.links)}`
   );
+  // --- One mark for every unfinished row -----------------------------------------
+  // A row used to grow a second and third icon to say what was wrong with it: an amber
+  // exclamation for a Lith with no file, a grey one for a file outside the backup, and a
+  // red clock for edits never saved. They all open the same dialog, so the row now
+  // carries the history control with an exclamation where its clock hands sit. Asserted
+  // from the DOM, because the difference between the two states is the drawing itself.
+  await vaultPage.evaluate(async () => {
+    const request = indexedDB.open('keyval-store', 1);
+    await new Promise((ok, fail) => {
+      request.onerror = () => fail(request.error);
+      request.onsuccess = () => ok();
+    });
+    const db = request.result;
+    await new Promise((ok, fail) => {
+      const tx = db.transaction('keyval', 'readwrite');
+      const store = tx.objectStore('keyval');
+      // A second row with nothing wrong with it, so the two states are on screen at
+      // the same time: the marked one beside the plain clock it replaces.
+      store.put(
+        [{ handle: null, tauriPath: null, name: 'chain.lith' }, { handle: null, tauriPath: null, name: 'settled.lith' }],
+        'recentFiles'
+      );
+      store.put({ headId: 'v1', versions: [{ id: 'v1', ts: Date.now(), sizeBytes: 120, isBase: true }] }, 'search_cache_meta_settled.lith');
+      store.put(
+        { ts: Date.now(), tiddlers: [{ title: 'A', text: 'unsaved' }] },
+        'dirty_state_chain.lith'
+      );
+      tx.oncomplete = ok;
+      tx.onerror = () => fail(tx.error);
+    });
+    db.close();
+  });
+  await reopenLauncher();
+  await vaultPage.waitForSelector('.recent-row .cache-history-button.modified');
+  const mergedMark = await vaultPage.evaluate(() => {
+    const button = document.querySelector('.recent-row .cache-history-button.modified');
+    const icon = button?.querySelector('.history-download-icon.modified');
+    return {
+      marks: icon?.querySelectorAll('.history-icon-mark').length ?? 0,
+      hands: /-2\.108915/.test(icon?.querySelector('.history-icon-shape')?.getAttribute('d') ?? ''),
+      colour: button ? getComputedStyle(button).color : '',
+      title: button?.getAttribute('title') ?? '',
+      plain: document.querySelectorAll('.recent-row .history-download-icon:not(.modified)').length
+    };
+  });
+  assert.equal(mergedMark.marks, 2, 'The marked icon draws an exclamation where the clock hands were');
+  assert.equal(mergedMark.hands, false, '...and the hands are gone from its outer shape');
+  assert.equal(mergedMark.colour, 'rgb(224, 179, 71)', '...in the yellow the one mark is drawn in');
+  assert.match(mergedMark.title, /Unsaved edits/, '...still naming the state it marks');
+  assert.ok(mergedMark.plain >= 1, 'While a settled row keeps the plain clock icon');
+  await vaultPage.evaluate(async () => {
+    const request = indexedDB.open('keyval-store', 1);
+    await new Promise((ok, fail) => {
+      request.onerror = () => fail(request.error);
+      request.onsuccess = () => ok();
+    });
+    const db = request.result;
+    await new Promise((ok, fail) => {
+      const tx = db.transaction('keyval', 'readwrite');
+      tx.objectStore('keyval').delete('dirty_state_chain.lith');
+      tx.objectStore('keyval').delete('search_cache_meta_settled.lith');
+      tx.oncomplete = ok;
+      tx.onerror = () => fail(tx.error);
+    });
+    db.close();
+  });
   // --- The folder a backup acts on, and the picker that changes it ---------------
   // The dialog named a folder nobody chose: it was inferred from the open Lith, else the
   // newest recent row, else a library folder Lithic already had a repository in, and moving

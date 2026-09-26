@@ -17,7 +17,7 @@
   import { normalizeLithName } from './legacy-saver';
   import { searchCachedWikis } from './cache-search';
   import { topHits, type InstanceCacheRead, type InstanceReads } from './instance-search';
-  import { computeBackupCoverage, folderOf, hasBackedUpRepo, orphanedEntries, reindexFolders, syncedDirFor, type CoverageRow, type RebuildOrphan } from './backup-coverage';
+  import { computeBackupCoverage, folderNameOf, folderOf, hasBackedUpRepo, orphanedEntries, reindexFolders, syncedDirFor, type CoverageRow, type RebuildOrphan } from './backup-coverage';
   import { parseDeviceCode, parseDevicePoll, pollDelayMs, formatUserCode, generateRepoName, partitionRepos } from './github-device';
   import { syncIndicator, shouldHeartbeat, healthFailure, verifiedAge, SYNC_PULSE_MS, type SyncIndicator, type HealthState } from './git-sync-health';
   import { createServerRepo, disconnectServerSync, fetchServerSyncStatus, listServerRepos, pollServerDeviceToken, requestServerDeviceCode, serverSyncIndicator, setupServerSync, type ServerSyncStatus } from './server-git-sync';
@@ -2697,6 +2697,28 @@
   }
 
   /**
+   * The Lith the history dialog's adaptive header is about: the one it lists
+   * versions for, when that Lith sits outside every backed-up folder. Separate
+   * from the row's own coverage test because the row no longer asks it — the
+   * mark that opens this dialog is the same mark an unfinished or fallback row
+   * carries, so the copy offer has to travel into the dialog with it.
+   */
+  $: historyLocalOnlyPath = (() => {
+    if (!showHistoryModal || !showBackupStatus) return '';
+    const row = recentFiles.find((item) => getEntryName(item) === historyName);
+    const path = row ? recentDiskPath(row as any) : null;
+    return path && localOnlyPaths.has(path) ? path : '';
+  })();
+  /** The folder that offer would copy into, named rather than promised. */
+  $: historySyncedFolder = historyLocalOnlyPath ? syncedDirFor(recentRows(), backupRoots) ?? '' : '';
+  /**
+   * The same folder as a button can name it. `D:\\backups\\archive` is the fact;
+   * "Copy to archive" is the offer, and the offer has to fit beside the sentence
+   * that says what it does or the header stops being one line.
+   */
+  $: historySyncedFolderName = historySyncedFolder ? folderNameOf(historySyncedFolder) : '';
+
+  /**
    * Open the per-wiki version history modal. The history icon no longer
    * downloads a single cache blob — it lists every timestamped version
    * (deltas materialized on demand) and lets the user download any of them
@@ -4516,6 +4538,20 @@
       <div class="launcher-modal history-modal" role="dialog" aria-modal="true" aria-labelledby="history-title">
         <button class="modal-close" aria-label="Close version history dialog" on:click={closeHistoryModal}>×</button>
         <h2 id="history-title" title={historyName}>{clipFilename(historyName)} Version History</h2>
+        <!--
+          The header is adaptive: a Lith that lives outside every backed-up
+          folder leads with the offer to copy it in, because that is the one
+          thing this dialog can do about it and GitHub sync is already wired
+          up. Above the fallback's claim and the versions, so the row's mark
+          opens onto the same answer whether the Lith is unsaved, browser-only,
+          or simply not where the backup is.
+        -->
+        {#if historyLocalOnlyPath && historySyncedFolder}
+          <div class="history-backup-offer" role="group" aria-label="Back up this Lith">
+            <p title={historySyncedFolder}>Not backed up. Copy it into {historySyncedFolder} to have it synced.</p>
+            <button class="modal-action" on:click={() => offerCopyToSyncedDir(historyName, historyLocalOnlyPath)}>Copy to {historySyncedFolderName}</button>
+          </div>
+        {/if}
         {#if historyBrowserOnly}
           <!--
             The fallback's claim, said here because this is the only place a touch
@@ -4724,6 +4760,11 @@
         {/each}
         {#each filteredRecent as file}
           {@const name = getEntryName(file)}
+          {@const diskPath = recentDiskPath(file as any)}
+          {@const browserOnlyRow = (file as any).browserOnly === true}
+          {@const unsavedRow = Boolean(dirtyEntries[name])}
+          {@const localOnlyRow = showBackupStatus && Boolean(diskPath) && localOnlyPaths.has(diskPath as string)}
+          {@const markedRow = browserOnlyRow || localOnlyRow || unsavedRow}
           <div class="recent-row">
             <!--
               The hover answers the one question a row cannot show: where this Lith lives
@@ -4733,37 +4774,44 @@
               one. The path is what the app would open, unshortened: `~` or an ellipsis would
               be a second thing to decode on the one line that exists to be exact.
             -->
-            <button class="recent-name" title={recentDiskPath(file as any) ?? undefined} on:click={() => openRecent(file)}>{name}{#if cachedEntries[name]}<span class="cached-size">{formatCacheSize(cachedEntries[name].sizeBytes)}</span>{/if}</button>
+            <button class="recent-name" title={diskPath ?? undefined} on:click={() => openRecent(file)}>{name}{#if cachedEntries[name]}<span class="cached-size">{formatCacheSize(cachedEntries[name].sizeBytes)}</span>{/if}</button>
             <!--
-              The marks sit left of the history control, nearest the name they are
-              about: the clock is a control every row can have, while these two are
-              facts about the file behind this row, and a fact reads before a control.
-              The condition is written out rather than asked of a helper: Svelte
-              re-evaluates a template condition when the variables it names
-              change, and a function call names none of them. Through a helper
-              the mark only appeared once something else rebuilt the row — which
-              is after the coverage answer landed, so a fresh list showed no
-              marks at all and the copy offer was unreachable.
+              One mark for every kind of unfinished row: no file at all, a file
+              outside every backed-up folder, or edits never saved. It is the
+              history icon with an exclamation where the clock hands sit, in
+              yellow, because opening it is the answer to all three. The dialog
+              lists the versions, carries the fallback's claim, and offers the
+              copy into the synced folder, so a row that needs attention stays
+              one icon wide instead of growing a second and a third.
+
+              The states are read into locals at the top of the block rather than
+              asked of a helper: Svelte re-evaluates a template condition when the
+              variables it names change, and a function call names none of them,
+              so through a helper the mark only appeared once something else
+              rebuilt the row — which is after the coverage answer landed.
             -->
-            {#if showBackupStatus && localOnlyPaths.has(recentDiskPath(file as any) ?? '')}
-              <button class="recent-icon-button local-only-button" type="button" aria-label={`Copy ${name} to the synced folder`} title={`Local only. Copy ${name} into the backed-up folder.`} on:click={() => offerCopyToSyncedDir(name, recentDiskPath(file as any) as string)}>
-                <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8.5"></circle><path d="M12 7.5v5.5"></path><path d="M12 16.2h.01"></path></svg>
+            {#if markedRow || historyAvailable[name]}
+              <button
+                class="recent-icon-button cache-history-button"
+                class:modified={markedRow}
+                type="button"
+                disabled={!markedRow && !cachedEntries[name]}
+                aria-label={browserOnlyRow ? browserOnlyMarkTitle(name) : unsavedRow ? `${name} has unsaved edits; open to recover` : localOnlyRow ? `Open history and backup options for ${name}` : `Show version history for ${name}`}
+                title={browserOnlyRow ? browserOnlyMarkTitle(name) : unsavedRow ? `Unsaved edits from ${new Date(dirtyEntries[name]).toLocaleString()}` : localOnlyRow ? 'Not in a backed-up folder. Open for the copy offer.' : (cachedEntries[name] ? 'Show version history' : 'No cached history')}
+                on:click={() => openHistoryModal(name, browserOnlyRow)}
+              >
+                {#if markedRow}
+                  <!--
+                    The history icon with the clock hands swapped for an
+                    exclamation: same outer arc and rewind tail, so the shape is
+                    still the control the row already had, and the mark reads as
+                    a state of that control rather than a different thing.
+                  -->
+                  <svg class="history-download-icon modified" viewBox="56 108 33 36" aria-hidden="true"><path class="history-icon-shape" d="m 73.595508,109.76746 c -7.198235,0 -13.103617,5.58342 -13.647229,12.64471 h -0.0072 V 138.2696 H 58.61606 l 2.32389,4.02559 2.324405,-4.02559 h -1.323433 v -15.85123 c 0.530186,-5.97937 5.534806,-10.65103 11.654586,-10.65103 6.474618,0 11.703161,5.22855 11.703161,11.70316 0,6.47462 -5.228543,11.70161 -11.703161,11.70161 -2.644513,0 -5.080809,-0.87232 -7.037814,-2.34508 v 2.39572 c 2.058162,1.23707 4.46633,1.94924 7.037814,1.94924 7.555498,0 13.703556,-6.14599 13.703556,-13.70149 0,-7.5555 -6.148058,-13.70304 -13.703556,-13.70304 z"></path><path class="history-icon-mark" d="M72.3 116h2.6v9h-2.6z"></path><circle class="history-icon-mark" cx="73.6" cy="128.4" r="1.6"></circle></svg>
+                {:else}
+                  <svg class="history-download-icon" viewBox="56 108 33 36" aria-hidden="true"><path class="history-icon-shape" d="m 73.595508,109.76746 c -7.198235,0 -13.103617,5.58342 -13.647229,12.64471 h -0.0072 V 138.2696 H 58.61606 l 2.32389,4.02559 2.324405,-4.02559 h -1.323433 v -15.85123 c 0.530186,-5.97937 5.534806,-10.65103 11.654586,-10.65103 6.474618,0 11.703161,5.22855 11.703161,11.70316 0,6.47462 -5.228543,11.70161 -11.703161,11.70161 -2.644513,0 -5.080809,-0.87232 -7.037814,-2.34508 v 2.39572 c 2.058162,1.23707 4.46633,1.94924 7.037814,1.94924 7.555498,0 13.703556,-6.14599 13.703556,-13.70149 0,-7.5555 -6.148058,-13.70304 -13.703556,-13.70304 z m -2.108915,7.49825 v 8.05016 h 7.125663 v -1.59836 h -5.527311 v -6.4518 z"></path></svg>
+                {/if}
               </button>
-            {/if}
-            <!--
-              The fallback's mark, on the row for as long as the row exists: no
-              file backs this Lith, so there is nothing to fix and nothing to
-              clear — the only way out is out of the browser, through the
-              history dialog this opens.
-            -->
-            {#if (file as any).browserOnly}
-              <button class="recent-icon-button browser-only-button" type="button" aria-label={browserOnlyMarkTitle(name)} title={browserOnlyMarkTitle(name)} on:click={() => openHistoryModal(name, true)}>
-                <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3 2 20h20Z"></path><path d="M12 10v4.5"></path><path d="M12 17.3v.2"></path></svg>
-              </button>
-            {/if}
-            {#if dirtyEntries[name] || historyAvailable[name]}<button class="recent-icon-button cache-history-button" class:dirty={dirtyEntries[name]} type="button" disabled={!cachedEntries[name] && !dirtyEntries[name]} aria-label={dirtyEntries[name] ? `${name} has unsaved edits; open to recover` : `Show version history for ${name}`} title={dirtyEntries[name] ? `Unsaved edits from ${new Date(dirtyEntries[name]).toLocaleString()}` : (cachedEntries[name] ? 'Show version history' : 'No cached history')} on:click={() => openHistoryModal(name, (file as any).browserOnly === true)}>
-              <svg class="history-download-icon" viewBox="56 108 33 36" aria-hidden="true"><path class="history-icon-shape" d="m 73.595508,109.76746 c -7.198235,0 -13.103617,5.58342 -13.647229,12.64471 h -0.0072 V 138.2696 H 58.61606 l 2.32389,4.02559 2.324405,-4.02559 h -1.323433 v -15.85123 c 0.530186,-5.97937 5.534806,-10.65103 11.654586,-10.65103 6.474618,0 11.703161,5.22855 11.703161,11.70316 0,6.47462 -5.228543,11.70161 -11.703161,11.70161 -2.644513,0 -5.080809,-0.87232 -7.037814,-2.34508 v 2.39572 c 2.058162,1.23707 4.46633,1.94924 7.037814,1.94924 7.555498,0 13.703556,-6.14599 13.703556,-13.70149 0,-7.5555 -6.148058,-13.70304 -13.703556,-13.70304 z m -2.108915,7.49825 v 8.05016 h 7.125663 v -1.59836 h -5.527311 v -6.4518 z"></path></svg>
-            </button>
             {/if}
             {#if cacheSearchMatches[name]?.preview}
               <div
@@ -4783,8 +4831,12 @@
         {#each filteredCached as entry}
           <div class="recent-row cached-only-row">
             <div class="recent-name cached-result" role="note">{entry.name}<span class="cached-size">{formatCacheSize(entry.sizeBytes)}</span><span class="cached-label">Cached locally</span></div>
-            {#if dirtyEntries[entry.name] || historyAvailable[entry.name]}<button class="recent-icon-button cache-history-button" class:dirty={dirtyEntries[entry.name]} type="button" aria-label={`Show version history for ${entry.name}`} title={dirtyEntries[entry.name] ? `Unsaved edits from ${new Date(dirtyEntries[entry.name]).toLocaleString()}` : 'Show version history'} on:click={() => openHistoryModal(entry.name)}>
-              <svg class="history-download-icon" viewBox="56 108 33 36" aria-hidden="true"><path class="history-icon-shape" d="m 73.595508,109.76746 c -7.198235,0 -13.103617,5.58342 -13.647229,12.64471 h -0.0072 V 138.2696 H 58.61606 l 2.32389,4.02559 2.324405,-4.02559 h -1.323433 v -15.85123 c 0.530186,-5.97937 5.534806,-10.65103 11.654586,-10.65103 6.474618,0 11.703161,5.22855 11.703161,11.70316 0,6.47462 -5.228543,11.70161 -11.703161,11.70161 -2.644513,0 -5.080809,-0.87232 -7.037814,-2.34508 v 2.39572 c 2.058162,1.23707 4.46633,1.94924 7.037814,1.94924 7.555498,0 13.703556,-6.14599 13.703556,-13.70149 0,-7.5555 -6.148058,-13.70304 -13.703556,-13.70304 z m -2.108915,7.49825 v 8.05016 h 7.125663 v -1.59836 h -5.527311 v -6.4518 z"></path></svg>
+            {#if dirtyEntries[entry.name] || historyAvailable[entry.name]}<button class="recent-icon-button cache-history-button" class:modified={dirtyEntries[entry.name]} type="button" aria-label={`Show version history for ${entry.name}`} title={dirtyEntries[entry.name] ? `Unsaved edits from ${new Date(dirtyEntries[entry.name]).toLocaleString()}` : 'Show version history'} on:click={() => openHistoryModal(entry.name)}>
+              {#if dirtyEntries[entry.name]}
+                <svg class="history-download-icon modified" viewBox="56 108 33 36" aria-hidden="true"><path class="history-icon-shape" d="m 73.595508,109.76746 c -7.198235,0 -13.103617,5.58342 -13.647229,12.64471 h -0.0072 V 138.2696 H 58.61606 l 2.32389,4.02559 2.324405,-4.02559 h -1.323433 v -15.85123 c 0.530186,-5.97937 5.534806,-10.65103 11.654586,-10.65103 6.474618,0 11.703161,5.22855 11.703161,11.70316 0,6.47462 -5.228543,11.70161 -11.703161,11.70161 -2.644513,0 -5.080809,-0.87232 -7.037814,-2.34508 v 2.39572 c 2.058162,1.23707 4.46633,1.94924 7.037814,1.94924 7.555498,0 13.703556,-6.14599 13.703556,-13.70149 0,-7.5555 -6.148058,-13.70304 -13.703556,-13.70304 z"></path><path class="history-icon-mark" d="M72.3 116h2.6v9h-2.6z"></path><circle class="history-icon-mark" cx="73.6" cy="128.4" r="1.6"></circle></svg>
+              {:else}
+                <svg class="history-download-icon" viewBox="56 108 33 36" aria-hidden="true"><path class="history-icon-shape" d="m 73.595508,109.76746 c -7.198235,0 -13.103617,5.58342 -13.647229,12.64471 h -0.0072 V 138.2696 H 58.61606 l 2.32389,4.02559 2.324405,-4.02559 h -1.323433 v -15.85123 c 0.530186,-5.97937 5.534806,-10.65103 11.654586,-10.65103 6.474618,0 11.703161,5.22855 11.703161,11.70316 0,6.47462 -5.228543,11.70161 -11.703161,11.70161 -2.644513,0 -5.080809,-0.87232 -7.037814,-2.34508 v 2.39572 c 2.058162,1.23707 4.46633,1.94924 7.037814,1.94924 7.555498,0 13.703556,-6.14599 13.703556,-13.70149 0,-7.5555 -6.148058,-13.70304 -13.703556,-13.70304 z m -2.108915,7.49825 v 8.05016 h 7.125663 v -1.59836 h -5.527311 v -6.4518 z"></path></svg>
+              {/if}
             </button>
             {/if}
             {#if cacheSearchMatches[entry.name]?.preview}

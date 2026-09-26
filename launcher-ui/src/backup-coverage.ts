@@ -22,6 +22,17 @@ export function folderOf(path: string): string {
   return normalized.slice(0, cut + 1);
 }
 
+/**
+ * The folder's own name: the last segment of a path, tolerating either separator
+ * and trailing slashes. Naming a folder in copy needs the name, not the path —
+ * "Copy to archive" fits a button, `D:\backups\archive` does not.
+ */
+export function folderNameOf(path: string): string {
+  const normalized = path.replace(/[\\/]+$/, '');
+  const cut = Math.max(normalized.lastIndexOf('/'), normalized.lastIndexOf('\\'));
+  return cut < 0 ? normalized : normalized.slice(cut + 1);
+}
+
 /** One recent row, reduced to what coverage needs. */
 export type CoverageRow = { name: string; path: string | null };
 

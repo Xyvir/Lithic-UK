@@ -60,7 +60,7 @@
 
 import { execFile } from 'node:child_process';
 import { existsSync } from 'node:fs';
-import { mkdir, readFile, rm, writeFile } from 'node:fs/promises';
+import { mkdir, readdir, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
 import { promisify } from 'node:util';
 import puppeteer from 'puppeteer';
@@ -350,10 +350,14 @@ const installRust = (page, config) =>
           // folder I derived", so panes about anything else are unchanged.
           return cfg.syncFolder ?? null;
         case 'git_sync_coverage':
-          // Folder path → the repository root that covers it. No fixture is inside a
-          // repository, so the honest answer is an empty map — `null` would be a read
-          // that failed, which is a different thing and one the app rightly trips over.
-          return {};
+          // Wiki path → the repository root that covers it. The default is an empty map,
+          // which is the honest answer for a fixture that is inside no repository —
+          // `null` would be a read that failed, which is a different thing and one the
+          // app rightly trips over. A pane about the not-backed-up mark sets
+          // `syncCoverage` so one row is covered and the other is not: with nothing
+          // covered the mark never renders, because "not backed up" would then be true
+          // of every row and say nothing about any particular one.
+          return cfg.syncCoverage ?? {};
         case 'list_folder_liths':
           // A fixture row's folder, listed flat. Empty is a real answer from Rust, and the
           // one that makes each row with a path an orphan — which is the state that puts
@@ -533,7 +537,7 @@ const SHEETS = [
           caches: { 'search_cache_fallback.lith': cache([{ title: 'A', text: 'text' }]) },
           meta: { 'search_cache_meta_fallback.lith': history() }
         },
-        expect: '.browser-only-button'
+        expect: '.cache-history-button.modified'
       },
       {
         name: '050-fallback-no-matches',
@@ -638,7 +642,7 @@ const SHEETS = [
           caches: { 'search_cache_fallback.lith': cache([{ title: 'A', text: 'text' }]) },
           meta: { 'search_cache_meta_fallback.lith': history() }
         },
-        expect: '.browser-only-button'
+        expect: '.cache-history-button.modified'
       },
       {
         // Honest about what this is: no server is reachable over `file://`, so this
@@ -722,6 +726,32 @@ const SHEETS = [
           await settle(page, 600);
         },
         expect: '.bookmark-row .cache-preview mark.cache-preview-title-mark'
+      },
+      {
+        // The one mark a row can carry, on the state that is not a fault: a Lith in a
+        // folder no backup covers, beside one that is covered. Same icon as an unsaved
+        // or browser-only row — the history control with an exclamation where the clock
+        // hands sit, in yellow — because all three are answered by the dialog it opens.
+        name: '263-not-backed-up-mark',
+        view: 'wide',
+        mode: 'tauri',
+        rust: {
+          exists: false,
+          pin: PIN,
+          entries: [],
+          path: VAULT_PATH,
+          syncCoverage: { 'D:\\archive\\archive.lith': 'D:\\archive' }
+        },
+        seed: {
+          recents: [diskRow('notes.lith'), diskRow('archive.lith', 'D:\\archive')],
+          caches: { 'search_cache_notes.lith': cache([{ title: 'A', text: 'note text' }]) },
+          meta: { 'search_cache_meta_notes.lith': history() }
+        },
+        drive: async (page) => {
+          await page.waitForSelector('.cache-history-button.modified .history-icon-mark');
+          await settle(page, 300);
+        },
+        expect: '.cache-history-button.modified'
       }
     ]
   },
@@ -787,7 +817,7 @@ const SHEETS = [
             'dirty_state_notes.lith': { ts: SAVED_AT, tiddlers: [{ title: 'A', text: 'unsaved' }] }
           }
         },
-        expect: '.cache-history-button.dirty'
+        expect: '.cache-history-button.modified'
       },
       {
         // The mark on a browser-only row opens this same dialog, and this is where a
@@ -803,12 +833,41 @@ const SHEETS = [
           meta: { 'search_cache_meta_fallback.lith': versionChain() }
         },
         drive: async (page) => {
-          await page.click('.browser-only-button');
+          await page.click('.cache-history-button.modified');
           await page.waitForSelector('.browser-only-history-note');
           await settle(page, 300);
         },
         clip: '.history-modal',
         expect: '.browser-only-history-note'
+      },
+      {
+        // The header's other half, and the reason the row's mark no longer opens a
+        // confirm dialog of its own: a Lith outside every backed-up folder leads the
+        // dialog with the offer to copy it into the folder that is backed up. Two rows,
+        // one covered and one not, because the marks exist only once coverage does.
+        name: '650-not-backed-up',
+        view: 'wide',
+        modal: 'history-title',
+        mode: 'tauri',
+        rust: {
+          exists: false,
+          pin: PIN,
+          entries: [],
+          path: VAULT_PATH,
+          syncCoverage: { 'D:\\archive\\archive.lith': 'D:\\archive' }
+        },
+        seed: {
+          recents: [diskRow('notes.lith'), diskRow('archive.lith', 'D:\\archive')],
+          caches: { 'search_cache_notes.lith': cache([{ title: 'A', text: 'note text' }]) },
+          meta: { 'search_cache_meta_notes.lith': versionChain() }
+        },
+        drive: async (page) => {
+          await page.click('.cache-history-button.modified');
+          await page.waitForSelector('.history-backup-offer');
+          await settle(page, 300);
+        },
+        clip: '.history-modal',
+        expect: '.history-backup-offer'
       }
     ]
   },
@@ -1653,7 +1712,7 @@ async function dialogsInSource() {
 }
 
 /** Who draws what, and what nothing draws. */
-function dialogCoverage(dialogs, drawn) {
+function dialogCoverage(dialogs, drawn, kept) {
   const entries = [...dialogs].map(([id, line]) => {
     const panes = drawn.get(id) ?? [];
     return panes.length > 0 ? { id, panes } : { id, panes, gap: UNPHOTOGRAPHED[id] ?? null, line };
@@ -1682,6 +1741,14 @@ function dialogCoverage(dialogs, drawn) {
     lines.push(`- \`${entry.id}\` — claimed by ${entry.panes.join(', ')}, but no such dialog in the source`);
   }
   lines.push('', `${width} of ${dialogs.size} drawn by a pane.`);
+  lines.push(
+    '',
+    kept.length === 0
+      ? 'Every claim above was walked in this run.'
+      : `This run re-shot ${SHEETS.length - kept.length} of ${SHEETS.length} sheets; the claims on ${kept
+          .map((entry) => entry.sheet.id)
+          .join(', ')} were walked when their own sheet was last shot.`
+  );
   const gaps = entries.filter((entry) => entry.gap).length;
   return { text: `${lines.join('\n')}\n`, entries, stale, unexplained, gaps, drawn: width, total: dialogs.size };
 }
@@ -1714,7 +1781,7 @@ async function montage(sheet, files) {
  * lines than as a picture of one. The state each line belongs to is the heading,
  * so a rewrite can cite where it came from.
  */
-function copyDeck(sheets, results) {
+function copyDeck(sheets, results, kept) {
   const lines = [
     '# Launcher copy deck',
     '',
@@ -1722,6 +1789,11 @@ function copyDeck(sheets, results) {
     'by `npm run gallery` — edit the launcher, not this file.',
     ''
   ];
+  // A filtered run holds the words of the sheets it shot and nothing else: the deck is a
+  // reading of the run, so it says which run that was rather than looking complete.
+  if (kept.length > 0) {
+    lines.push(`Only the sheets this run re-shot: ${sheets.map((sheet) => sheet.id).join(', ')}.`, '');
+  }
   for (const sheet of sheets) {
     lines.push(`## ${sheet.title}`, '');
     for (const entry of results[sheet.id] ?? []) {
@@ -1733,26 +1805,40 @@ function copyDeck(sheets, results) {
   return `${lines.join('\n')}\n`;
 }
 
+/** When a sheet that was not re-shot took its picture, in the page's own timezone. */
+function shotAt(date) {
+  const pad = (value) => String(value).padStart(2, '0');
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}`;
+}
+
 /** A page that shows every sheet, so a review is one tab rather than four files. */
-function contactPage(sheets, results, artifact, coverage) {
+function contactPage(sheets, kept, results, artifact, coverage) {
   const dialogRows = coverage.entries
     .map((entry) => {
       const note = entry.gap ?? (entry.line ? `no pane, and no reason given (App.svelte:${entry.line})` : '');
       return `      <li><code>${entry.id}</code> — ${entry.panes.length > 0 ? entry.panes.join(', ') : note}</li>`;
     })
     .join('\n');
-  const rows = sheets
-    .map((sheet) => {
-      const panes = (results[sheet.id] ?? [])
-        .map((entry) => `<li><b>${entry.pane.name}</b> — <code>${entry.pane.expect}</code></li>`)
-        .join('\n');
-      return `  <section>
-    <h2>${sheet.title}</h2>
-    <img src="sheet-${sheet.id}.png" alt="${sheet.title}" />      <ol>${panes}</ol>
-  </section>`;
-
-    })
-    .join('\n');
+  // Every sheet, whether or not this run shot it: the page is the launcher, and a run that
+  // looked at one sheet is not a launcher with one screen. A sheet that did not run keeps
+  // its picture, with the date it was taken, because a stale sheet that says so is worth
+  // more than a fresh page that silently dropped it.
+  const keptById = new Map(kept.map((entry) => [entry.sheet.id, entry]));
+  const scope = sheets.map((sheet) => sheet.id).join(', ');
+  const rows = SHEETS.map((sheet) => {
+    const shot = results[sheet.id] !== undefined;
+    // The pane list comes from the same place either way, so a kept section is readable
+    // rather than a name and a mystery.
+    const panes = (shot ? results[sheet.id].map((entry) => entry.pane) : sheet.panes)
+      .map((pane) => `<li><b>${pane.name}</b> — <code>${pane.expect}</code></li>`)
+      .join('\n');
+    const at = keptById.get(sheet.id)?.at ?? null;
+    const note = shot
+      ? ''
+      : `\n    <p class="kept">${at === null ? 'Not shot yet: run the gallery with no sheet filter.' : `Not re-shot in this run. This picture is from ${shotAt(at)}.`}</p>`;
+    const image = shot || at !== null ? `\n    <img src="sheet-${sheet.id}.png" alt="${sheet.title}" />` : '';
+    return `  <section>\n    <h2>${sheet.title}</h2>${note}${image}\n    <ol>${panes}</ol>\n  </section>`;
+  }).join('\n');
   return `<!doctype html>
 <html lang="en">
   <head>
@@ -1768,11 +1854,13 @@ function contactPage(sheets, results, artifact, coverage) {
       ol { margin: 14px 0 0; padding-left: 22px; color: #b9b3bd; font-size: 0.86rem; }
       code { color: #8ab4f8; }
       .artifact { margin: -14px 0 32px; color: #8f8f8f; font-size: 0.86rem; }
+      .kept { margin: 0 0 12px; color: #e6b95c; font-size: 0.86rem; }
     </style>
   </head>
   <body>
     <h1>Lithic launcher — UI gallery</h1>
     <p class="artifact">Shooting <code>${artifact}</code> — the words are in <a href="copy-deck.md">copy-deck.md</a>, the dialog list in <a href="modal-coverage.md">modal-coverage.md</a></p>
+${kept.length > 0 ? `    <p class="kept">This run re-shot ${scope}. ${kept.length} sheet${kept.length === 1 ? '' : 's'} below kept the picture from the run before it.</p>\n` : ''}
   <section>
     <h2>Dialogs — every one the launcher declares, and the pane that draws it</h2>
     <ol>
@@ -1800,8 +1888,29 @@ if (sheets.length === 0) {
   process.exit(1);
 }
 
-await rm(RAW_DIR, { recursive: true, force: true });
+/*
+ * Only the panes this run is about to redraw are deleted, and a sheet that does not run
+ * keeps its own `sheet-<id>.png`. Both used to go.
+ *
+ * A filtered run is a look at one sheet, not a statement that the others stopped existing,
+ * and the two files this replaces made it read as one: `raw/` was emptied, so the other
+ * sheets could not be re-tiled either, and the contact page — the one page anybody opens —
+ * came back two sheets wide. That is a run that says the launcher has no credential manager
+ * and no sync workflow, because the run that would have shown them was filtered.
+ */
+const redraw = new Set(sheets.flatMap((sheet) => sheet.panes.map((pane) => pane.name)));
 await mkdir(RAW_DIR, { recursive: true });
+for (const name of await readdir(RAW_DIR).catch(() => [])) {
+  if (!redraw.has(name.replace(/(-unreached)?\.png$/, ''))) await rm(join(RAW_DIR, name), { force: true });
+}
+
+/** The sheets this run is not shooting, each with the picture it keeps instead. */
+const kept = [];
+for (const sheet of SHEETS) {
+  if (sheets.includes(sheet)) continue;
+  const file = join(OUT_DIR, `sheet-${sheet.id}.png`);
+  kept.push({ sheet, at: existsSync(file) ? (await stat(file)).mtime : null });
+}
 
 // Serves this run's artifact and the instance's CGI, so the self-host backup flow
 // has somewhere to be driven. One for the run: the panes that use it each start
@@ -1815,8 +1924,24 @@ const browser = await puppeteer.launch({
 
 const results = {};
 const failures = [];
-/** Which panes drew which dialog, accumulated as the walk runs. */
-const drawnDialogs = new Map();
+/*
+ * Which panes claim each dialog — read off the sheets, not off the run.
+ *
+ * The walk is what proves a claim for a pane that runs (`runPane` throws when a pane's
+ * dialog is not in the DOM before it takes its picture), but the *report* has to describe
+ * the launcher rather than the run: accumulated from the run, a filtered gallery reported
+ * ten dialogs with no pane at all, which is a fact about the filter and reads as a fact
+ * about the app. Taken from the sheets, the report is the same document either way, and
+ * says which of its claims this run re-walked.
+ */
+const claimedDialogs = new Map();
+for (const sheet of SHEETS) {
+  for (const pane of sheet.panes) {
+    if (pane.modal) {
+      claimedDialogs.set(pane.modal, [...(claimedDialogs.get(pane.modal) ?? []), pane.name]);
+    }
+  }
+}
 let drawn = 0;
 
 try {
@@ -1828,7 +1953,6 @@ try {
         const { errors, text } = await runPane(browser, pane);
         files.push(join(RAW_DIR, `${pane.name}.png`));
         results[sheet.id].push({ pane, text });
-        if (pane.modal) drawnDialogs.set(pane.modal, [...(drawnDialogs.get(pane.modal) ?? []), pane.name]);
         drawn += 1;
         const flag = errors.length > 0 ? `  (${errors.length} console error${errors.length === 1 ? '' : 's'})` : '';
         console.log(`  ✓ ${pane.name}${flag}`);
@@ -1849,11 +1973,18 @@ try {
   await stub.close();
 }
 
-const coverage = dialogCoverage(await dialogsInSource(), drawnDialogs);
-await writeFile(join(OUT_DIR, 'index.html'), contactPage(sheets, results, ARTIFACT, coverage), 'utf8');
-await writeFile(join(OUT_DIR, 'copy-deck.md'), copyDeck(sheets, results), 'utf8');
+const coverage = dialogCoverage(await dialogsInSource(), claimedDialogs, kept);
+await writeFile(join(OUT_DIR, 'index.html'), contactPage(sheets, kept, results, ARTIFACT, coverage), 'utf8');
+await writeFile(join(OUT_DIR, 'copy-deck.md'), copyDeck(sheets, results, kept), 'utf8');
 await writeFile(join(OUT_DIR, 'modal-coverage.md'), coverage.text, 'utf8');
 console.log(`\n${drawn} pane${drawn === 1 ? '' : 's'} drawn across ${sheets.length} sheet${sheets.length === 1 ? '' : 's'}.`);
+if (kept.length > 0) {
+  const names = kept.map((entry) => entry.sheet.id).join(', ');
+  const missing = kept.filter((entry) => entry.at === null);
+  console.log(`Sheets not re-shot, keeping their last picture: ${names}.`);
+  console.log(`A bare \`npm run gallery\` re-shoots all ${SHEETS.length} sheets.`);
+  for (const entry of missing) console.error(`! ${entry.sheet.id} has no picture at all yet — run the gallery whole.`);
+}
 console.log(
   `Dialogs: ${coverage.drawn} of ${coverage.total} drawn by a pane — ` +
     `${coverage.gaps} with a reason, ${coverage.unexplained.length} with none.`
