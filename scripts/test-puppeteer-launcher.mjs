@@ -1837,6 +1837,15 @@ try {
     } catch {
       // No storage here: the fixture's own folder stands.
     }
+    // Whether the focused folder should report itself wired to a repository. Its own flag,
+    // and off by default, because the flow this document walks is the setting-up one, where
+    // the honest answer is "nothing is synced here".
+    let syncConnected = false;
+    try {
+      syncConnected = localStorage.getItem('__lithicSyncConnected') === '1';
+    } catch {
+      // No storage here: nothing is synced here either.
+    }
     const syncFolder = {
       automatic: nothingToPropose ? null : 'C:/Users/fixture/Documents/Lithic',
       picked: null,
@@ -1999,6 +2008,18 @@ try {
           syncFolder.clears += 1;
           syncFolder.picked = null;
           return null;
+        case 'git_sync_status':
+          // Whether the focused folder is wired to a repository. Held back unless the flag
+          // above says otherwise, since every other section here is on the setup screens.
+          return syncConnected ? { connected: true, repo: 'fixture/repo', in_flight: false } : null;
+        case 'github_device_code':
+          // The device flow's first answer — the step the folder rides on. The code is put
+          // on screen and the poll starts; the section that uses this abandons the wait
+          // rather than authorizing it, so the dialog parks where the folder is shown.
+          return { device_code: 'fixture-device-code', user_code: 'WXYZ2345', interval: 1 };
+        case 'github_device_poll':
+          // Never authorized: the step is what is under test, not what comes after it.
+          return { pending: true };
         default:
           // Everything else the launcher asks for in this mode: no answer, which
           // every caller already treats as "absent".
@@ -3535,6 +3556,130 @@ try {
   // Reloaded again, which is also what puts the fixture's folder and its unrecorded pick
   // back: nothing below this point sees a fresh install or the folder just chosen.
   await vaultPage.evaluate(() => localStorage.removeItem('__lithicSyncFolderNone'));
+  await reopenLauncher();
+
+  // --- The device-code step, which carries the folder it is about to back up ----------
+  // The picker belongs to setting a backup up, and that means the screens that end at the
+  // commit. The step where GitHub is waited on is one of them: nothing else is happening
+  // there, the folder is not committed until Start Sync, and it used to be the one screen
+  // in the flow that said nothing about the folder at all.
+  await vaultPage.click('.heading .sync-button');
+  await vaultPage.waitForSelector('.git-sync-modal .sync-folder');
+  await clickAction(vaultPage, '.git-sync-modal .modal-action', 'Connect to GitHub');
+  await vaultPage.waitForSelector('.git-sync-modal .user-code-display');
+
+  const codeStep = await vaultPage.evaluate(() => {
+    const row = document.querySelector('.git-sync-modal .sync-folder');
+    const code = document.querySelector('.git-sync-modal .user-code-display');
+    return {
+      tag: row?.tagName ?? null,
+      disabled: row?.disabled ?? null,
+      path: row?.querySelector('.sync-folder-path')?.textContent.trim() ?? '',
+      hint: row?.querySelector('.sync-folder-change')?.textContent.trim() ?? '',
+      aboveTheCode:
+        Boolean(row && code) && Boolean(row.compareDocumentPosition(code) & Node.DOCUMENT_POSITION_FOLLOWING),
+      code: code?.textContent.trim() ?? null,
+      lines: [...document.querySelectorAll('.git-sync-modal p')].map((line) => line.textContent.trim()),
+      actions: [...document.querySelectorAll('.git-sync-modal .modal-action')].map((node) => node.textContent.trim())
+    };
+  });
+  assert.equal(codeStep.tag, 'BUTTON', 'The folder line is still the control while the code is waited on');
+  assert.equal(
+    codeStep.disabled,
+    false,
+    '...enabled there: the wait is not a lock on the folder, and the poll has not made the dialog busy'
+  );
+  assert.equal(codeStep.path, 'C:/Users/fixture/Documents/Lithic', '...naming the folder Lithic worked out');
+  assert.equal(codeStep.hint, 'Change', '...with the hint that says a second click moves it');
+  assert.equal(codeStep.code, 'WXYZ-2345', 'The device code is on screen, which is what makes this the code step');
+  assert.equal(
+    codeStep.aboveTheCode,
+    true,
+    '...and the folder rides at the top of it, above the steps it is being set up beside'
+  );
+  assert.ok(
+    codeStep.lines.some((line) => line.startsWith('1. Open')),
+    `The authorization instructions are still there: ${JSON.stringify(codeStep.lines)}`
+  );
+  assert.deepEqual(codeStep.actions, ['Stop waiting'], 'The only action left is abandoning the wait');
+
+  // The pick, taken on the step: it changes what will be committed and nothing else. The
+  // flow stays where it is, because nothing has been authorized yet.
+  await vaultPage.click('.git-sync-modal .sync-folder');
+  await vaultPage.waitForFunction(() =>
+    document.querySelector('.git-sync-modal .sync-folder-path')?.textContent.trim() === 'D:/Lithic'
+  );
+  const pickedOnTheCodeStep = await vaultPage.evaluate(() => ({
+    picks: window.__lithicSyncFolder.picks,
+    path: document.querySelector('.git-sync-modal .sync-folder-path')?.textContent.trim() ?? '',
+    reset: document.querySelector('.git-sync-modal .sync-folder-reset')?.textContent.trim() ?? null,
+    code: document.querySelector('.git-sync-modal .user-code-display')?.textContent.trim() ?? null,
+    repoCards: document.querySelectorAll('.git-sync-modal .repo-card').length
+  }));
+  assert.equal(pickedOnTheCodeStep.picks, 1, 'One click, one picker');
+  assert.equal(pickedOnTheCodeStep.path, 'D:/Lithic', '...and the step names what the backup will act on');
+  assert.equal(pickedOnTheCodeStep.reset, 'Use the automatic folder', "...with the way back to Lithic's own answer");
+  assert.equal(pickedOnTheCodeStep.code, 'WXYZ-2345', '...without leaving the step it was made on');
+  assert.equal(pickedOnTheCodeStep.repoCards, 0, '...and without running ahead to the repository choice');
+  await assertNoExtraDismiss('.git-sync-modal', 'The sync dialog on the device-code step');
+
+  // Abandoning the wait lands back on the Connect screen with the pick still in force:
+  // stopping an authorization is not a decision about the folder.
+  await clickAction(vaultPage, '.git-sync-modal .modal-action', 'Stop waiting');
+  await vaultPage.waitForSelector('.git-sync-modal .git-sync-advanced');
+  const afterStopWaiting = await vaultPage.evaluate(() => ({
+    path: document.querySelector('.git-sync-modal .sync-folder-path')?.textContent.trim() ?? '',
+    reset: document.querySelector('.git-sync-modal .sync-folder-reset')?.textContent.trim() ?? null,
+    codeGone: document.querySelector('.git-sync-modal .user-code-display') === null
+  }));
+  assert.equal(afterStopWaiting.codeGone, true, 'The code is gone with the wait it belonged to');
+  assert.equal(afterStopWaiting.path, 'D:/Lithic', '...and the folder it was set up over is still the one named');
+  assert.equal(afterStopWaiting.reset, 'Use the automatic folder', '...with its way back still offered');
+  await vaultPage.click('.git-sync-modal .modal-close');
+  await vaultPage.waitForFunction(() => document.querySelector('.git-sync-modal') === null);
+
+  // --- The connected dialog, where the folder is the answer and not a control --------
+  // A running backup is not the place to re-aim itself, so the picker is gone and the
+  // folder it was pointed at is named instead — in the same place, because the dialog
+  // still has to say what is being backed up. Moving it means Disconnect and setting it
+  // up again, which is also the one path that forgets the pick.
+  await vaultPage.evaluate(() => localStorage.setItem('__lithicSyncConnected', '1'));
+  await reopenLauncher();
+  await vaultPage.click('.heading .sync-button');
+  await vaultPage.waitForSelector('.git-sync-modal .sync-folder');
+  const connectedFolder = await vaultPage.evaluate(() => {
+    const row = document.querySelector('.git-sync-modal .sync-folder');
+    return {
+      tag: row?.tagName ?? null,
+      readonly: row?.classList.contains('readonly') ?? null,
+      rows: document.querySelectorAll('.git-sync-modal .sync-folder').length,
+      path: row?.querySelector('.sync-folder-path')?.textContent.trim() ?? '',
+      tooltip: row?.querySelector('.sync-folder-path')?.getAttribute('title') ?? null,
+      hint: Boolean(row?.querySelector('.sync-folder-change')),
+      reset: document.querySelector('.git-sync-modal .sync-folder-reset') === null,
+      repo: document.querySelector('.git-sync-modal .user-code-display')?.textContent.trim() ?? '',
+      actions: [...document.querySelectorAll('.git-sync-modal .modal-action')].map((node) => node.textContent.trim())
+    };
+  });
+  assert.equal(connectedFolder.tag, 'DIV', 'The folder line stops being a button once the repository is connected');
+  assert.equal(connectedFolder.readonly, true, '...drawn as the answer rather than as a control');
+  assert.equal(connectedFolder.rows, 1, '...and drawn once: no picker lingers beside it');
+  assert.equal(connectedFolder.path, 'C:/Users/fixture/Documents/Lithic', 'It still names the folder being backed up');
+  assert.equal(connectedFolder.tooltip, connectedFolder.path, '...with the full path on it, as the picker had');
+  assert.equal(connectedFolder.hint, false, '...and no hint offering to change it');
+  assert.equal(
+    connectedFolder.reset,
+    true,
+    'Nothing to give back either: the Disconnect before a new setup is what forgets a pick'
+  );
+  assert.equal(connectedFolder.repo, 'fixture/repo', 'The repository it is connected to is named under it');
+  assert.deepEqual(connectedFolder.actions, ['Disconnect'], 'Disconnect is the way back to the setup screens');
+  await assertNoExtraDismiss('.git-sync-modal', 'The connected sync dialog');
+  await vaultPage.click('.git-sync-modal .modal-close');
+  await vaultPage.waitForFunction(() => document.querySelector('.git-sync-modal') === null);
+  // Put the document back the way every section below expects it: a folder nothing is
+  // synced to, on the Connect screen.
+  await vaultPage.evaluate(() => localStorage.removeItem('__lithicSyncConnected'));
   await reopenLauncher();
 
   // --- The × on a bookmark, and the half of it this page cannot do ---------------

@@ -1667,11 +1667,18 @@ fn git_sync_status(path: String) -> Option<GitSyncStatus> {
     Some(GitSyncStatus { connected: true, repo, in_flight })
 }
 
-/// Disconnect: drop the managed origin remote. Refuses to touch repos the
-/// user configured themselves (no oauth2 marker) — those aren't ours.
+/// Disconnect: drop the managed origin remote, and forget the folder pick that aimed the
+/// backup. Refuses to touch repos the user configured themselves (no oauth2 marker) —
+/// those aren't ours.
 #[tauri::command]
 fn git_sync_disconnect(path: String) -> Result<(), String> {
-    let dir = sync_dir_of(Path::new(&path))
+    disconnect_sync_folder(&path, exe_dir().as_deref())
+}
+
+/// The disconnect itself, with the sidecar directory named by the caller so the whole of it
+/// — the detached mark and the forgotten pick — can be tested against a folder of its own.
+fn disconnect_sync_folder(path: &str, sidecar: Option<&Path>) -> Result<(), String> {
+    let dir = sync_dir_of(Path::new(path))
         .filter(|dir| dir.is_dir())
         .ok_or_else(|| format!("Cannot resolve a folder for {}", path))?;
     let repo = gitcore::open(&dir)?;
@@ -1683,6 +1690,15 @@ fn git_sync_disconnect(path: String) -> Result<(), String> {
     // Recorded, because the commits stay behind: without it the launcher would keep
     // preferring this folder and there would be no way to back up another one.
     gitcore::mark_detached(&repo);
+    // The pick was made for the backup that just ended, and the dialog offers the folder
+    // picker only while setting one up — so a folder recorded for a backup that is gone is
+    // a choice nobody can see or undo. Forgetting it hands the next setup back to the
+    // automatic rules, which work the folder out from evidence. Best-effort, because the
+    // disconnect is what the user asked for: failing to rewrite a preference must not read
+    // as a failed disconnect.
+    if let Some(dir) = sidecar {
+        let _ = set_sync_folder_in(dir, None);
+    }
     Ok(())
 }
 
@@ -3899,6 +3915,9 @@ mod tests {
     /// without one the folder it just detached is preferred straight back and there
     /// is no way to point the backup at another folder — which is also why
     /// re-attaching is what lifts it, and why this drives the real connect path.
+    ///
+    /// `None` for the sidecar on purpose: the command wrapper hands it the exe's own
+    /// folder, and a test has no business writing a recents file beside the test binary.
     #[test]
     fn a_disconnected_library_is_not_preferred_again_until_it_is_attached() {
         let root = scratch("disconnect");
@@ -3907,7 +3926,7 @@ mod tests {
         attach(&library);
         assert_eq!(preferred_sync_folder(None, &[library.clone()]), Some(library.clone()));
 
-        git_sync_disconnect(library.to_string_lossy().into_owned())
+        disconnect_sync_folder(&library.to_string_lossy(), None)
             .expect("disconnect should succeed");
         assert_eq!(preferred_sync_folder(None, &[library.clone()]), None);
 
@@ -3915,6 +3934,40 @@ mod tests {
         sync_with_remote(&library, remote.to_str().unwrap(), &|_, _| {})
             .expect("re-attaching should succeed");
         assert_eq!(preferred_sync_folder(None, &[library.clone()]), Some(library));
+
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    /// The pick goes with the backup it was made for. The dialog draws the picker only
+    /// while a backup is being set up, so a folder left recorded after a Disconnect would
+    /// be a choice nobody could see and nobody could undo — and it would outrank the rules
+    /// that work the folder out from evidence on the setup that follows.
+    #[test]
+    fn a_disconnect_forgets_the_folder_that_was_picked() {
+        let root = scratch("disconnect-pick");
+        let library = root.join("Lithic");
+        write(&library, "notes.lith", "notes\n");
+        attach(&library);
+        set_sync_folder_in(&root, Some(&library)).unwrap();
+        assert_eq!(chosen_sync_folder_in(&root), Some(library.clone()));
+        // The sidecar is also the recents list: the disconnect may take the pick and
+        // nothing else, so the header it was written over has to still be there.
+        let before = fs::read_to_string(root.join("recents.txt")).unwrap();
+        assert!(before.starts_with(RECENTS_HEADER), "{before}");
+        assert!(before.contains(SYNC_FOLDER_MARKER), "{before}");
+
+        disconnect_sync_folder(&library.to_string_lossy(), Some(&root))
+            .expect("disconnect should succeed");
+
+        assert_eq!(sync_folder_value_in(&root), None, "the pick went with the backup");
+        assert_eq!(chosen_sync_folder_in(&root), None, "...so no folder is recorded any more");
+        let after = fs::read_to_string(root.join("recents.txt")).unwrap();
+        assert!(!after.contains(SYNC_FOLDER_MARKER), "{after}");
+        assert_eq!(
+            after.lines().count(),
+            before.lines().count() - 1,
+            "one line left, and it is the pick: {before:?} -> {after:?}"
+        );
 
         let _ = fs::remove_dir_all(&root);
     }

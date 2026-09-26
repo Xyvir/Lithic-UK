@@ -475,6 +475,19 @@
   $: gitSyncNoTarget = mode === 'tauri' && !(gitSyncPreferredFolder ?? gitSyncSubject);
 
   /**
+   * Whether the folder line is the control or the answer.
+   *
+   * The folder is decided while the backup is being set up, so the picker is drawn on the
+   * screens that end at the commit — the Connect screen, the device-code step it rides on
+   * while GitHub is waited on, and the repository choice after it — and the connected
+   * dialog names the folder instead. Variables rather than conditions asked in the markup,
+   * for the usual reason: Svelte only re-runs a block when a variable it *names* changes.
+   */
+  $: gitSyncFolderEditable = mode === 'tauri' && gitSyncView !== 'connected';
+  /** The other half of that line: connected, so the folder is named rather than offered. */
+  $: gitSyncFolderLive = mode === 'tauri' && gitSyncView === 'connected';
+
+  /**
    * Ask the OS for the folder to back up, instead of the one Lithic worked out.
    *
    * The line in the dialog named a folder nobody chose: it came from the open Lith, else
@@ -901,7 +914,9 @@
       gitSyncConnectedRepo = '';
       setGitSyncView('disconnected');
       void refreshBackupCoverage();
-      // That folder is no longer attached, so what Rust prefers may have moved.
+      // That folder is no longer attached and the disconnect forgot the pick that named it,
+      // so what Rust answers may have moved: re-read rather than keep naming a folder
+      // nothing is recorded for any more.
       void resolveSyncFolder(gitSyncSubject);
     } catch (error) {
       gitSyncError = error instanceof Error ? error.message : String(error);
@@ -3919,12 +3934,19 @@
     <div class="modal-overlay" role="presentation" on:click={(event) => event.currentTarget === event.target && closeGitSyncModal()}>
       <div class="launcher-modal git-sync-modal" role="dialog" aria-modal="true" aria-labelledby="gitsync-title">          <button class="modal-close" aria-label="Close GitHub sync dialog" on:click={closeGitSyncModal}>×</button>
         <h2 id="gitsync-title">GitHub Sync</h2>
-        {#if mode === 'tauri'}
+        {#if gitSyncFolderEditable}
           <!--
             A button, not a label: this is the one thing in the dialog the user can change
             about what is being backed up, and it used to be read-only — which left
             Disconnect as the only way to aim the backup somewhere else. It keeps the plain
             look the line had, so the affordance is the hint on the right plus the hover.
+
+            Drawn while the backup is being set up, and not after: the Connect screen, the
+            device-code step it rides on while GitHub is waited on, and the repository
+            choice that follows — every screen up to the one that commits. The connected
+            dialog names the folder instead — see the read-only line below — because a backup
+            that is already running is not the place to re-aim it: moving it means
+            Disconnect and setting it up again, which is also what forgets the pick.
 
             Drawn even when no folder could be worked out, which is the state a fresh
             download starts in: the line used to be hidden then, and the dialog's whole
@@ -3954,6 +3976,19 @@
             <p class="sync-folder-reset"><button type="button" disabled={gitSyncBusy} on:click={clearSyncFolderOverride}>Use the automatic folder</button></p>
           {/if}
           {#if gitSyncFolderError}<p class="status-line error" role="alert">{gitSyncFolderError}</p>{/if}
+        {:else if gitSyncFolderLive}
+          <!--
+            The folder a running backup acts on, named rather than offered: it is the answer
+            this dialog is about, and the picker that could change it belongs to the
+            setting-up screens above. A `<div>` rather than a disabled button — nothing here
+            is a control, and a greyed-out one would read as a choice that is temporarily
+            unavailable rather than as a statement of fact.
+          -->
+          <div class="sync-folder readonly" class:empty={!gitSyncFolder}>
+            <span class="sync-folder-label">Folder</span>
+            <!-- The same tooltip the picker carries: this line ellipsizes too. -->
+            <span class="sync-folder-path" title={gitSyncFolder || undefined}>{gitSyncFolder || 'No folder yet'}</span>
+          </div>
         {/if}
         {#if showBackupStatus && backupCoverage.localOnlyPaths.length > 0}
           <p class="backup-status" role="status">{backupCoverage.backedUp} of {backupCoverage.tracked} recent liths backed up</p>

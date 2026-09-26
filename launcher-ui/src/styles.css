@@ -477,11 +477,12 @@ h1 { flex: none; min-width: 0; margin: 0; color: #f4edf5; font-size: 1.8rem; fon
    this line is what keeps a folder the user never picked from being backed up by
    accident. One line, truncated rather than wrapped: the title attribute carries
    the full path for a long one. */
-/* The folder line. A button since 2026-09-25: it is the one thing in the dialog the user
-   can change about what is being backed up, and it used to be plain text, which left
-   Disconnect as the only way to aim the backup elsewhere. It keeps the plain look it had —
-   a boxed row would read as a form field rather than as the current answer — so the
-   affordance is the hint on the right and the hover. */
+/* The folder line. A button since 2026-09-25, and a button only while the backup is being
+   set up (see `gitSyncFolderEditable`): it is the one thing in the dialog the user can
+   change about what is being backed up, and it used to be plain text, which left Disconnect
+   as the only way to aim the backup elsewhere. It keeps the plain look it had — a boxed row
+   would read as a form field rather than as the current answer — so the affordance is the
+   hint on the right and the hover. */
 .sync-folder {
   display: flex;
   align-items: baseline;
@@ -501,6 +502,10 @@ h1 { flex: none; min-width: 0; margin: 0; color: #f4edf5; font-size: 1.8rem; fon
 .sync-folder:hover:not(:disabled) { color: #ded8e0; }
 .sync-folder:focus-visible { outline: 1px solid #7a6f7f; outline-offset: 2px; }
 .sync-folder:disabled { cursor: default; }
+/* The same line once the repository is connected, with the picker gone: it is the answer
+   rather than a control, so it may not offer a hover or a text cursor. Drawn as a `<div>`
+   and not a disabled `<button>` for the same reason. */
+.sync-folder.readonly { cursor: default; }
 .sync-folder-label {
   flex: 0 0 auto;
   color: #8f8892;
