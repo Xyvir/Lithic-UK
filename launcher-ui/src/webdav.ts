@@ -314,6 +314,63 @@ export async function fetchRemoteWiki(
   };
 }
 
+/** What the instance says about a file without sending it. */
+export type RemoteFileMeta = { digest: string; rev: string; size: number | null };
+
+/**
+ * Either "the file is still the one you have" or "here it is".
+ *
+ * `unchanged` carries only the metadata, so the caller mounts the copy it already holds. `file`
+ * carries the wiki, and is the answer both when the file moved on and when the instance is older
+ * than the metadata read — in which case the body that came back *is* the read the caller was
+ * about to make, so nothing was spent finding that out.
+ */
+export type RemoteWikiRead =
+  | { state: 'unchanged'; meta: RemoteFileMeta }
+  | { state: 'file'; wiki: RemoteWiki };
+
+/** The metadata read's JSON answer, or null when the body was the file itself. */
+export function parseRemoteMeta(body: string, digest: string, rev: string): RemoteFileMeta | null {
+  try {
+    const parsed = JSON.parse(body) as { digest?: unknown; rev?: unknown; size?: unknown };
+    if (parsed && typeof parsed === 'object' && typeof parsed.digest === 'string' && parsed.digest) {
+      return {
+        digest: parsed.digest,
+        rev: typeof parsed.rev === 'string' ? parsed.rev : rev,
+        size: typeof parsed.size === 'number' ? parsed.size : null
+      };
+    }
+  } catch {
+    // A .lith is not JSON: an instance that ignores `meta` answers with the file itself.
+  }
+  return null;
+}
+
+/**
+ * Ask whether the copy this device holds is still the instance's copy.
+ *
+ * `meta=1` is the deployment's metadata read: the digest, the revision and the size, no body. It
+ * is the difference between opening a 10 MB Lith and *knowing* about it — a device that already
+ * holds that content mounts its own copy and never fetches the file.
+ *
+ * Only worth asking when the patch API answers, because the digest is the API's own. An instance
+ * without it has no digest to compare against and the caller reads the file the ordinary way.
+ */
+export async function fetchRemoteWikiMeta(
+  name: string,
+  fetcher: typeof fetch = fetch,
+  apiBase = LITHIC_API_BASE
+): Promise<RemoteWikiRead> {
+  const response = await fetcher(`${apiBase}file?file=${encodeURIComponent(name)}&meta=1`, { method: 'GET' });
+  if (!response.ok) throw new Error(`Failed to fetch ${name}: ${response.status}`);
+  const body = await response.text();
+  const digest = headerValue(response, 'digest');
+  const rev = headerValue(response, 'rev');
+  const meta = parseRemoteMeta(body, digest, rev);
+  if (meta) return { state: 'unchanged', meta };
+  return { state: 'file', wiki: { text: body, digest, rev } };
+}
+
 /**
  * Send only the changed lines. The base digest is echoed back so the server can
  * refuse a patch built against a stale read instead of clobbering newer work.

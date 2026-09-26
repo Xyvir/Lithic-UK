@@ -7,13 +7,13 @@
   import { pwaInstall, promptPwaInstall } from './pwa-install';
   import { bootLegacyWiki, bootLegacyHtml, writeHandoff, type RemoteTarget } from './legacy-launcher-runtime';
   import { EMOJI_LIST, uploadInstanceIcon, clearInstanceIcon, emojiFaviconUrl, applyFavicon, bustIconCache, readInstanceEmoji, readServerEmoji, saveInstanceEmoji, clearInstanceEmoji, instanceMarkUrl } from './instance-icon';
-  import { getRecentFiles, addRecentFile, removeRecentFile, addBrowserOnlyRecent, removeBrowserOnlyRecent, clearAllRecentFiles, purgeOldestCachesIfNeeded, saveSearchCache, forgetWikiCache, cachedWikiNames, idb, getSearchCacheText, listWikiVersions, wikiHasHistory, downloadWikiVersion, getDirtyState, clearDirtyState, listDirtyRecoveries, isWikiDriftedFromHead, isInstallDismissed, setInstallDismissed, recentDiskPath, type RecentEntry } from './storage';
+  import { getRecentFiles, addRecentFile, removeRecentFile, addBrowserOnlyRecent, removeBrowserOnlyRecent, clearAllRecentFiles, purgeOldestCachesIfNeeded, saveSearchCache, forgetWikiCache, cachedWikiNames, idb, getSearchCacheText, readFetchedLith, rememberFetchedLith, listWikiVersions, wikiHasHistory, downloadWikiVersion, getDirtyState, clearDirtyState, listDirtyRecoveries, isWikiDriftedFromHead, isInstallDismissed, setInstallDismissed, recentDiskPath, type RecentEntry } from './storage';
   import { resolveStorageMode, storageModeOverride, browserOnlyMarkTitle, BROWSER_ONLY_HISTORY_NOTE, type StorageMode } from './browser-storage';
   import { readBookmarkEntries, saveBookmark, removeBookmark, setBookmarkIcon, refreshBookmarkIcon, verifyInstanceUrl, normalizeInstanceUrl, instanceLabel, type BookmarkEntry, type InstanceVerification } from './bookmarks';
   import { LOGIN_CHECK_LABELS, askInstanceAboutLogin, loginVerdict, loginVerdictFromError, typedLoginCheck, type LoginCheckState, type LoginVerdict } from './login-check';
   import { copyDropNote, forgetInstanceCopy } from './instance-copy';
   import PinEntry from './PinEntry.svelte';
-  import { deleteRemoteFile, fetchRemoteFiles, fetchRemoteWiki, probePatchApi, createLockHeartbeat, readRemoteLock, uploadRemoteFile, webdavUrl, resolveSessionId, lithUploadName, type WebdavFile } from './webdav';
+  import { deleteRemoteFile, fetchRemoteFiles, fetchRemoteWiki, fetchRemoteWikiMeta, probePatchApi, createLockHeartbeat, readRemoteLock, uploadRemoteFile, webdavUrl, resolveSessionId, lithUploadName, type WebdavFile } from './webdav';
   import { normalizeLithName } from './legacy-saver';
   import { searchCachedWikis } from './cache-search';
   import { topHits, type InstanceCacheRead, type InstanceReads } from './instance-search';
@@ -2324,14 +2324,46 @@
     try {
       let text: string;
       let digest = '';
+      let fetchedFromServer = true;
       if (patchApiAvailable) {
-        const remote = await fetchRemoteWiki(name);
-        text = remote.text;
-        digest = remote.digest;
+        // This device's own copy first. One metadata read says whether the instance is still on
+        // the revision that copy was taken from, and when it is, the file never crosses the wire
+        // at all — which is the point of keeping the fetched text beside its digest. With no copy
+        // to compare, the metadata read could only tell us what the file's digest is, so it is
+        // skipped and the file is read as it always was.
+        const known = await readFetchedLith(name);
+        if (!known) {
+          const remote = await fetchRemoteWiki(name);
+          text = remote.text;
+          digest = remote.digest;
+        } else {
+          const read = await fetchRemoteWikiMeta(name);
+          if (read.state === 'unchanged' && read.meta.digest === known.digest) {
+            text = known.text;
+            digest = read.meta.digest;
+            fetchedFromServer = false;
+          } else {
+            // Either the file moved on, or this instance is older than the metadata read and
+            // answered with the file itself — which is the read that was about to be made anyway.
+            const wiki = read.state === 'file' ? read.wiki : await fetchRemoteWiki(name);
+            text = wiki.text;
+            digest = wiki.digest;
+          }
+        }
       } else {
         const response = await fetch(webdavUrl(name));
         if (!response.ok) throw new Error(`GET failed: ${response.status}`);
         text = await response.text();
+      }
+      if (fetchedFromServer) {
+        // A Lith this device has never cached is indexed from the copy just fetched, which is what
+        // makes a first open searchable and gives it an offline copy. A record that already holds
+        // text keeps it: that text is the baseline the drift check compares against, and rewriting
+        // it on every open would retire the notice it exists to raise.
+        if (!(await getSearchCacheText(name))) {
+          await saveSearchCache(name, JSON.stringify(parseLithToJSON(text)));
+        }
+        await rememberFetchedLith(name, { text, digest });
       }
 
       activeRemote = { name, digest, api: patchApiAvailable && Boolean(digest) };
@@ -2977,11 +3009,22 @@
       for (const [position, entry] of targets.entries()) {
         status = `Re-indexing ${position + 1} of ${targets.length} · ${entry.name}`;
         try {
-          const text = entry.path
-            ? mode === 'tauri' ? await readDiskWikiText(entry.path) : ''
-            : mode === 'self-host' ? await readRemoteWikiText(entry.name) : '';
+          // Self-host reads through the patch API when it is there, because that read also
+          // answers the digest: a rebuilt cache is then also the copy a later open mounts without
+          // downloading, and one request does both jobs.
+          const remote = !entry.path && mode === 'self-host' && patchApiAvailable
+            ? await fetchRemoteWiki(entry.name)
+            : null;
+          const text = remote
+            ? remote.text
+            : entry.path
+              ? mode === 'tauri' ? await readDiskWikiText(entry.path) : ''
+              : mode === 'self-host' ? await readRemoteWikiText(entry.name) : '';
           if (text) {
             await saveSearchCache(entry.name, JSON.stringify(parseLithToJSON(text)));
+            if (remote?.digest) {
+              await rememberFetchedLith(entry.name, { text: remote.text, digest: remote.digest, rev: remote.rev });
+            }
             indexed += 1;
           }
         } catch {

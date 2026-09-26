@@ -511,6 +511,54 @@ export async function getSearchCacheText(fileName: string): Promise<string> {
   }
 }
 
+/** The copy of a Lith this device fetched, and the instance's digest for it. */
+export type FetchedLith = { text: string; digest: string };
+
+/**
+ * The file this device last fetched for a Lith, if it kept one.
+ *
+ * Keyed inside the wiki's own cache record, so every cleanup path that already forgets a wiki
+ * — a deleted row, a rebuild's orphan sweep, the storage purge — takes this with it.
+ */
+export async function readFetchedLith(fileName: string, store: CacheStore = idb): Promise<FetchedLith | null> {
+  try {
+    const record = await store.get<SearchCacheRecord>(`search_cache_${fileName}`);
+    if (!record || typeof record.sourceText !== 'string' || !record.sourceDigest) return null;
+    return { text: record.sourceText, digest: record.sourceDigest };
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Keep the file a fetch just returned, beside the digest it was fetched at.
+ *
+ * The parsed cache text is what search reads; this is the document as the instance had it, which
+ * is the only form the patch API's base can take — so a device holding both can ask whether the
+ * instance has moved on and, when it has not, mount its own copy instead of downloading the file
+ * again. A file with no digest is not saved: without one there is nothing to compare against, and
+ * a copy nobody can check is storage spent on nothing.
+ */
+export async function rememberFetchedLith(
+  fileName: string,
+  file: { text: string; digest: string; rev?: string },
+  store: CacheStore = idb
+): Promise<void> {
+  if (!file.digest) return;
+  try {
+    const key = `search_cache_${fileName}`;
+    const existing = await store.get<SearchCacheRecord>(key);
+    await store.set(key, {
+      ...existing,
+      sourceText: file.text,
+      sourceDigest: file.digest,
+      sourceRev: file.rev
+    });
+  } catch (err) {
+    console.error('Failed to keep the fetched Lith:', err);
+  }
+}
+
 /** Version summaries for the launcher's history modal (newest first). */
 export async function listWikiVersions(name: string): Promise<VersionSummary[]> {
   return historyStore.listVersions(name);
@@ -538,7 +586,22 @@ export async function downloadWikiVersion(name: string, id: string): Promise<Dow
   return historyStore.getVersion(name, id);
 }
 
-export type SearchCacheRecord = { text?: string; lastModified?: string; backupTimestamp?: number };
+export type SearchCacheRecord = {
+  text?: string;
+  lastModified?: string;
+  backupTimestamp?: number;
+  /**
+   * The file exactly as this device received it, and the digest the instance gave for it.
+   *
+   * `text` above is *parsed* tiddlers — what search reads, and the baseline the drift check saves
+   * — so it cannot be handed back to the patch API, whose base has to be the bytes the server
+   * hashed. These three are that copy, and they are what makes a second open of a 10 MB Lith cost
+   * one metadata read rather than the file (see `readFetchedLith`).
+   */
+  sourceText?: string;
+  sourceDigest?: string;
+  sourceRev?: string;
+};
 
 export type CacheStore = {
   keys(): Promise<IDBValidKey[]>;
@@ -593,7 +656,9 @@ export async function purgeOldestCachesIfNeeded(
         key,
         name: key.slice('search_cache_'.length),
         lastModified: Number.isNaN(parsed) ? 0 : parsed,
-        size: cache.text ? new Blob([cache.text]).size : 0
+        // Both copies in the record count towards what purging it frees, or the policy would
+        // measure a 10 MB Lith as its parsed index and keep more of them than it means to.
+        size: new Blob([cache.text ?? '', cache.sourceText ?? '']).size
       });
     }
   }

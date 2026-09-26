@@ -37,6 +37,7 @@
  */
 
 import { createServer } from 'node:http';
+import { createHash } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 
 /** The fixture account's repositories, and how `partitionRepos` splits them. */
@@ -96,6 +97,16 @@ const STATIC = {
   '/apple-touch-icon.png': ['image/png', PIXEL_PNG],
   '/src/app-icon.png': ['image/png', PIXEL_PNG]
 };
+
+/**
+ * What the deployment's patch API calls a file's digest: `git hash-object --no-filters`, which is
+ * the hash of `blob <size>\0<content>`. Computed rather than fixed, because a launcher's whole
+ * cache-first read is a comparison against this value — a constant would let a stale copy pass for
+ * the current one and hide exactly the bug that comparison exists to prevent.
+ */
+function contentDigest(text) {
+  return createHash('sha1').update(`blob ${Buffer.byteLength(text, 'utf8')}\0${text}`, 'utf8').digest('hex');
+}
 
 /**
  * One WebDAV `<response>` for a file in the fixture store.
@@ -262,12 +273,22 @@ export async function startSelfHostStub(options = {}) {
         send(404, 'application/json', JSON.stringify({ error: `no ${name} in this store` }));
         return;
       }
-      send(
-        200,
-        'text/plain; charset=utf-8',
-        lith.text ?? `created: 20260920090000000\ntitle: ${name.replace(/\.lith$/i, '')}\ntype: text/vnd.tiddlywiki\n\nfrom this instance\n`,
-        { 'x-lithic-digest': 'stub-digest', 'x-lithic-rev': 'stub-rev' }
-      );
+      const text = lith.text ?? `created: 20260920090000000\ntitle: ${name.replace(/\.lith$/i, '')}\ntype: text/vnd.tiddlywiki\n\nfrom this instance\n`;
+      const digest = contentDigest(text);
+      const headers = { 'x-lithic-digest': digest, 'x-lithic-rev': 'stub-rev' };
+      // The metadata read: the digest without the file. This is the whole of what a cache-first
+      // open costs when the copy on the device is current, so the smoke can assert on the requests
+      // that were made rather than only on what appeared on screen.
+      if (url.searchParams.get('meta')) {
+        send(
+          200,
+          'application/json; charset=utf-8',
+          JSON.stringify({ digest, rev: 'stub-rev', size: Buffer.byteLength(text, 'utf8') }),
+          headers
+        );
+        return;
+      }
+      send(200, 'text/plain; charset=utf-8', text, headers);
       return;
     }
 

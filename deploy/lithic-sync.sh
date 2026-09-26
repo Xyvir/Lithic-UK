@@ -16,6 +16,7 @@
 # Routes (all under /api/lithic/):
 #   GET  ping                     -> capability probe; older servers 404 here
 #   GET  file?file=X.lith         -> raw text + X-Lithic-Digest / X-Lithic-Rev
+#   GET  file?file=X.lith&meta=1  -> the same digest and rev, with no body (see below)
 #   POST apply                    -> body: "<file>\n<base digest>\n<patch>"
 #   GET  log?file=X.lith&limit=N  -> commit list for the rollback UI
 #   POST restore                  -> body: "<file>\n<rev>" (checkout + commit)
@@ -105,6 +106,24 @@ if [ "$ROUTE" = "/api/lithic/file" ]; then
 
     DIGEST="$(git -C "$DATA_DIR" hash-object --no-filters "$FILE" 2>/dev/null)"
     REV="$(git -C "$DATA_DIR" rev-parse HEAD 2>/dev/null)"
+
+    # Metadata only, for a client that keeps its own copy of every Lith it has opened.
+    # `X-Lithic-Digest` is the content hash the patch API would check a save against, so
+    # "has this changed since I read it?" is answerable from this alone - and answering it
+    # with the file would make the question cost the download the client is avoiding. A
+    # client cannot ask this of a handler that predates the parameter: the query is
+    # ignored, the file comes back, and the caller reads it as the file it asked about.
+    if [ -n "$(query_val meta)" ]; then
+        SIZE="$(wc -c < "${DATA_DIR}/${FILE}" 2>/dev/null | tr -d ' ')"
+        echo "Content-Type: application/json; charset=utf-8"
+        echo "X-Lithic-Digest: ${DIGEST}"
+        echo "X-Lithic-Rev: ${REV}"
+        echo "Cache-Control: no-store"
+        echo ""
+        printf '{"digest":"%s","rev":"%s","size":%s}\n' "${DIGEST}" "${REV}" "${SIZE:-0}"
+        exit 0
+    fi
+
     echo "Content-Type: text/plain; charset=utf-8"
     echo "X-Lithic-Digest: ${DIGEST}"
     echo "X-Lithic-Rev: ${REV}"

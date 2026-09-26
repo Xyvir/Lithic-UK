@@ -16,6 +16,8 @@ import {
   lithUploadName,
   probePatchApi,
   fetchRemoteWiki,
+  fetchRemoteWikiMeta,
+  parseRemoteMeta,
   applyRemotePatch,
   listRemoteVersions,
   restoreRemoteVersion,
@@ -284,6 +286,54 @@ test('fetchRemoteWiki returns the text with the digest the server will verify', 
   assert.equal(wiki.digest, 'abc123');
   assert.equal(wiki.rev, 'deadbeef');
   await assert.rejects(() => fetchRemoteWiki('x.lith', fakeFetch(() => text('', 404))), /Failed to fetch x.lith: 404/);
+});
+
+test('fetchRemoteWikiMeta asks about the file instead of asking for it', async () => {
+  let requested = '';
+  const read = await fetchRemoteWikiMeta(
+    'my wiki.lith',
+    fakeFetch((url) => {
+      requested = url;
+      return json({ digest: 'abc123', rev: 'deadbeef', size: 42 }, 200, {
+        'X-Lithic-Digest': 'abc123',
+        'X-Lithic-Rev': 'deadbeef'
+      });
+    })
+  );
+  assert.equal(requested, `${LITHIC_API_BASE}file?file=my%20wiki.lith&meta=1`);
+  assert.deepEqual(read, { state: 'unchanged', meta: { digest: 'abc123', rev: 'deadbeef', size: 42 } });
+  await assert.rejects(
+    () => fetchRemoteWikiMeta('x.lith', fakeFetch(() => text('', 404))),
+    /Failed to fetch x.lith: 404/
+  );
+});
+
+// An instance older than the metadata read ignores the parameter and answers with the file. Read as
+// metadata that answer is nothing, and the caller would fetch the same bytes a second time — so the
+// state it reports is the whole point: one request, and the file is in hand.
+test('a server that ignores the metadata read answers with the file, and the answer is used', async () => {
+  const read = await fetchRemoteWikiMeta(
+    'notes.lith',
+    fakeFetch(() => text('title: A\n\nbody\n', 200, { 'X-Lithic-Digest': 'abc123', 'X-Lithic-Rev': 'deadbeef' }))
+  );
+  assert.deepEqual(read, {
+    state: 'file',
+    wiki: { text: 'title: A\n\nbody\n', digest: 'abc123', rev: 'deadbeef' }
+  });
+});
+
+test('parseRemoteMeta accepts only the metadata answer', () => {
+  assert.deepEqual(parseRemoteMeta('{"digest":"a","rev":"b","size":7}', 'x', 'y'), {
+    digest: 'a',
+    rev: 'b',
+    size: 7
+  });
+  // A Lith is not metadata, however it was asked for.
+  assert.equal(parseRemoteMeta('title: A\n\nbody', 'abc', 'rev'), null);
+  // Neither is a JSON body that says nothing about a digest.
+  assert.equal(parseRemoteMeta('{"error":"nope"}', 'abc', 'rev'), null);
+  // A missing size is still an answer; the revision falls back to the header.
+  assert.deepEqual(parseRemoteMeta('{"digest":"a"}', 'hdr', 'rev'), { digest: 'a', rev: 'rev', size: null });
 });
 
 test('applyRemotePatch frames the request as name/base/patch and reports success', async () => {

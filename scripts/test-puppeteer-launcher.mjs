@@ -1165,6 +1165,44 @@ try {
     `Live self-host: while the engine's own entry stays the pointer its saver reads: ${JSON.stringify(bigOpen.active)}`
   );
 
+  // Opening it again asks about the file instead of asking for it.
+  //
+  // The per-device cache is only worth keeping if a second open is cheap, and the only way to say
+  // that without measuring time is to read the requests: the same Lith a second time is one
+  // metadata read whose digest matches the digest the copy was fetched at, so the 6 MB body is
+  // never asked for again. Asserted against the requests the instance actually served, because a
+  // mount can look identical either way — which is why this leg is worth having beside the one
+  // above it.
+  await livePage.goto(`${stub.origin}/launcher.html?mode=self-host`, { waitUntil: 'domcontentloaded' });
+  await livePage.waitForFunction(
+    () => [...document.querySelectorAll('.recent-row.remote-row .recent-name')].some((row) => row.textContent.includes('huge.lith')),
+    POLL
+  );
+  const asksBeforeSecond = stub.state.asked.length;
+  await livePage.evaluate(() => {
+    [...document.querySelectorAll('.recent-row.remote-row .recent-name')]
+      .find((row) => row.textContent.includes('huge.lith'))
+      .click();
+  });
+  await livePage.waitForFunction(() => document.querySelector('.recent-row') === null, POLL);
+  const secondOpen = await livePage.evaluate(() => ({
+    alert: document.querySelector('.status-line.error')?.textContent?.trim() ?? null
+  }));
+  const secondAsks = stub.state.asked.slice(asksBeforeSecond);
+  assert.equal(
+    secondOpen.alert,
+    null,
+    `Live self-host: reopening a Lith from this device's cache mounts rather than failing: ${JSON.stringify(secondOpen)}`
+  );
+  assert.ok(
+    secondAsks.includes('GET /api/lithic/file?file=huge.lith&meta=1'),
+    `Live self-host: ...because a second open asks about the file: ${JSON.stringify(secondAsks)}`
+  );
+  assert.ok(
+    !secondAsks.some((entry) => entry.includes('file=huge.lith') && !entry.includes('meta=1')),
+    `Live self-host: ...and never for its 6 MB body again: ${JSON.stringify(secondAsks)}`
+  );
+
   await liveContext.close();
   await stub.close();
 
