@@ -1843,6 +1843,41 @@ const SHEETS = [
         },
         clip: '.recent-foot',
         expect: '.recent-foot .install-button'
+      },
+      {
+        // And the same arrival caught halfway, which is the only way this pane can exist: the
+        // part of the motion worth looking at is the part that is not visible when it stops,
+        // because the pane runner waits for every animation to settle before it frames
+        // anything. Paused at 45% of the travel, the offer is about two thirds into the row
+        // and the rebuild control has had exactly that much taken off it. Headless Chromium
+        // does paint this one — a DOM box animating its own width is drawn in the frame; a
+        // native scrollbar is not, which is why the list's reveal has no pane of its own.
+        name: '817-install-offer-phone-arriving',
+        view: 'phone',
+        scale: 3,
+        mode: 'self-host',
+        server: true,
+        drive: async (page) => {
+          stub.addLith('offer-arriving-note.lith', new Date('2026-09-20T09:00:00Z'), 48000);
+          await page.reload({ waitUntil: 'domcontentloaded' });
+          await page.waitForSelector('.recent-row.remote-row');
+          await offerPwaInstall(page);
+          await page.evaluate(() => {
+            const offer = document.querySelector('.install-offer');
+            // A second run of the same keyframes: the first one is already over, and a
+            // finished animation is no longer in `getAnimations()` to be held.
+            offer.style.animation = 'none';
+            void offer.offsetWidth;
+            offer.style.animation = '';
+            const animation = offer
+              .getAnimations()
+              .find((entry) => entry.animationName === 'install-offer-in-row');
+            animation.pause();
+            animation.currentTime = 81;
+          });
+        },
+        clip: '.recent-foot',
+        expect: '.recent-foot .install-button'
       }
     ]
   }

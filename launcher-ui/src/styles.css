@@ -1254,10 +1254,53 @@ footer > * { pointer-events: auto; }
    * the dismiss affordance is placed against — with no containing block of its own,
    * the ✕ would fly out to the container's corner. Its place is its place in the row,
    * so the corner offsets go back to `auto`. */
-  .recent-foot .install-offer { position: relative; right: auto; bottom: auto; }
+  /* The box is clipped while it shrinks into the row (see the keyframes below), and that
+   * clip is load-bearing twice over: it hides the button's label while the box is narrower
+   * than the label, and `overflow` other than `visible` is what removes a flex item's
+   * automatic minimum size — without it the box could never be narrower than its own label
+   * and the row would snap instead of travelling. Settled, the box is exactly its label's
+   * width, so nothing is cut off: what the clip does eat is a focus ring, which is drawn
+   * outside the button, so the phone row brings the ring inside the button instead, in the
+   * button's own ink. */
+  .recent-foot .install-offer { position: relative; right: auto; bottom: auto; overflow: hidden; }
+  .recent-foot .install-button:focus-visible { outline: 2px solid #121212; outline-offset: -3px; }
 }
 
 /*
+/*
+ * The phone's arrival, with the room for it made in the same motion.
+ *
+ * The offer stands inside the panel's foot row there, and the width it takes has to come
+ * from somewhere: the row is a flex line holding it and the rebuild control, so the only
+ * slack is the control beside it, and animating the offer's own width is what makes the two
+ * move together rather than one of them jumping.
+ *
+ * `width: auto` as an animation target is `interpolate-size`; without the feature the
+ * engine cannot interpolate to a keyword, so this rule asks for it in a feature query and
+ * the offer keeps the plain reveal above — landing at full width with the control stepping
+ * aside in a single frame. Measured through this keyframe with the offer on the left and
+ * the rebuild control on the right: 0/326, 23.6/302, 43.8/282, 61.2/264, 76.2/250 at 0, 45,
+ * 90, 135 and 180ms. The travel is the whole 180ms — which `max-width: 0 -> 100%` does not
+ * give: that box reaches its natural width 25% of the way in, so the motion would be over
+ * in 45ms and the remaining 135ms would be a row standing still.
+ *
+ * Asked for only at phone width, and only for a reader who has not asked for less motion:
+ * the reduced-motion block above already cancels the offer's animation, and the query here
+ * is the one place the cancellation could have been outranked from, so the two are kept
+ * mutually exclusive by spelling the preference into the condition rather than adding a
+ * second cancellation further down the sheet. Nothing above 600px changes: there the offer
+ * is pinned to the window's corner, out of flow, with no row to relayout. */
+@supports (interpolate-size: allow-keywords) {
+  @media (max-width: 600px) and (prefers-reduced-motion: no-preference) {
+    .recent-foot { interpolate-size: allow-keywords; }
+    .recent-foot .install-offer { animation: install-offer-in-row 180ms ease-out; }
+  }
+}
+@keyframes install-offer-in-row {
+  from { opacity: 0; transform: translateY(6px); width: 0; }
+  to { opacity: 1; transform: translateY(0); width: auto; }
+}
+
 /*
  * The bookmark tile is no longer dropped on the narrowest launchers: the vault's
  * manager — changing the secret, or forgetting every login — is reached through the

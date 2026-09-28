@@ -1896,8 +1896,8 @@ try {
   assert.equal(browserOffer.label, 'Install App', 'The browser offers the install in its own words');
   assert.equal(
     browserOffer.animation,
-    'install-offer-in',
-    '...and arrives with the same reveal the desktop offer uses'
+    'install-offer-in-row',
+    '...and arrives at this width with the reveal that makes room for it in the row it shares'
   );
   assert.ok(browserOffer.dismissal, '...and carries the same dismiss affordance');
   assert.equal(browserOffer.link, 'Github', '...beside the link the webapp footer keeps');
@@ -1919,6 +1919,7 @@ try {
     const resetBox = reset ? box(reset) : null;
     return {
       position: getComputedStyle(offer).position,
+      animation: getComputedStyle(offer).animationName,
       inFootRow: offer.parentElement === foot,
       footChildren: foot ? [...foot.children].map(node => node.className) : null,
       // Does the offer reach the panel's own edges, and does the panel's box actually
@@ -1963,6 +1964,83 @@ try {
   assert.ok((phoneOffer.offeredRight ?? 0) <= phoneOffer.panelRight + 0.5, '...with the offer inside the panel’s right edge');
   assert.equal(phoneOffer.position, 'relative', '...laid out in the row, not pinned to the window');
   assert.ok((phoneOffer.gapBelowPanel ?? 99) <= 20, 'The phone panel is not cut short for a band with nothing in it');
+  assert.equal(phoneOffer.animation, 'install-offer-in-row', '...arriving on the keyframe that widens it into the row');
+
+  // The width it takes is width the rebuild control gives up, and the only place that claim
+  // can be checked is mid-travel: an offer that simply appeared at full width with the
+  // control stepping aside in one frame is exactly what a settled measurement cannot tell
+  // apart from this. The animation is replayed rather than hunted — a finished run has
+  // already left `getAnimations()`, and what is being measured is the keyframe the
+  // stylesheet asks for rather than a copy of it.
+  const shrink = await page.evaluate(() => {
+    const offer = document.querySelector('.install-offer');
+    const reset = document.querySelector('.reset-cache');
+    offer.style.animation = 'none';
+    void offer.offsetWidth;
+    offer.style.animation = '';
+    const animation = offer
+      .getAnimations()
+      .find((entry) => entry.animationName === 'install-offer-in-row');
+    if (!animation) return null;
+    const name = getComputedStyle(offer).animationName;
+    const width = (node) => +node.getBoundingClientRect().width.toFixed(2);
+    animation.pause();
+    const steps = [0, 45, 90, 135, 180].map((time) => {
+      animation.currentTime = time;
+      return { time, offer: width(offer), reset: width(reset) };
+    });
+    animation.cancel();
+    return { name, steps };
+  });
+  assert.ok(shrink && shrink.steps.length === 5, 'The phone reveal is a keyframe the test can step through');
+  assert.equal(shrink.name, 'install-offer-in-row', '...and it is the row’s own, not a copy of it');
+  const grown = shrink.steps.map((step) => step.offer);
+  const given = shrink.steps.map((step) => step.reset);
+  assert.deepEqual([...grown].sort((a, b) => a - b), grown, `The offer widens as it arrives: ${grown.join(', ')}`);
+  assert.deepEqual([...given].sort((a, b) => b - a), given, `The rebuild control narrows by the same motion: ${given.join(', ')}`);
+  assert.ok(grown[0] < 1, `...starting from no width at all: ${grown[0]} on the first frame`);
+  assert.ok(grown[4] - grown[0] > 40, `...and ending a button wide: ${grown[4]}`);
+  assert.ok(given[0] - given[4] > 40, `...which is the width the rebuild control hands over: ${given[0]} -> ${given[4]}`);
+  assert.ok(
+    grown[2] > grown[0] + 5 && grown[2] < grown[4] - 5,
+    `...across the whole travel rather than in one jump: ${grown[2]} at the halfway mark of a row that ends at ${grown[4]}`
+  );
+  assert.ok(
+    shrink.steps.every(
+      (step) => Math.abs(step.offer + step.reset - (shrink.steps[0].offer + shrink.steps[0].reset)) < 2
+    ),
+    'The two move in lockstep, so the row never has slack to place'
+  );
+
+  // The clip that lets the offer be narrower than its own label is also the button's edge,
+  // and a focus ring is drawn outside that edge — so the phone row brings the ring inside
+  // the button. Reached with a real Tab, because `:focus-visible` is the browser's judgement
+  // about how focus arrived and a scripted `focus()` does not produce a keyboard ring.
+  await page.evaluate(() => {
+    document.activeElement?.blur();
+    document.body.tabIndex = -1;
+    document.body.focus();
+  });
+  let ring = null;
+  for (let press = 0; press < 120 && !ring; press += 1) {
+    await page.keyboard.press('Tab');
+    ring = await page.evaluate(() => {
+      const button = document.querySelector('.recent-foot .install-button');
+      if (document.activeElement !== button) return null;
+      const style = getComputedStyle(button);
+      return {
+        visible: button.matches(':focus-visible'),
+        style: style.outlineStyle,
+        color: style.outlineColor,
+        width: style.outlineWidth,
+        offset: style.outlineOffset
+      };
+    });
+  }
+  assert.ok(ring?.visible, 'The phone row’s install button is reachable from the keyboard');
+  assert.equal(ring?.style, 'solid', '...and rings itself rather than the browser ringing it outside the clip');
+  assert.equal(ring?.color, 'rgb(18, 18, 18)', '...in the button’s own ink, which is what reads on its face');
+  assert.equal(ring?.offset, '-3px', '...drawn inside the button, where the clip cannot eat it');
 
   // 800px is the width where this matters most: the column is still 600 wide and centred,
   // so the corner the offer returns to reaches over the column's own edge — which is why
@@ -1970,6 +2048,7 @@ try {
   await page.setViewport({ width: 800, height: 700 });
   const wideOffer = await readOfferPlacement();
   assert.equal(wideOffer.position, 'fixed', 'Wider than a phone the offer goes back to the window’s corner');
+  assert.equal(wideOffer.animation, 'install-offer-in', '...and arrives there on the plain reveal again, with no row to make room in');
   assert.equal(wideOffer.paintedWhere, 'install-button', '...and is painted there, outside the panel it is rendered inside');
   assert.ok(
     Math.abs(wideOffer.resetRight - wideOffer.panelContentRight) <= 1,
