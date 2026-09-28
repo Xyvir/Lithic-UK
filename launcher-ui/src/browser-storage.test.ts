@@ -49,7 +49,7 @@ test('the override is read from the page URL', () => {
 
 test('the mark says the copy is the only copy, and where to get a real one', () => {
   const title = browserOnlyMarkTitle('recipes.lith');
-  assert.match(title, /^recipes\.lith — /);
+  assert.match(title, /^recipes\.lith\. /);
   assert.match(title, /intrinsically volatile/);
   assert.match(title, /version history/);
   assert.match(BROWSER_ONLY_TOOLTIP, /hard copies/);

@@ -85,7 +85,14 @@ export const BROWSER_ONLY_HISTORY_NOTE =
   'Browser storage only. This Lith has no file, so what this browser holds is the only copy there is. ' +
   'Download a version to keep one you can mount again.';
 
-/** The row mark's title: the wiki's name, then what is true of it. */
+/**
+ * The row mark's title: the wiki's name, then what is true of it.
+ *
+ * A period between the two rather than a dash, like every other title in this app that
+ * says a name and then a claim (`Not in a backed-up folder. Open for the copy offer.`).
+ * A tooltip is one of the two places the no-dashes rule names, so the mark's own title is
+ * where it would be most visible.
+ */
 export function browserOnlyMarkTitle(name: string): string {
-  return `${name} — ${BROWSER_ONLY_TOOLTIP}`;
+  return `${name}. ${BROWSER_ONLY_TOOLTIP}`;
 }

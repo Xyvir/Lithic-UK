@@ -3824,8 +3824,8 @@
   // manager's list is on screen only inside its own dialog — the two are never true
   // at once, so a state for it would be a state nobody sees.
   $: vaultManagerTitle = vaultSavedCount > 0
-    ? `Saved instance logins — ${vaultSavedCount} saved`
-    : 'Saved instance logins — none saved yet';
+    ? `Saved instance logins. ${vaultSavedCount} saved.`
+    : 'Saved instance logins. None saved yet.';
 
   async function refreshVaultStatus() {
     try {
@@ -3865,7 +3865,7 @@
    * a secret: a login is saved for this address (manage it) or it is not (save one).
    */
   function vaultRowTitle(origin: string): string {
-    if (vaultCoverage.has(origin)) return `A login is saved for ${origin} — manage it`;
+    if (vaultCoverage.has(origin)) return `A login is saved for ${origin}. Manage it.`;
     return `Save a login for ${origin} so it stops asking`;
   }
 
@@ -3974,7 +3974,8 @@
       // setting the vault up again, and that is worth saying on the one control that
       // costs the logins.
       body:
-        'The vault file is deleted, and the PIN with it. The next login you save chooses a new PIN — until then, instances will ask for a password.',
+        'The vault file is deleted, and the PIN with it. The next login you save chooses a new PIN. ' +
+        'Until then, instances will ask for a password.',
       confirmLabel: 'Forget Everything',
       // The one confirmation in the app whose answer cannot be undone: the file is gone,
       // and nothing here can bring it back. Disconnecting a sync only stops one.
@@ -4645,7 +4646,7 @@
       <div class="launcher-modal vault-modal" role="dialog" aria-modal="true" aria-labelledby="instance-unlock-title">
         <button class="modal-close" aria-label="Close unlock dialog" on:click={cancelInstanceUnlock}>×</button>
         <h2 id="instance-unlock-title">Open {instanceLabel(instanceUnlock.origin)}</h2>
-        <p class="vault-sub">Saved login — enter your PIN.</p>
+        <p class="vault-sub">Saved login. Please enter your PIN.</p>
         <div class="vault-pin instance-unlock-pin">
           <PinEntry
             bind:value={instanceSecret}
