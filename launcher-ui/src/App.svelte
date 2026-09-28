@@ -17,6 +17,7 @@
   import { deleteRemoteFile, fetchRemoteFiles, fetchRemoteWiki, fetchRemoteWikiMeta, probePatchApi, createLockHeartbeat, readRemoteLock, uploadRemoteFile, webdavUrl, resolveSessionId, lithUploadName, type WebdavFile } from './webdav';
   import { normalizeLithName } from './legacy-saver';
   import { searchCachedWikis } from './cache-search';
+  import { showsForQuery, titleMatches, titleMarkup } from './name-match';
   import { topHits, type InstanceCacheRead, type InstanceReads } from './instance-search';
   import { computeBackupCoverage, folderOf, hasBackedUpRepo, orphanedEntries, reindexFolders, syncedDirFor, type CoverageRow, type RebuildOrphan } from './backup-coverage';
   import { parseDeviceCode, parseDevicePoll, pollDelayMs, formatUserCode, generateRepoName, partitionRepos } from './github-device';
@@ -1710,14 +1711,18 @@
     }
   }
 
+  // The name half of every list's search is `showsForQuery`: a Lith is found by its
+  // title, which is its name without the extension every row shares. See `name-match`
+  // for why the suffix is not searchable, and why the same answer also decides where
+  // a row's matched characters are marked.
   $: filteredRecent = recentFiles.filter((file) => {
     const name = getEntryName(file);
-    return name.toLowerCase().includes(search.toLowerCase()) || Boolean(cacheSearchMatches[name]?.preview);
+    return showsForQuery(name, search) || Boolean(cacheSearchMatches[name]?.preview);
   });
 
   // Self-host: the server's own Liths are the primary list, filtered by the
   // same search box as the local recents.
-  $: filteredRemote = remoteFiles.filter((file) => file.name.toLowerCase().includes(search.toLowerCase()));
+  $: filteredRemote = remoteFiles.filter((file) => showsForQuery(file.name, search));
 
   /**
    * Whether this cached self-host launcher is in offline mode — see `offline-mode.ts`
@@ -1738,7 +1743,7 @@
    */
   $: offlineRows = offlineLauncher
     ? Object.values(cachedEntries)
-        .filter((entry) => entry.name.toLowerCase().includes(search.trim().toLowerCase()))
+        .filter((entry) => showsForQuery(entry.name, search))
         .sort((a, b) => a.name.localeCompare(b.name))
     : [];
 
@@ -1759,10 +1764,10 @@
 
   $: filteredCached = Object.values(cachedEntries).filter((entry) => {
     const isRecent = recentFiles.some((file) => getEntryName(file) === entry.name);
-    const query = search.trim().toLowerCase();
-    if (!query) return false;
-    const nameMatches = entry.name.toLowerCase().includes(query);
-    return !isRecent && (nameMatches || Boolean(cacheSearchMatches[entry.name]?.preview));
+    // Rows only a search can produce, so no query means no row — unlike the lists
+    // above, where an empty box is the whole list.
+    if (!search.trim()) return false;
+    return !isRecent && (titleMatches(entry.name, search) || Boolean(cacheSearchMatches[entry.name]?.preview));
   });
 
   // The name that will actually be created (extension normalized), used to
@@ -5025,7 +5030,7 @@
             -->
             {#each offlineRows as entry (entry.name)}
               <div class="recent-row offline-row">
-                <button class="recent-name" title={OFFLINE_ROW_OPEN_TITLE} on:click={() => void openCachedEntry(entry)}>{entry.name}<span class="cached-size">{formatCacheSize(entry.sizeBytes)}</span></button>
+                <button class="recent-name" title={OFFLINE_ROW_OPEN_TITLE} on:click={() => void openCachedEntry(entry)}>{@html titleMarkup(entry.name, search)}<span class="cached-size">{formatCacheSize(entry.sizeBytes)}</span></button>
                 <button class="recent-icon-button cache-history-button modified" type="button" title={OFFLINE_ROW_MARK_TITLE} aria-label={`Show version history for ${entry.name}`} on:click={() => openHistoryModal(entry.name)}>
                   <svg class="history-download-icon modified" viewBox="56 108 33 36" aria-hidden="true"><path class="history-icon-shape" d="m 73.595508,109.76746 c -7.198235,0 -13.103617,5.58342 -13.647229,12.64471 h -0.0072 V 138.2696 H 58.61606 l 2.32389,4.02559 2.324405,-4.02559 h -1.323433 v -15.85123 c 0.530186,-5.97937 5.534806,-10.65103 11.654586,-10.65103 6.474618,0 11.703161,5.22855 11.703161,11.70316 0,6.47462 -5.228543,11.70161 -11.703161,11.70161 -2.644513,0 -5.080809,-0.87232 -7.037814,-2.34508 v 2.39572 c 2.058162,1.23707 4.46633,1.94924 7.037814,1.94924 7.555498,0 13.703556,-6.14599 13.703556,-13.70149 0,-7.5555 -6.148058,-13.70304 -13.703556,-13.70304 z"></path><path class="history-icon-mark" d="M72.3 116h2.6v9h-2.6z"></path><circle class="history-icon-mark" cx="73.6" cy="128.4" r="1.6"></circle></svg>
                 </button>
@@ -5051,7 +5056,7 @@
                   thing a name cannot tell you about a Lith you are about to open. Absent
                   when the store does not report it, rather than shown as a zero.
                 -->
-                <button class="recent-name" title="Open from this server" on:click={() => openRemoteFile(file.name)}>{file.name}{#if file.sizeBytes !== null}<span class="cached-size">{formatLithSize(file.sizeBytes)}</span>{/if}</button>
+                <button class="recent-name" title="Open from this server" on:click={() => openRemoteFile(file.name)}>{@html titleMarkup(file.name, search)}{#if file.sizeBytes !== null}<span class="cached-size">{formatLithSize(file.sizeBytes)}</span>{/if}</button>
                 <!--
                   The one fact about a Lith in a store that only this client can tell you:
                   what *it* has read of that Lith, and when. Same control, same place and the
@@ -5172,7 +5177,7 @@
               one. The path is what the app would open, unshortened: `~` or an ellipsis would
               be a second thing to decode on the one line that exists to be exact.
             -->
-            <button class="recent-name" title={diskPath ?? undefined} on:click={() => openRecent(file)}>{name}{#if cachedEntries[name]}<span class="cached-size">{formatCacheSize(cachedEntries[name].sizeBytes)}</span>{/if}</button>
+            <button class="recent-name" title={diskPath ?? undefined} on:click={() => openRecent(file)}>{@html titleMarkup(name, search)}{#if cachedEntries[name]}<span class="cached-size">{formatCacheSize(cachedEntries[name].sizeBytes)}</span>{/if}</button>
             <!--
               One mark for every kind of unfinished row: no file at all, a file
               outside every backed-up folder, or edits never saved. It is the
@@ -5228,7 +5233,7 @@
         {/each}
         {#each filteredCached as entry}
           <div class="recent-row cached-only-row">
-            <div class="recent-name cached-result" role="note">{entry.name}<span class="cached-size">{formatCacheSize(entry.sizeBytes)}</span><span class="cached-label">Cached locally</span></div>
+            <div class="recent-name cached-result" role="note">{@html titleMarkup(entry.name, search)}<span class="cached-size">{formatCacheSize(entry.sizeBytes)}</span><span class="cached-label">Cached locally</span></div>
             {#if dirtyEntries[entry.name] || historyAvailable[entry.name]}<button class="recent-icon-button cache-history-button" class:modified={dirtyEntries[entry.name]} type="button" aria-label={`Show version history for ${entry.name}`} title={dirtyEntries[entry.name] ? `Unsaved edits from ${new Date(dirtyEntries[entry.name]).toLocaleString()}` : 'Show version history'} on:click={() => openHistoryModal(entry.name)}>
               {#if dirtyEntries[entry.name]}
                 <svg class="history-download-icon modified" viewBox="56 108 33 36" aria-hidden="true"><path class="history-icon-shape" d="m 73.595508,109.76746 c -7.198235,0 -13.103617,5.58342 -13.647229,12.64471 h -0.0072 V 138.2696 H 58.61606 l 2.32389,4.02559 2.324405,-4.02559 h -1.323433 v -15.85123 c 0.530186,-5.97937 5.534806,-10.65103 11.654586,-10.65103 6.474618,0 11.703161,5.22855 11.703161,11.70316 0,6.47462 -5.228543,11.70161 -11.703161,11.70161 -2.644513,0 -5.080809,-0.87232 -7.037814,-2.34508 v 2.39572 c 2.058162,1.23707 4.46633,1.94924 7.037814,1.94924 7.555498,0 13.703556,-6.14599 13.703556,-13.70149 0,-7.5555 -6.148058,-13.70304 -13.703556,-13.70304 z"></path><path class="history-icon-mark" d="M72.3 116h2.6v9h-2.6z"></path><circle class="history-icon-mark" cx="73.6" cy="128.4" r="1.6"></circle></svg>

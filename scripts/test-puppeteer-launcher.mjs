@@ -1720,7 +1720,11 @@ try {
     const row = [...document.querySelectorAll('.recent-row')].find(entry => entry.textContent?.includes('archive.lith')) ?? null;
     const preview = row?.querySelector('.cache-preview') ?? null;
     const titleMark = row?.querySelector('mark.cache-preview-title-mark') ?? null;
-    const bodyMark = row?.querySelector('mark:not(.cache-preview-title-mark)') ?? null;
+    // Scoped to the preview: a row's own name is marked by the same query, in a mark
+    // of its own, and a document-wide "the mark that is not the title mark" reads the
+    // name's before it reads the body's.
+    const bodyMark = preview?.querySelector('mark:not(.cache-preview-title-mark)') ?? null;
+    const nameMark = row?.querySelector('mark.name-match') ?? null;
     return {
       row,
       preview,
@@ -1730,6 +1734,8 @@ try {
       titleMarkColor: titleMark && getComputedStyle(titleMark).color,
       bodyMarkText: bodyMark?.textContent ?? null,
       bodyMarkColor: bodyMark && getComputedStyle(bodyMark).color,
+      nameMarkText: nameMark?.textContent ?? null,
+      nameMarkColor: nameMark && getComputedStyle(nameMark).color,
       size: row?.querySelector('.cached-size')?.textContent
     };
   });
@@ -1751,6 +1757,8 @@ try {
   assert.equal(cachedSearch.bodyMarkText, 'distinctive', 'The body hit carries the mark');
   assert.equal(cachedSearch.bodyMarkColor, 'rgb(255, 152, 0)', 'Body marks stay amber');
   assert.equal(cachedSearch.titleMarkText, null, 'A title without the query is not marked');
+  // Nor is a row's own name: the query is in the note, not in the file it lives in.
+  assert.equal(cachedSearch.nameMarkText, null, 'A row whose name does not match carries no name mark');
 
   // The note's own name is content, so it matches and it is marked — in the install
   // button's blue, which is the one colour this app already uses for "the thing".
@@ -1759,6 +1767,10 @@ try {
   assert.equal(titleMatch.titleMarkText, 'Archive', 'The matched title is marked, case preserved');
   assert.equal(titleMatch.titleMarkColor, 'rgb(138, 180, 248)', 'The title mark is the install button blue');
   assert.equal(titleMatch.bodyMarkText, null, 'A title-only match marks no body text');
+  // The row's own name matched too, and says so in place — the same characters the
+  // query was typed against, drawn where the user typed them.
+  assert.equal(titleMatch.nameMarkText, 'archive', 'The row’s name is marked where the query landed in it');
+  assert.equal(titleMatch.nameMarkColor, 'rgb(138, 180, 248)', '...in the same blue the title mark uses');
 
   // The stamps are not search surface: `te` lives in creaTE d, in modified's cousin
   // and in `text/vnd.tiddlywiki`, and none of them may bring a row or a panel back.
@@ -4710,6 +4722,49 @@ try {
   assert.ok(
     (foundByBody.preview ?? '').includes('petrichor'),
     `...and shows the matching tiddler beside the row: ${JSON.stringify(foundByBody.preview)}`
+  );
+
+  // The extension is not search surface. Every row in this list is a `.lith`, so a
+  // query for those four characters used to answer with the whole folder — and mark
+  // them on the end of every name. Nothing is in a list by its suffix.
+  await syncedPage.click('.recent-search-clear');
+  await syncedPage.type('input.recent-search', 'lith');
+  await syncedPage.waitForFunction(() => document.querySelectorAll('.recent-row').length === 0, POLL);
+  assert.equal(
+    await syncedPage.evaluate(() => document.querySelector('.recent-list .empty')?.textContent?.trim() ?? null),
+    'No matching Liths.',
+    'A query only a name’s extension could answer lists nothing'
+  );
+
+  // And the word is shown where it was typed: the matched run of the title carries a
+  // mark of its own, which is what makes a filtered list read as an answer rather
+  // than as a shorter list.
+  await syncedPage.click('.recent-search-clear');
+  await syncedPage.type('input.recent-search', 'three');
+  await syncedPage.waitForFunction(() => document.querySelectorAll('.recent-row').length === 1, POLL);
+  const namedMatch = await syncedPage.evaluate(() => {
+    const row = document.querySelector('.recent-row');
+    const nameElement = row?.querySelector('.recent-name') ?? null;
+    const mark = row?.querySelector('mark.name-match') ?? null;
+    // The name is its own text plus its marks, so the size the row hangs off the same
+    // button is not read back as part of it.
+    const name = nameElement
+      ? [...nameElement.childNodes].filter((node) => node.nodeType === 3 || node.nodeName === 'MARK').map((node) => node.textContent).join('')
+      : null;
+    return {
+      name,
+      mark: mark?.textContent ?? null,
+      color: mark ? getComputedStyle(mark).color : null,
+      background: mark ? getComputedStyle(mark).backgroundColor : null
+    };
+  });
+  assert.equal(namedMatch.name, 'three.lith', `The row still shows its whole name, suffix and all: ${JSON.stringify(namedMatch)}`);
+  assert.equal(namedMatch.mark, 'three', 'The matched run of the title is marked, and only that run');
+  assert.equal(namedMatch.color, 'rgb(138, 180, 248)', '...in the same blue the title mark inside a preview uses');
+  assert.match(
+    namedMatch.background ?? '',
+    /^rgba?\(138, 180, 248/,
+    `...over a tint rather than a weight change, which keeps the name still while it is typed against: ${JSON.stringify(namedMatch.background)}`
   );
   await syncedContext.close();
 

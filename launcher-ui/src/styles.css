@@ -1087,6 +1087,24 @@ footer > * { pointer-events: auto; }
  * said twice. Written with the element in the selector so it outranks the rule above,
  * which is the one that colours every other mark in the panel. */
 .cache-preview mark.cache-preview-title-mark { color: #8ab4f8; background: transparent; }
+/*
+ * The characters a query matched, inside a row's own title.
+ *
+ * A tinted run rather than the preview's bold coloured text, because this list is
+ * filtered as the characters arrive: a weight change re-measures the word under the
+ * cursor on every keystroke, which drags the rest of the title sideways while the
+ * user is typing the word they are trying to read. Colour and a background move no
+ * glyph at all. The blue is the one the title mark inside a preview already uses,
+ * for the same reason: these characters are why the row is on screen.
+ *
+ * Transparent-and-bold, the legacy launcher's treatment, is the one shape this
+ * cannot take: it is drawn *and* re-measured on each key, and on a dark row a run
+ * that is only coloured reads as part of the name rather than as an answer. */
+.recent-name mark.name-match {
+  color: #8ab4f8;
+  background: rgba(138, 180, 248, 0.2);
+  border-radius: 3px;
+}
 .remove-recent { color: #ff5555; }
 .remove-recent:hover { color: #ff7777; }
 .empty { padding: 20px; color: #999; text-align: center; }

@@ -835,6 +835,29 @@ const SHEETS = [
         expect: '.recent-row.remote-row .cache-history-button'
       },
       {
+        // The characters a query landed on, inside the row's own title: the answer to
+        // "why is this row here", drawn where the user typed it. Two of the store's
+        // Liths carry the query and one does not, so the pane shows both halves of the
+        // rule at once — a row that matches reads as an answer, and a row that only
+        // matched by its `.lith` suffix would not be here at all
+        // (see `name-match` and the search leg of the puppeteer suite).
+        name: '254-instance-name-match',
+        view: 'wide',
+        mode: 'self-host',
+        server: true,
+        drive: async (page) => {
+          stub.addLith('launcher_scratchpad.lith', new Date('2026-09-20T09:00:00Z'), 12288);
+          stub.addLith('lithography.lith', new Date('2026-09-19T09:00:00Z'), 4096);
+          await page.reload({ waitUntil: 'domcontentloaded' });
+          await page.waitForSelector('.recent-row.remote-row .recent-name');
+          await page.type('input.recent-search', 'scr');
+          await page.waitForSelector('.recent-row.remote-row mark.name-match');
+          await settle(page, 300);
+        },
+        clip: '.recent-section',
+        expect: '.recent-row.remote-row mark.name-match'
+      },
+      {
         name: '260-tauri-bookmark-keys',
         view: 'wide',
         mode: 'tauri',
