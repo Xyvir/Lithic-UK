@@ -73,8 +73,8 @@ export function storageModeOverride(search: string): string | null {
  * the dialog below is for.
  */
 export const BROWSER_ONLY_TOOLTIP =
-  'Browser storage only: this Lith is kept in this browser’s cache, and nothing here is written back to a file. ' +
-  'That copy is intrinsically volatile — clearing site data, or the browser reclaiming space, will lose it. ' +
+  'Browser storage only. This Lith is kept in this browser’s cache, and nothing here is written back to a file. ' +
+  'That copy is intrinsically volatile. Clearing site data, or the browser reclaiming space, will lose it. ' +
   'Download your own hard copies from its version history.';
 
 /**
@@ -82,7 +82,7 @@ export const BROWSER_ONLY_TOOLTIP =
  * the mark itself opens, above the versions whose download is the way out.
  */
 export const BROWSER_ONLY_HISTORY_NOTE =
-  'Browser storage only — this Lith has no file, so what this browser holds is the only copy there is. ' +
+  'Browser storage only. This Lith has no file, so what this browser holds is the only copy there is. ' +
   'Download a version to keep one you can mount again.';
 
 /** The row mark's title: the wiki's name, then what is true of it. */

@@ -63,3 +63,16 @@ test('the history dialog says the same thing without a pointer to hover with', (
   assert.match(BROWSER_ONLY_HISTORY_NOTE, /Download a version/);
   assert.doesNotMatch(BROWSER_ONLY_HISTORY_NOTE, /hard copies/);
 });
+
+// Both of these are read in a dialog and a tooltip, which is where the house rule about
+// dashes matters most: an em dash between two clauses reads as editorializing and wraps
+// badly, and the fix is a period and a new sentence. The rule is spelled out at the top of
+// agents.md, and it is pinned here because the copy is prose somebody will re-tune.
+test('neither the mark nor the dialog note reaches for a dash to join two clauses', () => {
+  for (const copy of [BROWSER_ONLY_TOOLTIP, BROWSER_ONLY_HISTORY_NOTE]) {
+    assert.doesNotMatch(copy, /[\u2013\u2014]/, `a dash in: ${copy}`);
+  }
+  // The claim leads with its own sentence rather than a dash: what it is, then what that
+  // means, which is the shape the offline banner uses too.
+  assert.match(BROWSER_ONLY_HISTORY_NOTE, /^Browser storage only\. This Lith has no file,/);
+});
