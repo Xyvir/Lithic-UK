@@ -94,12 +94,16 @@ jobs:
            echo "date=$tag" >> $env:GITHUB_OUTPUT
            # The executable is named after the date and time only, with no mode
            # in it: one Windows build is published, so "Online"/"Offline" would
-           # be a distinction with nothing on the other side of it. Anything
-           # unparseable falls back to the whole tag so a build never fails here.
+           # be a distinction with nothing on the other side of it. An underscore
+           # joins the word to the stamp, because the hyphen already separates the
+           # stamp's own date from its time (MM.DD.YY-HHMM) and a second one up
+           # front reads as four version parts rather than a name and a stamp.
+           # Anything unparseable falls back to the whole tag so a build never
+           # fails here.
            if ($tag -match '(\d{4})\.(\d{2})\.(\d{2})-(\d{4})') {
-             $exe = "Lithic-$($Matches[2]).$($Matches[3]).$($Matches[1].Substring(2))-$($Matches[4]).exe"
+             $exe = "Lithic_$($Matches[2]).$($Matches[3]).$($Matches[1].Substring(2))-$($Matches[4]).exe"
            } else {
-             $exe = "Lithic-$tag.exe"
+             $exe = "Lithic_$tag.exe"
            }
            echo "exe=$exe" >> $env:GITHUB_OUTPUT
            # Semver for the exe's FileVersion/ProductVersion resources:
