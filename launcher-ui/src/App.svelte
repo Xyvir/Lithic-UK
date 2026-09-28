@@ -743,6 +743,16 @@
   // own list is a view rather than a catalogue once a folder is backed up; on an instance
   // there was never any doubt, the server is the only list there is.
   $: showRebuildControl = showBackupStatus || isSelfHost();
+  // Whether the recent panel is on screen at all. Named because two places now ask: the
+  // panel itself, and the install offer, which waits in a launcher with no panel to hold
+  // it rather than in one that does (see the offer's two homes in the markup).
+  $: recentPanelShown =
+    bookmarks.length > 0 ||
+    recentFiles.length > 0 ||
+    remoteFiles.length > 0 ||
+    isSelfHost() ||
+    Object.keys(cachedEntries).length > 0 ||
+    showRecent;
 
   /**
    * Offer to copy a Lith that no backup covers into the folder that is covered.
@@ -4234,6 +4244,20 @@
 <svelte:head><title>Lithic - Launcher</title></svelte:head>
 
 <main class="container" data-mode={mode}>
+  <!--
+    The install offer, written once because it has two homes and never both at once: the
+    panel's foot row (where a phone wants it, beside the rebuild control) and the footer
+    band (for a launcher with nothing listed yet, where there is no foot row to sit in).
+    Which one is in play is a fact about the page — whether the panel is drawn — while
+    whether the offer is *beside* the rebuild control at all is a fact about the window's
+    width, and that half is the stylesheet's: see `.install-offer`.
+
+    The wrapping `<span>` is the offer's own box, so the button's dismiss affordance
+    (absolutely placed in the button's corner) has something to be placed against.
+  -->
+  {#snippet installOfferControl()}
+    <span class="install-offer"><button class="install-button" class:update-available={installState === 'update'} on:click={installOfferAction} disabled={installBusy} title={installOfferTitle}>{installOfferLabel}</button><button class="install-dismiss" on:click={dismissInstallOffer} title="Hide the install offer" aria-label="Dismiss install offer"><span class="install-dismiss-label">dismiss</span>✕</button></span>
+  {/snippet}
   <header class="heading">
     <!--
       The way back out of a handed-over instance, in the margin left of the mark rather
@@ -5010,7 +5034,7 @@
       {/if}
     </div>
   </section>
-  {#if bookmarks.length > 0 || recentFiles.length > 0 || remoteFiles.length > 0 || isSelfHost() || Object.keys(cachedEntries).length > 0 || showRecent}
+  {#if recentPanelShown}
     <section class="recent-section" aria-label="Recent Liths">
       <div class="recent-search-wrap">
         <svg class="recent-search-icon" viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="7.5"></circle><path d="m16.5 16.5 4 4"></path></svg>
@@ -5276,16 +5300,43 @@
         an error beside the banner that already explains it. The rows it would index are
         the ones on screen, which is the whole of what this mode is.
       -->
-      {#if !indexDbOnly && !offlineLauncher}
-        {#if showRebuildControl}
-          <button class="reset-cache" on:click={rebuildRecents} disabled={rebuildBusy} title={isSelfHost() ? 'Read this server again and index its Liths here' : 'Rebuild this list from the files on disk'}>{
-            rebuildBusy ? 'Re-indexing…' : 'Rebuild Recents'
-          }</button>
-        {:else}
-          <button class="reset-cache" on:click={clearRecent} title="Clears this list and its local history. Your files stay.">Reset Recents</button>
+      <!--
+        The panel's foot row, and with it the phone layout's answer to horizontal space.
+        The control the panel's list is rebuilt from ends the panel, and at phone width the
+        install offer joins it here instead of hovering in the window's corner: the corner
+        is width taken from the panel's own rows (a phone's window is barely wider than the
+        column), while the row the rebuild control already has is one button wide and has
+        room for a second. Anything wider than a phone the offer goes back to that corner,
+        which is where it is pinned — see `.install-offer`.
+
+        The row is the panel's last element and exists whether or not it has anything in
+        it, so a launcher that rebuilds nothing (offline mode, the browser-only store)
+        simply draws an empty row of no height rather than a second layout.
+      -->
+      <div class="recent-foot">
+        {#if !indexDbOnly && !offlineLauncher}
+          {#if showRebuildControl}
+            <button class="reset-cache" on:click={rebuildRecents} disabled={rebuildBusy} title={isSelfHost() ? 'Read this server again and index its Liths here' : 'Rebuild this list from the files on disk'}>{
+              rebuildBusy ? 'Re-indexing…' : 'Rebuild Recents'
+            }</button>
+          {:else}
+            <button class="reset-cache" on:click={clearRecent} title="Clears this list and its local history. Your files stay.">Reset Recents</button>
+          {/if}
         {/if}
-      {/if}
+        {#if installOffer}{@render installOfferControl()}{/if}
+      </div>
     </section>
   {/if}
-  <footer>{#if mode === 'webapp'}<a class="github-link" href="https://github.com/Lithic-UK/Lithic" target="_blank" rel="noreferrer">Github</a>{/if}{#if installOffer}<span class="install-offer"><button class="install-button" class:update-available={installState === 'update'} on:click={installOfferAction} disabled={installBusy} title={installOfferTitle}>{installOfferLabel}</button><button class="install-dismiss" on:click={dismissInstallOffer} title="Hide the install offer" aria-label="Dismiss install offer"><span class="install-dismiss-label">dismiss</span>✕</button></span>{/if}</footer>
+  <!--
+    The footer band is the one control this launcher keeps in the window's corner, and it
+    is the browser-only half of the mark above: the launcher a deployment serves shows the
+    link here, and the desktop app has never had it (it syncs from the header instead). On
+    a phone it goes, because the mark carries the same link.
+
+    The install offer waits here only when there is no panel foot row to hold it — the
+    launcher with nothing listed yet. Everything else about it, including where it is
+    drawn, is the offer's own business; the two sites are mutually exclusive, which is why
+    the markup for it is written once, above.
+  -->
+  <footer>{#if mode === 'webapp'}<a class="github-link" href="https://github.com/Lithic-UK/Lithic" target="_blank" rel="noreferrer">Github</a>{/if}{#if installOffer && !recentPanelShown}{@render installOfferControl()}{/if}</footer>
 </main>

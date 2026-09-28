@@ -600,8 +600,8 @@ h1 { flex: none; min-width: 0; margin: 0; color: #f4edf5; font-size: 1.8rem; fon
    * rule it exists to cancel. The offer still has to *arrive*, it just does not move
    * — its hidden state lives in the keyframes, not in the element's own style, so with
    * no animation it renders where it belongs instead of fading in from nowhere. */
-  footer .install-offer { animation: none; }
-  footer .install-dismiss { animation: none; }
+  .recent-foot .install-offer, footer .install-offer { animation: none; }
+  .recent-foot .install-dismiss, footer .install-dismiss { animation: none; }
   .install-dismiss-label { transition: none; }
   .sync-spinner { animation-duration: 2.5s; }
 }
@@ -609,11 +609,13 @@ h1 { flex: none; min-width: 0; margin: 0; color: #f4edf5; font-size: 1.8rem; fon
 code { color: #8ab4f8; }
 /* Pinned to the window corners, the way the legacy launcher's Github link and
  * install button were (`bottom/left/right: 15px` there; 22px is our own gutter
- * and matches the bottom band). The band spans the whole window so the two
- * controls bracket the column rather than hugging it on a wide screen. The band
- * used to be a fixed 800px wide, which put each control just outside the 600px
- * column — and put the 115px install button 15px *over* the column's right
- * edge, on top of the recent rows' own controls. */
+ * and matches the bottom band). The band spans the whole window so its control
+ * clears the column rather than hugging it on a wide screen. The band used to be a
+ * fixed 800px wide, which put each control just outside the 600px column — and put
+ * the 115px install button 15px *over* the column's right edge, on top of the
+ * recent rows' own controls. The install offer no longer rides in this band (see
+ * `.install-offer` below); the Github link is what is left, and it is the one
+ * control here that is a link to something rather than an action on this page. */
 footer {
   position: fixed;
   right: 22px;
@@ -628,8 +630,18 @@ footer {
 footer > * { pointer-events: auto; }
 .github-link, .install-button { flex: 0 1 auto; min-width: 0; white-space: nowrap; }
 /* Install offer wraps button + dismiss affordance as one unit; margin-auto
- * pinning moves to the wrapper so it survives the extra child. */
-.install-offer { margin-left: auto; display: inline-flex; align-items: center; gap: 8px; position: relative; }
+ * pinning moves to the wrapper so it survives the extra child.
+ *
+ * It stands in the window's bottom-right corner — the opposite one to the Github
+ * link, both of them outside the 600px column on a window wide enough to have a
+ * corner to spare. Positioned rather than laid out in a row, because it does not
+ * live in the footer on a phone: there the offer sits beside the panel's rebuild
+ * control (see the 600px query), which is inside the panel and not a sibling of
+ * anything in the footer band. So this is the one control that carries its own
+ * place instead of inheriting one, and `position: fixed` is also what makes the
+ * offer behave the same in the two places it can be rendered (the footer, and the
+ * panel's foot row): in both, its corner is the window's. */
+.install-offer { margin-left: auto; display: inline-flex; align-items: center; gap: 8px; position: fixed; right: 22px; bottom: 20px; }
 /* The offer rises into place instead of being painted there.
  *
  * Its state is a question the app cannot answer itself — is a copy installed, is it
@@ -650,9 +662,6 @@ footer > * { pointer-events: auto; }
   to { opacity: 1; transform: translateY(0); }
 }
 .install-button { position: relative; }
-/* Keep the install affordance pinned right even when it's the only footer
- * child (tauri mode has no Github link; webapp hides it post-install). */
-.install-button { margin-left: auto; }
 /* "dismiss ✕": small bare black text in the install button's upper-right
  * corner, no pill or background, sitting above the label's line box so it never
  * lands on the glyphs. Black, and with no shadow: the button face is pale, so
@@ -1108,7 +1117,14 @@ footer > * { pointer-events: auto; }
 .remove-recent { color: #ff5555; }
 .remove-recent:hover { color: #ff7777; }
 .empty { padding: 20px; color: #999; text-align: center; }
+.recent-foot { display: flex; align-items: stretch; gap: 10px; }
 .reset-cache { width: 100%; padding: 11px; border: 1px dashed #454545; border-radius: 7px; background: transparent; color: #ddd; cursor: pointer; }
+/* The rebuild/reset control takes whatever the row has left, which is all of it when the
+ * install offer is not beside it (every width above a phone, and a phone whose browser
+ * has made no offer). `min-width: 0` because the label is the last thing to give: below
+ * that the button would hold its own min-content width and push the offer out of the row
+ * rather than letting the two share it. */
+.recent-foot .reset-cache { min-width: 0; flex: 1 1 auto; }
 .reset-cache:disabled { color: #8a8a8a; cursor: default; }
 /* Coverage is a count, not a warning: how much of the list is backed up. */
 /* How much of the recent list is covered, read in the dialog about backups
@@ -1151,14 +1167,21 @@ footer > * { pointer-events: auto; }
 
 /*
  * On wide windows each control clears the 600px launcher column entirely, so
- * the Recent panel can use the full height. Narrower than that the footer sits
- * over the launcher column, so reserve a bottom band to keep it from covering
- * the clear-recent control. The threshold is the measured one: the widest
- * control (install, 115px) plus a 22px gutter either side of a 600px column is
- * 874px, rounded up to leave the column a few px of clearance for font
+ * the Recent panel can use the full height. Narrower than that the Github link
+ * sits over the launcher column, so reserve a bottom band to keep it from
+ * covering the control the panel ends on. The threshold is the measured one: the
+ * widest control (install, 115px) plus a 22px gutter either side of a 600px column
+ * is 874px, rounded up to leave the column a few px of clearance for font
  * metrics differing from the developer's machine.
+ *
+ * Nothing is reserved below 601px, and that is a statement about what a phone's
+ * window corners hold: the Github link is gone by then (the mark above carries the
+ * same link), and the install offer has left the corner for the panel's own foot
+ * row, which is inside the panel and needs no room made for it. The band was
+ * therefore 76px of nothing under the last row of an instance's list — the emptiest
+ * on a phone, where the list has the least to spare.
  */
-@media (max-width: 899px) {
+@media (min-width: 601px) and (max-width: 899px) {
   .container { padding-bottom: 76px; }
 }
 
@@ -1188,6 +1211,14 @@ footer > * { pointer-events: auto; }
    * one that goes. Webapp mode only: the desktop app has never had this
    * button, it syncs from the header instead. */
   .github-link { display: none; }
+  /* The install offer leaves the window's corner for the panel's own foot row: on a
+   * phone the corner is width taken from the panel (the window is barely wider than
+   * the column), while the row the rebuild control already occupies is one button
+   * wide. `position: relative` rather than `static` because the offer's box is what
+   * the dismiss affordance is placed against — with no containing block of its own,
+   * the ✕ would fly out to the container's corner. Its place is its place in the row,
+   * so the corner offsets go back to `auto`. */
+  .recent-foot .install-offer { position: relative; right: auto; bottom: auto; }
 }
 
 /*

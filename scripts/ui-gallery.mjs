@@ -695,6 +695,30 @@ const SHEETS = [
         seed: { caches: OFFLINE_CACHES },
         drive: goOffline,
         expect: '.offline-banner'
+      },
+      {
+        // The instance's own store at the width the panel's foot row has to live in. This
+        // is the pane the phone layout's dead space showed up in: the window's corners are
+        // still reserved for the footer band at this width, and on an instance there is
+        // nothing in them — no Github link, and an install offer only when the browser
+        // makes one — so the reservation is height the panel could have had. The rebuild
+        // control is the panel's last element in every case, so it is where that shows.
+        name: '095-instance-store-phone',
+        view: 'phone',
+        mode: 'self-host',
+        server: true,
+        drive: async (page) => {
+          // Names of its own: the store is one per run and every pane adds to it, so a
+          // pane that planted the same Lith twice would be a store with two entries under
+          // one name — which no filesystem can be, and which the list draws as a duplicate
+          // key. (Pane 251 is the wide picture of this same store.)
+          stub.addLith('phone-store-notes.lith', new Date('2026-09-20T09:00:00Z'), 48000);
+          stub.addLith('phone-store-recipe.lith', new Date('2026-09-18T09:00:00Z'), 1_678_000);
+          await page.reload({ waitUntil: 'domcontentloaded' });
+          await page.waitForSelector('.recent-row.remote-row .remove-remote');
+          await settle(page, 300);
+        },
+        expect: '.reset-cache'
       }
     ]
   },
@@ -1797,6 +1821,28 @@ const SHEETS = [
         drive: offerPwaInstall,
         clip: '.install-offer',
         expect: '.install-button'
+      },
+      {
+        // And the same offer at the one width where it stands somewhere else: on a phone it
+        // shares the panel's own foot row with the control the list is rebuilt from, rather
+        // than sitting in the window's corner — the corner is width taken off the panel's
+        // rows, and the row the rebuild control already occupies is one button wide. An
+        // instance is where this matters, because it is the deployment whose window corner
+        // holds nothing else: it serves no Github link, so the band the corner reserved was
+        // empty until the offer arrived, and is empty again when the offer is dismissed.
+        name: '816-install-offer-phone',
+        view: 'phone',
+        scale: 3,
+        mode: 'self-host',
+        server: true,
+        drive: async (page) => {
+          stub.addLith('offer-phone-note.lith', new Date('2026-09-20T09:00:00Z'), 48000);
+          await page.reload({ waitUntil: 'domcontentloaded' });
+          await page.waitForSelector('.recent-row.remote-row');
+          await offerPwaInstall(page);
+        },
+        clip: '.recent-foot',
+        expect: '.recent-foot .install-button'
       }
     ]
   }

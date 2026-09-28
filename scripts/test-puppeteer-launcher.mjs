@@ -300,21 +300,52 @@ try {
   assert.equal(filteredEdges?.rowVsSearchRight, edges?.rowVsSearchRight, 'Rows keep their right edge when the scrollbar goes away');
   assert.equal(filteredEdges?.resetVsSearchRight, edges?.resetVsSearchRight, 'Rebuild control keeps its right edge when the scrollbar goes away');
 
-  await page.setViewport({ width: 600, height: 700 });
-  const narrow = await page.evaluate(() => ({
-    paddingBottom: parseFloat(getComputedStyle(document.querySelector('main.container')).paddingBottom),
-    footerTop: document.querySelector('footer')?.getBoundingClientRect().top ?? 0,
-    mainBottom: document.querySelector('main.container')?.getBoundingClientRect().bottom ?? 0
-  }));
-  assert.ok(narrow.paddingBottom >= 70, 'Narrow layout reserves space for the blocking footer');
-  assert.ok(narrow.footerTop >= 0 && narrow.footerTop <= narrow.mainBottom, 'Narrow footer remains in the viewport');
+  // The band the fixed footer sits in, at the three widths whose answer differs. Where the
+  // footer has a control drawn in it, the panel has to leave room for it; where it has
+  // none, the reservation is that much height taken off the panel instead — which on an
+  // instance's phone is an empty strip under the list's last control, because an instance
+  // has no Github link and its browser may have made no install offer either.
+  const readFooterBand = async (width) => {
+    await page.setViewport({ width, height: 700 });
+    return page.evaluate(() => {
+      const container = document.querySelector('main.container');
+      const footer = document.querySelector('footer');
+      const panel = document.querySelector('.recent-section');
+      return {
+        paddingBottom: parseFloat(getComputedStyle(container).paddingBottom),
+        footerLeft: footer?.getBoundingClientRect().left ?? 0,
+        footerTop: footer?.getBoundingClientRect().top ?? 0,
+        mainLeft: container?.getBoundingClientRect().left ?? 0,
+        mainBottom: container?.getBoundingClientRect().bottom ?? 0,
+        // What is *drawn* in the band, as opposed to what its markup holds: the phone
+        // layout keeps the Github link in the DOM and hides it.
+        footerControls: footer
+          ? [...footer.children].filter(node => getComputedStyle(node).display !== 'none').length
+          : 0,
+        panelBottom: panel?.getBoundingClientRect().bottom ?? null,
+        viewportHeight: window.innerHeight
+      };
+    });
+  };
 
-  await page.setViewport({ width: 1000, height: 700 });
-  const wide = await page.evaluate(() => ({
-    paddingBottom: parseFloat(getComputedStyle(document.querySelector('main.container')).paddingBottom),
-    footerLeft: document.querySelector('footer')?.getBoundingClientRect().left ?? 0,
-    mainLeft: document.querySelector('main.container')?.getBoundingClientRect().left ?? 0
-  }));
+  const phone = await readFooterBand(600);
+  assert.equal(
+    phone.footerControls,
+    0,
+    'The phone layout draws nothing in the window’s corners: the Github link is hidden there and the install offer belongs to the panel'
+  );
+  assert.ok(phone.paddingBottom < 70, '...so the band it would have sat in is not reserved');
+  assert.ok(
+    phone.viewportHeight - (phone.panelBottom ?? 0) <= 20,
+    `The panel runs to the bottom of a phone’s window, not to a reserved band above it (${phone.viewportHeight - (phone.panelBottom ?? 0)}px below it)`
+  );
+  assert.ok(phone.footerTop >= 0 && phone.footerTop <= phone.mainBottom, 'The empty footer band stays inside the viewport');
+
+  const midNarrow = await readFooterBand(800);
+  assert.equal(midNarrow.footerControls, 1, 'A window wider than a phone draws the Github link in the corner again');
+  assert.ok(midNarrow.paddingBottom >= 70, '...and reserves the band it sits in, so it cannot cover the control the panel ends on');
+
+  const wide = await readFooterBand(1000);
   assert.ok(wide.paddingBottom < 70, 'Wide layout does not reserve the blocking footer band');
   assert.ok(wide.footerLeft < wide.mainLeft || wide.footerLeft > wide.mainLeft + 600, 'Wide footer is placed outside the launcher column');
 
@@ -1826,6 +1857,83 @@ try {
   );
   assert.ok(browserOffer.dismissal, '...and carries the same dismiss affordance');
   assert.equal(browserOffer.link, 'Github', '...beside the link the webapp footer keeps');
+
+  // Where the offer stands, which is a question about the width and not about the mode:
+  // on a phone it shares the panel's foot row with the control the list is rebuilt from,
+  // because the window's corner is width taken off the panel's own rows; wider than that
+  // it goes back to the corner, where the column has long since stopped reaching. The
+  // page is at 600px here already, and the offer is up — the viewport is what changes.
+  const readOfferPlacement = () => page.evaluate(() => {
+    const offer = document.querySelector('.install-offer');
+    const foot = document.querySelector('.recent-foot');
+    const reset = document.querySelector('.reset-cache');
+    const panel = document.querySelector('.recent-section');
+    const container = document.querySelector('main.container');
+    const box = node => node.getBoundingClientRect();
+    const round = value => +value.toFixed(2);
+    const offerBox = box(offer);
+    const resetBox = reset ? box(reset) : null;
+    return {
+      position: getComputedStyle(offer).position,
+      inFootRow: offer.parentElement === foot,
+      footChildren: foot ? [...foot.children].map(node => node.className) : null,
+      // Does the offer reach the panel's own edges, and does the panel's box actually
+      // contain it? A fixed control inside an overflow-hidden panel is only clipped when
+      // that panel is also its containing block, and the hit test is what says which.
+      paintedWhere: (() => {
+        const hit = document.elementFromPoint(offerBox.left + offerBox.width / 2, offerBox.top + offerBox.height / 2);
+        return hit ? hit.className : null;
+      })(),
+      offeredRight: round(offerBox.right),
+      panelRight: round(box(panel).right),
+      panelLeft: round(box(panel).left),
+      // Where the panel's padding lets a control end: the edge the rebuild control has to
+      // itself when the offer is not sharing its row.
+      panelContentRight: (() => {
+        const style = getComputedStyle(panel);
+        return round(box(panel).right - parseFloat(style.borderRightWidth) - parseFloat(style.paddingRight));
+      })(),
+      sameLineAsReset: resetBox ? Math.abs(resetBox.top - offerBox.top) < 1 : null,
+      gapFromReset: resetBox ? round(offerBox.left - resetBox.right) : null,
+      resetRight: resetBox ? round(resetBox.right) : null,
+      resetHeight: resetBox ? round(resetBox.height) : null,
+      offerHeight: round(offerBox.height),
+      gapBelowPanel: round(window.innerHeight - box(panel).bottom),
+      containerPaddingBottom: parseFloat(getComputedStyle(container).paddingBottom)
+    };
+  });
+
+  // The offer is still rising when it first appears (6px, 180ms), and a box measured
+  // mid-rise is a box 6px below the row it is about to belong to.
+  await new Promise(resolve => setTimeout(resolve, 300));
+  const phoneOffer = await readOfferPlacement();
+  assert.ok(phoneOffer.inFootRow, 'On a phone the offer stands in the panel’s own foot row');
+  assert.deepEqual(phoneOffer.footChildren, ['reset-cache', 'install-offer'], '...beside the rebuild/reset control, and after it');
+  assert.equal(phoneOffer.sameLineAsReset, true, '...on the same line as that control');
+  assert.ok((phoneOffer.gapFromReset ?? 0) > 0, '...to its right, clear of it');
+  assert.ok(
+    phoneOffer.panelContentRight - (phoneOffer.resetRight ?? 0) >= 100,
+    '...and the rebuild control gives up the room the offer takes, rather than the two sharing a line they cannot both fit on'
+  );
+  assert.equal(phoneOffer.resetHeight, phoneOffer.offerHeight, '...both stretched to the row’s height, so the row reads as one control strip');
+  assert.ok((phoneOffer.offeredRight ?? 0) <= phoneOffer.panelRight + 0.5, '...with the offer inside the panel’s right edge');
+  assert.equal(phoneOffer.position, 'relative', '...laid out in the row, not pinned to the window');
+  assert.ok((phoneOffer.gapBelowPanel ?? 99) <= 20, 'The phone panel is not cut short for a band with nothing in it');
+
+  // 800px is the width where this matters most: the column is still 600 wide and centred,
+  // so the corner the offer returns to reaches over the column's own edge — which is why
+  // the band under the panel is reserved rather than left to the panel.
+  await page.setViewport({ width: 800, height: 700 });
+  const wideOffer = await readOfferPlacement();
+  assert.equal(wideOffer.position, 'fixed', 'Wider than a phone the offer goes back to the window’s corner');
+  assert.equal(wideOffer.paintedWhere, 'install-button', '...and is painted there, outside the panel it is rendered inside');
+  assert.ok(
+    Math.abs(wideOffer.resetRight - wideOffer.panelContentRight) <= 1,
+    '...and the panel’s last control spans the row again, all the way to the panel’s edge'
+  );
+  assert.ok(wideOffer.offeredRight > wideOffer.panelRight, '...and standing clear of the column entirely');
+  assert.ok(wideOffer.containerPaddingBottom >= 70, '...with the band it sits in reserved again');
+  await page.setViewport({ width: 600, height: 700 });
   // And the dismissal is the same control in this mode, which is the point of the shared
   // rule: hiding the offer is not a per-mode bargain. It also puts the footer back the way
   // the next section expects to find it.
