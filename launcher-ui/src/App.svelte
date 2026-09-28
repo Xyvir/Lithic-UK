@@ -138,10 +138,26 @@
   let installBusy = false;
   let installStatus = '';
   let installState: 'uninstalled' | 'current' | 'stale' | 'update' = 'uninstalled';
+  // Whether the app has been told what the offer should be, which is the one thing
+  // it cannot work out for itself: if a copy is installed, whether that copy is older
+  // than this build, whether the release this build was cut from is still the newest.
+  // Every earlier default was a guess, and the wrong guess was visible: 'uninstalled'
+  // is a *showing* state, so an installed copy painted an Install button for the frame
+  // or two before `install_status` answered, then took it away. Nothing renders at all
+  // until this is true, so the offer arrives as the app's answer instead of being a
+  // guess that gets corrected in front of the user.
+  let installOfferReady = false;
+  /**
+   * Which offer the footer is making, or null for none — see the rule below.
+   *
+   * Declared rather than left to inference, because the template and the action both read
+   * it and a widened `string` would let a typo be a mode that never matches.
+   */
+  let installOffer: 'desktop' | 'pwa' | null = null;
   /** Where the manual update offer sends the user. Rust's answer, never a literal here. */
   let updateUrl = '';
   // "Dismiss" on the install offer: hides the button until manually restored
-  // (clear site data in webapp mode; delete recents.txt beside the exe in
+  // (clear site data in a browser; delete recents.txt beside the exe in
   // tauri mode). A pending Update Install is the one offer dismissal does not
   // hide: that newer exe is already on this machine and the user is mid-update.
   // The manual Update Available offer is hidden like the rest, because a user
@@ -151,6 +167,9 @@
   async function refreshInstallState() {
     if (mode !== 'tauri') {
       installDismissed = await isInstallDismissed();
+      // A browser's install prompt is what the webapp offer waits on, and that
+      // arrives when it arrives; this only stops the footer guessing in the meantime.
+      installOfferReady = true;
       return;
     }
     let launchedFromInstall = false;
@@ -167,6 +186,16 @@
     } catch {
       installDismissed = false;
     }
+    // Both reads above are local and quick, and between them they are everything the
+    // offer's *existence* turns on, so this is where it may be shown. Deliberately before
+    // the release question below, which is a network round trip: holding the offer back
+    // behind GitHub would make a launcher with nothing to offer wait on the internet to
+    // say nothing. The offer appears on its own answer, and only its claim about the
+    // newest release waits for the answer that needs the network.
+    //
+    // After the dismissal read and never before it: a user who dismissed the offer must
+    // not watch it arrive and then be taken away in the same breath.
+    installOfferReady = true;
     // Only an install sitting in its own folder asks about releases, and only
     // while the offer is still on show: asking a user who dismissed it would put
     // the button back on screen for as long as the answer took.
@@ -195,6 +224,34 @@
   }
 
   /**
+   * What the footer should be offering, worked out once for every mode.
+   *
+   * One value rather than a condition written into each branch of the template, because
+   * the rule is the same in all three modes: say nothing until the answer is in, then
+   * reveal the offer that answer asks for. The modes differ only in *what* their answer
+   * is. A browser answers with the install prompt — the published launcher and an
+   * instance's own copy alike, which is why self-host is not a special case here — and
+   * the desktop app answers with the state of the copy on disk.
+   *
+   * `installOfferReady` is the half they share, and the reason none of them can drift back
+   * into painting a guess: until the app has been told what to make of itself there is no
+   * offer, so there is never a first paint to take back. The dismissal outranks an ordinary
+   * offer in every mode — a user who hid it wants it hidden wherever they are — with the one
+   * exception of a pending Update Install, because that newer exe is already on this machine
+   * and the user is mid-update.
+   */
+  $: installOffer =
+    installOfferReady && !(installDismissed && installState !== 'stale')
+      ? mode === 'tauri'
+        ? installState === 'current'
+          ? null
+          : 'desktop'
+        : $pwaInstall.installable
+          ? 'pwa'
+          : null
+      : null;
+
+  /**
    * The offer button's label, and what it promises on hover.
    *
    * Reactive statements rather than functions the template calls: Svelte reads a
@@ -204,19 +261,31 @@
    */
   $: installOfferLabel = installBusy
     ? 'Installing…'
-    : installState === 'update'
-      ? 'Update Available'
-      : installState === 'stale'
-        ? 'Update Install'
-        : 'Install';
+    : installOffer === 'pwa'
+      ? 'Install App'
+      : installState === 'update'
+        ? 'Update Available'
+        : installState === 'stale'
+          ? 'Update Install'
+          : 'Install';
   $: installOfferTitle =
     installStatus ||
-    (installState === 'update'
-      ? 'Download the new version, then press Update Install'
-      : 'Copy to Documents and add a Start Menu shortcut');
+    (installOffer === 'pwa'
+      ? 'Add the launcher to this device'
+      : installState === 'update'
+        ? 'Download the new version, then press Update Install'
+        : 'Copy to Documents and add a Start Menu shortcut');
 
-  /** The offer's primary action: install, update the install, or open the page. */
+  /**
+   * The offer's primary action: prompt the browser, install, update the install, or open
+   * the release page. Switched on the offer rather than on the mode, so the button and the
+   * thing it does cannot disagree about which offer is on screen.
+   */
   async function installOfferAction(): Promise<void> {
+    if (installOffer === 'pwa') {
+      await installPwa();
+      return;
+    }
     if (installState === 'update') {
       try {
         await tauriInvoke('open_external', { url: updateUrl });
@@ -3411,8 +3480,12 @@
     // --- URL payload injection (?json= / ?lith= / ?url=) ---
     void processUrlPayload();
 
-    // Webapp/PWA mode: honor a previously dismissed install offer.
-    if (mode === 'webapp') {
+    // A browser honors a previously dismissed install offer; the desktop app reads what is
+    // on disk as well, and the tauri branch below is where that one starts. Deliberately not
+    // webapp-only, which is how self-host came to have no offer at all: an instance's launcher
+    // is a browser page like any other and its offer is the same one (see `installOffer`), so
+    // the read that decides it is the same read.
+    if (mode !== 'tauri') {
       void refreshInstallState();
     }
 
@@ -5112,5 +5185,5 @@
       {/if}
     </section>
   {/if}
-  <footer>{#if mode === 'webapp'}<a class="github-link" href="https://github.com/Lithic-UK/Lithic" target="_blank" rel="noreferrer">Github</a>{#if $pwaInstall.installable && !(installDismissed && installState !== 'stale')}<span class="install-offer"><button class="install-button" on:click={installPwa}>Install App</button><button class="install-dismiss" on:click={dismissInstallOffer} title="Hide the install offer" aria-label="Dismiss install offer"><span class="install-dismiss-label">dismiss</span>✕</button></span>{/if}{:else if mode === 'tauri' && installState !== 'current' && !(installDismissed && installState !== 'stale')}<span class="install-offer"><button class="install-button" class:update-available={installState === 'update'} on:click={installOfferAction} disabled={installBusy} title={installOfferTitle}>{installOfferLabel}</button><button class="install-dismiss" on:click={dismissInstallOffer} title="Hide the install offer" aria-label="Dismiss install offer"><span class="install-dismiss-label">dismiss</span>✕</button></span>{/if}</footer>
+  <footer>{#if mode === 'webapp'}<a class="github-link" href="https://github.com/Lithic-UK/Lithic" target="_blank" rel="noreferrer">Github</a>{/if}{#if installOffer}<span class="install-offer"><button class="install-button" class:update-available={installState === 'update'} on:click={installOfferAction} disabled={installBusy} title={installOfferTitle}>{installOfferLabel}</button><button class="install-dismiss" on:click={dismissInstallOffer} title="Hide the install offer" aria-label="Dismiss install offer"><span class="install-dismiss-label">dismiss</span>✕</button></span>{/if}</footer>
 </main>

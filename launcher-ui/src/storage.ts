@@ -243,7 +243,7 @@ export async function getRecentFiles(): Promise<RecentEntry[]> {
 }
 
 /**
- * "Dismiss install offer" flag, webapp/PWA mode: user chose to hide the
+ * "Dismiss install offer" flag, the browser modes: user chose to hide the
  * install button (e.g. using the launcher as a plain bookmark). Cleared by
  * clearing site data — IndexedDB is the deliberate persistence choice so
  * "clear cache" is the manual restore path.

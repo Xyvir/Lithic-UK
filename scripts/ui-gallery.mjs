@@ -1655,13 +1655,19 @@ const SHEETS = [
     // CSS pixel, because the subject is where that glyph sits in the corner — at sheet
     // size it is a smudge on a pale face.
     //
-    // Four panes for the four labels the app chooses between, since the corner has to
-    // work in all of them: a first install, an installed copy older than this build, the
+    // Six panes: the four labels the desktop app chooses between, since the corner has to
+    // work in all of them — a first install, an installed copy older than this build, the
     // manual update (the same copy, but the release it was cut from is no longer the
-    // newest), and the hint, which is the only state where anything moves.
+    // newest), and the hint, which is the only state after arrival where anything moves —
+    // then the browser's own offer, in the two modes that make one.
+    //
+    // Every pane is a state the offer reaches *after* it exists, and it does not exist until
+    // the app has been told what it should be, so each is shot once the reveal has landed
+    // rather than through it (see `waitForMotion`). The offer's arrival is a fact about the
+    // whole sheet, not a pane's subject.
     id: 'install-offer',
-    title: 'The install offer — Install, Update Install, Update Available, and the dismiss hint',
-    tile: '4x',
+    title: 'The install offer in every mode — Install, Update Install, Update Available, Install App, and the dismiss hint',
+    tile: '3x',
     panes: [
       {
         name: '810-install-offer',
@@ -1717,6 +1723,33 @@ const SHEETS = [
         },
         clip: '.install-offer',
         expect: '.install-button.update-available'
+      },
+      {
+        // The offer the browser makes, in the mode it was written for: a visitor on the
+        // published launcher, whom the browser has told it could install this as an app.
+        name: '814-install-offer-pwa',
+        view: 'wide',
+        scale: 3,
+        mode: 'webapp',
+        drive: offerPwaInstall,
+        clip: '.install-offer',
+        expect: '.install-button'
+      },
+      {
+        // And the same offer on an instance's own copy, which is this same artifact
+        // served by somebody's server. It is allowed to ask for the same reason the
+        // published one is — installability is the browser's answer about the origin in
+        // front of it, not about whose launcher this is — so the pane exists to show that
+        // the rule is the mode's, not the deployment's. Filmed against the stand-in
+        // instance, since a page with no server behind it has nothing to read.
+        name: '815-install-offer-instance',
+        view: 'wide',
+        scale: 3,
+        mode: 'self-host',
+        server: true,
+        drive: offerPwaInstall,
+        clip: '.install-offer',
+        expect: '.install-button'
       }
     ]
   }
@@ -1767,6 +1800,49 @@ function paneUrl(pane) {
   if (pane.storage) params.push(`storage=${pane.storage}`);
   const base = pane.server ? `${stub.origin}/launcher.html` : `file://${ARTIFACT}`;
   return `${base}${params.length ? `?${params.join('&')}` : ''}`;
+}
+
+/**
+ * Offer the browser's install prompt by hand, and wait for the offer it produces.
+ *
+ * The two modes that make their offer with the browser's own prompt — the published
+ * launcher, and the launcher an instance serves — are both waiting on
+ * `beforeinstallprompt`, which headless Chromium never fires. The app listens for the
+ * event rather than for the browser that sends it, so dispatching one is the honest way
+ * to reach the state; the alternative would be a pane that photographs a case nobody can
+ * see.
+ */
+async function offerPwaInstall(page) {
+  await page.evaluate(() => window.dispatchEvent(new Event('beforeinstallprompt', { cancelable: true })));
+  await page.waitForFunction(
+    () => document.querySelector('.install-button')?.textContent.trim() === 'Install App'
+  );
+}
+
+/**
+ * Let finite animations land before the pane is framed and shot.
+ *
+ * The install offer rises into place once the app has decided to show it, and a
+ * screenshot taken inside that motion is a half-transparent button, cropped to a box
+ * that is itself still moving. Waiting on the animations beats sleeping a fixed time:
+ * it ends when the motion does, and a pane with nothing moving pays nothing for it.
+ *
+ * Finite ones only. The status dots and the sync spinner loop forever — that is what
+ * they are for, they mean "still working" — so a pane containing one would be waiting
+ * for an animation with no end, and the ceiling below is what keeps that from becoming
+ * a hang. Nothing here waits longer than the motion it is actually waiting for.
+ */
+async function waitForMotion(page, ceiling = 600) {
+  await page.evaluate((limit) => {
+    const moving = document.getAnimations().filter((animation) => {
+      const timing = animation.effect?.getComputedTiming();
+      return timing && timing.iterations !== Infinity;
+    });
+    return Promise.race([
+      Promise.all(moving.map((animation) => animation.finished.catch(() => {}))),
+      new Promise((resolve) => setTimeout(resolve, limit))
+    ]);
+  }, ceiling);
 }
 
 /** Crop to the pane's element, if it asked for one, expanded by a little air. */
@@ -1820,13 +1896,22 @@ async function runPane(browser, pane) {
     if (pane.seed) await applySeed(page, pane.seed);
     await settle(page);
     if (pane.drive) await pane.drive(page);
-    const clip = await clipFor(page, pane, view);
     try {
       await page.waitForSelector(pane.expect, { timeout: 8000 });
     } catch (error) {
       // A pane that never reached its state is still worth looking at: what
       // rendered instead is usually the answer, and the commands the page asked
       // for are the other half of it. Both are kept, then the pane fails.
+      // The crop is asked for here rather than from above the wait, and it may be
+      // the very thing that is missing — a pane cropped to an element that never
+      // rendered would otherwise throw out of the crop and report a bad selector in
+      // place of the state that never arrived.
+      let clip;
+      try {
+        clip = await clipFor(page, pane, view);
+      } catch {
+        clip = undefined;
+      }
       await page.screenshot({
         path: join(RAW_DIR, `${pane.name}-unreached.png`),
         clip,
@@ -1843,6 +1928,10 @@ async function runPane(browser, pane) {
       )}\n      asked Rust for: ${asked || 'nothing'}\n      console: ${errors.join(' | ') || 'clean'}`
       );
     }
+    // Only now is the pane framed: its state is on screen and anything that arrived with
+    // a motion has landed, so the crop is the settled box rather than a moving one.
+    await waitForMotion(page);
+    const clip = await clipFor(page, pane, view);
     // The walk, for a pane that claims a dialog: reaching the state asked for is not the
     // same as reaching the dialog, and a claim nobody checks is a claim that drifts. Read
     // from the DOM rather than inferred from `expect`, because `expect` is a fragment of

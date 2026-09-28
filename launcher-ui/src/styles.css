@@ -594,7 +594,14 @@ h1 { flex: none; min-width: 0; margin: 0; color: #f4edf5; font-size: 1.8rem; fon
 }
 @media (prefers-reduced-motion: reduce) {
   .activity-dots i { animation: none; }
-  .install-dismiss { animation: none; }
+  /* Written with the footer in the selector because order alone does not carry it:
+   * both of these are declared further down the sheet, and at equal specificity the
+   * later rule wins, so a bare `.install-offer` here would be overridden by the very
+   * rule it exists to cancel. The offer still has to *arrive*, it just does not move
+   * — its hidden state lives in the keyframes, not in the element's own style, so with
+   * no animation it renders where it belongs instead of fading in from nowhere. */
+  footer .install-offer { animation: none; }
+  footer .install-dismiss { animation: none; }
   .install-dismiss-label { transition: none; }
   .sync-spinner { animation-duration: 2.5s; }
 }
@@ -623,6 +630,25 @@ footer > * { pointer-events: auto; }
 /* Install offer wraps button + dismiss affordance as one unit; margin-auto
  * pinning moves to the wrapper so it survives the extra child. */
 .install-offer { margin-left: auto; display: inline-flex; align-items: center; gap: 8px; position: relative; }
+/* The offer rises into place instead of being painted there.
+ *
+ * Its state is a question the app cannot answer itself — is a copy installed, is it
+ * older than this build, is the release it came from still the newest — so the element
+ * is not rendered at all until an answer is in (see `installOfferReady`). That makes this
+ * the offer's entrance rather than a decorative touch: without it the button lands on a
+ * footer that was, a moment ago, sitting empty, and the eye reads a pop-in as something
+ * still loading. A settled rise reads as the app having decided.
+ *
+ * 6px and a fade, 180ms, easing out, so the label is legible long before the motion is
+ * over — this is a control the user may press in the same second it appears, and anything
+ * slower or bouncier would be motion standing between them and it. The travel is upward
+ * because the offer comes up from the footer's own edge, which is where it was always
+ * going to be if it had been there from the start. */
+.install-offer { animation: install-offer-in 180ms ease-out; }
+@keyframes install-offer-in {
+  from { opacity: 0; transform: translateY(6px); }
+  to { opacity: 1; transform: translateY(0); }
+}
 .install-button { position: relative; }
 /* Keep the install affordance pinned right even when it's the only footer
  * child (tauri mode has no Github link; webapp hides it post-install). */

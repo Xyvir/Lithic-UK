@@ -1724,9 +1724,58 @@ try {
   assert.ok(mobileSearch.row, 'Mobile cached content-only match remains visible');
   assert.equal(mobileSearch.previewStyle, 'none', 'Mobile layout hides the context pop-out');
 
+  // --- The browser's offer is gated and revealed the same way --------------------
+  // Every mode that has an offer follows one rule: nothing on screen until the app has
+  // been told what should be there, and then the offer arrives rather than being painted
+  // there. The desktop half of that is pinned further down, where a held-back answer can
+  // be watched; this is the browser half, and the two are the same code path on purpose —
+  // the published launcher, an instance's own copy and the desktop app all take it.
+  //
+  // Headless Chromium never fires `beforeinstallprompt`, so the event is dispatched by
+  // hand. What the app listens for is the event, not the browser that sent it, and
+  // dispatching it is also the only way to reach this offer at all from here.
+  assert.equal(
+    await page.$('.install-offer'),
+    null,
+    'A page whose browser has offered nothing is offered nothing, once the app has asked'
+  );
+  await page.evaluate(() => {
+    window.dispatchEvent(new Event('beforeinstallprompt', { cancelable: true }));
+  });
+  await page.waitForSelector('.install-offer');
+  const browserOffer = await page.evaluate(() => {
+    const offer = document.querySelector('.install-offer');
+    return {
+      label: offer.querySelector('.install-button')?.textContent.trim(),
+      animation: getComputedStyle(offer).animationName,
+      dismissal: Boolean(offer.querySelector('.install-dismiss')),
+      link: document.querySelector('.github-link')?.textContent.trim() ?? null
+    };
+  });
+  assert.equal(browserOffer.label, 'Install App', 'The browser offers the install in its own words');
+  assert.equal(
+    browserOffer.animation,
+    'install-offer-in',
+    '...and arrives with the same reveal the desktop offer uses'
+  );
+  assert.ok(browserOffer.dismissal, '...and carries the same dismiss affordance');
+  assert.equal(browserOffer.link, 'Github', '...beside the link the webapp footer keeps');
+  // And the dismissal is the same control in this mode, which is the point of the shared
+  // rule: hiding the offer is not a per-mode bargain. It also puts the footer back the way
+  // the next section expects to find it.
+  await page.click('.install-offer .install-dismiss');
+  await page.waitForFunction(() => document.querySelector('.install-offer') === null);
+  assert.equal(await page.$('.install-offer'), null, 'Dismissing the browser offer takes it away');
+  // The cursor parked clear of the footer again, because that click left it on the spot the
+  // injected markup below lands in — and the reveal there picks up a pointer that is already
+  // on the control, which would look exactly like the reveal that section is measuring.
+  await page.mouse.move(4, 4);
+
   // --- The install offer's dismiss affordance ---
-  // It only renders in the desktop app, or in a browser that has offered an
-  // install prompt — never in this page — so drive the markup the bundle emits.
+  // It renders in the desktop app, and in a browser that has offered an install prompt —
+  // which this page can now be told to do by hand, as above. The markup is injected here
+  // all the same, so that these measurements have the two controls in the page's own footer
+  // with nothing else around them and no state of their own to settle first.
   // The word is a hint that appears under the cursor; the ✕ is the control and
   // must neither paint anything at rest nor move when the word arrives.
   assert.ok(
@@ -2155,6 +2204,22 @@ try {
       openedAt: null
     };
     window.__lithicSyncFolder = syncFolder;
+    // What Rust answers about a copy already on disk, and how long it takes to say it.
+    // The *timing* here is the point: the launcher has to decide whether to offer an
+    // install before it can know, so a test that wants to catch it deciding wrongly has
+    // to be able to hold the answer back. `delay` is that hold, and both halves are
+    // fixture-driven rather than hard-coded so the same page can walk every answer.
+    let installAnswer = { installed: false, up_to_date: false, running_from_install: false };
+    let installDelay = 0;
+    try {
+      const held = JSON.parse(localStorage.getItem('__lithicInstall') ?? 'null');
+      if (held) {
+        installAnswer = { ...installAnswer, ...held.status };
+        installDelay = held.delay ?? 0;
+      }
+    } catch {
+      // No storage here: nothing is installed here either.
+    }
     const answer = (command, args) => {
       vault.calls.push({ command, args });
       if (typeof window.__lithicRecord === 'function') window.__lithicRecord({ command, args });
@@ -2321,12 +2386,58 @@ try {
         case 'github_device_poll':
           // Never authorized: the step is what is under test, not what comes after it.
           return { pending: true };
+        case 'install_status':
+          // The slow one, on request — and the only one of the three that is ever slow.
+          // What is being pinned is the gap between the launcher painting and the
+          // launcher knowing, and there is no other way to see into it. A promise
+          // rather than a sleep before the answer, because the call has to be *made*
+          // first: the launcher is on screen and has already asked.
+          return installDelay
+            ? new Promise(resolve => setTimeout(() => resolve(installAnswer), installDelay))
+            : installAnswer;
+        case 'install_offer_status':
+          // Whether the user has dismissed the offer. Never the slow one: the app has
+          // to read this before it may show anything, so a launcher that waited on the
+          // disk for it would hold an offer back for no reason at all.
+          return { installed: installAnswer.installed, dismissed: false };
+        case 'install_update_check':
+          // This build is the newest release, from the mock's side. The release
+          // question belongs to the gallery and the Rust tests, and a browser test that
+          // reached GitHub would be one that fails on a train.
+          return { available: false, url: '', latest: '' };
         default:
           // Everything else the launcher asks for in this mode: no answer, which
           // every caller already treats as "absent".
           return null;
       }
     };
+    // Whether the install offer was ever painted, and when.
+    //
+    // Watched from the document's first moment rather than sampled once the launcher has
+    // settled, because the flash this exists to catch is a single paint wide: anything
+    // that waits for the page to settle looks at the frame *after* the button has already
+    // gone. An observer on the document catches the insertion itself, which is the moment
+    // the footer contained an offer at all.
+    //
+    // Gated on a flag in storage so every other document here pays for one read and
+    // nothing else; the clock is `performance.now()`, which is measured from navigation,
+    // because that is the only frame of reference it shares with the delay above.
+    let watchForOffer = false;
+    try {
+      watchForOffer = localStorage.getItem('__lithicInstallWatch') === '1';
+    } catch {
+      // No storage here: nothing to watch for.
+    }
+    if (watchForOffer) {
+      window.__installOfferSeenAt = null;
+      const observer = new MutationObserver(() => {
+        if (window.__installOfferSeenAt !== null) return;
+        if (!document.querySelector('.install-offer')) return;
+        window.__installOfferSeenAt = performance.now();
+        observer.disconnect();
+      });
+      observer.observe(document, { childList: true, subtree: true });
+    }
     window.__TAURI__ = {
       // A command that refuses has to reject the way Rust's does: a synchronous throw
       // out of `invoke` would not be the same contract.
@@ -2360,6 +2471,91 @@ try {
   await vaultPage.goto(`file://${artifact}?mode=tauri`, { waitUntil: 'domcontentloaded' });
   await vaultPage.waitForSelector('.bookmark-row .vault-row-button');
   await new Promise(resolve => setTimeout(resolve, 250));
+
+  // --- The install offer is hidden until the app knows there is one -------------
+  // The footer used to guess. Its state began as "nothing installed", which is a
+  // *showing* state, so a machine that already had the app painted an Install button
+  // for the frame or two it took `install_status` to answer "installed, and current"
+  // — and then took the button away again. A control that appears and withdraws reads
+  // as a bug, and the one thing a launcher must never look like is something that
+  // changed its mind about installing itself.
+  //
+  // Pinned from both sides, then: a copy that is current never shows an offer at all,
+  // not even for a frame, and a copy that does need one is offered only once the answer
+  // is in. Both answers are held back here, because the gap between the launcher being
+  // painted and the launcher knowing is the whole of what is under test.
+  await vaultPage.evaluate(() => {
+    localStorage.setItem('__lithicInstallWatch', '1');
+    localStorage.setItem(
+      '__lithicInstall',
+      JSON.stringify({
+        delay: 500,
+        status: { installed: true, up_to_date: true, running_from_install: true }
+      })
+    );
+  });
+  await vaultPage.goto(`file://${artifact}?mode=tauri`, { waitUntil: 'domcontentloaded' });
+  await vaultPage.waitForSelector('.bookmark-row .vault-row-button');
+  await new Promise(resolve => setTimeout(resolve, 900));
+  const installedOffer = await vaultPage.evaluate(() => ({
+    seenAt: window.__installOfferSeenAt,
+    offers: document.querySelectorAll('.install-offer').length,
+    asked: window.__lithicVault.calls.filter(call => call.command === 'install_status').length
+  }));
+  assert.ok(installedOffer.asked > 0, 'An installed copy asks Rust what is on disk');
+  assert.equal(
+    installedOffer.seenAt,
+    null,
+    'An installed copy never paints an install offer, not even for one frame while the answer is in flight'
+  );
+  assert.equal(installedOffer.offers, 0, 'And its footer is empty once the answer has arrived');
+
+  // The other side of it: a copy with nothing installed does get the offer, and the
+  // clock says it got it after the answer rather than before it. A reveal that began
+  // at paint time would land here visibly early — and would be the old bug wearing an
+  // animation.
+  await vaultPage.evaluate(() => {
+    localStorage.setItem('__lithicInstall', JSON.stringify({ delay: 500, status: { installed: false } }));
+  });
+  await vaultPage.goto(`file://${artifact}?mode=tauri`, { waitUntil: 'domcontentloaded' });
+  await vaultPage.waitForSelector('.install-offer');
+  const freshOffer = await vaultPage.evaluate(() => {
+    const offer = document.querySelector('.install-offer');
+    return {
+      seenAt: window.__installOfferSeenAt,
+      label: offer.querySelector('.install-button')?.textContent.trim(),
+      animation: getComputedStyle(offer).animationName,
+      dismissal: Boolean(offer.querySelector('.install-dismiss'))
+    };
+  });
+  assert.ok(
+    freshOffer.seenAt >= 400,
+    `The offer waits for the answer before it appears (seen at ${freshOffer.seenAt}ms, answer held back for 500)`
+  );
+  assert.equal(freshOffer.label, 'Install', 'And then it offers the install');
+  assert.equal(freshOffer.animation, 'install-offer-in', 'The offer arrives with the reveal rather than being painted there');
+  assert.ok(freshOffer.dismissal, 'It still carries its dismiss affordance');
+
+  // The reveal is a courtesy rather than a mechanism: a reader who has asked their
+  // system for less motion gets the same offer, in place and fully lit, with nothing
+  // moving. The offer's hidden state lives in the keyframes and not in the element's
+  // own style, which is what makes "no animation" a still arrival instead of a button
+  // that never becomes visible.
+  await vaultPage.emulateMediaFeatures([{ name: 'prefers-reduced-motion', value: 'reduce' }]);
+  await vaultPage.evaluate(() => {
+    localStorage.removeItem('__lithicInstall');
+    localStorage.removeItem('__lithicInstallWatch');
+  });
+  await vaultPage.goto(`file://${artifact}?mode=tauri`, { waitUntil: 'domcontentloaded' });
+  await vaultPage.waitForSelector('.install-offer');
+  const stillOffer = await vaultPage.evaluate(() => {
+    const style = getComputedStyle(document.querySelector('.install-offer'));
+    return { animation: style.animationName, opacity: style.opacity, transform: style.transform };
+  });
+  await vaultPage.emulateMediaFeatures([]);
+  assert.equal(stillOffer.animation, 'none', 'A reader who asked for less motion gets no reveal');
+  assert.equal(stillOffer.opacity, '1', '...and the offer is simply there, not left faded out');
+  assert.equal(stillOffer.transform, 'none', '...and in its own place rather than mid-rise');
 
   // The vault no longer has a control in the heading: what it owns is an instance's
   // address, so its controls live with the instances.
