@@ -627,13 +627,16 @@ footer > * { pointer-events: auto; }
 /* Keep the install affordance pinned right even when it's the only footer
  * child (tauri mode has no Github link; webapp hides it post-install). */
 .install-button { margin-left: auto; }
-/* "dismiss ✕": small bare white text in the install button's upper-right
+/* "dismiss ✕": small bare black text in the install button's upper-right
  * corner, no pill or background, sitting above the label's line box so it never
- * lands on the glyphs. The faint shadow is what keeps the white ✕ legible on the
- * light button face; without it the text washes out. Dark red on hover — and the
- * word is only ever shown on hover, so it is always the red, which reads better
- * on that pale blue than white does. Padding is invisible (no background) and
- * only widens the hit target.
+ * lands on the glyphs. Black, and with no shadow: the button face is pale, so
+ * black is the ink that reads on it and the shadow white needed to survive there
+ * would only smear black. Set into the corner rather than centred on the edge —
+ * two pixels lower and three further right than the white ✕ sat, which is what
+ * the eye reads as "the button's corner" once the label's own lift is in the
+ * way. Dark red on hover, the launcher's destructive ink; the word stays black,
+ * because it is the control's label and not part of the glyph it names. Padding
+ * is invisible (no background) and only widens the hit target.
  *
  * Only the ✕ shows at rest; the word is a hint, and it unfurls to the left of
  * the ✕ while the cursor is on the control (or it has keyboard focus). The label
@@ -647,14 +650,13 @@ footer > * { pointer-events: auto; }
  * be this tight because the gap no longer comes from a laid-out word space. */
 .install-dismiss {
   position: absolute;
-  top: 2px;
-  right: 6px;
+  top: 4px;
+  right: 3px;
   padding: 0 6px 0 4px;
   border: 0;
   background: none;
-  color: #fff;
+  color: #000;
   font: 0.55rem/1 'Vollkorn', Georgia, serif;
-  text-shadow: 0 1px 1px rgb(0 0 0 / 45%);
   cursor: pointer;
   animation: dismiss-nudge 2.8s ease-in-out 1.2s 3;
 }
@@ -670,8 +672,10 @@ footer > * { pointer-events: auto; }
   transition: opacity 0.16s ease, transform 0.16s ease;
 }
 .install-dismiss:hover { color: #b3261e; }
+/* The label takes the ink back from the hover red: it is revealed by the same hover that
+   reddens the ✕, so without this it would arrive already red. */
 .install-dismiss:hover .install-dismiss-label,
-.install-dismiss:focus-visible .install-dismiss-label { opacity: 1; transform: translate(0, -50%); }
+.install-dismiss:focus-visible .install-dismiss-label { opacity: 1; transform: translate(0, -50%); color: #000; }
 .install-dismiss:focus-visible { outline: 1px solid #ffb74d; }
 @keyframes dismiss-nudge {
   0%, 100% { transform: scale(1); }
