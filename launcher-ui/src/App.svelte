@@ -1654,6 +1654,46 @@
     };
   }
 
+  /**
+   * Draw the recent list's scrollbar only while the list is being scrolled.
+   *
+   * A scrollbar is a fact about the list, not about the row being read: at rest the panel's
+   * rows already carry the gap and the reserved gutter a thumb needs, so what the thumb
+   * adds is four dark pixels of furniture on the one panel that is nearly all list — and on
+   * a phone, where the window is barely wider than the column, the gutter is the only thing
+   * in the panel's right padding at all.
+   *
+   * `.scrolling` is the whole mechanism (see the stylesheet) because a native scrollbar
+   * cannot be animated: Blink paints a scrollbar from its un-animated style, so a transition
+   * or an animation on the thumb is measured to do nothing at all, and the thumb can only
+   * cut between hidden and drawn. A class toggle costs the same frame either way.
+   *
+   * Written as a class rather than reactive state because a scroll burst fires on every
+   * frame of the gesture and nothing else on the page reads this: state would schedule a
+   * render per frame to change one attribute the user is not looking at, and the linger is a
+   * timer, which is not something a template can hold.
+   *
+   * The linger is the other half of the idea. Hiding the thumb as soon as the last scroll
+   * event lands would blink it off between two wheel notches — a flick of a trackpad lands
+   * events tens of milliseconds apart — so the class outlives the gesture by long enough
+   * that a burst reads as one continuous scroll.
+   */
+  function trackListScroll(node: HTMLElement) {
+    let linger: ReturnType<typeof setTimeout> | null = null;
+    const onScroll = () => {
+      node.classList.add('scrolling');
+      if (linger) clearTimeout(linger);
+      linger = setTimeout(() => node.classList.remove('scrolling'), 700);
+    };
+    node.addEventListener('scroll', onScroll, { passive: true });
+    return {
+      destroy() {
+        if (linger) clearTimeout(linger);
+        node.removeEventListener('scroll', onScroll);
+      }
+    };
+  }
+
   function getEntryName(entry: RecentEntry | { name?: string; handle?: any }): string {
     if (entry.handle && entry.handle.name) return entry.handle.name;
     return (entry as any).name || 'untitled.lith';
@@ -5041,7 +5081,7 @@
         <input class="recent-search" aria-label="Search recent Liths" placeholder="Search recent liths…" bind:value={search} on:keydown={handleSearchKeydown} />
         {#if search}<button class="recent-search-clear" type="button" aria-label="Clear recent Lith search" on:click={() => search = ''}>×</button>{/if}
       </div>
-      <div class="recent-list">
+      <div class="recent-list" use:trackListScroll>
         {#if isSelfHost()}
           {#if offlineLauncher}
             <!--

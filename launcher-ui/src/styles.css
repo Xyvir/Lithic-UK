@@ -67,8 +67,44 @@ body { overflow: hidden; background: #181818; }
 *::-webkit-scrollbar-track { background: transparent; }
 *::-webkit-scrollbar-thumb { background-color: #6b6b6b; border-radius: 999px; }
 *::-webkit-scrollbar-thumb:hover { background-color: #8a8a8a; }
+/*
+ * The recent list is the one scroll area whose scrollbar is furniture rather than
+ * information: it is hidden until the list is in use, in every mode, because the panel is
+ * almost entirely list and the thumb is the only thing in its right padding. A phone is
+ * where that shows most — there the four pixels sit alone between the rows and the border.
+ *
+ * Transparent rather than taken away: the gutter has to stay reserved (`scrollbar-gutter:
+ * stable` on `.recent-list`) or the rows would step sideways every time the bar comes and
+ * goes, which is the jump that gutter exists to prevent.
+ *
+ * The class is written by the action in App.svelte and the change is a cut rather than a
+ * fade, and that is a limit rather than a choice: Blink paints a scrollbar from its
+ * un-animated style, so freezing a transition *and* an animation on this pseudo-element and
+ * screenshotting the lane in a headed browser gives the same 192 pixels of #6b6b6b at 0%,
+ * 50% and 100%. There is no lever between transparent and drawn.
+ *
+ * The same limit is what keeps a pointer out of this: `.recent-list:hover
+ * ::-webkit-scrollbar-thumb` reports the colour it asks for through
+ * `getComputedStyle`, and paints nothing — measured in headless and headed Chromium alike,
+ * with the lane widened to 14px so the thumb could not hide. A rule that only exists to be
+ * read is worse than no rule, so there is none: the thumb is not a drag target, and the
+ * list is moved by the wheel the same way it always was.
+ *
+ * `.scrolling` is the selector rather than a bare `.recent-list::-webkit-scrollbar-thumb`
+ * because that is what lets these rules beat the universal ones above: a class outranks the
+ * bare `*` at equal pseudo-element count. The consequence is worth stating, since the
+ * universal brightness on hover (`*::-webkit-scrollbar-thumb:hover`) ties with the first of
+ * these and the later rule wins — the thumb no longer brightens under the pointer. There is
+ * nothing to brighten: the bar is only on screen while the list is moving, and the gesture
+ * that drew it does not need a hover state as well. */
+.recent-list::-webkit-scrollbar-thumb { background-color: transparent; }
+.recent-list.scrolling::-webkit-scrollbar-thumb { background-color: #6b6b6b; }
 @supports not selector(::-webkit-scrollbar) {
   * { scrollbar-width: thin; scrollbar-color: #6b6b6b transparent; }
+  /* The same rule in the standard pair: a transparent thumb keeps the gutter reserved in
+   * Firefox exactly as a transparent `::-webkit-scrollbar-thumb` keeps it in Chromium. */
+  .recent-list { scrollbar-color: transparent transparent; }
+  .recent-list.scrolling { scrollbar-color: #6b6b6b transparent; }
 }
 
 .container {
@@ -1221,6 +1257,7 @@ footer > * { pointer-events: auto; }
   .recent-foot .install-offer { position: relative; right: auto; bottom: auto; }
 }
 
+/*
 /*
  * The bookmark tile is no longer dropped on the narrowest launchers: the vault's
  * manager — changing the secret, or forgetting every login — is reached through the

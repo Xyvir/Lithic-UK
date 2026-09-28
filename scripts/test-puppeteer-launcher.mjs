@@ -167,6 +167,7 @@ try {
       barWidth: getComputedStyle(list, '::-webkit-scrollbar').width,
       barArrows: getComputedStyle(list, '::-webkit-scrollbar-button').display,
       barThumbRadius: getComputedStyle(list, '::-webkit-scrollbar-thumb').borderRadius,
+      barThumb: getComputedStyle(list, '::-webkit-scrollbar-thumb').backgroundColor,
       rowVsSearchRight: box(row).right - box(search).right,
       rowVsSearchLeft: box(row).left - box(search).left,
       resetVsSearchRight: reset ? box(reset).right - box(search).right : null,
@@ -269,6 +270,49 @@ try {
   assert.ok(Math.abs(edges?.resetVsCardRight ?? 99) <= 0.5, 'Rebuild control ends where the action card’s buttons end');
   assert.ok((edges?.scrollbarOuterRight ?? 0) <= (edges?.panelInnerRight ?? 0), 'Recent list scrollbar sits inside the panel padding, not over the rows');
   assert.ok((edges?.panelInnerRight ?? 0) - (edges?.scrollbarOuterRight ?? 0) >= 3, 'Scrollbar keeps clearance from the panel border');
+
+  // The thumb is drawn only while the list is moving. Read from the pseudo-element's own
+  // computed style because that is the only place a scrollbar's paint can be observed from
+  // a page at all — a scrollbar is the compositor's, and a headless screenshot shows
+  // nothing where it is — and because it is how this suite reads every other fact about
+  // this bar (its width, its arrows, its radius). The change is a class and a cut rather
+  // than a fade: a transition on a scrollbar is measured to do nothing (see the sheet).
+  const readThumb = () => page.evaluate(() => {
+    const list = document.querySelector('.recent-list');
+    return {
+      thumb: getComputedStyle(list, '::-webkit-scrollbar-thumb').backgroundColor,
+      scrolling: list.classList.contains('scrolling'),
+      gutter: list.offsetWidth - list.clientWidth
+    };
+  });
+  await page.mouse.move(4, 4);
+  const restingThumb = await readThumb();
+  assert.equal(restingThumb.scrolling, false, 'A list nobody is scrolling carries no mark of a gesture');
+  assert.equal(restingThumb.thumb, 'rgba(0, 0, 0, 0)', '...and its scrollbar is not drawn at all');
+  await page.evaluate(() => { document.querySelector('.recent-list').scrollTop = 60; });
+  await new Promise(resolve => setTimeout(resolve, 80));
+  const scrollingThumb = await readThumb();
+  assert.equal(scrollingThumb.scrolling, true, 'Scrolling the list marks it as in use');
+  assert.equal(scrollingThumb.thumb, 'rgb(107, 107, 107)', '...and draws the thumb while it is');
+  // The reserved gutter is untouched by any of this, which is the whole reason the thumb is
+  // made transparent rather than taken away: the rows must not step sideways as it comes
+  // and goes. Measured while the thumb is hidden, against the same list with it drawn.
+  const hiddenEdges = await measurePanelEdges();
+  assert.equal(hiddenEdges?.gutter, edges?.gutter, 'The scrollbar’s width stays reserved while the thumb is hidden');
+  assert.equal(hiddenEdges?.rowVsSearchRight, edges?.rowVsSearchRight, '...so the rows keep their right edge as the bar comes and goes');
+  assert.equal(hiddenEdges?.rowVsSearchLeft, edges?.rowVsSearchLeft, '...and their left edge');
+  // A burst, not a single event: a flick of a wheel lands its events tens of milliseconds
+  // apart, and hiding the thumb between two of them would blink it off mid-gesture.
+  await page.evaluate(() => {
+    const list = document.querySelector('.recent-list');
+    for (let notch = 0; notch < 5; notch += 1) setTimeout(() => { list.scrollTop += 20; }, notch * 60);
+  });
+  await new Promise(resolve => setTimeout(resolve, 500));
+  assert.equal((await readThumb()).scrolling, true, 'The mark survives a scroll whose events arrive one notch at a time');
+  await new Promise(resolve => setTimeout(resolve, 900));
+  const idleThumb = await readThumb();
+  assert.equal(idleThumb.scrolling, false, 'The thumb goes away again once the gesture is over');
+  assert.equal(idleThumb.thumb, 'rgba(0, 0, 0, 0)', '...and the lane is empty once more');
   assert.ok((result.recentRows[0]?.height ?? 0) === 52, 'Recent row uses the shared control height');
   assert.ok((result.historyRect?.width ?? 99) <= 20, 'History/download icon is visually smaller than its control');
   assert.ok(result.mountBookmark && result.mountBookmark.height === 60, 'Bookmark control matches the main action height');
