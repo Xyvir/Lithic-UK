@@ -811,6 +811,30 @@ const SHEETS = [
         expect: '.brand-emoji'
       },
       {
+        // The one fact about a Lith in a store that only this client can tell you: what
+        // *it* has read of that Lith, and when. Same control, same place and the same
+        // meaning as on the desktop app's own rows, drawn only where there are versions
+        // behind it — so the store is seeded with the record a rebuild on this machine
+        // would have written (see the `instance-notes` row against the bare ones around
+        // it, which are Liths this client has never read).
+        name: '253-instance-row-history',
+        view: 'wide',
+        mode: 'self-host',
+        server: true,
+        seed: {
+          caches: { 'search_cache_instance-notes.lith': cache([{ title: 'A', text: 'note text' }]) },
+          meta: { 'search_cache_meta_instance-notes.lith': history() }
+        },
+        drive: async (page) => {
+          stub.addLith('instance-notes.lith', new Date('2026-09-20T09:00:00Z'), 48000);
+          await page.reload({ waitUntil: 'domcontentloaded' });
+          await page.waitForSelector('.recent-row.remote-row .cache-history-button');
+          await settle(page, 300);
+        },
+        clip: '.recent-section',
+        expect: '.recent-row.remote-row .cache-history-button'
+      },
+      {
         name: '260-tauri-bookmark-keys',
         view: 'wide',
         mode: 'tauri',

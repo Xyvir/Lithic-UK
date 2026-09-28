@@ -162,8 +162,39 @@ test('reindexFolders walks repository roots first, then every known folder', () 
   );
   assert.deepEqual(folders, [
     'C:\\Lithic',
-    'C:\\Lithic\\',
     'C:\\Lithic\\projects\\',
     'D:\\notes\\'
   ]);
+});
+
+/**
+ * The same folder, spelled the two ways it arrives. A repository root comes back
+ * from the backend with no separator on the end; a row's folder is cut out of a
+ * file path and keeps one. They are one directory, the listing is flat, and the
+ * rebuild replaces the list with what the listing found — so listing both would
+ * put every Lith in the folder on the list twice.
+ */
+test('reindexFolders lists one folder once, whatever its spelling', () => {
+  const folders = reindexFolders(
+    [
+      { name: 'a.lith', path: 'C:\\Lithic\\a.lith' },
+      { name: 'b.lith', path: 'C:\\Lithic\\b.lith' },
+      { name: 'other.lith', path: '/data/other.lith' }
+    ],
+    { 'C:\\Lithic\\a.lith': 'C:\\Lithic', 'C:\\Lithic\\b.lith': 'C:\\Lithic' }
+  );
+  assert.deepEqual(folders, ['C:\\Lithic', '/data/']);
+});
+
+/**
+ * A row's folder is kept when nothing covers it — the folder that is not backed up
+ * yet is still listed, so a rebuild finds its siblings — and whitespace inside a
+ * name is never touched.
+ */
+test('reindexFolders keeps unbacked folders and their names exactly', () => {
+  const folders = reindexFolders(
+    [{ name: 'my notes.lith', path: '/home/me/my notes/my notes.lith' }],
+    {}
+  );
+  assert.deepEqual(folders, ['/home/me/my notes/']);
 });

@@ -914,6 +914,60 @@ try {
     `Live self-host: and no row carries a date instead: ${JSON.stringify(afterConnect.rows)}`
   );
 
+  // Connecting is also where this client's own index comes from. An instance's rows are
+  // the *server's*; search here reads this device — so the store is read into the local
+  // cache as soon as it lands, behind the dialog that asked for it, and a row gains the
+  // history this machine holds for it with nothing clicked. Same pass the rebuild runs,
+  // which is why these two are asserted together.
+  await livePage.waitForSelector('.recent-row.remote-row .cache-history-button', { timeout: 15000 });
+  const indexedRow = await livePage.evaluate(() => {
+    const button = document.querySelector('.recent-row.remote-row .cache-history-button');
+    return {
+      aria: button?.getAttribute('aria-label') ?? null,
+      title: button?.getAttribute('title') ?? null,
+      modified: button?.classList.contains('modified') ?? null,
+      disabled: button?.hasAttribute('disabled') ?? null,
+      icon: button?.querySelector('.history-download-icon') !== null,
+      status: document.querySelector('.status-label')?.textContent?.trim() ?? null
+    };
+  });
+  assert.equal(
+    indexedRow.aria,
+    'Show version history for arrived.lith',
+    `Live self-host: the row says what history it holds, by name: ${JSON.stringify(indexedRow)}`
+  );
+  assert.equal(indexedRow.title, 'Show version history', 'Live self-host: and hovers as the plain affordance, since this machine has no unsaved edits of its own for it');
+  assert.equal(indexedRow.modified, false, 'Live self-host: a Lith the server owns is not this device’s unfinished row');
+  assert.equal(indexedRow.disabled, false, 'Live self-host: live rather than a promise — the cache behind the icon is what enables it');
+  assert.equal(indexedRow.icon, true, 'Live self-host: drawn with the same clock-with-arrow shape the local rows use');
+  assert.equal(
+    indexedRow.status,
+    'Indexed 1 lith for search here',
+    `Live self-host: and the line names the one read this client just did: ${JSON.stringify(indexedRow.status)}`
+  );
+  assert.ok(
+    stub.state.asked.includes('GET /api/lithic/file?file=arrived.lith'),
+    `Live self-host: the Lith was read through the store, once, for this device: ${JSON.stringify(stub.state.asked.slice(-8))}`
+  );
+
+  // The history the icon opens is this device's own: the versions the index just wrote,
+  // not anything the server keeps.
+  await livePage.click('.recent-row.remote-row .cache-history-button');
+  // The dialog reads the version store on open, so the entries arrive a beat after the
+  // dialog does. Waiting for one is the assertion's own precondition, not a sleep.
+  await livePage.waitForSelector('.history-modal .history-entry', { timeout: 15000 });
+  const indexedHistory = await livePage.evaluate(() => ({
+    entries: document.querySelectorAll('.history-modal .history-entry').length,
+    empty: document.querySelector('.history-modal .history-empty')?.textContent?.trim() ?? null
+  }));
+  assert.ok(
+    indexedHistory.entries >= 1,
+    `Live self-host: the dialog lists the version the reading of the store wrote: ${JSON.stringify(indexedHistory)}`
+  );
+  assert.equal(indexedHistory.empty, null, 'Live self-host: and has nothing to report as missing, so the row offered what is really there');
+  await livePage.click('.history-modal .modal-close');
+  await livePage.waitForSelector('.history-modal', { hidden: true });
+
   // --- Re-reading the server, and indexing it here ----------------------------
   // The rebuild control stays on an instance, which is the mode whose list is derived
   // rather than authored. Rebuilding here is two things at once: the store is read again,
@@ -4516,6 +4570,148 @@ try {
     `...so the whole mirror stays the size of a list: ${mirror.bytes} bytes for ${JSON.stringify(mirror.names)}`
   );
   await mountContext.close();
+
+  // --- Rebuilding a synced folder on the desktop app ------------------------------
+  //
+  // One click, two jobs: re-list the folder, because the list is a view of it rather
+  // than a catalogue of it, and read every Lith the listing turned up — so that search
+  // here and each row's own history work for a folder this machine has never opened.
+  // The second half is what this section is for. A Lith the listing finds is in the
+  // index when it lands, and one whose *body* was read is findable by a word that is
+  // nowhere in its name, which is the only thing a search here reads the cache for.
+  const syncedRoot = 'C:/keeper/notes';
+  const SYNCED_LITHS = [
+    { name: 'one.lith', path: `${syncedRoot}/one.lith`, text: 'title: one\n\npetrichor and wet stone' },
+    { name: 'two.lith', path: `${syncedRoot}/two.lith`, text: 'title: two\n\nnothing remarkable' },
+    // In the folder, in no row: the Lith a rebuild exists to find.
+    { name: 'three.lith', path: `${syncedRoot}/three.lith`, text: 'title: three\n\nnever opened here' }
+  ];
+  const syncedContext = await browser.createBrowserContext();
+  const syncedPage = await syncedContext.newPage();
+  await syncedPage.setViewport({ width: 900, height: 700 });
+  syncedPage.on('pageerror', error => errors.push(`synced: ${error.message}`));
+  const syncedCalls = [];
+  await syncedPage.exposeFunction('__lithicSyncedCall', entry => syncedCalls.push(entry));
+  await syncedPage.evaluateOnNewDocument((fixture) => {
+    window.__TAURI__ = {
+      core: {
+        invoke: (command, args) => {
+          window.__lithicSyncedCall({ command, args });
+          if (command === 'read_recents_sidecar') return Promise.resolve(fixture.recents);
+          if (command === 'git_sync_coverage') return Promise.resolve(fixture.coverage);
+          if (command === 'git_sync_folder') return Promise.resolve({ folder: fixture.root, overridden: false });
+          if (command === 'list_folder_liths') return Promise.resolve(fixture.listed);
+          if (command === 'read_lith_path') {
+            const lith = fixture.liths.find((entry) => entry.path === args.path);
+            return Promise.resolve(lith ? { name: lith.name, path: lith.path, text: lith.text } : null);
+          }
+          return Promise.resolve(null);
+        }
+      },
+      event: { listen: () => Promise.resolve(() => {}) }
+    };
+  }, {
+    root: syncedRoot,
+    recents: [SYNCED_LITHS[0].path, SYNCED_LITHS[1].path],
+    listed: SYNCED_LITHS.map((lith) => lith.path),
+    liths: SYNCED_LITHS,
+    // Every row is inside the repository, so none of them carries the not-backed-up
+    // mark: the only icon this section is about is the one the index puts there.
+    coverage: Object.fromEntries(SYNCED_LITHS.map((lith) => [lith.path, syncedRoot]))
+  });
+  await syncedPage.goto(`file://${artifact}?mode=tauri`, { waitUntil: 'domcontentloaded' });
+  await syncedPage.waitForSelector('.reset-cache');
+  await syncedPage.waitForFunction(() => document.querySelectorAll('.recent-row').length === 2, POLL);
+  // The name is the row's own text node rather than the button's text: a row with a
+  // cached copy hangs the size off the same button, which is half of what is being
+  // asserted here.
+  const rowIcons = () => syncedPage.evaluate(() =>
+    [...document.querySelectorAll('.recent-row')].map((row) => ({
+      name: row.querySelector('.recent-name')?.firstChild?.textContent?.trim() ?? null,
+      size: row.querySelector('.cached-size')?.textContent?.trim() ?? null,
+      title: row.querySelector('.cache-history-button')?.getAttribute('title') ?? null,
+      aria: row.querySelector('.cache-history-button')?.getAttribute('aria-label') ?? null,
+      disabled: row.querySelector('.cache-history-button')?.hasAttribute('disabled') ?? null
+    }))
+  );
+  const beforeRebuild = await rowIcons();
+  assert.deepEqual(
+    beforeRebuild.map((row) => row.title),
+    [null, null],
+    `Nothing here has read these files, so no row offers history yet: ${JSON.stringify(beforeRebuild)}`
+  );
+  assert.deepEqual(
+    beforeRebuild.map((row) => row.size),
+    [null, null],
+    '...and no row reports a cached copy, because there is none'
+  );
+  assert.equal(
+    await syncedPage.evaluate(() => document.querySelectorAll('.recent-row .cache-history-button').length),
+    0,
+    '...and a row that cannot report history is a row with no icon at all, not a dead one'
+  );
+
+  await syncedPage.click('.reset-cache');
+  await syncedPage.waitForFunction(() => document.querySelectorAll('.recent-row').length === 3, POLL);
+  await syncedPage.waitForFunction(() => document.querySelectorAll('.recent-row .cache-history-button').length === 3, POLL);
+  const afterRebuild = await rowIcons();
+  assert.deepEqual(
+    afterRebuild.map((row) => row.name),
+    ['one.lith', 'two.lith', 'three.lith'],
+    `The rebuild lists the folder, so a Lith no row had is a row now: ${JSON.stringify(afterRebuild)}`
+  );
+  assert.deepEqual(
+    afterRebuild.map((row) => row.title),
+    ['Show version history', 'Show version history', 'Show version history'],
+    `...and every one of them has the history this device just wrote: ${JSON.stringify(afterRebuild)}`
+  );
+  assert.deepEqual(
+    afterRebuild.map((row) => row.disabled),
+    [false, false, false],
+    'The icon is live rather than a promise: the cache behind each one is what enables it'
+  );
+  assert.deepEqual(
+    afterRebuild.map((row) => row.size),
+    ['<0.01 MB', '<0.01 MB', '<0.01 MB'],
+    '...and each row now reports the copy this client holds, which is the cache the read wrote'
+  );
+  assert.equal(
+    afterRebuild[2].aria,
+    'Show version history for three.lith',
+    `Named for the Lith it is on, including the one that was not on this machine: ${JSON.stringify(afterRebuild[2])}`
+  );
+  assert.equal(
+    await syncedPage.$eval('.status-label', (node) => node.textContent.trim()),
+    'Re-indexed 3 liths',
+    '...and the count is the index that was written, not the number of files that were listed'
+  );
+  assert.deepEqual(
+    syncedCalls.filter(call => call.command === 'read_lith_path').map(call => call.args.path).sort(),
+    SYNCED_LITHS.map((lith) => lith.path).sort(),
+    `Every Lith in the folder is read, which is what puts a cache on this client: ${JSON.stringify(syncedCalls.filter(call => call.command === 'read_lith_path'))}`
+  );
+
+  // What the index is for: a word nothing names. Neither row's name contains it, so a
+  // list filtered by name alone would show nothing at all.
+  await syncedPage.type('input.recent-search', 'petrichor');
+  await syncedPage.waitForFunction(() => document.querySelectorAll('.recent-row').length === 1, POLL);
+  const foundByBody = await syncedPage.evaluate(() => {
+    const row = document.querySelector('.recent-row');
+    return {
+      name: row?.querySelector('.recent-name')?.firstChild?.textContent?.trim() ?? null,
+      preview: row?.querySelector('.cache-preview')?.textContent?.trim() ?? null
+    };
+  });
+  assert.equal(
+    foundByBody.name,
+    'one.lith',
+    `A search finds the Lith by what it holds, on a machine that never opened it: ${JSON.stringify(foundByBody)}`
+  );
+  assert.ok(
+    (foundByBody.preview ?? '').includes('petrichor'),
+    `...and shows the matching tiddler beside the row: ${JSON.stringify(foundByBody.preview)}`
+  );
+  await syncedContext.close();
 
   // --- Upload a Lith, several at a time ------------------------------------------
   //

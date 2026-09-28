@@ -158,9 +158,19 @@ export function reindexFolders(
 ): string[] {
   const folders: string[] = [];
   const seen = new Set<string>();
+  // Added by comparison key rather than by spelling, because the two lists below spell
+  // one folder two ways. A repository root arrives from the backend as a plain path
+  // (`C:\Lithic`), with no separator on the end, while a row's own folder is cut out of
+  // a file path and keeps one (`C:\Lithic\`). The listing is flat, so those two names
+  // return the same files — and a rebuild *replaces* the list with what it found, which
+  // would make every one of them a duplicate row.
   const add = (folder: string) => {
-    if (!folder || seen.has(folder)) return;
-    seen.add(folder);
+    if (!folder) return;
+    // A path that is nothing but separators has no key to compare, and listing a
+    // drive root flat is not what any of this is for.
+    const key = folder.replace(/[\\/]+$/, '');
+    if (!key || seen.has(key)) return;
+    seen.add(key);
     folders.push(folder);
   };
   for (const row of rows) if (row.path) add(repoRootByPath[row.path] ?? '');

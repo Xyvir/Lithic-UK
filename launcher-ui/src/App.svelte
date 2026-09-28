@@ -462,12 +462,19 @@
    * the moment the connection lands — the point of connecting a folder is to
    * have its wikis in front of you, not to go hunting for them through Mount.
    * Rust returns them newest-first and `remember` unshifts, so walk backwards.
+   *
+   * Being on screen is not the same as being known here: nothing has read a file
+   * whose row only just appeared, so the folder's Liths are indexed for this device
+   * behind the dialog that asked for them.
    */
   async function adoptSyncedWikis(paths: string[] | undefined): Promise<void> {
     if (!paths || paths.length === 0) return;
     for (const path of [...paths].reverse()) {
       await remember({ name: path.split(/[\\/]/).pop() || path, path });
     }
+    // Built from the paths Rust handed back rather than from the recent list, which
+    // caps itself at twenty rows and would quietly index the first of a big folder.
+    void indexRestoredLiths(paths.map((path) => ({ name: path.split(/[\\/]/).pop() || path, path })));
   }
 
   function openGitSyncModal() {
@@ -1191,6 +1198,10 @@
       setGitSyncView('connected');
       await refreshServerSyncStatus(false);
       await refreshRemoteList();
+      // Same pass the rebuild runs on an instance, for the same reason it exists
+      // there: the store's Liths are now this client's rows, and search here is a
+      // local index — one this client has never built for Liths it has not opened.
+      void indexRestoredLiths(remoteFiles.map((file) => ({ name: file.name, path: null })));
     } finally {
       gitSyncBusy = false;
       endGitSyncProgress();
@@ -1517,10 +1528,23 @@
 
   async function refreshHistoryAvailability(names: string[]) {
     const wanted = names.filter((name) => !(name in historyAvailable));
-    if (wanted.length > 0) {
-      const availability = await wikiHasHistory(wanted);
-      historyAvailable = { ...historyAvailable, ...availability };
-    }
+    if (wanted.length > 0) await rereadHistoryAvailability(wanted);
+  }
+
+  /**
+   * Ask again about names the list already has an answer for.
+   *
+   * `refreshHistoryAvailability` reads each name once, which is right for a list that
+   * only grows — but these answers are not permanent. They are read off this device's
+   * own version store, and indexing a Lith writes versions into that store: a row told
+   * "no history here" when it appeared has several the moment a rebuild has read its
+   * file, and the row's own Download History affordance is waiting on exactly that
+   * answer. So the pass that changes the store asks the question again.
+   */
+  async function rereadHistoryAvailability(names: string[]) {
+    if (names.length === 0) return;
+    const availability = await wikiHasHistory(names);
+    historyAvailable = { ...historyAvailable, ...availability };
   }
   type DirtyInfo = { name: string; ts: number; tiddlers: Array<Record<string, string>> };
   let showDirtyModal = false;
@@ -1784,7 +1808,11 @@
   // appearing rows get their answer without re-checking existing ones.
   $: void refreshHistoryAvailability([
     ...recentFiles.map((file) => getEntryName(file)),
-    ...filteredCached.map((entry) => entry.name)
+    ...filteredCached.map((entry) => entry.name),
+    // An instance's rows are the server's rather than this device's, so they are in
+    // neither list above — and the history this client holds for one of them is the
+    // whole of what its row has to add.
+    ...(isSelfHost() ? remoteFiles.map((file) => file.name) : [])
   ]);
 
   async function loadRecent() {
@@ -3078,6 +3106,87 @@
   }
 
   /**
+   * Read each of these Liths and write what it holds into this device's cache.
+   *
+   * One pass, shared by everything that puts a whole list in front of a client at
+   * once: a rebuild, and a folder or an instance whose repository has just been
+   * restored here. Both leave the same gap — the rows are on screen, but nothing on
+   * this machine has read their text, so a search here cannot find them and a row
+   * has no history of its own to report. Sequential on purpose: each read is small
+   * and awaiting between them is what keeps the window responsive. Returns the
+   * names actually written, which is what the callers count and report on.
+   */
+  async function indexLithsHere(rows: CoverageRow[], label: string): Promise<string[]> {
+    const targets: CoverageRow[] = [];
+    const seen = new Set<string>();
+    for (const row of rows) {
+      const key = row.name.toLowerCase();
+      if (!row.name || seen.has(key)) continue;
+      seen.add(key);
+      targets.push(row);
+    }
+
+    const indexed: string[] = [];
+    for (const [position, entry] of targets.entries()) {
+      status = `${label} ${position + 1} of ${targets.length} · ${entry.name}`;
+      try {
+        // Self-host reads through the patch API when it is there, because that read also
+        // answers the digest: a rebuilt cache is then also the copy a later open mounts without
+        // downloading, and one request does both jobs.
+        const remote = !entry.path && mode === 'self-host' && patchApiAvailable
+          ? await fetchRemoteWiki(entry.name)
+          : null;
+        const text = remote
+          ? remote.text
+          : entry.path
+            ? mode === 'tauri' ? await readDiskWikiText(entry.path) : ''
+            : mode === 'self-host' ? await readRemoteWikiText(entry.name) : '';
+        if (text) {
+          await saveSearchCache(entry.name, JSON.stringify(parseLithToJSON(text)));
+          if (remote?.digest) {
+            await rememberFetchedLith(entry.name, { text: remote.text, digest: remote.digest, rev: remote.rev });
+          }
+          indexed.push(entry.name);
+        }
+      } catch {
+        // One unreadable Lith must not abort the rest of the index.
+      }
+    }
+    return indexed;
+  }
+
+  /**
+   * Index a list, then re-ask the two per-row facts indexing just changed.
+   *
+   * Neither is in the text that was written: whether this device holds version
+   * history for a Lith, which is what lets the row offer it at all, and the cached
+   * size the row shows beside its name. Both were asked when the row appeared and
+   * answered from the store these reads are what fill — so a pass that does not ask
+   * again leaves every row it just filled unable to say so.
+   */
+  async function indexRowsHere(rows: CoverageRow[], label: string): Promise<number> {
+    const indexed = await indexLithsHere(rows, label);
+    await updateCacheMatches(search);
+    await rereadHistoryAvailability(indexed);
+    await refreshBackupCoverage();
+    return indexed.length;
+  }
+
+  /**
+   * The same pass, for a list a setup has just restored, run without holding its
+   * caller. The point of connecting a folder or an instance is to have its Liths in
+   * front of you now, and reading every one of them is not part of answering that —
+   * so the rows land first and the index catches up behind them.
+   */
+  async function indexRestoredLiths(rows: CoverageRow[]): Promise<void> {
+    if (rows.length === 0) return;
+    const indexed = await indexRowsHere(rows, 'Indexing');
+    status = indexed > 0
+      ? `Indexed ${indexed} lith${indexed === 1 ? '' : 's'} for search here`
+      : 'Nothing new to index';
+  }
+
+  /**
    * Re-index instead of forgetting.
    *
    * Where the recent list is derived rather than authored — the desktop app's
@@ -3173,48 +3282,11 @@
       }
 
       // Pass 2: rebuild each wiki's searchable cache from the file itself.
-      // Sequential on purpose: each read is small and awaiting between them is
-      // what keeps the window responsive.
       const targets: CoverageRow[] = [];
-      const seen = new Set<string>();
-      const addTarget = (entry: CoverageRow) => {
-        const key = entry.name.toLowerCase();
-        if (!entry.name || seen.has(key)) return;
-        seen.add(key);
-        targets.push(entry);
-      };
-      if (isSelfHost()) for (const file of remoteFiles) addTarget({ name: file.name, path: null });
-      else for (const row of recentRows()) if (row.path) addTarget(row);
+      if (isSelfHost()) for (const file of remoteFiles) targets.push({ name: file.name, path: null });
+      else for (const row of recentRows()) if (row.path) targets.push(row);
 
-      let indexed = 0;
-      for (const [position, entry] of targets.entries()) {
-        status = `Re-indexing ${position + 1} of ${targets.length} · ${entry.name}`;
-        try {
-          // Self-host reads through the patch API when it is there, because that read also
-          // answers the digest: a rebuilt cache is then also the copy a later open mounts without
-          // downloading, and one request does both jobs.
-          const remote = !entry.path && mode === 'self-host' && patchApiAvailable
-            ? await fetchRemoteWiki(entry.name)
-            : null;
-          const text = remote
-            ? remote.text
-            : entry.path
-              ? mode === 'tauri' ? await readDiskWikiText(entry.path) : ''
-              : mode === 'self-host' ? await readRemoteWikiText(entry.name) : '';
-          if (text) {
-            await saveSearchCache(entry.name, JSON.stringify(parseLithToJSON(text)));
-            if (remote?.digest) {
-              await rememberFetchedLith(entry.name, { text: remote.text, digest: remote.digest, rev: remote.rev });
-            }
-            indexed += 1;
-          }
-        } catch {
-          // One unreadable Lith must not abort the rest of the rebuild.
-        }
-      }
-
-      await updateCacheMatches(search);
-      await refreshBackupCoverage();
+      const indexed = await indexRowsHere(targets, 'Re-indexing');
       status = indexed > 0
         ? `Re-indexed ${indexed} lith${indexed === 1 ? '' : 's'}`
         : 'Nothing new to index';
@@ -4980,6 +5052,31 @@
                   when the store does not report it, rather than shown as a zero.
                 -->
                 <button class="recent-name" title="Open from this server" on:click={() => openRemoteFile(file.name)}>{file.name}{#if file.sizeBytes !== null}<span class="cached-size">{formatLithSize(file.sizeBytes)}</span>{/if}</button>
+                <!--
+                  The one fact about a Lith in a store that only this client can tell you:
+                  what *it* has read of that Lith, and when. Same control, same place and the
+                  same meaning as on this device's own rows, drawn only where there is
+                  something behind it — a Lith nothing here has indexed has no versions, and a
+                  button that opens an empty dialog is worse than none. Which is why an
+                  instance's rows are bare until a rebuild has read the store.
+                -->
+                {#if dirtyEntries[file.name] || historyAvailable[file.name]}
+                  <button
+                    class="recent-icon-button cache-history-button"
+                    class:modified={Boolean(dirtyEntries[file.name])}
+                    type="button"
+                    disabled={!cachedEntries[file.name]}
+                    aria-label={`Show version history for ${file.name}`}
+                    title={dirtyEntries[file.name] ? `Unsaved edits from ${new Date(dirtyEntries[file.name]).toLocaleString()}` : 'Show version history'}
+                    on:click={() => openHistoryModal(file.name)}
+                  >
+                    {#if dirtyEntries[file.name]}
+                      <svg class="history-download-icon modified" viewBox="56 108 33 36" aria-hidden="true"><path class="history-icon-shape" d="m 73.595508,109.76746 c -7.198235,0 -13.103617,5.58342 -13.647229,12.64471 h -0.0072 V 138.2696 H 58.61606 l 2.32389,4.02559 2.324405,-4.02559 h -1.323433 v -15.85123 c 0.530186,-5.97937 5.534806,-10.65103 11.654586,-10.65103 6.474618,0 11.703161,5.22855 11.703161,11.70316 0,6.47462 -5.228543,11.70161 -11.703161,11.70161 -2.644513,0 -5.080809,-0.87232 -7.037814,-2.34508 v 2.39572 c 2.058162,1.23707 4.46633,1.94924 7.037814,1.94924 7.555498,0 13.703556,-6.14599 13.703556,-13.70149 0,-7.5555 -6.148058,-13.70304 -13.703556,-13.70304 z"></path><path class="history-icon-mark" d="M72.3 116h2.6v9h-2.6z"></path><circle class="history-icon-mark" cx="73.6" cy="128.4" r="1.6"></circle></svg>
+                    {:else}
+                      <svg class="history-download-icon" viewBox="56 108 33 36" aria-hidden="true"><path class="history-icon-shape" d="m 73.595508,109.76746 c -7.198235,0 -13.103617,5.58342 -13.647229,12.64471 h -0.0072 V 138.2696 H 58.61606 l 2.32389,4.02559 2.324405,-4.02559 h -1.323433 v -15.85123 c 0.530186,-5.97937 5.534806,-10.65103 11.654586,-10.65103 6.474618,0 11.703161,5.22855 11.703161,11.70316 0,6.47462 -5.228543,11.70161 -11.703161,11.70161 -2.644513,0 -5.080809,-0.87232 -7.037814,-2.34508 v 2.39572 c 2.058162,1.23707 4.46633,1.94924 7.037814,1.94924 7.555498,0 13.703556,-6.14599 13.703556,-13.70149 0,-7.5555 -6.148058,-13.70304 -13.703556,-13.70304 z m -2.108915,7.49825 v 8.05016 h 7.125663 v -1.59836 h -5.527311 v -6.4518 z"></path></svg>
+                    {/if}
+                  </button>
+                {/if}
                 <!--
                   The × the legacy store carried on every remote row, kept: on an instance
                   the launcher's list is the store, and a Lith that can only be added is a
