@@ -12,6 +12,7 @@
   import { readBookmarkEntries, saveBookmark, removeBookmark, setBookmarkIcon, refreshBookmarkIcon, verifyInstanceUrl, normalizeInstanceUrl, instanceLabel, type BookmarkEntry, type InstanceVerification } from './bookmarks';
   import { LOGIN_CHECK_LABELS, askInstanceAboutLogin, loginVerdict, loginVerdictFromError, typedLoginCheck, type LoginCheckState, type LoginVerdict } from './login-check';
   import { copyDropNote, forgetInstanceCopy } from './instance-copy';
+  import { offlineMode, looksUnreachable, OFFLINE_TITLE, OFFLINE_BODY, OFFLINE_ROW_MARK_TITLE, OFFLINE_ROW_OPEN_TITLE } from './offline-mode';
   import PinEntry from './PinEntry.svelte';
   import { deleteRemoteFile, fetchRemoteFiles, fetchRemoteWiki, fetchRemoteWikiMeta, probePatchApi, createLockHeartbeat, readRemoteLock, uploadRemoteFile, webdavUrl, resolveSessionId, lithUploadName, type WebdavFile } from './webdav';
   import { normalizeLithName } from './legacy-saver';
@@ -101,6 +102,14 @@
   let remoteBusy = false;
   let remoteError = '';
   let remoteNotice = '';
+  /**
+   * Offline mode's two inputs: whether this browser still has a network, and whether
+   * this instance failed to answer as a network fault rather than with a refusal. Only a
+   * cached self-host launcher can be offline, so both are read by `offline-mode.ts` and
+   * the result is what the banner and the list below read.
+   */
+  let online = typeof navigator === 'undefined' ? true : navigator.onLine;
+  let remoteUnreachable = false;
   let patchApiAvailable = false;
   let activeRemote: { name: string; digest: string; api: boolean } | null = null;
   // Set when the server reports a live lock held by someone else: the open is
@@ -997,7 +1006,13 @@
    */
   function startServerSyncPolling(): void {
     if (serverSyncStatusTimer || !isSelfHost()) return;
-    serverSyncStatusTimer = setInterval(() => void refreshServerSyncStatus(false), 15_000);
+    serverSyncStatusTimer = setInterval(() => {
+      void refreshServerSyncStatus(false);
+      // The other way back out of offline mode. A lost network announces itself, so the
+      // `online` listener below catches that; an instance that was merely down does not,
+      // and one List read is what says whether it is up again. Same interval, one request.
+      if (remoteUnreachable && navigator.onLine) void refreshRemoteList();
+    }, 15_000);
   }
 
   /**
@@ -1544,6 +1559,29 @@
   // Self-host: the server's own Liths are the primary list, filtered by the
   // same search box as the local recents.
   $: filteredRemote = remoteFiles.filter((file) => file.name.toLowerCase().includes(search.toLowerCase()));
+
+  /**
+   * Whether this cached self-host launcher is in offline mode — see `offline-mode.ts`
+   * for why only this one mode has the state. Read by the banner above the list and by
+   * the list itself, so the two can never disagree about which launcher is on screen.
+   */
+  $: offlineLauncher = offlineMode(mode, online, remoteUnreachable);
+
+  /**
+   * The rows an offline launcher lists: the Liths this device already holds a copy of,
+   * which are the only ones that can be opened without the instance.
+   *
+   * By name rather than by date: with no server there is nothing to order by, and the
+   * server's order would change under the reader the moment it answered. Every row is a
+   * copy this device took, so the set is `cachedEntries` — the same store the online
+   * list already reads for its sizes and its search — and nothing new is fetched to
+   * build it, which is the whole point of a mode with no network.
+   */
+  $: offlineRows = offlineLauncher
+    ? Object.values(cachedEntries)
+        .filter((entry) => entry.name.toLowerCase().includes(search.trim().toLowerCase()))
+        .sort((a, b) => a.name.localeCompare(b.name))
+    : [];
 
   /**
    * Bookmark rows to draw: the address matches, *or* the instance holds a cached wiki
@@ -2274,9 +2312,17 @@
     try {
       patchApiAvailable = await probePatchApi();
       remoteFiles = await fetchRemoteFiles();
+      remoteUnreachable = false;
     } catch (error) {
       remoteFiles = [];
-      remoteError = `Could not list this server’s Liths (${error instanceof Error ? error.message : String(error)}).`;
+      // Nothing answered: that is offline mode, and the banner says why better than a
+      // raw fetch error can, so the error line stands down and the list below becomes
+      // this device's own. A refusal is the opposite case -- the instance is talking to
+      // us -- and keeps its message, which is the only thing that explains it.
+      remoteUnreachable = looksUnreachable(error);
+      remoteError = remoteUnreachable || !online
+        ? ''
+        : `Could not list this server’s Liths (${error instanceof Error ? error.message : String(error)}).`;
     } finally {
       remoteBusy = false;
     }
@@ -3254,6 +3300,19 @@
     };
     window.addEventListener('keydown', closeOnEscape);
 
+    // Offline mode's live half. The browser is the only side that knows the network
+    // went, and it announces both directions, so the state is never a guess made once at
+    // boot. Coming back is also when the server's list is worth reading again: it is the
+    // read that failed to put us here.
+    const onConnectionChange = () => {
+      online = navigator.onLine;
+      if (!online) return;
+      remoteUnreachable = false;
+      if (isSelfHost()) void refreshRemoteList();
+    };
+    window.addEventListener('online', onConnectionChange);
+    window.addEventListener('offline', onConnectionChange);
+
     // --- Drag and drop (legacy parity) ---
     const onDragOver = (event: DragEvent) => {
       event.preventDefault();
@@ -3308,6 +3367,8 @@
 
     return () => {
       window.removeEventListener('keydown', closeOnEscape);
+      window.removeEventListener('online', onConnectionChange);
+      window.removeEventListener('offline', onConnectionChange);
       window.removeEventListener('dragover', onDragOver);
       window.removeEventListener('dragenter', onDragEnter);
       window.removeEventListener('dragleave', onDragLeave);
@@ -3700,10 +3761,14 @@
    * "no Liths yet" would be a second, wrong answer to the same question.
    */
   $: listEmpty = mode === 'self-host'
-    ? filteredRemote.length === 0 && !remoteBusy && !remoteError
+    ? (offlineLauncher
+        ? offlineRows.length === 0
+        : filteredRemote.length === 0 && !remoteBusy && !remoteError)
     : filteredRecent.length === 0 && filteredCached.length === 0 && filteredRemote.length === 0 && filteredBookmarks.length === 0;
   $: emptyMessage = mode === 'self-host'
-    ? (search.trim() ? 'No matching Liths.' : 'No Liths on this server yet.')
+    ? (offlineLauncher
+        ? (search.trim() ? 'No matching Liths.' : 'No Liths from this instance on this device yet.')
+        : (search.trim() ? 'No matching Liths.' : 'No Liths on this server yet.'))
     : (search.trim() ? 'No matching Liths.' : 'No recent Liths.');
 
   async function openBookmarkedInstance(url: string, query = '') {
@@ -4020,8 +4085,8 @@
           {#if activeRemote}<span class="remote-file">{activeRemote.name}</span>{/if}
         </div>
       {/if}
-      {#if remoteNotice}<div class="status-line">{remoteNotice}</div>{/if}
-      {#if remoteError}<div class="status-line error" role="alert">{remoteError}</div>{/if}
+      {#if remoteNotice && !offlineLauncher}<div class="status-line">{remoteNotice}</div>{/if}
+      {#if remoteError && !offlineLauncher}<div class="status-line error" role="alert">{remoteError}</div>{/if}
       {#if status}<div class="status-line" role="status"><span class="status-label">{status.replace(/[…\.\s]+$/, '')}</span><span class="activity-dots" aria-hidden="true"><i></i><i></i><i></i></span></div>{/if}
       {#if mountError}<div class="status-line error" role="alert">{mountError}</div>{/if}
     </div>
@@ -4037,6 +4102,24 @@
     {#if mode === 'webapp'}<button class="help-button" aria-label="View Introduction" title="View Introduction" on:click={openIntro}>{introBusy ? '…' : '?'}</button>{:else if mode === 'tauri' || isSelfHost()}<button class="sync-button {headingSyncState}" aria-label="GitHub Sync" title={headingSyncTitle} on:click={openGitSyncModal}><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 17.6A5 5 0 0 0 18 8h-1.3A8 8 0 1 0 4 16.3"/><path d="M12 12v9"/><path d="m8.5 15.5 3.5-3.5 3.5 3.5"/></svg>{#if headingSyncState === 'checking'}<span class="sync-glyph ring" aria-hidden="true"></span>{:else if headingSyncState === 'error'}<span class="sync-glyph alert" aria-hidden="true">!</span>{:else if headingSyncState === 'connected'}<span class="sync-glyph dot" aria-hidden="true"></span>{/if}</button>{/if}
     </div>
   </header>
+  <!--
+    Offline mode's global line, above everything the mode changes rather than inside the
+    list it replaces: "the rows below are this device's copies, not the server's" is a fact
+    about the launcher, and one line covering the whole screen is what stops it having to
+    be said again on every row. The rows still carry their own mark — the exclamation
+    the unfinished states already use — because which Lith is currently local-only is a
+    per-row answer; only the reason is global. Only a cached self-host launcher reaches
+    this (see offline-mode.ts).
+  -->
+  {#if offlineLauncher}
+    <div class="offline-banner" role="status">
+      <svg class="offline-banner-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3 2 20h20Z"/><path d="M12 10v4.5"/><path d="M12 17.3v.2"/></svg>
+      <div class="offline-banner-copy">
+        <strong>{OFFLINE_TITLE}</strong>
+        <span>{OFFLINE_BODY}</span>
+      </div>
+    </div>
+  {/if}
   {#if pendingImports.length > 0}
     <div class="pending-imports" role="status" aria-label="Pending imports">
       <div class="pending-imports-header">
@@ -4720,35 +4803,54 @@
       </div>
       <div class="recent-list">
         {#if isSelfHost()}
-          {#if remoteBusy && remoteFiles.length === 0}
-            <p class="empty">Reading this server’s Liths…</p>
+          {#if offlineLauncher}
+            <!--
+              The same rows the online list draws, taken from this device instead of the
+              server, because these are the only Liths that can be opened now. Each keeps
+              the mark the unfinished rows already carry -- the history icon with an
+              exclamation -- which is the per-row half of what the banner above says: this
+              Lith is currently local only. Clicking mounts the copy read-only, and the
+              dialog behind the mark is where a real file can be taken from it.
+            -->
+            {#each offlineRows as entry (entry.name)}
+              <div class="recent-row offline-row">
+                <button class="recent-name" title={OFFLINE_ROW_OPEN_TITLE} on:click={() => void openCachedEntry(entry)}>{entry.name}<span class="cached-size">{formatCacheSize(entry.sizeBytes)}</span></button>
+                <button class="recent-icon-button cache-history-button modified" type="button" title={OFFLINE_ROW_MARK_TITLE} aria-label={`Show version history for ${entry.name}`} on:click={() => openHistoryModal(entry.name)}>
+                  <svg class="history-download-icon modified" viewBox="56 108 33 36" aria-hidden="true"><path class="history-icon-shape" d="m 73.595508,109.76746 c -7.198235,0 -13.103617,5.58342 -13.647229,12.64471 h -0.0072 V 138.2696 H 58.61606 l 2.32389,4.02559 2.324405,-4.02559 h -1.323433 v -15.85123 c 0.530186,-5.97937 5.534806,-10.65103 11.654586,-10.65103 6.474618,0 11.703161,5.22855 11.703161,11.70316 0,6.47462 -5.228543,11.70161 -11.703161,11.70161 -2.644513,0 -5.080809,-0.87232 -7.037814,-2.34508 v 2.39572 c 2.058162,1.23707 4.46633,1.94924 7.037814,1.94924 7.555498,0 13.703556,-6.14599 13.703556,-13.70149 0,-7.5555 -6.148058,-13.70304 -13.703556,-13.70304 z"></path><path class="history-icon-mark" d="M72.3 116h2.6v9h-2.6z"></path><circle class="history-icon-mark" cx="73.6" cy="128.4" r="1.6"></circle></svg>
+                </button>
+              </div>
+            {/each}
+          {:else}
+            {#if remoteBusy && remoteFiles.length === 0}
+              <p class="empty">Reading this server’s Liths…</p>
+            {/if}
+            <!--
+              The server's files, and nothing else, with no group heading over them and no
+              marker beside them: both existed to separate these rows from this device's own,
+              and in this mode there are no others to separate them from. The list is the
+              store; a Lith somewhere on this machine belongs to the mode that owns that
+              machine.
+            -->
+            {#each filteredRemote as file (file.name)}
+              <div class="recent-row remote-row">
+                <!--
+                  The row's suffix is the file's size on the server, not its date: on this
+                  list the dates of a store are its least interesting fact (the server
+                  commits constantly, so they all read "today"), while the size is the one
+                  thing a name cannot tell you about a Lith you are about to open. Absent
+                  when the store does not report it, rather than shown as a zero.
+                -->
+                <button class="recent-name" title="Open from this server" on:click={() => openRemoteFile(file.name)}>{file.name}{#if file.sizeBytes !== null}<span class="cached-size">{formatLithSize(file.sizeBytes)}</span>{/if}</button>
+                <!--
+                  The × the legacy store carried on every remote row, kept: on an instance
+                  the launcher's list is the store, and a Lith that can only be added is a
+                  store nobody can tidy. It asks first, because this one deletes the file
+                  every reader of the instance opens rather than a copy of it held here.
+                -->
+                <button class="recent-icon-button remove-recent remove-remote" type="button" aria-label={`Delete ${file.name} from this server`} title="Delete from remote storage" on:click={() => removeRemoteLith(file.name)}><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m7 7 10 10M17 7 7 17"></path></svg></button>
+              </div>
+            {/each}
           {/if}
-          <!--
-            The server's files, and nothing else, with no group heading over them and no
-            marker beside them: both existed to separate these rows from this device's own,
-            and in this mode there are no others to separate them from. The list is the
-            store; a Lith somewhere on this machine belongs to the mode that owns that
-            machine.
-          -->
-          {#each filteredRemote as file (file.name)}
-            <div class="recent-row remote-row">
-              <!--
-                The row's suffix is the file's size on the server, not its date: on this
-                list the dates of a store are its least interesting fact (the server
-                commits constantly, so they all read "today"), while the size is the one
-                thing a name cannot tell you about a Lith you are about to open. Absent
-                when the store does not report it, rather than shown as a zero.
-              -->
-              <button class="recent-name" title="Open from this server" on:click={() => openRemoteFile(file.name)}>{file.name}{#if file.sizeBytes !== null}<span class="cached-size">{formatLithSize(file.sizeBytes)}</span>{/if}</button>
-              <!--
-                The × the legacy store carried on every remote row, kept: on an instance
-                the launcher's list is the store, and a Lith that can only be added is a
-                store nobody can tidy. It asks first, because this one deletes the file
-                every reader of the instance opens rather than a copy of it held here.
-              -->
-              <button class="recent-icon-button remove-recent remove-remote" type="button" aria-label={`Delete ${file.name} from this server`} title="Delete from remote storage" on:click={() => removeRemoteLith(file.name)}><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m7 7 10 10M17 7 7 17"></path></svg></button>
-            </div>
-          {/each}
         {/if}
         {#if listEmpty}
           <p class="empty">{emptyMessage}</p>
@@ -4927,8 +5029,13 @@
         though the list is the server's: re-reading the store is also what indexes each of
         its Liths here, and that index is what search reads. Reset is not kept — the list
         is not this device's to clear, and re-reading it is the rebuild it already has.
+
+        Offline mode gets neither, and there the rebuild is not merely unhelpful: reading
+        the server again is the very thing that just failed, so a click could only repaint
+        an error beside the banner that already explains it. The rows it would index are
+        the ones on screen, which is the whole of what this mode is.
       -->
-      {#if !indexDbOnly}
+      {#if !indexDbOnly && !offlineLauncher}
         {#if showRebuildControl}
           <button class="reset-cache" on:click={rebuildRecents} disabled={rebuildBusy} title={isSelfHost() ? 'Read this server again and index its Liths here' : 'Rebuild this list from the files on disk'}>{
             rebuildBusy ? 'Re-indexing…' : 'Rebuild Recents'

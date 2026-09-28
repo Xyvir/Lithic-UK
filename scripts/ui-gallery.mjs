@@ -153,6 +153,26 @@ const diskRow = (name, folder = 'C:\\liths') => ({ name, path: `${folder}\\${nam
 /** A tiddler snapshot, so a cached Lith has searchable content without a mount. */
 const cache = (tiddlers) => ({ text: JSON.stringify(tiddlers) });
 
+/**
+ * A cached Lith's body of a given size.
+ *
+ * An offline row's size column is `formatCacheSize` over this text's own length, so a
+ * fixture of a few words photographs `<0.01 MB` three times over and says nothing about
+ * what the state looks like with real Liths in it.
+ */
+const cachedLith = (kilobytes) => cache([{ title: 'Body', text: 'x'.repeat(kilobytes * 1024) }]);
+
+/**
+ * Offline mode's list: this device's copies of three of the instance's own Liths, one of
+ * them big enough to be worth backing up. The state's whole change is which list is on
+ * screen, so the pane is about the rows and the line above them, not the files.
+ */
+const OFFLINE_CACHES = {
+  'search_cache_keeper-notes.lith': cachedLith(48),
+  'search_cache_scratchpad.lith': cachedLith(212),
+  'search_cache_trip-2026.lith': cachedLith(1400)
+};
+
 /** One recorded version, which is what puts the history/download icon on a row. */
 const history = (ts = SAVED_AT) => ({ headId: 'v1', versions: [{ id: 'v1', ts, sizeBytes: 120, isBase: true }] });
 
@@ -472,6 +492,26 @@ async function typeOfferedLogin(page, waitMs) {
   await settle(page, waitMs);
 }
 
+/**
+ * Take this page's network away, the way a lost connection does.
+ *
+ * Chrome's own emulation, rather than the page being told it is offline: `navigator.onLine`
+ * flips, the `offline` event fires, and every request the page makes afterwards fails at
+ * the network instead of with a status. Those are the two inputs offline mode is decided
+ * from (see `offline-mode.ts`), so what the pane photographs is the state rather than a
+ * fixture standing in for it.
+ */
+async function goOffline(page) {
+  // Settled first, because what the state is *missing* is part of it: the instance icon
+  // is read over the network at boot, so taking the network away too early loses it — and
+  // the same pane then photographs with an icon or without one depending on the run.
+  // Everything this page has to say it says within this wait, and afterwards it can only
+  // say less.
+  await settle(page, 400);
+  await page.emulateNetworkConditions({ offline: true, download: 0, upload: 0, latency: 0 });
+  await settle(page, 500);
+}
+
 /** Open a bookmarked instance by its label, the way a cursor would. */
 async function openBookmark(page, label) {
   await page.evaluate((text) => {
@@ -607,6 +647,21 @@ const SHEETS = [
           await settle(page, 300);
         },
         expect: '.emoji-btn.selected'
+      },
+      {
+        // Offline mode at the width where it costs the most: the line above the list takes
+        // a row's worth of screen off a phone, and the amber rows below it are the reason
+        // the trade is worth taking — they are the only Liths that can be opened at all.
+        // The page itself arrived over http from the stand-in instance, so what the network
+        // going away leaves behind is a launcher that really was somebody's instance — and
+        // the copies in its rows are the only ones it can still open.
+        name: '090-offline-cached',
+        view: 'phone',
+        mode: 'self-host',
+        server: true,
+        seed: { caches: OFFLINE_CACHES },
+        drive: goOffline,
+        expect: '.offline-banner'
       }
     ]
   },
@@ -676,9 +731,10 @@ const SHEETS = [
         expect: '.cache-history-button.modified'
       },
       {
-        // Honest about what this is: no server is reachable over `file://`, so this
-        // is the self-host *chrome* — no bookmark tile, the mark as a live control,
-        // the list's empty state — not a populated instance.
+        // Honest about what this is: no server is reachable over `file://`, so this is the
+        // self-host *chrome* — no bookmark tile, the mark as a live control — and, since the
+        // List read can only fail here, offline mode with nothing cached for it to list. The
+        // panes that shoot that state with copies to show are 090 and 270.
         name: '250-self-host-chrome',
         view: 'wide',
         mode: 'self-host',
@@ -783,6 +839,20 @@ const SHEETS = [
           await settle(page, 300);
         },
         expect: '.cache-history-button.modified'
+      },
+      {
+        // The same state at the width the footer leaves, which is where the sizes, the
+        // read-only marks and the sentence above them are all readable at once. The list
+        // is this device's copies of the instance's own three Liths: what the server's
+        // rows look like is pane 251, and the difference between the two pictures is the
+        // whole of the mode.
+        name: '270-offline-cached',
+        view: 'wide',
+        mode: 'self-host',
+        server: true,
+        seed: { caches: OFFLINE_CACHES },
+        drive: goOffline,
+        expect: '.offline-banner'
       }
     ]
   },

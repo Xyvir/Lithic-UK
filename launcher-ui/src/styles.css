@@ -1310,6 +1310,53 @@ body.drag-over::after {
 /* "2 of 5 saved" — the line that says when Proceed is safe. */
 .orphan-progress { margin: 10px 0 0; color: #9ede94; font-size: 0.8rem; text-align: center; }
 
+/* --- Offline mode: a cached self-host launcher whose instance is out of reach --- */
+/*
+ * The one global notice the launcher ever draws. A saved self-host launcher whose instance
+ * cannot be answered is a different launcher from the same page online — its list is this
+ * device's copies rather than the server's — and that is a fact about the screen, so it is
+ * said once at the top instead of on each row. Amber is deliberately the same tone a row's
+ * unfinished mark uses (`#e0b347`): the banner and the exclamations are two halves of one
+ * fact, and giving the global half its own colour would read as a second problem.
+ *
+ * Drawn as a sibling of the heading rather than inside it, so it cannot move the mark, the
+ * title or the heading's own buttons, which are the same three things in every mode. It
+ * takes a line off the list on a phone, which is the trade a mode notice is worth.
+ */
+.offline-banner {
+  display: flex;
+  align-items: flex-start;
+  gap: 9px;
+  margin: 0 0 12px;
+  padding: 9px 12px;
+  border: 1px solid rgb(224 179 71 / 45%);
+  border-radius: 7px;
+  background: rgb(224 179 71 / 10%);
+  color: #e0b347;
+}
+.offline-banner-icon {
+  flex: 0 0 18px;
+  width: 18px;
+  height: 18px;
+  margin-top: 1px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.7;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+.offline-banner-copy { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
+.offline-banner-copy strong { color: #f0d585; font-size: 0.86rem; font-weight: 600; line-height: 1.25; }
+.offline-banner-copy span { color: #d9c48a; font-size: 0.78rem; line-height: 1.35; }
+/*
+ * A phone gets that line one notch smaller, because there it was the widest thing in the
+ * banner: at the desktop size it wrapped under a one-line heading and read as a paragraph
+ * rather than as one statement (measured: two lines at 390px, one at 0.7rem).
+ */
+@media (max-width: 600px) {
+  .offline-banner-copy span { font-size: 0.7rem; }
+}
+
 /* --- Self-host: the open remote Lith and the server's list ---------------- */
 .remote-line { display: flex; align-items: center; gap: 8px; margin-top: 2px; min-width: 0; }
 /* The heading line's only child, and the whole of what the heading says beyond the

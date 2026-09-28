@@ -58,9 +58,16 @@ const ASSETS_TO_CACHE = [
 self.addEventListener('install', (event) => {
   self.skipWaiting();
   event.waitUntil(
-    caches.open(CACHE_NAME).then((cache) => {
+    caches.open(CACHE_NAME).then(async (cache) => {
       console.log('[SW] Pre-caching core assets');
-      return cache.addAll(ASSETS_TO_CACHE);
+      // One asset at a time rather than `cache.addAll`, which rejects as a whole: a
+      // deployment missing any single file (a public dir that never got one icon, an
+      // engine served from somewhere else) used to install a worker with an empty cache
+      // and no way to tell. This cache is the only thing that can answer once the server
+      // is down, so losing all of it to one 404 is losing offline mode itself.
+      const missed = [];
+      await Promise.all(ASSETS_TO_CACHE.map((path) => cache.add(path).catch(() => missed.push(path))));
+      if (missed.length > 0) console.warn('[SW] Pre-cache missed:', missed.join(', '));
     })
   );
 });
@@ -187,6 +194,19 @@ self.addEventListener('fetch', function (event) {
         return await fetch(event.request);
       } catch (error) {
         console.log('Offline fetch failed for:', event.request.url);
+        // A navigation with no cache entry of its own is the launcher handed over with
+        // annotations on its address: `?mode=self-host&lithic-from=…` (see
+        // `withLauncherHandoff`), and `?q=…` when the handover is a search. Cache keys are
+        // whole URLs, so the document itself is not found, and the network that would
+        // serve it is what just failed — which left a bookmarked instance that is down
+        // showing a bare "Offline" page instead of the launcher it was told to open, with
+        // no offline mode and no way back. The same path without the query is what was
+        // precached, so this asks for it by path alone: those annotations name who handed
+        // the page over, never which document was asked for.
+        if (event.request.mode === 'navigate') {
+          const shell = await caches.match(event.request, { ignoreSearch: true });
+          if (shell) return shell;
+        }
         return new Response('Offline', { status: 408, statusText: 'Offline' });
       }
     })()

@@ -456,8 +456,9 @@ try {
   await selfHostPage.setViewport({ width: 1000, height: 700 });
   // Seeded on this page's own origin before the mode is asked for, so the assertions below
   // have something that *could* have been drawn: a recent row, a cache-only row and a
-  // bookmark, all of which belong to the device rather than to the server. Self-host shows
-  // none of them, and the only way to see that it does not is to give it all three. The
+  // bookmark, all of which belong to the device rather than to the server. A launcher whose
+  // instance cannot answer draws exactly one of the three — the cached copy, which is the
+  // only one it can open — so the count below is only meaningful with all three seeded. The
   // bookmark carries its icon, so nothing here reaches the network: an unfetched favicon
   // would be a fetch this test then has to explain.
   await selfHostPage.goto(`file://${artifact}`, { waitUntil: 'domcontentloaded' });
@@ -511,20 +512,28 @@ try {
       syncLabel: document.querySelector('.heading .sync-button')?.getAttribute('aria-label') ?? null,
       syncTitle: document.querySelector('.heading .sync-button')?.getAttribute('title') ?? null,
       syncGlyph: document.querySelector('.heading .sync-button .sync-glyph')?.textContent?.trim() ?? null,
-      // The device's own rows, none of which this mode draws — seeded above, so each of
-      // these counts would be non-zero without the gate that keeps them off this list.
+      // The device's own rows. Seeded above, so each count would be non-zero without the
+      // gate that decides which of them belongs on the server's list — and one of them
+      // does: a copy this device took is the only row a page with no instance can offer.
       bookmarkRows: document.querySelectorAll('.bookmark-row').length,
       localRows: document.querySelectorAll('.recent-row:not(.remote-row)').length,
       cachedRows: document.querySelectorAll('.cached-result').length,
+      // Offline mode's own line, and the two claims the rows carry (see `offline-mode.ts`).
+      offlineHeading: document.querySelector('.offline-banner strong')?.textContent?.trim() ?? null,
+      offlineBody: document.querySelector('.offline-banner span')?.textContent?.trim() ?? null,
+      offlineRowName: document.querySelector('.recent-row.offline-row .recent-name')?.textContent?.trim() ?? null,
+      offlineRowTitle: document.querySelector('.recent-row.offline-row .recent-name')?.getAttribute('title') ?? null,
+      offlineMarkTitle: document.querySelector('.recent-row.offline-row .cache-history-button')?.getAttribute('title') ?? null,
       // The server's rows, and the two decorations that used to separate them from the
       // device's: a group heading and a marker per row. With no other rows there is
       // nothing to separate them from.
       groupLabels: document.querySelectorAll('.recent-group-label').length,
       remoteDots: document.querySelectorAll('.remote-dot').length,
-      // The rebuild control, which this mode keeps: the list is the server's, but the
-      // caches it repairs are this device's, and reading the store again is also what
-      // indexes it here. Reset is the half that does not belong to a list this device
-      // does not own.
+      // The rebuild control, which online is this mode's to keep: the list is the server's,
+      // but the caches it repairs are this device's, and reading the store again is also
+      // what indexes it here. Reset is the half that does not belong to a list this device
+      // does not own. Offline it goes too, because re-reading the server is the thing that
+      // just failed.
       resetCache: document.querySelector('.reset-cache') !== null,
       rebuildLabel: [...document.querySelectorAll('button')].map(button => button.textContent?.trim()).find(text => text?.includes('Rebuild')) ?? null,
       empty: document.querySelector('.empty')?.textContent?.trim() ?? null,
@@ -559,14 +568,26 @@ try {
   );
   assert.equal(selfHost.syncGlyph, '!', 'Self-host: the failure carries a non-colour badge too');
   assert.equal(selfHost.bookmarkRows, 0, 'Self-host: bookmarks for other instances are not on this list');
-  assert.equal(selfHost.localRows, 0, 'Self-host: this device\'s own Liths are not on this list');
-  assert.equal(selfHost.cachedRows, 0, 'Self-host: neither are this device\'s cached copies');
+  // The three seeded rows, and which of them this state draws. The recent row is a name
+  // with no cached wiki behind it and the bookmark is an address rather than a file, so
+  // neither is a copy this device could open — the cache-only entry is the whole list.
+  assert.equal(selfHost.localRows, 1, `Self-host: the list is this device\'s copies: ${JSON.stringify(selfHost)}`);
+  assert.match(selfHost.offlineRowName ?? '', /^cache-only\.lith/, 'Self-host: named rather than ordered, there being no server left to order by');
+  assert.equal(selfHost.cachedRows, 0, 'Self-host: and its own search panel is not a second copy of them');
   assert.equal(selfHost.groupLabels, 0, 'Self-host: no group heading, because there is no second group');
   assert.equal(selfHost.remoteDots, 0, 'Self-host: the server\'s rows carry no marker');
-  assert.equal(selfHost.resetCache, true, 'Self-host: the rebuild control stays, since the caches it rebuilds are this device\'s');
-  assert.equal(selfHost.rebuildLabel, 'Rebuild Recents', 'Self-host: and it is offered as the rebuild rather than as a reset');
+  assert.equal(selfHost.resetCache, false, 'Self-host: nothing offers to read a server that cannot answer');
+  assert.equal(selfHost.rebuildLabel, null, 'Self-host: so the rebuild is not drawn at all');
   assert.equal(selfHost.empty, null, 'Self-host: a failed list says the failure, not that the server is empty');
-  assert.match(selfHost.error ?? '', /^Could not list this server’s Liths/, 'Self-host: the failure is the one line about the list');
+  assert.equal(selfHost.error, null, 'Self-host: and the failure is the banner rather than a status line');
+  assert.equal(selfHost.offlineHeading, 'Server unreachable', `Self-host: the banner names the cause: ${JSON.stringify(selfHost.offlineHeading)}`);
+  assert.match(
+    selfHost.offlineBody ?? '',
+    /saved copies.*read-only/,
+    'Self-host: and says whose list this is and what opening one does'
+  );
+  assert.equal(selfHost.offlineRowTitle, 'Open this device’s copy read-only', 'Self-host: the row says what clicking it does');
+  assert.equal(selfHost.offlineMarkTitle, 'Only on this device while offline.', 'Self-host: and the mark says why it is marked');
 
   // The backup dialog, opened from that button. What is asserted here is that the
   // *dialog* speaks about a server rather than a folder, and that the two things
@@ -1530,6 +1551,77 @@ try {
   );
   await proxyContext.close();
   await proxyStub.close();
+
+  // --- The bookmark handover, on an instance that has gone away ----------------
+  // What the app does when a bookmark is clicked: it hands this window to the instance with
+  // its annotations on the address (`?mode=self-host&lithic-from=…`, see
+  // `withLauncherHandoff`). Once the server is gone the instance's own worker is the only
+  // thing that can answer, and the address it is asked for is one it has no entry for: a
+  // cache key is a whole URL, and no annotation is in any of them. The answer therefore has
+  // to be the same path without the query. **Measured before this leg existed:** the window
+  // came up on the worker's bare `Offline` 408 body — no launcher, no offline mode, and
+  // nothing on the page to get back to the app with, which is the dead end a bookmark to a
+  // powered-off instance used to be.
+  const awayStub = await startSelfHostStub({ artifact, serviceWorker: 'real' });
+  const awayContext = await browser.createBrowserContext();
+  const awayPage = await awayContext.newPage();
+  const awayErrors = [];
+  awayPage.on('pageerror', (error) => awayErrors.push(error.message));
+  await awayPage.goto(`${awayStub.origin}/`, { waitUntil: 'domcontentloaded' });
+  await awayPage.evaluate(async () => {
+    await navigator.serviceWorker.register('/offline-service-worker.js');
+    await navigator.serviceWorker.ready;
+    // One of the instance's Liths as this device's own copy, which is the only kind of row
+    // offline mode has to list.
+    const request = indexedDB.open('keyval-store', 1);
+    await new Promise((ok, fail) => {
+      request.onsuccess = ok;
+      request.onerror = () => fail(request.error);
+    });
+    const db = request.result;
+    await new Promise((ok, fail) => {
+      const tx = db.transaction('keyval', 'readwrite');
+      tx.objectStore('keyval').put(
+        { text: JSON.stringify([{ title: 'Hello', text: 'a copy this device took' }]) },
+        'search_cache_notes.lith'
+      );
+      tx.oncomplete = ok;
+      tx.onerror = () => fail(tx.error);
+    });
+    db.close();
+  });
+  // The worker's own install fills that cache asynchronously, and closing the instance first
+  // would make this leg about a race rather than about the fallback.
+  await awayPage.waitForFunction(
+    async () => {
+      for (const name of await caches.keys()) {
+        if (await (await caches.open(name)).match('/')) return true;
+      }
+      return false;
+    },
+    { timeout: 15000 }
+  );
+  // The instance goes away: nothing answers this origin any more.
+  await awayStub.close();
+  await awayPage.goto(`${awayStub.origin}/?mode=self-host&lithic-from=tauri%3A%2F%2Flocalhost%2F`, {
+    waitUntil: 'domcontentloaded'
+  });
+  await awayPage.waitForSelector('.offline-banner', { timeout: 15000 });
+  const awayOpen = await awayPage.evaluate(() => ({
+    heading: document.querySelector('.offline-banner strong')?.textContent ?? '',
+    rows: [...document.querySelectorAll('.recent-row.offline-row .recent-name')].map((node) => node.textContent ?? ''),
+    back: Boolean(document.querySelector('.back-to-launcher'))
+  }));
+  assert.equal(
+    awayOpen.heading,
+    'Server unreachable',
+    `A bookmark to a down instance comes up as this launcher's offline mode: ${JSON.stringify(awayOpen)}`
+  );
+  assert.equal(awayOpen.rows.length, 1, `listing the copy this device took: ${JSON.stringify(awayOpen.rows)}`);
+  assert.match(awayOpen.rows[0], /^notes\.lith/, 'by name, because there is no server left to order it by');
+  assert.equal(awayOpen.back, true, 'and with the way back to the app that the worker’s own 408 page never had');
+  assert.deepEqual(awayErrors, [], `The handover ran without an uncaught error: ${awayErrors.join(' | ')}`);
+  await awayContext.close();
 
   // Seed a cache-only wiki. The query below is intentionally absent from the
   // filename so this exercises cached content search without file permissions.
