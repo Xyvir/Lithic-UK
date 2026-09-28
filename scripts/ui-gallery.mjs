@@ -387,6 +387,35 @@ const installRust = (page, config) =>
           // Nothing is open to close: this only drops the grant a load left behind.
           state.granted = false;
           return { ...state, count: entries.length };
+        case 'install_status':
+          // The footer's own question: is there a copy on disk, and is it this build's?
+          // `cfg.install` is the answer, and its default is the state every other tauri
+          // pane was already in — this used to fall through to `null`, which the app
+          // catches as "uninstalled", so the answer here is the same one it read then.
+          // `runningFromInstall` is the third fact the footer reads: only a copy that IS
+          // the installed file asks about releases.
+          return {
+            installed: (cfg.install ?? 'uninstalled') !== 'uninstalled',
+            up_to_date: cfg.install !== 'stale',
+            running_from_install: cfg.runningFromInstall === true
+          };
+        case 'install_offer_status':
+          // Dismissal lives beside the exe in this mode. No pane dismisses the offer,
+          // so it is always still on show.
+          return { installed: (cfg.install ?? 'uninstalled') !== 'uninstalled', dismissed: false };
+        case 'install_update_check':
+          // The release question, answered by `cfg.updateAvailable`. The URL is Rust's
+          // answer rather than a literal in the page — the page never carries the address
+          // — so this is a copy of what it would return.
+          return {
+            available: cfg.updateAvailable === true,
+            url: 'https://github.com/Xyvir/Lithic-UK/releases/latest',
+            latest: cfg.latestRelease ?? ''
+          };
+        case 'open_external':
+          // The offer's action in this mode: the invoke is recorded above, and a
+          // headless shot has no window to open.
+          return null;
         default:
           // Everything else: no answer, which every caller already treats as
           // "absent". Recents sidecars and backup coverage land here.
@@ -536,6 +565,10 @@ async function openBookmark(page, label) {
  *           pane fails loudly, so a sheet cannot show an empty pane silently.
  *   clip    crop to this element (plus `pad`) instead of the whole viewport, which
  *           is how the dialog panes stay comparable at a readable size.
+ *   scale   device pixels per CSS pixel, over the viewport's own. For the few
+ *           controls whose whole subject is smaller than a sheet's thumbnail, and
+ *           where a crop would otherwise be a smudge: the window is still laid out
+ *           at `view`'s size, so nothing but the resolution changes.
  *   modal   the dialog this pane photographs, named by its `aria-labelledby` id — or its
  *           own `aria-label`, for the one entry that has no heading to point at. The
  *           walk asserts the dialog is in the DOM before the shot, and every claim is
@@ -1614,6 +1647,78 @@ const SHEETS = [
         expect: '.sync-folder.empty'
       }
     ]
+  },
+  {
+    // The footer's install offer: the one control the launcher draws outside its own
+    // column, pinned to the window's corner, and the only place a six-pixel glyph has
+    // to hold its own against a 48px button. A crop, and three device pixels to the
+    // CSS pixel, because the subject is where that glyph sits in the corner — at sheet
+    // size it is a smudge on a pale face.
+    //
+    // Four panes for the four labels the app chooses between, since the corner has to
+    // work in all of them: a first install, an installed copy older than this build, the
+    // manual update (the same copy, but the release it was cut from is no longer the
+    // newest), and the hint, which is the only state where anything moves.
+    id: 'install-offer',
+    title: 'The install offer — Install, Update Install, Update Available, and the dismiss hint',
+    tile: '4x',
+    panes: [
+      {
+        name: '810-install-offer',
+        view: 'wide',
+        scale: 3,
+        mode: 'tauri',
+        // Nothing on disk: a first run, which is the state that asks.
+        rust: { install: 'uninstalled' },
+        clip: '.install-offer',
+        expect: '.install-button'
+      },
+      {
+        // Installed but older than the build — the label that exists only for this,
+        // and so asserted rather than trusted: the two panes differ by one word.
+        name: '811-install-update-offer',
+        view: 'wide',
+        scale: 3,
+        mode: 'tauri',
+        rust: { install: 'stale' },
+        drive: async (page) => {
+          await page.waitForFunction(() => document.querySelector('.install-button')?.textContent.trim() === 'Update Install');
+        },
+        clip: '.install-offer',
+        expect: '.install-button'
+      },
+      {
+        // The hint word out. It travels left out of the ✕, so this is the state that
+        // shows whether the two collide with the button's own label or get clipped.
+        name: '812-install-dismiss-hint',
+        view: 'wide',
+        scale: 3,
+        mode: 'tauri',
+        rust: { install: 'stale' },
+        drive: async (page) => {
+          await page.hover('.install-dismiss');
+          await page.waitForFunction(() => Number(getComputedStyle(document.querySelector('.install-dismiss-label')).opacity) > 0.9);
+          await settle(page, 300);
+        },
+        clip: '.install-offer',
+        expect: '.install-dismiss-label'
+      },
+      {
+        // The manual update: this copy IS the install, and the newest release is not the
+        // one it was cut from. The face is orange because the action is a hand-off to the
+        // browser, and the label is the only place the two update offers differ.
+        name: '813-install-update-available',
+        view: 'wide',
+        scale: 3,
+        mode: 'tauri',
+        rust: { install: 'current', runningFromInstall: true, updateAvailable: true },
+        drive: async (page) => {
+          await page.waitForFunction(() => document.querySelector('.install-button')?.textContent.trim() === 'Update Available');
+        },
+        clip: '.install-offer',
+        expect: '.install-button.update-available'
+      }
+    ]
   }
 ];
 
@@ -1688,7 +1793,9 @@ async function clipFor(page, pane, view) {
 
 /** Photograph one pane. Throws with the pane's name if its state never arrived. */
 async function runPane(browser, pane) {
-  const view = VIEW[pane.view ?? 'phone'];
+  const view = pane.scale
+    ? { ...VIEW[pane.view ?? 'phone'], deviceScaleFactor: pane.scale }
+    : VIEW[pane.view ?? 'phone'];
   const errors = [];
   const noise = (text) =>
     text.includes('Failed to load resource') ||

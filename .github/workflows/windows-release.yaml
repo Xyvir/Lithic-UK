@@ -120,6 +120,10 @@ jobs:
         run: npm run tauri build
         env:
           TAURI_CONFIG: ${{ steps.tag.outputs.tauri_config }}
+          # Baked in so a launched install can tell whether it is still the newest
+          # release: the app compares this against `releases/latest` and offers the
+          # download page when they differ. A build without it offers nothing.
+          LITHIC_BUILD_TAG: ${{ steps.tag.outputs.date }}
 
       # Sizes on every release, in the run summary: the executable embeds the
       # launcher and the wiki, so a stray build artifact left in src/ shows up

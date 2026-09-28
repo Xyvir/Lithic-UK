@@ -137,29 +137,95 @@
   // shown as an update when the installed copy is older than this build.
   let installBusy = false;
   let installStatus = '';
-  let installState: 'uninstalled' | 'current' | 'stale' = 'uninstalled';
+  let installState: 'uninstalled' | 'current' | 'stale' | 'update' = 'uninstalled';
+  /** Where the manual update offer sends the user. Rust's answer, never a literal here. */
+  let updateUrl = '';
   // "Dismiss" on the install offer: hides the button until manually restored
   // (clear site data in webapp mode; delete recents.txt beside the exe in
-  // tauri mode). Once installed, dismissal no longer hides the update button.
+  // tauri mode). A pending Update Install is the one offer dismissal does not
+  // hide: that newer exe is already on this machine and the user is mid-update.
+  // The manual Update Available offer is hidden like the rest, because a user
+  // who defers updates wants to manage them by hand, and that is their answer.
   let installDismissed = false;
 
   async function refreshInstallState() {
-    if (mode === 'tauri') {
-      try {
-        const result = await tauriInvoke<{ installed: boolean; up_to_date: boolean }>('install_status');
-        installState = result.installed ? (result.up_to_date ? 'current' : 'stale') : 'uninstalled';
-      } catch {
-        installState = 'uninstalled';
-      }
-      try {
-        const offer = await tauriInvoke<{ installed: boolean; dismissed: boolean }>('install_offer_status');
-        installDismissed = offer.dismissed;
-      } catch {
-        installDismissed = false;
-      }
-    } else {
+    if (mode !== 'tauri') {
       installDismissed = await isInstallDismissed();
+      return;
     }
+    let launchedFromInstall = false;
+    try {
+      const result = await tauriInvoke<{ installed: boolean; up_to_date: boolean; running_from_install: boolean }>('install_status');
+      installState = result.installed ? (result.up_to_date ? 'current' : 'stale') : 'uninstalled';
+      launchedFromInstall = result.running_from_install;
+    } catch {
+      installState = 'uninstalled';
+    }
+    try {
+      const offer = await tauriInvoke<{ installed: boolean; dismissed: boolean }>('install_offer_status');
+      installDismissed = offer.dismissed;
+    } catch {
+      installDismissed = false;
+    }
+    // Only an install sitting in its own folder asks about releases, and only
+    // while the offer is still on show: asking a user who dismissed it would put
+    // the button back on screen for as long as the answer took.
+    if (launchedFromInstall && !installDismissed) {
+      await checkForInstallUpdate();
+    }
+  }
+
+  /**
+   * Ask whether the release this build was cut from is still the newest.
+   *
+   * Read-only, and all it can do is relabel the offer: the app never downloads a
+   * file, never runs one and never writes to the install location. The user
+   * fetches the new exe in their browser and launches it themselves, then presses
+   * Update Install, which is the same manual step a portable copy makes.
+   */
+  async function checkForInstallUpdate() {
+    try {
+      const update = await tauriInvoke<{ available: boolean; url: string }>('install_update_check');
+      if (!update.available) return;
+      updateUrl = update.url;
+      installState = 'update';
+    } catch {
+      // A question that could not be answered is not an update.
+    }
+  }
+
+  /**
+   * The offer button's label, and what it promises on hover.
+   *
+   * Reactive statements rather than functions the template calls: Svelte reads a
+   * call expression untracked, so a label computed inside one never followed
+   * `installState` as it arrived — the button kept the word it mounted with, which
+   * is 'Install' for every offer that starts life before the first status read.
+   */
+  $: installOfferLabel = installBusy
+    ? 'Installing…'
+    : installState === 'update'
+      ? 'Update Available'
+      : installState === 'stale'
+        ? 'Update Install'
+        : 'Install';
+  $: installOfferTitle =
+    installStatus ||
+    (installState === 'update'
+      ? 'Download the new version, then press Update Install'
+      : 'Copy to Documents and add a Start Menu shortcut');
+
+  /** The offer's primary action: install, update the install, or open the page. */
+  async function installOfferAction(): Promise<void> {
+    if (installState === 'update') {
+      try {
+        await tauriInvoke('open_external', { url: updateUrl });
+      } catch (error) {
+        status = `Could not open your browser: ${error instanceof Error ? error.message : String(error)}`;
+      }
+      return;
+    }
+    await installMonolith();
   }
 
   /** Hide the install offer; per-mode persistence (IndexedDB / sidecar). */
@@ -5046,5 +5112,5 @@
       {/if}
     </section>
   {/if}
-  <footer>{#if mode === 'webapp'}<a class="github-link" href="https://github.com/Lithic-UK/Lithic" target="_blank" rel="noreferrer">Github</a>{#if $pwaInstall.installable && !(installDismissed && installState !== 'stale')}<span class="install-offer"><button class="install-button" on:click={installPwa}>Install App</button><button class="install-dismiss" on:click={dismissInstallOffer} title="Hide the install offer" aria-label="Dismiss install offer"><span class="install-dismiss-label">dismiss</span>✕</button></span>{/if}{:else if mode === 'tauri' && installState !== 'current' && !(installDismissed && installState === 'uninstalled')}<span class="install-offer"><button class="install-button" on:click={installMonolith} disabled={installBusy} title={installStatus || 'Copy to Documents and add a Start Menu shortcut'}>{installBusy ? 'Installing…' : installState === 'stale' ? 'Update Install' : 'Install'}</button><button class="install-dismiss" on:click={dismissInstallOffer} title="Hide the install offer" aria-label="Dismiss install offer"><span class="install-dismiss-label">dismiss</span>✕</button></span>{/if}</footer>
+  <footer>{#if mode === 'webapp'}<a class="github-link" href="https://github.com/Lithic-UK/Lithic" target="_blank" rel="noreferrer">Github</a>{#if $pwaInstall.installable && !(installDismissed && installState !== 'stale')}<span class="install-offer"><button class="install-button" on:click={installPwa}>Install App</button><button class="install-dismiss" on:click={dismissInstallOffer} title="Hide the install offer" aria-label="Dismiss install offer"><span class="install-dismiss-label">dismiss</span>✕</button></span>{/if}{:else if mode === 'tauri' && installState !== 'current' && !(installDismissed && installState !== 'stale')}<span class="install-offer"><button class="install-button" class:update-available={installState === 'update'} on:click={installOfferAction} disabled={installBusy} title={installOfferTitle}>{installOfferLabel}</button><button class="install-dismiss" on:click={dismissInstallOffer} title="Hide the install offer" aria-label="Dismiss install offer"><span class="install-dismiss-label">dismiss</span>✕</button></span>{/if}</footer>
 </main>

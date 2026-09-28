@@ -236,6 +236,24 @@ fn install_target() -> Option<PathBuf> {
         .map(|dir| dir.join("Lithic.exe"))
 }
 
+/// Whether this process *is* the installed copy — the same file as the install
+/// target, not merely the same bytes.
+///
+/// `up_to_date` is a byte comparison, and an identical portable copy passes it
+/// too. Only file identity answers "was the app launched from where it installs
+/// to", and that is the state the manual update offer belongs to: an installed
+/// exe has no newer copy on disk to copy over itself, so the download page is
+/// its only way forward. Both sides are canonicalised so a symlink or a short
+/// path cannot make the same file look like two.
+fn launched_from_install() -> bool {
+    let Some(target) = install_target() else { return false };
+    let Ok(exe) = std::env::current_exe() else { return false };
+    match (fs::canonicalize(exe), fs::canonicalize(target)) {
+        (Ok(exe), Ok(target)) => exe == target,
+        _ => false,
+    }
+}
+
 /// What an install did, so the launcher can say where the program went and
 /// whether it also picked up a Start Menu entry.
 #[derive(serde::Serialize)]
@@ -322,10 +340,15 @@ fn create_start_menu_shortcut(exe: &Path) -> Result<PathBuf, String> {
 /// Install state for the launcher's PWA-style button: hidden once an
 /// installed copy exists and matches the running exe; shown as an update
 /// when the installed copy differs (older build).
+///
+/// `running_from_install` is the third fact the footer needs and the other two
+/// cannot give it: this process *is* the installed copy, so a newer download is
+/// the only way forward for it (see `install_update_check`).
 #[derive(serde::Serialize)]
 struct InstallStatus {
     installed: bool,
     up_to_date: bool,
+    running_from_install: bool,
     path: String,
 }
 
@@ -343,6 +366,7 @@ fn install_status() -> InstallStatus {
     InstallStatus {
         installed,
         up_to_date,
+        running_from_install: launched_from_install(),
         path: target
             .map(|path| path.to_string_lossy().into_owned())
             .unwrap_or_default(),
@@ -1508,14 +1532,16 @@ async fn github_post_form(url: &str, form: &str) -> Result<serde_json::Value, St
 
 async fn github_api_get(url: &str, token: &str) -> Result<serde_json::Value, String> {
     let client = http_client().ok_or_else(|| "no HTTP client".to_string())?;
-    let response = client
+    let mut request = client
         .get(url)
-        .header("Authorization", format!("Bearer {}", token))
         .header("Accept", "application/vnd.github.v3+json")
-        .header("User-Agent", "Lithic-Sync")
-        .send()
-        .await
-        .map_err(|error| error.to_string())?;
+        .header("User-Agent", "Lithic-Sync");
+    // An empty token means the public API: GitHub rejects a bare `Bearer `, so
+    // the header is left off entirely rather than sent empty.
+    if !token.is_empty() {
+        request = request.header("Authorization", format!("Bearer {}", token));
+    }
+    let response = request.send().await.map_err(|error| error.to_string())?;
     let status = response.status().as_u16();
     if status >= 400 {
         return Err(format!("GitHub API returned {}", status));
@@ -2562,6 +2588,149 @@ fn set_install_dismissed(dismissed: bool) -> Result<(), String> {
     write_recents_sidecar(paths, dismissed)
 }
 
+/// The published release this build compares itself against.
+///
+/// The tag is the whole comparison: the release workflow bakes the tag it cut
+/// the build from into the executable as `LITHIC_BUILD_TAG`, so "is something
+/// newer published" is an equality check. No version parsing, no timestamps, no
+/// semver ordering, and one unauthenticated call.
+const RELEASES_LATEST_API: &str = "https://api.github.com/repos/Xyvir/Lithic-UK/releases/latest";
+
+/// What the offer opens. The releases page rather than an asset, because the
+/// user picks the download in their own browser.
+const RELEASES_LATEST_PAGE: &str = "https://github.com/Xyvir/Lithic-UK/releases/latest";
+
+/// Whether the download page should be offered, and where it is.
+#[derive(serde::Serialize)]
+struct InstallUpdate {
+    available: bool,
+    url: String,
+    latest: String,
+}
+
+impl InstallUpdate {
+    fn none() -> Self {
+        Self { available: false, url: String::new(), latest: String::new() }
+    }
+}
+
+/// Is a newer release published than the build this process is running?
+///
+/// Deliberately the app's *only* network question about its own updates, and
+/// deliberately read-only: it downloads nothing, runs nothing and never writes
+/// to the install location. The user fetches the new exe in their browser and
+/// launches it themselves, then presses Update Install, which is what keeps an
+/// update from looking like the behaviour Defender exists to stop.
+///
+/// Every failure is "no update". Offline, rate limited, an answer we cannot
+/// read: a launch that could not ask must not grow a button promising what it
+/// cannot deliver. Nothing is cached, so the question is asked once per launch.
+#[tauri::command]
+async fn install_update_check() -> InstallUpdate {
+    if !launched_from_install() {
+        return InstallUpdate::none();
+    }
+    // A build the release workflow did not cut carries no tag: a local build is
+    // not a release, and must never claim one is waiting.
+    let Some(built) = option_env!("LITHIC_BUILD_TAG").filter(|tag| !tag.is_empty()) else {
+        return InstallUpdate::none();
+    };
+    match github_api_get(RELEASES_LATEST_API, "").await {
+        Ok(data) => install_update_from(&data, built),
+        Err(_) => InstallUpdate::none(),
+    }
+}
+
+/// Fold GitHub's answer into the offer it justifies.
+///
+/// Split out from the command so the decision is testable without a network.
+fn install_update_from(data: &serde_json::Value, built: &str) -> InstallUpdate {
+    let Some(latest) = data.get("tag_name").and_then(|value| value.as_str()) else {
+        return InstallUpdate::none();
+    };
+    if latest == built {
+        return InstallUpdate::none();
+    }
+    // The page has to have something to download. The exe is attached by the
+    // Tauri job, so a newest release that lists assets and no exe means that job
+    // did not finish, and pointing at it is a dead end. An answer with no
+    // `assets` at all is a shape we do not know, so there the tag stands on its
+    // own rather than the feature going quiet on a shape change.
+    let has_exe = data
+        .get("assets")
+        .and_then(|value| value.as_array())
+        .map(|assets| {
+            assets.is_empty()
+                || assets.iter().any(|asset| {
+                    asset
+                        .get("name")
+                        .and_then(|name| name.as_str())
+                        .map(|name| name.to_ascii_lowercase().ends_with(".exe"))
+                        .unwrap_or(false)
+                })
+        })
+        .unwrap_or(true);
+    if !has_exe {
+        return InstallUpdate::none();
+    }
+    InstallUpdate {
+        available: true,
+        url: RELEASES_LATEST_PAGE.to_string(),
+        latest: latest.to_string(),
+    }
+}
+
+/// Open an http(s) address in the user's own browser.
+///
+/// The update offer is the only caller. It has to land the user on a page they
+/// asked to see, in a real window, because everything after that is theirs to
+/// drive: download the file, launch it, then use Update Install here. Only
+/// http(s) is accepted, so a page's own anchors cannot reach this to open a
+/// local file or a shell scheme.
+#[tauri::command]
+fn open_external(url: String) -> Result<(), String> {
+    if !(url.starts_with("https://") || url.starts_with("http://")) {
+        return Err("Only http and https addresses can be opened".to_string());
+    }
+    open_in_browser(&url)
+}
+
+#[cfg(windows)]
+fn open_in_browser(url: &str) -> Result<(), String> {
+    use windows::core::{HSTRING, PCWSTR};
+    use windows::Win32::UI::Shell::ShellExecuteW;
+    use windows::Win32::UI::WindowsAndMessaging::SW_SHOWNORMAL;
+
+    // SAFETY: the verb and the address are fresh HSTRINGs that outlive the call,
+    // and ShellExecuteW only reads its arguments.
+    let opened = unsafe {
+        ShellExecuteW(
+            None,
+            &HSTRING::from("open"),
+            &HSTRING::from(url),
+            PCWSTR::null(),
+            PCWSTR::null(),
+            SW_SHOWNORMAL,
+        )
+    };
+    // ShellExecuteW reports success as a value above 32; at or below it the
+    // number is an error code rather than a window.
+    if (opened.0 as isize) <= 32 {
+        return Err(format!("Could not open {}", url));
+    }
+    Ok(())
+}
+
+#[cfg(not(windows))]
+fn open_in_browser(url: &str) -> Result<(), String> {
+    let opener = if cfg!(target_os = "macos") { "open" } else { "xdg-open" };
+    std::process::Command::new(opener)
+        .arg(url)
+        .spawn()
+        .map_err(|error| error.to_string())?;
+    Ok(())
+}
+
 // --- Credential vault --------------------------------------------------------
 // The launcher's side of a self-hosted instance asking for HTTP Basic auth. The
 // storage and the cryptography live in `credentials`; what is here is the session
@@ -3015,6 +3184,8 @@ pub fn run() {
             install_status,
             install_offer_status,
             set_install_dismissed,
+            install_update_check,
+            open_external,
             read_recents_sidecar,
             write_recents_sidecar,
             git_sync_setup,
@@ -3057,6 +3228,43 @@ pub fn run() {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The update offer's whole decision, minus the network: this build's own tag
+    /// is nothing to offer, a different tag with an exe is an offer, and a newest
+    /// release the Tauri job never fed is neither.
+    #[test]
+    fn an_update_is_offered_only_for_a_newer_release_you_can_download() {
+        let built = "build-2026.09.28-1416";
+        let release = |tag: &str, assets: serde_json::Value| serde_json::json!({ "tag_name": tag, "assets": assets });
+
+        // This build's own tag: nothing to offer, whatever the release carries.
+        let current = install_update_from(&release(built, serde_json::json!([])), built);
+        assert!(!current.available);
+
+        // A newer tag with an exe: the offer, pointing at the releases page.
+        let newer = install_update_from(
+            &release("build-2026.09.29-0900", serde_json::json!([{ "name": "Lithic-09.29.26-0900.exe" }])),
+            built,
+        );
+        assert!(newer.available);
+        assert_eq!(newer.url, RELEASES_LATEST_PAGE);
+        assert_eq!(newer.latest, "build-2026.09.29-0900");
+
+        // A newer tag whose release lists assets and no exe: the desktop build for
+        // it did not finish, so there is nothing to download from it yet.
+        let no_exe = install_update_from(
+            &release("build-2026.09.29-0900", serde_json::json!([{ "name": "lithic.html" }])),
+            built,
+        );
+        assert!(!no_exe.available);
+
+        // No `assets` at all is a shape we do not know, so the tag stands alone.
+        let unknown = install_update_from(&serde_json::json!({ "tag_name": "build-2026.09.29-0900" }), built);
+        assert!(unknown.available);
+
+        // Nothing usable at all is no offer.
+        assert!(!install_update_from(&serde_json::json!({}), built).available);
+    }
 
     /// The verdicts a saved login can get, each one a case a real deployment
     /// produces: a password that still works, one that was changed server-side, an

@@ -631,10 +631,14 @@ footer > * { pointer-events: auto; }
  * corner, no pill or background, sitting above the label's line box so it never
  * lands on the glyphs. Black, and with no shadow: the button face is pale, so
  * black is the ink that reads on it and the shadow white needed to survive there
- * would only smear black. Set into the corner rather than centred on the edge —
- * two pixels lower and three further right than the white ✕ sat, which is what
- * the eye reads as "the button's corner" once the label's own lift is in the
- * way. Dark red on hover, the launcher's destructive ink; the word stays black,
+ * would only smear black. Set into the corner at the same distance in on both
+ * sides: 4px down from the top edge and 4px in from the right one, which is what
+ * the eye reads as "the button's corner" once the label's own lift is in the way.
+ * Both are measured to the glyph's own ink rather than to the box, because the ink
+ * is the edge the eye places. The air on the right is not slack either: a ✕ flush
+ * to the box edge would read as having slid off the button, since the 8px radius
+ * has already eaten about a pixel of the face at the glyph's height.
+ * Dark red on hover, the launcher's destructive ink; the word stays black,
  * because it is the control's label and not part of the glyph it names. Padding
  * is invisible (no background) and only widens the hit target.
  *
@@ -651,8 +655,8 @@ footer > * { pointer-events: auto; }
 .install-dismiss {
   position: absolute;
   top: 4px;
-  right: 3px;
-  padding: 0 6px 0 4px;
+  right: 0;
+  padding: 0 4px;
   border: 0;
   background: none;
   color: #000;
@@ -1093,6 +1097,13 @@ footer > * { pointer-events: auto; }
 /* Same 1px border, in the button's own colour: dropping it would make the
  * primary action 2px shorter than the link beside it. */
 .install-button { border-color: #8ab4f8; background: #8ab4f8; color: #121212; font-weight: 600; cursor: pointer; }
+/* The manual update offer, in the launcher's amber rather than the install
+ * button's blue: it is a different kind of action, a hand-off to the user's own
+ * browser and a download they drive, and it must not read as the same button as
+ * Install or Update Install. The base rule's dark ink carries over, so only the
+ * face changes and the control keeps its size. The amber is the sheet's existing
+ * one, already the focus outline's colour. */
+.install-button.update-available { border-color: #ffb74d; background: #ffb74d; }
 
 /*
  * On wide windows each control clears the 600px launcher column entirely, so
