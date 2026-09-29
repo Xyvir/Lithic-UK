@@ -24,6 +24,7 @@
   import { computeBackupCoverage, folderOf, hasBackedUpRepo, orphanedEntries, reindexFolders, syncedDirFor, type CoverageRow, type RebuildOrphan } from './backup-coverage';
   import { parseDeviceCode, parseDevicePoll, pollDelayMs, formatUserCode, generateRepoName, partitionRepos } from './github-device';
   import { syncIndicator, shouldHeartbeat, healthFailure, verifiedAge, SYNC_PULSE_MS, type SyncIndicator, type HealthState } from './git-sync-health';
+  import { gapCount, versionGap } from './history-gap';
   import { createServerRepo, disconnectServerSync, fetchServerSyncStatus, listServerRepos, pollServerDeviceToken, requestServerDeviceCode, serverSyncIndicator, setupServerSync, type ServerSyncStatus } from './server-git-sync';
   import { serializeJsonToLith, parseLithToJSON } from './lithic-format';
   // Inlined as a base64 data URL (assetsInlineLimit: Infinity) so the brand
@@ -1556,6 +1557,18 @@
     if (stemLimit <= 3) return name.slice(0, limit - 1) + '…';
     return name.slice(0, stemLimit - 1) + '…' + ext;
   }
+
+  /**
+   * The grey line the history trail draws between two versions: how much later the row above
+   * was saved than the row below it, in the one unit `versionGap` picks and this locale's own
+   * decimal mark. Only the greatest unit is ever named, so one sentence covers a four second
+   * step and a three week gap. Empty when the two stamps are the same instant, and then the
+   * chevron joins them alone.
+   */
+  function historyGapLabel(newerTs: number, olderTs: number): string {
+    const gap = versionGap(newerTs - olderTs);
+    return gap ? copy.dialogs.history.later[gap.unit](gapCount(gap, LOCALE_TAG)) : '';
+  }
   let cachedEntries: Record<string, CacheSearchEntry> = {};
   let cacheSearchMatches: Record<string, CacheSearchMatch> = {};
   let cacheSearchRequest = 0;
@@ -1811,7 +1824,16 @@
 
   // Self-host: the server's own Liths are the primary list, filtered by the
   // same search box as the local recents.
-  $: filteredRemote = remoteFiles.filter((file) => showsForQuery(file.name, search));
+  // ...and by what this device holds of them, which is the half the local list has always
+  // had and this one was missing. A word that appears only inside a Lith's body is worth
+  // exactly as much here as there: the launcher cached that Lith when it was last opened,
+  // so the text is on this machine and the row is an answer rather than a blank list. It
+  // does not mix the two lists, which is what the device's own rows are kept out of here
+  // for: the row is still the server's, and the panel beside it is an annotation on it,
+  // exactly as a match inside a recent row is.
+  $: filteredRemote = remoteFiles.filter(
+    (file) => showsForQuery(file.name, search) || Boolean(cacheSearchMatches[file.name]?.preview)
+  );
 
   /**
    * Whether this cached self-host launcher is in offline mode. See `offline-mode.ts`
@@ -1832,7 +1854,7 @@
    */
   $: offlineRows = offlineLauncher
     ? Object.values(cachedEntries)
-        .filter((entry) => showsForQuery(entry.name, search))
+        .filter((entry) => showsForQuery(entry.name, search) || Boolean(cacheSearchMatches[entry.name]?.preview))
         .sort((a, b) => a.name.localeCompare(b.name))
     : [];
 
@@ -3447,25 +3469,62 @@
   }
 
   /**
-   * Pin the tiddler matched by a cache preview to the top of the story river
-   * (Dogear tag) and open the file. The payload must be queued before the
-   * mount. After the engine boots the launcher component is torn down.
+   * The tiddler a cache preview matched, queued as a pending import, and the cached text
+   * it was taken from.
+   *
+   * The note is copied out of the cache rather than out of the file, because the cache is
+   * what the preview was cut from: the title came from there and so must the body, or the
+   * pinned tiddler would be some other version of the note than the one on screen. Null
+   * when there is nothing to pin, which is also the answer when the cache has gone or the
+   * note has moved out of it since the match was made.
+   *
+   * The payload has to be queued before the mount: after the engine boots, this component
+   * is torn down, and whatever is queued is what the mount drains.
    */
-  async function pinFromPreview(name: string) {
+  async function pinCachedMatch(name: string): Promise<string | null> {
     const match = cacheSearchMatches[name];
-    if (!match?.title) return;
+    if (!match?.title) return null;
     const cacheText = await getCacheHistoryText(name);
-    if (!cacheText) return;
+    if (!cacheText) return null;
     const payload = pinCachedTiddler(cacheText, match.title);
-    if (!payload) return;
+    if (!payload) return null;
     pendingImports = mergePendingImports(pendingImports, payload);
+    return cacheText;
+  }
 
+  /** Pin the matched tiddler and open the file it is in: the row's own gesture, plus the note. */
+  async function pinFromPreview(name: string) {
+    const cacheText = await pinCachedMatch(name);
+    if (!cacheText) return;
     const recent = recentFiles.find((file) => getEntryName(file) === name);
     if (recent) {
       await openRecent(recent);
     } else {
       await openCachedEntry({ name, text: cacheText, sizeBytes: new Blob([cacheText]).size });
     }
+  }
+
+  /**
+   * The same gesture on a row that is only this device's copy of a Lith: off a server that
+   * is out of reach, the copy is the document, so pinning the note and opening it read-only
+   * is the whole of what the row can offer.
+   */
+  async function pinCachedCopyFromPreview(entry: CacheSearchEntry) {
+    if (!(await pinCachedMatch(entry.name))) return;
+    await openCachedEntry(entry);
+  }
+
+  /**
+   * ...and on one the server holds.
+   *
+   * The row's own click opens the server's copy, so this one does too: the note is pinned
+   * from what this device read of that Lith, which is the only copy the launcher can quote,
+   * and the document that opens is the instance's current one. The pin is what ties the two
+   * together, and it is why this is a step rather than a navigation.
+   */
+  async function pinRemoteFromPreview(name: string) {
+    if (!(await pinCachedMatch(name))) return;
+    await openRemoteFile(name);
   }
 
   /**
@@ -5029,17 +5088,25 @@
         {:else}
           <ul class="history-list">
             {#each historyEntries as entry, index (entry.id)}
-              {#if index > 0}
+              {@const newer = historyEntries[index - 1]}
+              {@const gap = newer ? historyGapLabel(newer.ts, entry.ts) : ''}
+              {#if newer}
                 <!--
-                  What joins two versions, and the only thing that says which way the
-                  list runs. The store hands these over newest first, so the row below
-                  any entry is the state it was written from: the chevron points at it,
-                  which is also what makes a `step` read as a delta against the version
-                  underneath rather than as an unrelated row. Decorative, so it stays out
-                  of the accessibility tree, and centred in the gap it owns.
+                  What joins two versions, and the only thing that says which way the list
+                  runs. The store hands these over newest first, so the row above any entry
+                  is the version written after it: the chevron points UP at that one, from
+                  the older version at the bottom towards the newer one above, which is the
+                  direction the trail is read back in. The arrow is also what makes a `step`
+                  read as a delta against the version above rather than as an unrelated row.
+                  Beside it, in grey, the distance between the two as one unit: the answer
+                  to a question two long timestamps otherwise leave to mental arithmetic.
+                  Decorative, so it stays out of the accessibility tree (the stamps either
+                  side of it already say exactly when each version was written) and the pair
+                  is centred in the gap it owns.
                 -->
                 <li class="history-link" aria-hidden="true">
-                  <svg viewBox="0 0 14 8" aria-hidden="true"><path d="M1.5 1.5 7 6.5l5.5-5"></path></svg>
+                  <svg viewBox="0 0 14 8" aria-hidden="true"><path d="M1.5 6.5 7 1.5l5.5 5"></path></svg>
+                  {#if gap}<span class="history-gap">{gap}</span>{/if}
                 </li>
               {/if}
               <li class="history-entry">
@@ -5137,6 +5204,24 @@
                 <button class="recent-icon-button cache-history-button modified" type="button" title={copy.offline.rowMarkTitle} aria-label={copy.row.historyAria(entry.name)} on:click={() => openHistoryModal(entry.name)}>
                   <svg class="history-download-icon modified" viewBox="56 108 33 36" aria-hidden="true"><path class="history-icon-shape" d="m 73.595508,109.76746 c -7.198235,0 -13.103617,5.58342 -13.647229,12.64471 h -0.0072 V 138.2696 H 58.61606 l 2.32389,4.02559 2.324405,-4.02559 h -1.323433 v -15.85123 c 0.530186,-5.97937 5.534806,-10.65103 11.654586,-10.65103 6.474618,0 11.703161,5.22855 11.703161,11.70316 0,6.47462 -5.228543,11.70161 -11.703161,11.70161 -2.644513,0 -5.080809,-0.87232 -7.037814,-2.34508 v 2.39572 c 2.058162,1.23707 4.46633,1.94924 7.037814,1.94924 7.555498,0 13.703556,-6.14599 13.703556,-13.70149 0,-7.5555 -6.148058,-13.70304 -13.703556,-13.70304 z"></path><path class="history-icon-mark" d="M72.3 116h2.6v9h-2.6z"></path><circle class="history-icon-mark" cx="73.6" cy="128.4" r="1.6"></circle></svg>
                 </button>
+                <!--
+                  The same panel a local match draws, on the rows that ARE the local copies:
+                  offline there is no server to take a Lith from, so pinning the matched note
+                  and opening this device's copy read-only is the whole of what the row can
+                  offer, and it is what the row's own click already does.
+                -->
+                {#if cacheSearchMatches[entry.name]?.preview}
+                  <div
+                    use:positionCachePreview
+                    class="cache-preview"
+                    role="button"
+                    tabindex="0"
+                    aria-label={cacheSearchMatches[entry.name].title ? copy.row.pinAria(entry.name, cacheSearchMatches[entry.name].title ?? '') : copy.row.openAria(entry.name)}
+                    title={copy.row.pinTitle}
+                    on:click={() => void pinCachedCopyFromPreview(entry)}
+                    on:keydown={(event) => (event.key === 'Enter' || event.key === ' ') && void pinCachedCopyFromPreview(entry)}
+                  >{@html cacheSearchMatches[entry.name].preview}</div>
+                {/if}
               </div>
             {/each}
           {:else}
@@ -5184,6 +5269,26 @@
                       <svg class="history-download-icon" viewBox="56 108 33 36" aria-hidden="true"><path class="history-icon-shape" d="m 73.595508,109.76746 c -7.198235,0 -13.103617,5.58342 -13.647229,12.64471 h -0.0072 V 138.2696 H 58.61606 l 2.32389,4.02559 2.324405,-4.02559 h -1.323433 v -15.85123 c 0.530186,-5.97937 5.534806,-10.65103 11.654586,-10.65103 6.474618,0 11.703161,5.22855 11.703161,11.70316 0,6.47462 -5.228543,11.70161 -11.703161,11.70161 -2.644513,0 -5.080809,-0.87232 -7.037814,-2.34508 v 2.39572 c 2.058162,1.23707 4.46633,1.94924 7.037814,1.94924 7.555498,0 13.703556,-6.14599 13.703556,-13.70149 0,-7.5555 -6.148058,-13.70304 -13.703556,-13.70304 z m -2.108915,7.49825 v 8.05016 h 7.125663 v -1.59836 h -5.527311 v -6.4518 z"></path></svg>
                     {/if}
                   </button>
+                {/if}
+                <!--
+                  Beside the row, the same panel with the same grey preview this device's own
+                  matched rows draw, because it is the same fact: these words are in a copy
+                  the launcher holds of this Lith. The gesture matches too, pinning the note
+                  the preview was cut from and opening the Lith, and the one difference is
+                  worth knowing: the note comes out of the cache, and the document that opens
+                  is the server's current copy of it.
+                -->
+                {#if cacheSearchMatches[file.name]?.preview}
+                  <div
+                    use:positionCachePreview
+                    class="cache-preview"
+                    role="button"
+                    tabindex="0"
+                    aria-label={cacheSearchMatches[file.name].title ? copy.row.pinAria(file.name, cacheSearchMatches[file.name].title ?? '') : copy.row.openAria(file.name)}
+                    title={copy.row.pinTitle}
+                    on:click={() => void pinRemoteFromPreview(file.name)}
+                    on:keydown={(event) => (event.key === 'Enter' || event.key === ' ') && void pinRemoteFromPreview(file.name)}
+                  >{@html cacheSearchMatches[file.name].preview}</div>
                 {/if}
                 <!--
                   The × the legacy store carried on every remote row, kept: on an instance

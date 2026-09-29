@@ -1072,6 +1072,86 @@ try {
   await livePage.click('.history-modal .modal-close');
   await livePage.waitForSelector('.history-modal', { hidden: true });
 
+  // --- A body match on a server row, which this list was missing ----------------
+  //
+  // Self-host's rows are the server's, and they used to be filtered by their names alone.
+  // But this device holds a cache of each Lith the indexing pass above read, and a word
+  // that appears only inside one is worth exactly as much here as it is on a local row:
+  // the row is still the server's, the panel beside it is an annotation on it. The word is
+  // taken from the store's own filler text (`from this instance`), so this measures the
+  // read-through path rather than a cache this test planted for itself.
+  await livePage.type('input.recent-search', 'instance');
+  await new Promise(resolve => setTimeout(resolve, 300));
+  const storeBodyMatch = await livePage.evaluate(() => {
+    const row = [...document.querySelectorAll('.recent-row.remote-row')].find(node => node.textContent.includes('arrived.lith')) ?? null;
+    const panel = row?.querySelector('.cache-preview') ?? null;
+    const mark = panel?.querySelector('mark:not(.cache-preview-title-mark)') ?? null;
+    return {
+      rows: [...document.querySelectorAll('.recent-row.remote-row .recent-name')].map(node => node.textContent.trim()),
+      panel: Boolean(panel),
+      preview: panel?.textContent?.trim() ?? null,
+      mark: mark?.textContent ?? null,
+      colour: mark ? getComputedStyle(mark).color : null,
+      aria: panel?.getAttribute('aria-label') ?? null,
+      title: panel?.getAttribute('title') ?? null,
+      // The device's own rows are never drawn in this mode, so a list that has one has
+      // mixed the two, which is the rule this change is not allowed to break.
+      deviceRows: document.querySelectorAll('.recent-row:not(.remote-row)').length
+    };
+  });
+  assert.ok(
+    storeBodyMatch.rows.some((row) => row.startsWith('arrived.lith')),
+    `Live self-host: a word only the cached body holds lists the server's row: ${JSON.stringify(storeBodyMatch)}`
+  );
+  assert.equal(storeBodyMatch.panel, true, 'Live self-host: ...with the same match panel a local row draws');
+  assert.equal(
+    storeBodyMatch.mark,
+    'instance',
+    `Live self-host: ...marking the hit inside the body it was found in: ${JSON.stringify(storeBodyMatch.preview)}`
+  );
+  assert.equal(storeBodyMatch.colour, 'rgb(255, 152, 0)', 'Live self-host: body marks stay amber, here as everywhere');
+  assert.equal(
+    storeBodyMatch.aria,
+    'Open arrived.lith and pin “arrived” to top',
+    'Live self-host: ...and offers the gesture a local panel offers, the note the preview matched pinned to the top'
+  );
+  assert.equal(storeBodyMatch.title, 'Open and pin this tiddler', 'Live self-host: said the same way in the tooltip');
+  assert.equal(storeBodyMatch.deviceRows, 0, 'Live self-host: and the answer is a panel on the server’s row rather than this device’s row appearing in a list that is not its own');
+
+  // The other half of that gesture: the click pins the note and then opens the Lith. The
+  // pin is filled in before the mount, so it is asserted while the mount is still failing:
+  // the file is taken out of the store first, which is the shortest way to make the open
+  // stop and leave the launcher on screen. The row stays drawn (a failed open does not
+  // re-read the list), and what it reports is what the row's own click would report.
+  const arrivedIndex = stub.state.liths.findIndex((lith) => lith.name === 'arrived.lith');
+  assert.ok(arrivedIndex >= 0, 'Live self-host: the Lith this leg is about is in the store to begin with');
+  const [heldLith] = stub.state.liths.splice(arrivedIndex, 1);
+  await livePage.click('.recent-row.remote-row .cache-preview');
+  await livePage.waitForSelector('.pending-imports li', { timeout: 5000 });
+  const queuedPin = await livePage.evaluate(() => ({
+    heading: document.querySelector('.pending-imports-header span')?.textContent?.trim() ?? null,
+    titles: [...document.querySelectorAll('.pending-imports li')].map((node) => node.textContent.trim())
+  }));
+  assert.equal(queuedPin.heading, 'Pending Imports', `Live self-host: the panel's click queues what it matched before anything is opened: ${JSON.stringify(queuedPin)}`);
+  assert.deepEqual(queuedPin.titles, ['arrived'], 'Live self-host: ...the note the preview was cut from, by the title the cache holds it under');
+  await livePage.waitForFunction(
+    () => [...document.querySelectorAll('.status-line.error')].some((line) => line.textContent.includes('arrived.lith')),
+    POLL
+  );
+  const failedOpen = await livePage.evaluate(() =>
+    [...document.querySelectorAll('.status-line.error')].map((line) => line.textContent.trim())[0] ?? null
+  );
+  assert.match(
+    failedOpen ?? '',
+    /^Could not open arrived\.lith: /,
+    `Live self-host: ...and then opens the Lith from the server, which is the row's own gesture: ${failedOpen}`
+  );
+  stub.state.liths.push(heldLith);
+  await livePage.click('.pending-imports-header button');
+  await livePage.waitForSelector('.pending-imports', { hidden: true });
+  await livePage.click('.recent-search-clear');
+  await livePage.waitForFunction(() => document.querySelectorAll('.recent-row.remote-row').length > 0, POLL);
+
   // --- Re-reading the server, and indexing it here ----------------------------
   // The rebuild control stays on an instance, which is the mode whose list is derived
   // rather than authored. Rebuilding here is two things at once: the store is read again,
@@ -1779,6 +1859,35 @@ try {
   assert.match(awayOpen.rows[0], /^notes\.lith/, 'by name, because there is no server left to order it by');
   assert.equal(awayOpen.back, true, 'and with the way back to the app that the worker’s own 408 page never had');
   assert.deepEqual(awayErrors, [], `The handover ran without an uncaught error: ${awayErrors.join(' | ')}`);
+  // The same rule on this list, where it matters most: a down instance has no second list to
+  // fall back on, and the copy on this device is the whole of what there is to search. The
+  // query appears only inside what that copy holds, which is the half this list was missing.
+  await awayPage.type('input[aria-label="Search recent Liths"]', 'device');
+  await new Promise(resolve => setTimeout(resolve, 250));
+  const awayMatch = await awayPage.evaluate(() => {
+    const row = document.querySelector('.recent-row.offline-row') ?? null;
+    const preview = row?.querySelector('.cache-preview') ?? null;
+    const mark = preview?.querySelector('mark:not(.cache-preview-title-mark)') ?? null;
+    return {
+      rows: [...document.querySelectorAll('.recent-row.offline-row .recent-name')].map((node) => node.textContent ?? ''),
+      preview: Boolean(preview),
+      mark: mark?.textContent ?? null,
+      aria: preview?.getAttribute('aria-label') ?? null
+    };
+  });
+  assert.equal(
+    awayMatch.rows.length,
+    1,
+    `Offline: a word only the cached body holds still lists the copy this device took: ${JSON.stringify(awayMatch)}`
+  );
+  assert.equal(awayMatch.preview, true, 'Offline: ...with the match panel a local row draws');
+  assert.equal(awayMatch.mark, 'device', `Offline: ...marking the hit in the body it was found in: ${JSON.stringify(awayMatch)}`);
+  assert.equal(
+    awayMatch.aria,
+    'Open notes.lith and pin “Hello” to top',
+    'Offline: ...and offering the row’s own open with the matched note pinned'
+  );
+  assert.deepEqual(awayErrors, [], `The search ran without an uncaught error: ${awayErrors.join(' | ')}`);
   await awayContext.close();
 
   // Seed a cache-only wiki. The query below is intentionally absent from the
@@ -4193,13 +4302,15 @@ try {
       store.put([{ handle: null, tauriPath: null, name: 'chain.lith' }], 'recentFiles');
       store.put({ text: '[]' }, 'search_cache_chain.lith');
       // Oldest first, which is the order the chain is recorded in: the modal is what
-      // turns it round, so an ascending store is the case worth asserting.
+      // turns it round, so an ascending store is the case worth asserting. The steps are
+      // a day and then 90 minutes before the head, so the distances the trail names are
+      // 1.5 hours and 22.5 hours: the half step is read in the DOM rather than assumed.
       store.put(
         {
           headId: 'v3',
           versions: [
             { id: 'v1', ts: at - 86_400_000, sizeBytes: 41_820, isBase: true },
-            { id: 'v2', ts: at - 3_600_000, sizeBytes: 42_360 },
+            { id: 'v2', ts: at - 90 * 60_000, sizeBytes: 42_360 },
             { id: 'v3', ts: at, sizeBytes: 43_010 }
           ]
         },
@@ -4216,18 +4327,33 @@ try {
   await vaultPage.waitForSelector('.history-entry');
   const chain = await vaultPage.evaluate(() => {
     const list = document.querySelector('.history-list');
-    const box = list.getBoundingClientRect();
     const rows = [...list.querySelectorAll('.history-entry')].map(node => ({
       badge: node.querySelector('.history-badge').textContent.trim(),
       at: Date.parse(node.querySelector('.history-time').textContent.trim().replace(' UTC', 'Z').replace(' ', 'T'))
     }));
+    // Centred on the rows rather than on the list box: a connector is the chevron AND the
+    // distance beside it, so the pair is what has to sit in the middle, and a scrollbar
+    // cannot shift the reference.
+    const rowBox = list.querySelector('.history-entry').getBoundingClientRect();
+    const centre = rowBox.left + rowBox.width / 2;
+    const links = [...list.querySelectorAll('.history-link')];
+    // The connector's drawing, read as its two ends and the apex between them (`M<x> <y> <x>
+    // <y>l<dx> <dy>`), which is the only way the direction of an outline can be asserted.
+    const drawing = links[0]
+      .querySelector('svg path')
+      .getAttribute('d')
+      .match(/-?\d+(?:\.\d+)?/g)
+      .map(Number);
     return {
       rows,
-      // Where each connector's chevron falls, as an offset from the list's own centre.
-      links: [...list.querySelectorAll('.history-link')].map(node => {
+      links: links.map(node => {
         const chevron = node.querySelector('svg').getBoundingClientRect();
-        return Math.round(chevron.left + chevron.width / 2 - (box.left + box.width / 2));
-      })
+        const distance = node.querySelector('.history-gap');
+        const right = distance ? distance.getBoundingClientRect().right : chevron.right;
+        return Math.round((chevron.left + right) / 2 - centre);
+      }),
+      gaps: links.map(node => node.querySelector('.history-gap')?.textContent?.trim() ?? null),
+      chevron: { endY: drawing[1], apexY: drawing[3] }
     };
   });
   assert.deepEqual(
@@ -4242,7 +4368,16 @@ try {
   assert.equal(chain.links.length, chain.rows.length - 1, 'Every gap between two versions is drawn, and no more');
   assert.ok(
     chain.links.every(offset => Math.abs(offset) <= 1),
-    `...each one centred on the list rather than on the row it hangs from: ${JSON.stringify(chain.links)}`
+    `...each one centred on the rows rather than on the row it hangs from: ${JSON.stringify(chain.links)}`
+  );
+  assert.deepEqual(
+    chain.gaps,
+    ['1.5 hours later', '22.5 hours later'],
+    'Each connector names the distance between its two versions, in the greatest unit only'
+  );
+  assert.ok(
+    chain.chevron.apexY < chain.chevron.endY,
+    `...and its chevron points up at the newer version, not down at the older one: ${JSON.stringify(chain.chevron)}`
   );
   // --- One mark for every unfinished row -----------------------------------------
   // A row used to grow a second and third icon to say what was wrong with it: an amber
@@ -4880,6 +5015,17 @@ try {
 
   // An address the machine will not open is the document's own, and rust accepts http and https only:
   // a mailto must stay a mailto rather than become a second open.
+  //
+  // The click is a real one, so the default action is cancelled by a listener this test adds
+  // first. That is not a shortcut around the behaviour under test: a mailto left to the browser
+  // is handed to the machine's own mail client, so running this suite on a machine with one
+  // opens a compose window out of a test run. The claim is about what the LAUNCHER does with
+  // the click, and the launcher's handler is on `window` in the capture phase, so it has
+  // already had its chance by the time this runs: were a mailto treated as a second external
+  // address, the count asserted below would be two. Only the handoff that follows is stopped.
+  await mountPage.evaluate(() => {
+    document.querySelector('#write')?.addEventListener('click', (event) => event.preventDefault());
+  });
   await mountPage.click('#write');
   assert.equal(
     mountCalls.filter(call => call.command === 'open_external').length,

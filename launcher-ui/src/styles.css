@@ -1377,7 +1377,7 @@ body.drag-over::after {
   pointer-events: none;
 }
 
-/* --- Version history modal --- */
+/* --- History trail modal --- */
 .history-modal { width: min(100%, 540px); }
 .history-modal h2 { margin-bottom: 12px; padding-right: 30px; overflow-wrap: anywhere; }
 .history-empty { color: #999; }
@@ -1387,17 +1387,20 @@ body.drag-over::after {
   padding: 8px 10px; border: 1px solid #3a3a3a; border-radius: 7px; background: #2c2c2c;
 }
 /*
- * What joins two versions: the gap between two entries, with the chevron centred in it.
- * The list runs newest at the top, so the chevron points down at the version the row above
- * was written from. Which is the one fact the panel otherwise left to the timestamps.
+ * What joins two versions: the gap between two entries, with the chevron and the distance
+ * between them centred in it. The list runs newest at the top, so the chevron points up, from
+ * the older version below to the newer one above, which is the way the trail is read back.
  * The connector owns the spacing, which is why an entry carries no bottom margin of its own:
  * one gap, drawn, instead of a margin plus a decoration inside it.
  */
-.history-link { display: grid; place-items: center; height: 16px; }
+.history-link { display: flex; align-items: center; justify-content: center; gap: 8px; height: 20px; }
 .history-link svg {
   width: 13px; height: 8px;
   fill: none; stroke: #6f6f6f; stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round;
 }
+/* The distance itself, in a grey near the chevron's own: smaller than the timestamp it reads,
+ * because it is a reading of two stamps rather than a third fact about the version. */
+.history-gap { color: #8a8a8a; font-size: 0.74em; white-space: nowrap; }
 .history-badge {
   flex: none; padding: 1px 6px; border-radius: 9px;
   border: 1px solid #5a7fbf; color: #8ab4f8; font-size: 0.66em; text-transform: uppercase; letter-spacing: 0.04em;

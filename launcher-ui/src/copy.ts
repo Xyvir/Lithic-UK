@@ -289,8 +289,8 @@ const en = {
     },
 
     history: {
-      closeAria: 'Close version history dialog',
-      title: (name: string) => `${name} Version History`,
+      closeAria: 'Close history trail dialog',
+      title: (name: string) => `${name} History Trail`,
       backupGroupAria: 'Back up this Lith',
       localOnly: (folder: string) => `Not backed up. Copy it into ${folder} to have it synced.`,
       copy: 'Copy',
@@ -303,6 +303,17 @@ const en = {
       badgeStep: 'step',
       badgeStepTitle: 'Edits since the previous save.',
       downloadAria: (when: string) => `Download a copy of the version from ${when}`,
+      /**
+       * The grey distance the trail draws between two versions, as the newer row's own
+       * sentence. `count` arrives as this locale already writes a number, so only the unit
+       * word and its plural live here.
+       */
+      later: {
+        seconds: (count: string) => `${count} second${count === '1' ? '' : 's'} later`,
+        minutes: (count: string) => `${count} minute${count === '1' ? '' : 's'} later`,
+        hours: (count: string) => `${count} hour${count === '1' ? '' : 's'} later`,
+        days: (count: string) => `${count} day${count === '1' ? '' : 's'} later`
+      },
       note: 'Reverting is manual. Download a version, then replace the wiki with it.'
     },
 
@@ -818,8 +829,8 @@ const es: Copy = {
     },
 
     history: {
-      closeAria: 'Cerrar el diálogo del historial',
-      title: (name: string) => `Historial de ${name}`,
+      closeAria: 'Cerrar el sendero del historial',
+      title: (name: string) => `Sendero del historial de ${name}`,
       backupGroupAria: 'Respaldar este Lith',
       localOnly: (folder: string) => `Sin respaldo. Cópialo a ${folder} para que se sincronice.`,
       copy: 'Copiar',
@@ -832,6 +843,12 @@ const es: Copy = {
       badgeStep: 'paso',
       badgeStepTitle: 'Ediciones desde el guardado anterior.',
       downloadAria: (when: string) => `Descargar una copia de la versión del ${when}`,
+      later: {
+        seconds: (count: string) => `${count} segundo${count === '1' ? '' : 's'} después`,
+        minutes: (count: string) => `${count} minuto${count === '1' ? '' : 's'} después`,
+        hours: (count: string) => `${count} hora${count === '1' ? '' : 's'} después`,
+        days: (count: string) => `${count} día${count === '1' ? '' : 's'} después`
+      },
       note: 'Revertir es manual. Descarga una versión y sustituye el wiki con ella.'
     },
 
@@ -1327,8 +1344,8 @@ const fr: Copy = {
     },
 
     history: {
-      closeAria: 'Fermer le dialogue de l’historique',
-      title: (name: string) => `Historique de ${name}`,
+      closeAria: 'Fermer le sentier de l’historique',
+      title: (name: string) => `Sentier de l’historique de ${name}`,
       backupGroupAria: 'Sauvegarder ce Lith',
       localOnly: (folder: string) => `Pas sauvegardé. Copiez-le dans ${folder} pour le synchroniser.`,
       copy: 'Copier',
@@ -1341,6 +1358,12 @@ const fr: Copy = {
       badgeStep: 'étape',
       badgeStepTitle: 'Modifications depuis l’enregistrement précédent.',
       downloadAria: (when: string) => `Télécharger une copie de la version du ${when}`,
+      later: {
+        seconds: (count: string) => `${count} seconde${count === '1' ? '' : 's'} plus tard`,
+        minutes: (count: string) => `${count} minute${count === '1' ? '' : 's'} plus tard`,
+        hours: (count: string) => `${count} heure${count === '1' ? '' : 's'} plus tard`,
+        days: (count: string) => `${count} jour${count === '1' ? '' : 's'} plus tard`
+      },
       note: 'Le retour en arrière est manuel. Téléchargez une version, puis remplacez le wiki par celle-ci.'
     },
 
@@ -1833,8 +1856,8 @@ const de: Copy = {
     },
 
     history: {
-      closeAria: 'Dialog des Versionsverlaufs schließen',
-      title: (name: string) => `Versionen von ${name}`,
+      closeAria: 'Spur des Verlaufs schließen',
+      title: (name: string) => `Spur des Verlaufs von ${name}`,
       backupGroupAria: 'Diesen Lith sichern',
       localOnly: (folder: string) => `Nicht gesichert. Kopiere ihn nach ${folder}, damit er synchronisiert wird.`,
       copy: 'Kopieren',
@@ -1847,6 +1870,12 @@ const de: Copy = {
       badgeStep: 'Schritt',
       badgeStepTitle: 'Änderungen seit der letzten Speicherung.',
       downloadAria: (when: string) => `Eine Kopie der Version von ${when} herunterladen`,
+      later: {
+        seconds: (count: string) => `${count} Sekunde${count === '1' ? '' : 'n'} später`,
+        minutes: (count: string) => `${count} Minute${count === '1' ? '' : 'n'} später`,
+        hours: (count: string) => `${count} Stunde${count === '1' ? '' : 'n'} später`,
+        days: (count: string) => `${count} Tag${count === '1' ? '' : 'e'} später`
+      },
       note: 'Zurücksetzen ist manuell. Lade eine Version herunter und ersetze das Wiki damit.'
     },
 

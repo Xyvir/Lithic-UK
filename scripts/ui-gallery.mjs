@@ -177,16 +177,22 @@ const OFFLINE_CACHES = {
 const history = (ts = SAVED_AT) => ({ headId: 'v1', versions: [{ id: 'v1', ts, sizeBytes: 120, isBase: true }] });
 
 /**
- * Three recorded versions, oldest first: a full save, then the edits since it. Each
+ * Four recorded versions, oldest first: a full save, then the edits since it. Each
  * `sizeBytes` is the document's own size at that save, not the delta's — which is
  * what `saveVersion` records, and what makes the sizes comparable down the list.
+ *
+ * The stamps are spread on purpose, because the trail names the distance between two
+ * versions in one unit: 90 minutes, then 22.5 hours, then 3 days, so a sheet of this
+ * fixture shows the half step, the greatest-unit rule and a plural without a reader
+ * having to take any of them on trust.
  */
 const versionChain = () => ({
-  headId: 'v3',
+  headId: 'v4',
   versions: [
-    { id: 'v1', ts: SAVED_AT - 86_400_000, sizeBytes: 41_820, isBase: true },
-    { id: 'v2', ts: SAVED_AT - 3_600_000, sizeBytes: 42_360 },
-    { id: 'v3', ts: SAVED_AT, sizeBytes: 43_010 }
+    { id: 'v1', ts: SAVED_AT - 4 * 86_400_000, sizeBytes: 41_820, isBase: true },
+    { id: 'v2', ts: SAVED_AT - 86_400_000, sizeBytes: 42_360 },
+    { id: 'v3', ts: SAVED_AT - 5_400_000, sizeBytes: 42_980 },
+    { id: 'v4', ts: SAVED_AT, sizeBytes: 43_010 }
   ]
 });
 
@@ -989,11 +995,11 @@ const SHEETS = [
     ]
   },
   {
-    // The per-wiki version history, which is a Lith's own business rather than an
+    // The per-wiki history trail, which is a Lith's own business rather than an
     // instance's: what the launcher recorded of *this* document, newest first, and the
     // only way back to any of it.
     id: 'history',
-    title: 'Version history — the chain, its badges, and the only way back',
+    title: 'History trail — the chain, its distances, and the only way back',
     tile: '3x',
     panes: [
       {
