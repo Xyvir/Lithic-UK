@@ -892,6 +892,79 @@ function injectSaverBootstrap(
 }
 
 /**
+ * The one place a mounted wiki can put an external link.
+ *
+ * The desktop webview has no second window, so a `target="_blank"` click inside a mounted wiki
+ * lands nowhere at all: every reference in the document is a dead control, the same failure the
+ * launcher's own project link and device-login page had. A browser opens the tab itself, so this
+ * script does nothing outside the app.
+ *
+ * It has to live *inside* the document the mount writes. `document.open()` builds a fresh document
+ * and drops every event listener the launcher registered on the one it replaced (measured: a
+ * listener held over from launcher JS never fires again, while window properties survive), which is
+ * the same reason the injected saver resolves `__TAURI__` for itself and reports back through
+ * `postMessage` rather than through a reference into the launcher UI.
+ */
+const MOUNTED_LINK_BOOTSTRAP = `(function(){
+    var root = window;
+    var doc = root.document;
+    if (!doc || root.__LITHIC_LINK_OPENER__) return;
+
+    // v2 exposes the invoke on __TAURI__.core, v1 on __TAURI__.tauri, and the bare
+    // __TAURI__.invoke is accepted as well, since the global's shape is the one thing
+    // that differs between the app builds this bundle is loaded into.
+    var tauriInvoke = (function() {
+      var tauri = root.__TAURI__;
+      if (!tauri) return null;
+      if (tauri.invoke) return tauri.invoke;
+      if (tauri.core && tauri.core.invoke) return tauri.core.invoke;
+      return (tauri.tauri && tauri.tauri.invoke) || null;
+    })();
+    if (!tauriInvoke) return;
+    root.__LITHIC_LINK_OPENER__ = true;
+
+    // Capture phase, so the click is claimed before anything in the document acts on it. Only a
+    // plain left click is: the middle click, the context menu, "Copy link" and the modifier keys
+    // all stay the document's own, which is what they are in a browser too.
+    doc.addEventListener('click', function(event) {
+      if (event.defaultPrevented || event.button !== 0) return;
+      var target = event.target;
+      var anchor = target && target.closest ? target.closest('a[href]') : null;
+      if (!anchor) return;
+      // http and https only, the same limit Rust's open_external enforces, so an anchor in a page
+      // cannot reach a local file or a shell scheme through this. A tiddler link, a fragment, a
+      // relative address and a mailto are each left to the document that produced them.
+      if (!/^https?:$/i.test(anchor.protocol || '')) return;
+      // An address on this page's own origin is the page's own business: it is the one click a
+      // wiki can serve from where it already is.
+      if (anchor.origin === root.location.origin) return;
+      event.preventDefault();
+      try {
+        tauriInvoke('open_external', { url: anchor.href });
+      } catch (e) { /* refused, and the address is still in the href */ }
+    }, true);
+  })();`;
+
+/**
+ * Put the link bootstrap in a document, ahead of its boot script where there is one so it shares the
+ * injected saver's place in the boot order.
+ *
+ * A monolith is an ordinary page rather than an engine and has no boot script to precede: the script
+ * lands at the end of its head, or at the end of the document when it has neither a head nor a body
+ * to aim at. Arriving late costs nothing, because the only thing it has to beat is a person clicking
+ * a link, and it is registered while the document is still being parsed.
+ */
+function injectMountedLinkBootstrap(html: string): string {
+  const script = `<script>${MOUNTED_LINK_BOOTSTRAP}</script>`;
+  const bootScript = /<script[^>]+(?:src=["'][^"']*boot[^"']*["']|data-tiddler-title=["']\$:\/boot\/)/i;
+  const tag = html.match(bootScript)?.[0] ?? '';
+  if (tag) return html.replace(tag, `${script}\n${tag}`);
+  if (/<\/head>/i.test(html)) return html.replace(/<\/head>/i, `${script}\n</head>`);
+  if (/<\/body>/i.test(html)) return html.replace(/<\/body>/i, `${script}\n</body>`);
+  return `${html}\n${script}`;
+}
+
+/**
  * The engine boots in place via document.open/write/close, which preserves
  * the launcher window and its globals. Injecting the ones the mounted engine
  * needs (e.g. __EPHEMERAL_MODE__ for the Ephemeral widget) is kept as a
@@ -1032,7 +1105,8 @@ export function buildEngineHtml(
     // root tiddler injected by the scratch mount.
     html = injectEngineGlobals(html, { __LITHIC_SCRATCH_ROOT__: scratchRootTitle(handoff.name) });
   }
-  return injectEngineGlobals(html, engineGlobals);
+  // Last, so the link bootstrap sits closest to the boot script the mount also injects ahead of.
+  return injectMountedLinkBootstrap(injectEngineGlobals(html, engineGlobals));
 }
 
 export async function bootLegacyWiki(
@@ -1067,8 +1141,12 @@ export function bootLegacyHtml(html: string, suggestedFileName?: string, path?: 
   // HTML monoliths keep their own tiddler store and are served as-is, but a
   // raw-HTML saver is injected so saves write the engine's serialized page back
   // to a .html file instead of falling through to TiddlyWiki's built-in
-  // download behavior (legacy setTwCustomSaveAsSaver(false) parity).
-  const withSaver = suggestedFileName ? injectSaverBootstrap(html, suggestedFileName, true) : html;
+  // download behavior (legacy setTwCustomSaveAsSaver(false) parity). The link
+  // bootstrap goes in with it, because this rewrite of the launcher document is
+  // exactly where an external link in the mounted page dies the same way.
+  const withSaver = injectMountedLinkBootstrap(
+    suggestedFileName ? injectSaverBootstrap(html, suggestedFileName, true) : html
+  );
   if (suggestedFileName) {
     // Record which file this is, exactly as the engine mount does. The injected
     // saver resolves its target from here, and without it a monolith adopted

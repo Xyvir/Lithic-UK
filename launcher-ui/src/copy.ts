@@ -1070,8 +1070,1023 @@ const es: Copy = {
   }
 };
 
+/**
+ * What a row's mark claims about a Lith this browser holds and nothing else does, in French.
+ * Separate from the deck below for the same reason the Spanish one is.
+ */
+const BROWSER_ONLY_TOOLTIP_FR =
+  'Stockage du navigateur uniquement. Ce Lith est gardé dans le cache de ce navigateur, et rien n’est réécrit dans un fichier. ' +
+  'Cette copie est intrinsèquement volatile. Effacer les données du site, ou un navigateur qui reprend de l’espace, la fera perdre. ' +
+  'Téléchargez vos propres copies depuis son historique de versions.';
+
+/**
+ * French.
+ *
+ * Written to the same rule as the Spanish deck above: a translation, not a transliteration, so
+ * a sentence is the claim English makes rather than the shape of the English sentence. `Lith`,
+ * `PIN` and `GitHub Sync` are the product's own words and do not move, and neither does
+ * anything the reader acts on (`github.com`, `owner/repository`, `.lith`), because a button
+ * that opens a real page has to name it. The copy rules hold here too: one short sentence,
+ * nothing restated, no em dashes or en dashes.
+ *
+ * French punctuation is written with plain spaces (`Dossier : `), not the narrow no-break
+ * space the typography asks for. An invisible character in a string this file is reviewed as
+ * prose is a worse trade than a break in a two-word dialog label.
+ */
+const fr: Copy = {
+  app: {
+    title: 'Lithic - Lanceur',
+    brandAlt: 'Lithic',
+    githubLink: 'Lithic sur GitHub',
+    footerLink: 'Github',
+    backToLauncher: 'Revenir au lanceur principal',
+    setInstanceIcon: 'Choisir l’icône de cette instance',
+    viewIntro: 'Voir l’introduction'
+  },
+
+  install: {
+    label: {
+      installing: 'Installation…',
+      install: 'Installer l’app',
+      plain: 'Installer',
+      updateAvailable: 'Mise à jour disponible',
+      updateInstall: 'Installer la mise à jour'
+    },
+    offer: {
+      browser: 'Ajouter le lanceur à cet appareil',
+      update: 'Téléchargez la nouvelle version, puis appuyez sur Installer la mise à jour',
+      desktop: 'Copier dans Documents et créer un raccourci dans le menu Démarrer'
+    },
+    dismissTitle: 'Masquer la proposition d’installation',
+    dismissAria: 'Fermer la proposition d’installation',
+    dismissText: 'fermer',
+    unavailable: 'L’installation est dans le menu du navigateur.',
+    openFailed: (detail: string) => `Impossible d’ouvrir votre navigateur : ${detail}`,
+    copyToSyncedDir: 'Copier dans le dossier synchronisé',
+    copyToSyncedDirBody: (name: string, folder: string) => `${name} n’est pas sauvegardé. Le copier dans ${folder} ?`,
+    copyConfirm: 'Copier',
+    copied: (name: string, folder: string) => `${name} copié dans ${folder}`,
+    installedPrefix: 'Installé dans ',
+    installed: (path: string) => `Installé dans ${path}`,
+    failed: (detail: string) => `Échec de l’installation : ${detail}`
+  },
+
+  pending: {
+    aria: 'Importations en attente',
+    heading: 'Importations en attente',
+    clear: 'Effacer les importations en attente',
+    untitled: 'Contenu sans titre'
+  },
+
+  common: {
+    cancel: 'Annuler',
+    back: 'Retour',
+    open: 'Ouvrir',
+    show: 'Afficher',
+    pin: 'PIN',
+    characterAria: (label: string, position: number, total: number) =>
+      `${label}, caractère ${position} sur ${total}`,
+    choosePin: 'Choisir un PIN',
+    repeatPin: 'Répéter le PIN'
+  },
+
+  dialogs: {
+    gitSync: {
+      title: 'GitHub Sync',
+      closeAria: 'Fermer le dialogue GitHub Sync',
+      folder: {
+        label: 'Dossier',
+        none: 'Pas encore de dossier',
+        choosing: 'Choix…',
+        change: 'Modifier',
+        choose: 'Choisir',
+        changeTitle: 'Modifier le dossier sauvegardé par GitHub Sync',
+        chooseTitle: 'Choisir le dossier sauvegardé par GitHub Sync',
+        changeAria: (folder: string) => `Modifier le dossier sauvegardé par GitHub Sync : ${folder}`,
+        chooseAria: 'Choisir le dossier sauvegardé par GitHub Sync',
+        automatic: 'Utiliser le dossier automatique'
+      },
+      backedUp: (backedUp: number, tracked: number) => `${backedUp} liths récents sauvegardés sur ${tracked}`,
+      noTarget: 'Enregistrez d’abord un Lith sur le disque, car la synchronisation sauvegarde son dossier.',
+      serverIntro: 'Sauvegardez ce serveur sur GitHub. Ses enregistrements sont envoyés automatiquement.',
+      serverNoAnswer: 'Cette instance n’a pas répondu au sujet des sauvegardes GitHub.',
+      folderIntro: 'Sauvegardez ce dossier sur GitHub. Les enregistrements sont envoyés automatiquement.',
+      working: 'En cours…',
+      stopping: 'Arrêt…',
+      stopSyncing: 'Arrêter la synchronisation',
+      connect: 'Connecter à GitHub',
+      tokenSummary: 'Avancé : se connecter avec un jeton d’accès personnel',
+      repoAria: 'Dépôt GitHub (propriétaire/nom)',
+      repoPlaceholder: 'propriétaire/dépôt',
+      tokenAria: 'Jeton GitHub',
+      tokenPlaceholder: 'Jeton fin ou classique avec droit d’écriture',
+      connecting: 'Connexion…',
+      connectPush: 'Connecter et envoyer',
+      stepOne: '1. Ouvrez',
+      stepTwo: '2. Saisissez ce code (installe Lithic Sync à la première utilisation) :',
+      waiting: 'En attente de l’autorisation…',
+      requesting: 'Demande d’un code à GitHub…',
+      stopWaiting: 'Arrêter d’attendre',
+      createAndSync: (name: string) => `+ Créer ${name} et synchroniser`,
+      foundRepos: 'Dépôts de synchronisation Lithic trouvés',
+      otherReposSummary: 'Avancé : vos autres dépôts',
+      customRepoAria: 'Dépôt personnalisé (propriétaire/nom)',
+      customRepoPlaceholder: 'propriétaire/nom',
+      syncing: 'Synchronisation…',
+      startSync: 'Démarrer la synchronisation',
+      connectedRepo: 'Dépôt connecté',
+      notRecorded: 'Non enregistré',
+      lastSynced: (age: string) => `Dernière synchronisation il y a ${age}.`,
+      noSyncYet: 'Pas encore de synchronisation.',
+      savesHere: 'Les enregistrements de ce dossier sont envoyés à GitHub automatiquement.',
+      waitingForGitHub: 'En attente de GitHub…',
+      reconnect: 'Reconnecter',
+      disconnect: 'Déconnecter',
+      starting: 'Démarrage…',
+      creatingRepo: 'Création du dépôt…',
+      settingUp: 'Préparation de la sauvegarde…',
+      backingUp: (repo: string) => `Sauvegarde de github.com/${repo}.`,
+      created: (repo: string) => `${repo} créé. `,
+      synced: 'Synchronisé',
+      reconnected: (repo: string) => `github.com/${repo} reconnecté`,
+      lastSaveFailed: (detail: string) => `Le dernier enregistrement n’a pas été envoyé : ${detail}`,
+      instanceNoDisconnect: 'L’instance n’a pas confirmé la déconnexion.',
+      noFolder: 'Impossible de déterminer le dossier ou le dépôt à reconnecter.',
+      noDeviceCode: 'GitHub n’a pas renvoyé de code d’appareil',
+      disconnectConfirm: {
+        server: 'Les enregistrements de ce serveur ne sont plus envoyés à GitHub.',
+        desktop: 'Les enregistrements de ce dossier ne sont plus envoyés à GitHub.',
+        label: 'Déconnecter'
+      },
+      disconnectTitle: 'Déconnecter GitHub Sync ?'
+    },
+
+    bookmark: {
+      closeAria: 'Fermer le dialogue des marque-pages',
+      title: 'Marquer une instance distante',
+      intro: 'Enregistrer une instance auto-hébergée pour y accéder vite.',
+      urlAria: 'URL de l’instance auto-hébergée',
+      urlPlaceholder: 'https://...',
+      save: 'Enregistrer le marque-page',
+      manage: 'Gérer les identifiants',
+      manageSaved: (count: number) => `Identifiants d’instances enregistrés. ${count} enregistrés.`,
+      manageEmpty: 'Identifiants d’instances enregistrés. Aucun pour l’instant.',
+      unverifiedTitle: 'Marquer cette instance ?',
+      unverifiedBody: 'Lithic n’a pas pu vérifier cette adresse.',
+      unverifiedConfirm: 'Marquer quand même',
+      unreachable: 'Cette adresse est injoignable.',
+      notInstance: 'Cette adresse n’est pas une instance Lithic.',
+      saved: 'Instance auto-hébergée marquée'
+    },
+
+    unlock: {
+      closeAria: 'Fermer le dialogue de déverrouillage',
+      title: (label: string) => `Ouvrir ${label}`,
+      sub: 'Identifiant enregistré. Saisissez votre PIN.'
+    },
+
+    credential: {
+      closeAria: 'Fermer le dialogue d’enregistrement',
+      title: 'Enregistrer cet identifiant ?',
+      forInstance: (label: string) => `Pour ${label}.`,
+      username: 'Nom d’utilisateur',
+      password: 'Mot de passe',
+      saving: 'Enregistrement…',
+      save: 'Enregistrer l’identifiant',
+      openWithoutSaving: 'Ouvrir sans enregistrer',
+      notSaved: 'Non enregistré : cette instance refuse cet identifiant.',
+      notOpened: 'Non ouvert : cette instance refuse cet identifiant.',
+      checking: 'Interrogation de l’instance…'
+    },
+
+    vault: {
+      closeAria: 'Fermer le dialogue des identifiants',
+      title: 'Identifiants d’instances',
+      empty: 'Rien d’enregistré pour l’instant.',
+      forgetAll: 'Tout oublier',
+      intro: 'Les identifiants des instances auto-hébergées apparaissent ici une fois enregistrés.',
+      pinPrompt: 'Saisissez votre PIN pour lire ces identifiants.',
+      count: (saved: number) => (saved === 1 ? '1 identifiant enregistré.' : `${saved} identifiants enregistrés.`),
+      checkAria: (origin: string) => `Vérifier l’identifiant de ${origin} auprès de l’instance`,
+      checkTitle: 'Demander à cette instance si l’identifiant enregistré fonctionne encore',
+      forgetAria: (origin: string) => `Oublier l’identifiant de ${origin}`,
+      forgetTitle: 'Oublier cet identifiant',
+      storedIn: 'Stocké dans',
+      forgot: (origin: string) => `Identifiant de ${origin} oublié.`,
+      forgetAllTitle: 'Oublier tous les identifiants enregistrés ?',
+      forgetAllBody:
+        'Le fichier du coffre est supprimé, et le PIN avec lui. Le prochain identifiant enregistré choisira un PIN neuf. ' +
+        'D’ici là, les instances demanderont un mot de passe.',
+      everyLoginGone: 'Tous les identifiants enregistrés ont disparu.'
+    },
+
+    collision: {
+      closeAria: 'Fermer le dialogue de session active',
+      title: 'Session active détectée',
+      someone: 'Quelqu’un d’autre',
+      hasOpenBefore: 'a',
+      hasOpenAfter: 'ouvert sur ce serveur. Le dernier qui écrit gagne.',
+      note: 'Ouvrir en lecture seule, ou ignorer le verrou.',
+      openReadOnly: 'Ouvrir en lecture seule',
+      ignoreLock: 'Ignorer le verrou et ouvrir'
+    },
+
+    icon: {
+      closeAria: 'Fermer le sélecteur d’icône',
+      title: 'Icône de l’instance',
+      intro: 'Cette icône appartient à l’instance. Toute personne qui ouvre cette adresse la voit.',
+      chooseAria: 'Choisir une icône d’instance',
+      saving: 'Enregistrement…',
+      savingProgress: (saved: number, total: number) => `Enregistrement… (${saved} sur ${total})`,
+      savedInstance: (name: string) => `✓ Enregistré. Cette instance utilise ${name}.`,
+      save: 'Enregistrer l’icône',
+      restoreTitle: 'Utiliser l’icône Lithic fournie',
+      restore: 'Rétablir l’icône d’origine',
+      savedHere: (detail: string) => `Enregistré sur cet appareil seulement. L’écriture sur le serveur a échoué (${detail}).`,
+      canvasFailed: 'Impossible de dessiner l’icône (pas de canvas).',
+      savedServer: '✓ Icône d’origine rétablie sur tout le serveur.',
+      restoredHere: 'Rétabli sur cet appareil seulement.'
+    },
+
+    rebuild: {
+      titleServer: 'Pas sur ce serveur',
+      titleDisk: 'Introuvable sur le disque',
+      bodyServer: (count: number) =>
+        `${count} ${count === 1 ? 'copie en cache manque' : 'copies en cache manquent'} sur le serveur, ` +
+        `donc reconstruire ${count === 1 ? 'la supprime' : 'les supprime'} de cet appareil.`,
+      bodyDisk: (count: number) =>
+        `${count} ${count === 1 ? 'lith n’a pas' : 'liths n’ont pas'} de fichier sur le disque, ` +
+        `donc reconstruire ${count === 1 ? 'sa copie en cache et son historique' : 'leurs copies en cache et leur historique'}.`,
+      unsavedWarning: (count: number) =>
+        `${count} d’entre eux ont des modifications non enregistrées, qu’aucun téléchargement ne peut récupérer.`,
+      noFile: 'Aucun fichier sur le disque',
+      cachedOnly: 'en cache seulement',
+      unsavedTag: 'modifications non enregistrées',
+      unsavedCaptured: (when: string) => `Modifications non enregistrées capturées ${when}`,
+      proceed: 'Continuer quand même'
+    },
+
+    history: {
+      closeAria: 'Fermer le dialogue de l’historique',
+      title: (name: string) => `Historique de ${name}`,
+      backupGroupAria: 'Sauvegarder ce Lith',
+      localOnly: (folder: string) => `Pas sauvegardé. Copiez-le dans ${folder} pour le synchroniser.`,
+      copy: 'Copier',
+      loading: 'Chargement des versions…',
+      none: 'Aucune version enregistrée pour l’instant.',
+      badgeSync: 'synchro',
+      badgeSyncTitle: 'Enregistré après une modification hors de cet appareil.',
+      badgeFull: 'complète',
+      badgeFullTitle: 'Copie complète de cet enregistrement.',
+      badgeStep: 'étape',
+      badgeStepTitle: 'Modifications depuis l’enregistrement précédent.',
+      downloadAria: (when: string) => `Télécharger une copie de la version du ${when}`,
+      note: 'Le retour en arrière est manuel. Téléchargez une version, puis remplacez le wiki par celle-ci.'
+    },
+
+    dirty: {
+      title: 'Modifications non enregistrées',
+      body: (name: string, edits: number, when: string) =>
+        `${name} a ${edits} ${edits === 1 ? 'modification' : 'modifications'} jamais enregistrée${edits === 1 ? '' : 's'} sur le disque, capturée${edits === 1 ? '' : 's'} ${when}.`,
+      more: (count: number) => `… et ${count} de plus`,
+      recover: 'Récupérer les modifications',
+      later: 'Décider plus tard',
+      discard: 'Abandonner'
+    }
+  },
+
+  actions: {
+    aria: 'Actions du lanceur',
+    newBlank: 'Nouveau Lith vierge',
+    upload: 'Téléverser un Lith',
+    mount: 'Monter un Lith',
+    bookmarkAria: 'Marquer une instance auto-hébergée',
+    bookmarkTitle: 'Marquer une instance distante'
+  },
+
+  newLith: {
+    placeholder: 'Saisir un titre',
+    nameAria: 'Nom du fichier Lith',
+    taken: 'Nom déjà utilisé',
+    takenError: 'Nom déjà utilisé.',
+    create: 'Créer le lith',
+    closeAria: 'Fermer la saisie du nouveau lith'
+  },
+
+  offline: {
+    title: 'Serveur injoignable',
+    body: 'Affichage des copies gardées par cet appareil. Les Liths s’ouvrent en lecture seule.',
+    rowMarkTitle: 'Sur cet appareil seulement, hors ligne.',
+    rowOpenTitle: 'Ouvrir la copie de cet appareil en lecture seule'
+  },
+
+  recent: {
+    aria: 'Liths récents',
+    searchAria: 'Rechercher dans les Liths récents',
+    searchPlaceholder: 'Rechercher des liths récents…',
+    clearSearch: 'Effacer la recherche de Liths récents',
+    readingServer: 'Lecture des Liths de ce serveur…',
+    empty: {
+      noMatch: 'Aucun Lith ne correspond.',
+      instanceHere: 'Aucun Lith de cette instance sur cet appareil pour l’instant.',
+      server: 'Aucun Lith sur ce serveur pour l’instant.',
+      recents: 'Aucun Lith récent.'
+    }
+  },
+
+  row: {
+    downloadAria: (name: string) => `Télécharger une copie de ${name}`,
+    downloadTitle: 'Télécharger une copie',
+    historyAria: (name: string) => `Afficher l’historique de ${name}`,
+    olderVersions: 'Versions précédentes',
+    showHistory: 'Afficher l’historique',
+    noHistory: 'Aucun historique en cache',
+    unsavedAria: (name: string) => `${name} a des modifications non enregistrées ; ouvrez pour les récupérer`,
+    unsavedFrom: (when: string) => `Modifications non enregistrées du ${when}`,
+    localOnlyAria: (name: string) => `Ouvrir l’historique et les options de sauvegarde de ${name}`,
+    localOnlyTitle: 'Hors d’un dossier sauvegardé. Ouvrez pour proposer la copie.',
+    openFromServer: 'Ouvrir depuis ce serveur',
+    deleteFromServerAria: (name: string) => `Supprimer ${name} de ce serveur`,
+    deleteFromServerTitle: 'Supprimer du stockage distant',
+    openUrl: (url: string) => `Ouvrir ${url}`,
+    noAddressAria: (url: string) => `Aucune adresse où enregistrer un identifiant sur ${url}`,
+    noAddress: 'Aucune adresse où enregistrer un identifiant',
+    vaultSaved: (origin: string) => `Un identifiant est enregistré pour ${origin}. Le gérer.`,
+    vaultSave: (origin: string) => `Enregistrer un identifiant pour ${origin} pour qu’il arrête de demander`,
+    openSearchingAria: (label: string, query: string) => `Ouvrir ${label} en cherchant « ${query} »`,
+    openSearchingTitle: (label: string) => `Ouvrir ${label} et chercher ceci`,
+    removeBookmarkAria: (url: string) => `Retirer le marque-page ${url}`,
+    pinAria: (name: string, title: string) => `Ouvrir ${name} et épingler « ${title} » en haut`,
+    openAria: (name: string) => `Ouvrir ${name}`,
+    pinTitle: 'Ouvrir et épingler ce tiddler',
+    removeAria: (name: string) => `Retirer ${name}`,
+    cachedLocally: 'En cache local',
+    browserOnly: (name: string) => `${name}. ${BROWSER_ONLY_TOOLTIP_FR}`,
+    browserOnlyClaim: BROWSER_ONLY_TOOLTIP_FR,
+    browserOnlyNote:
+      'Stockage du navigateur uniquement. Ce Lith n’a pas de fichier, donc ce que ce navigateur garde est la seule copie qui existe. ' +
+      'Téléchargez une version pour en garder une que vous pourrez remonter.'
+  },
+
+  foot: {
+    rebuild: 'Reconstruire les récents',
+    reindexing: 'Réindexation…',
+    rebuildServerTitle: 'Relire ce serveur et indexer ses Liths ici',
+    rebuildDiskTitle: 'Reconstruire cette liste depuis les fichiers du disque',
+    reset: 'Réinitialiser les récents',
+    resetTitle: 'Efface cette liste et son historique local. Vos fichiers restent.'
+  },
+
+  orphan: {
+    saving: { label: 'enregistrement…', title: 'Enregistrement d’une copie en cours.' },
+    saved: { label: '✓ enregistré', title: 'La copie est sur cet appareil.' },
+    unverified: {
+      label: '✓ vérifiez les téléchargements',
+      title: 'Le navigateur ne peut pas confirmer les téléchargements. Vérifiez votre dossier Téléchargements.'
+    },
+    failed: { label: 'échec', title: 'Cette copie n’a pas pu être enregistrée.' },
+    noteOneSaved: 'Enregistré. Vous pouvez continuer.',
+    noteOneUnconfirmed: 'Enregistré, mais non confirmé.',
+    noteAllSaved: (total: number) => `Les ${total} enregistrés. Vous pouvez continuer.`,
+    noteAllUnconfirmed: (total: number, unconfirmed: number) =>
+      `Les ${total} enregistrés, mais ${unconfirmed} non confirmés.`,
+    notePartial: (done: number, total: number) => `${done} sur ${total} enregistrés.`
+  },
+
+  sync: {
+    syncing: 'GitHub Sync : synchronisation…',
+    checking: 'GitHub Sync : vérification…',
+    verifying: 'GitHub Sync : vérification de la connexion…',
+    lastSaveFailed: (detail: string) => `GitHub Sync : le dernier enregistrement n’a pas été envoyé (${detail})`,
+    failure: (detail: string) => `GitHub Sync : ${detail}`,
+    connected: (target: string, age: string | null) =>
+      `GitHub Sync : ${target}${age ? `, vérifié il y a ${age}` : ''}`,
+    connectedLabel: 'connecté',
+    serverFailed: 'GitHub Sync : cette instance n’a pas répondu',
+    serverSyncing: (target: string) => `GitHub Sync : synchronisation vers ${target}…`,
+    serverConnected: (target: string, age: string | null) =>
+      `GitHub Sync : ${target}${age ? `, dernière synchronisation il y a ${age}` : ''}`,
+    readonly: 'ce jeton ne peut que lire le dépôt. Reconnectez-vous pour autoriser les envois.',
+    auth: 'GitHub a refusé ce jeton. Reconnectez-vous pour vous identifier à nouveau.',
+    missing: 'le dépôt est absent ou n’est pas partagé avec ce jeton.',
+    throttled: 'GitHub limite cet appareil. Les enregistrements restent locaux pour l’instant.',
+    offline: 'github.com est injoignable. Les enregistrements restent sur cet appareil.',
+    malformed: 'le dépôt distant enregistré pour ce dossier est illisible. Reconnectez-vous pour le réparer.',
+    backendSilent: 'le service de synchronisation n’a pas répondu'
+  },
+
+  loginCheck: {
+    busy: 'Vérification…',
+    accepted: 'Fonctionne',
+    refused: 'Refusé',
+    notRequired: 'Non demandé',
+    unclear: 'Incertain',
+    unreachable: 'Sans réponse'
+  },
+
+  instanceCopy: {
+    failed: (label: string) => `Impossible d’effacer la copie en cache de ${label}`
+  },
+
+  bookmarkErrors: {
+    needUrl: 'Saisissez l’URL d’une instance Lithic auto-hébergée.',
+    needHttp: 'Utilisez une URL HTTP ou HTTPS.'
+  },
+
+  deviceFlow: {
+    unexpected: 'Réponse inattendue de GitHub',
+    denied: 'Autorisation refusée sur GitHub.',
+    expired: 'Ce code a expiré. Recommencez pour en obtenir un nouveau.',
+    failed: 'L’autorisation a échoué ou expiré. Générez un nouveau code.'
+  },
+
+  serverSync: {
+    noCode: 'GitHub n’a pas répondu avec un code.',
+    unreachableForCode: 'Impossible d’atteindre ce serveur pour obtenir un code.',
+    noRepos: 'Impossible de lister vos dépôts.',
+    noCreate: 'Impossible de créer le dépôt.',
+    unreachableForSetup: 'Impossible d’atteindre ce serveur pour préparer la sauvegarde.',
+    setupFailed: 'Échec de la configuration.',
+    setupFailedDetail: (detail: string) => `Échec de la configuration : ${detail}`
+  },
+
+  status: {
+    opening: 'Ouverture…',
+    openingRecent: 'Ouverture d’un Lith récent…',
+    loadingBlank: 'Chargement d’un Lith vierge…',
+    openFailed: (detail: string) => `Échec de l’ouverture : ${detail}`,
+    mounted: (name: string) => `${name} monté`,
+    mountedReadOnly: (name: string) => `${name} monté en lecture seule`,
+    mountedPatched: (name: string) => `${name} monté. Les enregistrements n’envoient que les changements.`,
+    noPath: 'Aucun chemin de fichier enregistré. Ouvrez-le une fois avec Monter pour le relier.',
+    added: (count: number) => `${count} Liths ajoutés aux récents`,
+    uploading: (names: readonly string[]) =>
+      names.length === 1 ? `Envoi de ${names[0]}…` : `Envoi de ${names.length} Liths…`,
+    uploaded: (count: number) => `${count} Liths envoyés`,
+    uploadFailed: (detail: string) => `Impossible d’envoyer : ${detail}`,
+    replaceOne: 'Remplacer ce Lith ?',
+    replaceMany: 'Remplacer ces Liths ?',
+    replaceBodyOne: (name: string) => `${name} est déjà sur ce serveur. L’envoyer le remplace.`,
+    replaceBodyMany: (names: string) => `${names} sont déjà sur ce serveur. Les envoyer les remplace.`,
+    replaceConfirm: 'Remplacer',
+    listingFailed: (detail: string) => `Impossible de lister les Liths de ce serveur (${detail}).`,
+    openingName: (name: string) => `Ouverture de ${name}…`,
+    openNameFailed: (name: string, detail: string) => `Impossible d’ouvrir ${name} : ${detail}`,
+    creating: (name: string) => `Création de ${name}…`,
+    createFailed: (name: string, detail: string) => `Impossible de créer ${name} : ${detail}`,
+    deleteTitle: 'Supprimer ce Lith ?',
+    deleteConfirm: 'Supprimer',
+    deleting: (name: string) => `Suppression de ${name}…`,
+    deleteFailed: (name: string, detail: string) => `Impossible de supprimer ${name} : ${detail}`,
+    deleteBody: (name: string) => `${name} est supprimé du serveur, pas seulement de cet appareil.`,
+    recovering: (edits: number, name: string) =>
+      `Récupération de ${edits} ${edits === 1 ? 'modification' : 'modifications'} non enregistrée${edits === 1 ? '' : 's'} pour ${name}`,
+    editsKept: 'Modifications non enregistrées gardées pour plus tard',
+    recovered: (name: string) => `${name} récupéré`,
+    savedFile: (name: string) => `${name} enregistré`,
+    downloadingFile: (name: string) => `Téléchargement de ${name}`,
+    downloadFailed: (detail: string) => `Échec du téléchargement : ${detail}`,
+    noCachedCopy: (name: string) => `Aucune copie en cache de ${name} à télécharger`,
+    reindexing: 'Réindexation des liths récents…',
+    reindexed: (count: number) => `${count} lith${count === 1 ? '' : 's'} réindexé${count === 1 ? '' : 's'}`,
+    indexedHere: (count: number) => `${count} lith${count === 1 ? '' : 's'} indexé${count === 1 ? '' : 's'} ici pour la recherche`,
+    nothingToIndex: 'Rien de neuf à indexer',
+    reindexFailed: (detail: string) => `Échec de la réindexation : ${detail}`,
+    rebuildCancelled: 'Reconstruction annulée',
+    indexingLabel: 'Indexation',
+    reindexingLabel: 'Réindexation',
+    indexProgress: (label: string, position: number, total: number, name: string) =>
+      `${label} ${position} sur ${total} · ${name}`,
+    scratchSaveFailed: 'Échec de la sérialisation du brouillon ; le fichier n’a pas été touché.',
+    noHistory: 'Aucun historique de versions n’est encore disponible pour ce wiki.',
+    noHistoryVersion: 'Cette version n’a pas pu être reconstruite depuis l’historique.',
+    introFailed: 'Impossible de charger l’introduction.',
+    droppedInvalid: 'Le fichier déposé n’a pas un format de données valide.',
+    payloadFailed: 'Impossible de charger le contenu partagé',
+    blankLithFailed: 'Impossible de charger le wiki local',
+    engineUnavailable: (status: string) => `Impossible de charger le moteur du wiki (${status})`,
+    engineMissing: 'Impossible de charger le moteur Lithic en local, depuis le cache hors ligne ou en ligne.'
+  },
+
+  fileTypes: {
+    monolith: 'Monolithe Lithic',
+    html: 'Fichier HTML Lithic',
+    htmlMany: 'Fichiers HTML Lithic',
+    json: 'Sauvegardes JSON Lithic',
+    text: 'Fichiers texte modifiables',
+    notebook: 'Carnets Jupyter',
+    notebookOne: 'Carnet Jupyter'
+  }
+};
+
+/**
+ * What a row's mark claims about a Lith this browser holds and nothing else does, in German.
+ * Separate from the deck below for the same reason the Spanish one is.
+ */
+const BROWSER_ONLY_TOOLTIP_DE =
+  'Nur Browser-Speicher. Dieser Lith wird im Cache dieses Browsers gehalten, und nichts wird in eine Datei zurückgeschrieben. ' +
+  'Diese Kopie ist von Natur aus flüchtig. Werden die Websitedaten gelöscht oder holt sich der Browser Speicher zurück, ist sie weg. ' +
+  'Lade deine eigenen Kopien über ihren Versionsverlauf herunter.';
+
+/**
+ * German.
+ *
+ * Written to the same rule as the two decks above. One word deliberately does not move: the
+ * window title keeps the English `Launcher`, because that is what German software calls this
+ * window and a literal translation would read as a translation. `Lith`, `PIN` and `GitHub Sync`
+ * stay for the same reason, and anything the reader acts on keeps its literal spelling
+ * (`github.com`, `eigentümer/repository`, `.lith`). The copy rules hold here too: one short
+ * sentence, nothing restated, no em dashes or en dashes. Compounds are joined with a plain
+ * hyphen (`Lithic-Monolith`), which is the one the rule leaves alone.
+ */
+const de: Copy = {
+  app: {
+    title: 'Lithic - Launcher',
+    brandAlt: 'Lithic',
+    githubLink: 'Lithic auf GitHub',
+    footerLink: 'Github',
+    backToLauncher: 'Zurück zum Haupt-Launcher',
+    setInstanceIcon: 'Icon dieser Instanz wählen',
+    viewIntro: 'Einführung ansehen'
+  },
+
+  install: {
+    label: {
+      installing: 'Wird installiert…',
+      install: 'App installieren',
+      plain: 'Installieren',
+      updateAvailable: 'Update verfügbar',
+      updateInstall: 'Update installieren'
+    },
+    offer: {
+      browser: 'Launcher zu diesem Gerät hinzufügen',
+      update: 'Lade die neue Version herunter und tippe auf Update installieren',
+      desktop: 'Nach Dokumente kopieren und eine Verknüpfung im Startmenü anlegen'
+    },
+    dismissTitle: 'Installationsangebot ausblenden',
+    dismissAria: 'Installationsangebot schließen',
+    dismissText: 'ausblenden',
+    unavailable: 'Installation ist über das Browsermenü möglich.',
+    openFailed: (detail: string) => `Browser konnte nicht geöffnet werden: ${detail}`,
+    copyToSyncedDir: 'In den synchronisierten Ordner kopieren',
+    copyToSyncedDirBody: (name: string, folder: string) => `${name} ist nicht gesichert. Nach ${folder} kopieren?`,
+    copyConfirm: 'Kopieren',
+    copied: (name: string, folder: string) => `${name} nach ${folder} kopiert`,
+    installedPrefix: 'Installiert unter ',
+    installed: (path: string) => `Installiert unter ${path}`,
+    failed: (detail: string) => `Installation fehlgeschlagen: ${detail}`
+  },
+
+  pending: {
+    aria: 'Ausstehende Importe',
+    heading: 'Ausstehende Importe',
+    clear: 'Ausstehende Importe verwerfen',
+    untitled: 'Inhalt ohne Titel'
+  },
+
+  common: {
+    cancel: 'Abbrechen',
+    back: 'Zurück',
+    open: 'Öffnen',
+    show: 'Anzeigen',
+    pin: 'PIN',
+    characterAria: (label: string, position: number, total: number) =>
+      `${label}, Zeichen ${position} von ${total}`,
+    choosePin: 'PIN wählen',
+    repeatPin: 'PIN wiederholen'
+  },
+
+  dialogs: {
+    gitSync: {
+      title: 'GitHub Sync',
+      closeAria: 'Dialog GitHub Sync schließen',
+      folder: {
+        label: 'Ordner',
+        none: 'Noch kein Ordner',
+        choosing: 'Auswahl…',
+        change: 'Ändern',
+        choose: 'Auswählen',
+        changeTitle: 'Ordner ändern, den GitHub Sync sichert',
+        chooseTitle: 'Ordner auswählen, den GitHub Sync sichert',
+        changeAria: (folder: string) => `Ordner ändern, den GitHub Sync sichert: ${folder}`,
+        chooseAria: 'Ordner auswählen, den GitHub Sync sichert',
+        automatic: 'Automatischen Ordner verwenden'
+      },
+      backedUp: (backedUp: number, tracked: number) => `${backedUp} von ${tracked} letzten Liths gesichert`,
+      noTarget: 'Speichere zuerst einen Lith auf der Festplatte, da die Synchronisierung seinen Ordner sichert.',
+      serverIntro: 'Diesen Server auf GitHub sichern. Seine Speicherungen werden automatisch hochgeladen.',
+      serverNoAnswer: 'Diese Instanz hat nicht zu GitHub-Sicherungen geantwortet.',
+      folderIntro: 'Diesen Ordner auf GitHub sichern. Speicherungen werden automatisch hochgeladen.',
+      working: 'Läuft…',
+      stopping: 'Wird gestoppt…',
+      stopSyncing: 'Synchronisierung stoppen',
+      connect: 'Mit GitHub verbinden',
+      tokenSummary: 'Erweitert: mit einem persönlichen Zugriffstoken verbinden',
+      repoAria: 'GitHub-Repository (Eigentümer/Name)',
+      repoPlaceholder: 'eigentümer/repository',
+      tokenAria: 'GitHub-Token',
+      tokenPlaceholder: 'Fein abgestuftes oder klassisches Token mit Push-Zugriff',
+      connecting: 'Verbindung…',
+      connectPush: 'Verbinden und hochladen',
+      stepOne: '1. Öffne',
+      stepTwo: '2. Diesen Code eingeben (installiert Lithic Sync bei der ersten Verwendung):',
+      waiting: 'Warte auf die Autorisierung…',
+      requesting: 'Fordere einen Code von GitHub an…',
+      stopWaiting: 'Nicht mehr warten',
+      createAndSync: (name: string) => `+ ${name} erstellen und synchronisieren`,
+      foundRepos: 'Vorhandene Lithic-Sync-Repositories gefunden',
+      otherReposSummary: 'Erweitert: deine anderen Repositories',
+      customRepoAria: 'Eigenes Repository (Eigentümer/Name)',
+      customRepoPlaceholder: 'eigentümer/name',
+      syncing: 'Synchronisierung…',
+      startSync: 'Synchronisierung starten',
+      connectedRepo: 'Verbundenes Repository',
+      notRecorded: 'Nicht erfasst',
+      lastSynced: (age: string) => `Zuletzt synchronisiert vor ${age}.`,
+      noSyncYet: 'Noch nicht synchronisiert.',
+      savesHere: 'Speicherungen in diesem Ordner werden automatisch zu GitHub hochgeladen.',
+      waitingForGitHub: 'Warte auf GitHub…',
+      reconnect: 'Neu verbinden',
+      disconnect: 'Trennen',
+      starting: 'Startet…',
+      creatingRepo: 'Repository wird erstellt…',
+      settingUp: 'Sicherung wird eingerichtet…',
+      backingUp: (repo: string) => `Sichere github.com/${repo}.`,
+      created: (repo: string) => `${repo} erstellt. `,
+      synced: 'Synchronisiert',
+      reconnected: (repo: string) => `github.com/${repo} neu verbunden`,
+      lastSaveFailed: (detail: string) => `Die letzte Speicherung wurde nicht hochgeladen: ${detail}`,
+      instanceNoDisconnect: 'Die Instanz hat das Trennen nicht bestätigt.',
+      noFolder: 'Ordner oder Repository zum Neuverbinden nicht gefunden.',
+      noDeviceCode: 'GitHub hat keinen Gerätecode zurückgegeben',
+      disconnectConfirm: {
+        server: 'Speicherungen auf diesem Server werden nicht mehr zu GitHub hochgeladen.',
+        desktop: 'Speicherungen in diesem Ordner werden nicht mehr zu GitHub hochgeladen.',
+        label: 'Trennen'
+      },
+      disconnectTitle: 'GitHub Sync trennen?'
+    },
+
+    bookmark: {
+      closeAria: 'Dialog der Lesezeichen schließen',
+      title: 'Entfernte Instanz als Lesezeichen',
+      intro: 'Eine selbst gehostete Instanz für den schnellen Zugriff speichern.',
+      urlAria: 'URL der selbst gehosteten Instanz',
+      urlPlaceholder: 'https://...',
+      save: 'Lesezeichen speichern',
+      manage: 'Zugangsdaten verwalten',
+      manageSaved: (count: number) => `Gespeicherte Instanz-Zugänge. ${count} gespeichert.`,
+      manageEmpty: 'Gespeicherte Instanz-Zugänge. Noch keine.',
+      unverifiedTitle: 'Diese Instanz als Lesezeichen speichern?',
+      unverifiedBody: 'Lithic konnte diese Adresse nicht prüfen.',
+      unverifiedConfirm: 'Trotzdem speichern',
+      unreachable: 'Diese Adresse ist nicht erreichbar.',
+      notInstance: 'Diese Adresse ist keine Lithic-Instanz.',
+      saved: 'Selbst gehostete Instanz gemerkt'
+    },
+
+    unlock: {
+      closeAria: 'Entsperr-Dialog schließen',
+      title: (label: string) => `${label} öffnen`,
+      sub: 'Gespeicherter Zugang. Bitte PIN eingeben.'
+    },
+
+    credential: {
+      closeAria: 'Dialog zum Speichern schließen',
+      title: 'Zugang speichern?',
+      forInstance: (label: string) => `Für ${label}.`,
+      username: 'Benutzername',
+      password: 'Passwort',
+      saving: 'Wird gespeichert…',
+      save: 'Zugang speichern',
+      openWithoutSaving: 'Ohne Speichern öffnen',
+      notSaved: 'Nicht gespeichert: diese Instanz lehnt den Zugang ab.',
+      notOpened: 'Nicht geöffnet: diese Instanz lehnt den Zugang ab.',
+      checking: 'Instanz wird gefragt…'
+    },
+
+    vault: {
+      closeAria: 'Dialog der gespeicherten Zugänge schließen',
+      title: 'Gespeicherte Instanz-Zugänge',
+      empty: 'Noch nichts gespeichert.',
+      forgetAll: 'Alles vergessen',
+      intro: 'Zugangsdaten selbst gehosteter Instanzen erscheinen hier nach dem Speichern.',
+      pinPrompt: 'PIN eingeben, um diese Zugänge zu lesen.',
+      count: (saved: number) => (saved === 1 ? '1 Zugang gespeichert.' : `${saved} Zugänge gespeichert.`),
+      checkAria: (origin: string) => `Zugang für ${origin} bei der Instanz prüfen`,
+      checkTitle: 'Diese Instanz fragen, ob der gespeicherte Zugang noch funktioniert',
+      forgetAria: (origin: string) => `Zugang für ${origin} vergessen`,
+      forgetTitle: 'Diesen Zugang vergessen',
+      storedIn: 'Gespeichert in',
+      forgot: (origin: string) => `Zugang für ${origin} vergessen.`,
+      forgetAllTitle: 'Alle gespeicherten Zugänge vergessen?',
+      forgetAllBody:
+        'Die Tresordatei wird gelöscht, und der PIN mit ihr. Der nächste gespeicherte Zugang wählt einen neuen PIN. ' +
+        'Bis dahin fragen Instanzen nach einem Passwort.',
+      everyLoginGone: 'Alle gespeicherten Zugänge sind weg.'
+    },
+
+    collision: {
+      closeAria: 'Dialog der aktiven Sitzung schließen',
+      title: 'Aktive Sitzung erkannt',
+      someone: 'Jemand anderes',
+      hasOpenBefore: 'hat',
+      hasOpenAfter: 'auf diesem Server geöffnet. Wer zuletzt schreibt, gewinnt.',
+      note: 'Schreibgeschützt öffnen oder die Sperre ignorieren.',
+      openReadOnly: 'Schreibgeschützt öffnen',
+      ignoreLock: 'Sperre ignorieren und öffnen'
+    },
+
+    icon: {
+      closeAria: 'Icon-Auswahl schließen',
+      title: 'Instanz-Icon',
+      intro: 'Dieses Icon gehört zur Instanz. Jeder, der diese Adresse öffnet, sieht es.',
+      chooseAria: 'Instanz-Icon auswählen',
+      saving: 'Wird gespeichert…',
+      savingProgress: (saved: number, total: number) => `Wird gespeichert… (${saved} von ${total})`,
+      savedInstance: (name: string) => `✓ Gespeichert. Diese Instanz verwendet jetzt ${name}.`,
+      save: 'Icon speichern',
+      restoreTitle: 'Das mitgelieferte Lithic-Icon verwenden',
+      restore: 'Standard wiederherstellen',
+      savedHere: (detail: string) => `Nur auf diesem Gerät gespeichert. Das Schreiben auf den Server ist fehlgeschlagen (${detail}).`,
+      canvasFailed: 'Icon konnte nicht gezeichnet werden (kein Canvas).',
+      savedServer: '✓ Standard-Icon serverweit wiederhergestellt.',
+      restoredHere: 'Nur auf diesem Gerät wiederhergestellt.'
+    },
+
+    rebuild: {
+      titleServer: 'Nicht auf diesem Server',
+      titleDisk: 'Nicht auf der Festplatte gefunden',
+      bodyServer: (count: number) =>
+        `${count} ${count === 1 ? 'zwischengespeicherte Kopie fehlt' : 'zwischengespeicherte Kopien fehlen'} auf dem Server, ` +
+        `deshalb löscht ein Neuaufbau sie von diesem Gerät.`,
+      bodyDisk: (count: number) =>
+        `${count} ${count === 1 ? 'Lith hat' : 'Liths haben'} keine Datei auf der Festplatte, ` +
+        `deshalb löscht ein Neuaufbau ${count === 1 ? 'seine Kopie im Cache und seinen Verlauf' : 'ihre Kopien im Cache und ihren Verlauf'}.`,
+      unsavedWarning: (count: number) =>
+        `${count} davon haben ungespeicherte Änderungen, die kein Download retten kann.`,
+      noFile: 'Keine Datei auf der Festplatte',
+      cachedOnly: 'nur im Cache',
+      unsavedTag: 'ungespeicherte Änderungen',
+      unsavedCaptured: (when: string) => `Ungespeicherte Änderungen erfasst ${when}`,
+      proceed: 'Trotzdem fortfahren'
+    },
+
+    history: {
+      closeAria: 'Dialog des Versionsverlaufs schließen',
+      title: (name: string) => `Versionen von ${name}`,
+      backupGroupAria: 'Diesen Lith sichern',
+      localOnly: (folder: string) => `Nicht gesichert. Kopiere ihn nach ${folder}, damit er synchronisiert wird.`,
+      copy: 'Kopieren',
+      loading: 'Versionen werden geladen…',
+      none: 'Noch keine Versionen gespeichert.',
+      badgeSync: 'sync',
+      badgeSyncTitle: 'Gespeichert nach einer Änderung außerhalb dieses Geräts.',
+      badgeFull: 'voll',
+      badgeFullTitle: 'Vollständige Kopie dieser Speicherung.',
+      badgeStep: 'Schritt',
+      badgeStepTitle: 'Änderungen seit der letzten Speicherung.',
+      downloadAria: (when: string) => `Eine Kopie der Version von ${when} herunterladen`,
+      note: 'Zurücksetzen ist manuell. Lade eine Version herunter und ersetze das Wiki damit.'
+    },
+
+    dirty: {
+      title: 'Ungespeicherte Änderungen',
+      body: (name: string, edits: number, when: string) =>
+        `${name} hat ${edits} ${edits === 1 ? 'Änderung' : 'Änderungen'}, die nie auf der Festplatte gespeichert ${edits === 1 ? 'wurde' : 'wurden'}, erfasst ${when}.`,
+      more: (count: number) => `… und ${count} weitere`,
+      recover: 'Änderungen wiederherstellen',
+      later: 'Später entscheiden',
+      discard: 'Verwerfen'
+    }
+  },
+
+  actions: {
+    aria: 'Aktionen des Launchers',
+    newBlank: 'Neuer leerer Lith',
+    upload: 'Lith hochladen',
+    mount: 'Lith einbinden',
+    bookmarkAria: 'Selbst gehostete Instanz merken',
+    bookmarkTitle: 'Entfernte Instanz als Lesezeichen'
+  },
+
+  newLith: {
+    placeholder: 'Titel eingeben',
+    nameAria: 'Dateiname des Lith',
+    taken: 'Name bereits vergeben',
+    takenError: 'Name bereits vergeben.',
+    create: 'Lith erstellen',
+    closeAria: 'Eingabe des neuen Lith schließen'
+  },
+
+  offline: {
+    title: 'Server nicht erreichbar',
+    body: 'Es werden die gespeicherten Kopien dieses Geräts gezeigt. Liths öffnen schreibgeschützt.',
+    rowMarkTitle: 'Nur auf diesem Gerät, solange offline.',
+    rowOpenTitle: 'Die Kopie dieses Geräts schreibgeschützt öffnen'
+  },
+
+  recent: {
+    aria: 'Zuletzt verwendete Liths',
+    searchAria: 'Zuletzt verwendete Liths durchsuchen',
+    searchPlaceholder: 'Zuletzt verwendete Liths suchen…',
+    clearSearch: 'Suche in den letzten Liths leeren',
+    readingServer: 'Liths dieses Servers werden gelesen…',
+    empty: {
+      noMatch: 'Kein passender Lith.',
+      instanceHere: 'Noch keine Liths dieser Instanz auf diesem Gerät.',
+      server: 'Noch keine Liths auf diesem Server.',
+      recents: 'Keine letzten Liths.'
+    }
+  },
+
+  row: {
+    downloadAria: (name: string) => `Eine Kopie von ${name} herunterladen`,
+    downloadTitle: 'Eine Kopie herunterladen',
+    historyAria: (name: string) => `Versionsverlauf von ${name} anzeigen`,
+    olderVersions: 'Ältere Versionen',
+    showHistory: 'Versionsverlauf anzeigen',
+    noHistory: 'Kein Verlauf im Cache',
+    unsavedAria: (name: string) => `${name} hat ungespeicherte Änderungen; zum Wiederherstellen öffnen`,
+    unsavedFrom: (when: string) => `Ungespeicherte Änderungen vom ${when}`,
+    localOnlyAria: (name: string) => `Verlauf und Sicherungsoptionen für ${name} öffnen`,
+    localOnlyTitle: 'Nicht in einem gesicherten Ordner. Zum Kopieren öffnen.',
+    openFromServer: 'Von diesem Server öffnen',
+    deleteFromServerAria: (name: string) => `${name} von diesem Server löschen`,
+    deleteFromServerTitle: 'Aus dem Remote-Speicher löschen',
+    openUrl: (url: string) => `${url} öffnen`,
+    noAddressAria: (url: string) => `Keine Adresse, um einen Zugang für ${url} zu speichern`,
+    noAddress: 'Keine Adresse für einen Zugang',
+    vaultSaved: (origin: string) => `Für ${origin} ist ein Zugang gespeichert. Verwalten.`,
+    vaultSave: (origin: string) => `Einen Zugang für ${origin} speichern, damit die Abfrage aufhört`,
+    openSearchingAria: (label: string, query: string) => `${label} öffnen und nach „${query}“ suchen`,
+    openSearchingTitle: (label: string) => `${label} öffnen und danach suchen`,
+    removeBookmarkAria: (url: string) => `Lesezeichen ${url} entfernen`,
+    pinAria: (name: string, title: string) => `${name} öffnen und „${title}“ oben anheften`,
+    openAria: (name: string) => `${name} öffnen`,
+    pinTitle: 'Diesen Tiddler öffnen und anheften',
+    removeAria: (name: string) => `${name} entfernen`,
+    cachedLocally: 'Lokal zwischengespeichert',
+    browserOnly: (name: string) => `${name}. ${BROWSER_ONLY_TOOLTIP_DE}`,
+    browserOnlyClaim: BROWSER_ONLY_TOOLTIP_DE,
+    browserOnlyNote:
+      'Nur Browser-Speicher. Dieser Lith hat keine Datei, deshalb ist das, was dieser Browser hält, die einzige Kopie. ' +
+      'Lade eine Version herunter, um eine zu behalten, die du wieder einbinden kannst.'
+  },
+
+  foot: {
+    rebuild: 'Zuletzt verwendete neu aufbauen',
+    reindexing: 'Wird neu indexiert…',
+    rebuildServerTitle: 'Diesen Server erneut lesen und seine Liths hier indexieren',
+    rebuildDiskTitle: 'Diese Liste aus den Dateien auf der Festplatte neu aufbauen',
+    reset: 'Zuletzt verwendete zurücksetzen',
+    resetTitle: 'Leert diese Liste und ihren lokalen Verlauf. Deine Dateien bleiben.'
+  },
+
+  orphan: {
+    saving: { label: 'speichert…', title: 'Eine Kopie wird gerade gespeichert.' },
+    saved: { label: '✓ gespeichert', title: 'Die Kopie ist auf diesem Gerät.' },
+    unverified: {
+      label: '✓ Downloads prüfen',
+      title: 'Der Browser kann Downloads nicht bestätigen. Prüfe deinen Downloads-Ordner.'
+    },
+    failed: { label: 'fehlgeschlagen', title: 'Diese Kopie konnte nicht gespeichert werden.' },
+    noteOneSaved: 'Gespeichert. Du kannst fortfahren.',
+    noteOneUnconfirmed: 'Gespeichert, aber unbestätigt.',
+    noteAllSaved: (total: number) => `Alle ${total} gespeichert. Du kannst fortfahren.`,
+    noteAllUnconfirmed: (total: number, unconfirmed: number) =>
+      `Alle ${total} gespeichert, aber ${unconfirmed} unbestätigt.`,
+    notePartial: (done: number, total: number) => `${done} von ${total} gespeichert.`
+  },
+
+  sync: {
+    syncing: 'GitHub Sync: wird synchronisiert…',
+    checking: 'GitHub Sync: wird geprüft…',
+    verifying: 'GitHub Sync: Verbindung wird geprüft…',
+    lastSaveFailed: (detail: string) => `GitHub Sync: die letzte Speicherung wurde nicht hochgeladen (${detail})`,
+    failure: (detail: string) => `GitHub Sync: ${detail}`,
+    connected: (target: string, age: string | null) =>
+      `GitHub Sync: ${target}${age ? `, geprüft vor ${age}` : ''}`,
+    connectedLabel: 'verbunden',
+    serverFailed: 'GitHub Sync: diese Instanz hat nicht geantwortet',
+    serverSyncing: (target: string) => `GitHub Sync: wird zu ${target} synchronisiert…`,
+    serverConnected: (target: string, age: string | null) =>
+      `GitHub Sync: ${target}${age ? `, zuletzt synchronisiert vor ${age}` : ''}`,
+    readonly: 'dieses Token kann das Repository nur lesen. Neu verbinden, um Uploads zu erlauben.',
+    auth: 'GitHub hat dieses Token abgelehnt. Neu verbinden, um dich wieder anzumelden.',
+    missing: 'das Repository fehlt oder ist für dieses Token nicht freigegeben.',
+    throttled: 'GitHub begrenzt dieses Gerät. Speicherungen bleiben vorerst lokal.',
+    offline: 'github.com ist nicht erreichbar. Speicherungen bleiben auf diesem Gerät.',
+    malformed: 'das gespeicherte Remote dieses Ordners ist unlesbar. Neu verbinden, um es zu reparieren.',
+    backendSilent: 'der Sync-Dienst hat nicht geantwortet'
+  },
+
+  loginCheck: {
+    busy: 'Wird geprüft…',
+    accepted: 'Funktioniert',
+    refused: 'Abgelehnt',
+    notRequired: 'Nicht gefragt',
+    unclear: 'Unklar',
+    unreachable: 'Keine Antwort'
+  },
+
+  instanceCopy: {
+    failed: (label: string) => `Die zwischengespeicherte Kopie von ${label} konnte nicht gelöscht werden`
+  },
+
+  bookmarkErrors: {
+    needUrl: 'Gib die URL einer selbst gehosteten Lithic-Instanz ein.',
+    needHttp: 'Verwende eine HTTP- oder HTTPS-URL.'
+  },
+
+  deviceFlow: {
+    unexpected: 'Unerwartete Antwort von GitHub',
+    denied: 'Autorisierung auf GitHub abgelehnt.',
+    expired: 'Dieser Code ist abgelaufen. Starte neu für einen neuen.',
+    failed: 'Autorisierung fehlgeschlagen oder abgelaufen. Erzeuge einen neuen Code.'
+  },
+
+  serverSync: {
+    noCode: 'GitHub hat nicht mit einem Code geantwortet.',
+    unreachableForCode: 'Dieser Server war für einen Code nicht erreichbar.',
+    noRepos: 'Deine Repositories konnten nicht aufgelistet werden.',
+    noCreate: 'Das Repository konnte nicht erstellt werden.',
+    unreachableForSetup: 'Dieser Server war zum Einrichten der Sicherung nicht erreichbar.',
+    setupFailed: 'Einrichtung fehlgeschlagen.',
+    setupFailedDetail: (detail: string) => `Einrichtung fehlgeschlagen: ${detail}`
+  },
+
+  status: {
+    opening: 'Öffnet…',
+    openingRecent: 'Ein letzter Lith wird geöffnet…',
+    loadingBlank: 'Ein leerer Lith wird geladen…',
+    openFailed: (detail: string) => `Öffnen fehlgeschlagen: ${detail}`,
+    mounted: (name: string) => `${name} eingebunden`,
+    mountedReadOnly: (name: string) => `${name} schreibgeschützt eingebunden`,
+    mountedPatched: (name: string) => `${name} eingebunden. Speicherungen senden nur die Änderungen.`,
+    noPath: 'Kein Dateipfad erfasst. Öffne ihn einmal über Einbinden, um ihn wieder zu verknüpfen.',
+    added: (count: number) => `${count} Liths zu den letzten hinzugefügt`,
+    uploading: (names: readonly string[]) =>
+      names.length === 1 ? `Lade ${names[0]} hoch…` : `Lade ${names.length} Liths hoch…`,
+    uploaded: (count: number) => `${count} Liths hochgeladen`,
+    uploadFailed: (detail: string) => `Hochladen fehlgeschlagen: ${detail}`,
+    replaceOne: 'Diesen Lith ersetzen?',
+    replaceMany: 'Diese Liths ersetzen?',
+    replaceBodyOne: (name: string) => `${name} ist bereits auf diesem Server. Hochladen ersetzt ihn.`,
+    replaceBodyMany: (names: string) => `${names} sind bereits auf diesem Server. Hochladen ersetzt sie.`,
+    replaceConfirm: 'Ersetzen',
+    listingFailed: (detail: string) => `Die Liths dieses Servers konnten nicht aufgelistet werden (${detail}).`,
+    openingName: (name: string) => `${name} wird geöffnet…`,
+    openNameFailed: (name: string, detail: string) => `${name} konnte nicht geöffnet werden: ${detail}`,
+    creating: (name: string) => `${name} wird erstellt…`,
+    createFailed: (name: string, detail: string) => `${name} konnte nicht erstellt werden: ${detail}`,
+    deleteTitle: 'Diesen Lith löschen?',
+    deleteConfirm: 'Löschen',
+    deleting: (name: string) => `${name} wird gelöscht…`,
+    deleteFailed: (name: string, detail: string) => `${name} konnte nicht gelöscht werden: ${detail}`,
+    deleteBody: (name: string) => `${name} wird vom Server gelöscht, nicht nur von diesem Gerät.`,
+    recovering: (edits: number, name: string) =>
+      `Rufe ${edits} ${edits === 1 ? 'ungespeicherte Änderung' : 'ungespeicherte Änderungen'} für ${name} wieder her`,
+    editsKept: 'Ungespeicherte Änderungen für später behalten',
+    recovered: (name: string) => `${name} wiederhergestellt`,
+    savedFile: (name: string) => `${name} gespeichert`,
+    downloadingFile: (name: string) => `${name} wird heruntergeladen`,
+    downloadFailed: (detail: string) => `Download fehlgeschlagen: ${detail}`,
+    noCachedCopy: (name: string) => `Keine zwischengespeicherte Kopie von ${name} zum Herunterladen`,
+    reindexing: 'Zuletzt verwendete Liths werden neu indexiert…',
+    reindexed: (count: number) => `${count} ${count === 1 ? 'Lith' : 'Liths'} neu indexiert`,
+    indexedHere: (count: number) => `${count} ${count === 1 ? 'Lith' : 'Liths'} hier für die Suche indexiert`,
+    nothingToIndex: 'Nichts Neues zu indexieren',
+    reindexFailed: (detail: string) => `Neuindexierung fehlgeschlagen: ${detail}`,
+    rebuildCancelled: 'Neuaufbau abgebrochen',
+    indexingLabel: 'Indexiere',
+    reindexingLabel: 'Indexiere neu',
+    indexProgress: (label: string, position: number, total: number, name: string) =>
+      `${label} ${position} von ${total} · ${name}`,
+    scratchSaveFailed: 'Serialisieren des Entwurfs fehlgeschlagen; die Datei blieb unverändert.',
+    noHistory: 'Für dieses Wiki gibt es noch keinen Versionsverlauf.',
+    noHistoryVersion: 'Diese Version konnte nicht aus dem Verlauf erzeugt werden.',
+    introFailed: 'Die Einführung konnte nicht geladen werden.',
+    droppedInvalid: 'Die abgelegte Datei hat kein gültiges Datenformat.',
+    payloadFailed: 'Der geteilte Inhalt konnte nicht geladen werden',
+    blankLithFailed: 'Das lokale Wiki konnte nicht geladen werden',
+    engineUnavailable: (status: string) => `Die Wiki-Engine konnte nicht geladen werden (${status})`,
+    engineMissing: 'Die Lithic-Engine konnte weder lokal noch aus dem Offline-Cache noch online geladen werden.'
+  },
+
+  fileTypes: {
+    monolith: 'Lithic-Monolith',
+    html: 'Lithic-HTML-Datei',
+    htmlMany: 'Lithic-HTML-Dateien',
+    json: 'Lithic-JSON-Sicherungen',
+    text: 'Bearbeitbare Textdateien',
+    notebook: 'Jupyter-Notebooks',
+    notebookOne: 'Jupyter-Notebook'
+  }
+};
+
 /** Every locale this build can ship: one object per language, shaped like `en`. */
-const locales = { en, es };
+const locales = { en, es, fr, de };
 
 /** The languages the launcher can be read in. */
 export type LocaleId = keyof typeof locales;
@@ -1083,7 +2098,16 @@ export type LocaleId = keyof typeof locales;
  * (`es-ES`). Typed as a `Record` over `LocaleId` so a language added to the deck without a
  * tag is a compile error rather than an English document claiming to be Spanish.
  */
-const LOCALE_TAGS: Record<LocaleId, string> = { en: 'en-GB', es: 'es-ES' };
+const LOCALE_TAGS: Record<LocaleId, string> = { en: 'en-GB', es: 'es-ES', fr: 'fr-FR', de: 'de-DE' };
+
+/**
+ * Every deck this build carries, keyed by the name a URL uses.
+ *
+ * Exported for the unit tests, which walk all of them rather than only the one this process
+ * happens to read: a leaf that is empty in a deck nobody here is reading is still a blank line
+ * in front of somebody who reads that language.
+ */
+export const decks = locales;
 
 /** The key for a language somebody wrote down, or nothing if this build cannot say it. */
 function asLocale(value: string | null | undefined): LocaleId | undefined {

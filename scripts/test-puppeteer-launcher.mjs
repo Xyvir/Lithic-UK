@@ -45,6 +45,24 @@ const MULTI_MOUNT_PICKS = [
 ];
 
 /**
+ * The HTML monolith the Mount section's single-file leg opens.
+ *
+ * It carries the three kinds of anchor a mounted page can hold, because the desktop app has no
+ * second window for any of them: an external address, which is the one it has to hand to the
+ * machine; a mailto, which Rust refuses and the document keeps; and a fragment, which is the
+ * wiki's own. A monolith rather than a `.lith` for the reason the picks above are: over `file://`
+ * a `.lith` would send the launcher looking for the wiki engine, which is not this section's
+ * subject, and this page is written over the launcher exactly as an engine mount is.
+ */
+const SOLO_MONOLITH = [
+  '<!doctype html><html><head><title>solo</title></head><body>',
+  '<a id="beyond" href="https://lithic.uk/src/lithic.html">Beyond this document</a>',
+  '<a id="write" href="mailto:nobody@example.test">Write to somebody</a>',
+  '<a id="home" href="#Home">Home</a>',
+  '</body></html>'
+].join('');
+
+/**
  * What the Upload a Lith section's picker comes back with.
  *
  * None of the names is a `.lith`, because a file picked off a disk rarely is and the
@@ -4784,6 +4802,15 @@ try {
     await mountPage.goto(`file://${artifact}?mode=tauri`, { waitUntil: 'domcontentloaded' });
     await mountPage.waitForSelector('.mount-button');
   };
+  // The mount records what it asks Rust for, so waiting on the record rather than on a sleep is what
+  // keeps this section honest about the click having landed.
+  const waitForMountCall = async (matches) => {
+    for (let attempt = 0; attempt < 40; attempt += 1) {
+      if (mountCalls.some(matches)) return;
+      await new Promise(resolve => setTimeout(resolve, 100));
+    }
+    throw new Error('the mounted page never asked the machine for what this was waiting on');
+  };
   await openLauncher();
 
   // Three files: all three are added, nothing is opened, and the launcher never goes
@@ -4819,17 +4846,56 @@ try {
 
   // One file: added and opened, exactly as the button has always promised, and the row
   // it leaves is the one on top.
-  await mountPage.evaluate(() => {
+  await mountPage.evaluate((text) => {
     window.__lithicMountPicks = [
-      { name: 'solo.html', path: 'C:/fixture/solo.html', text: '<!doctype html><title>solo</title>' }
+      { name: 'solo.html', path: 'C:/fixture/solo.html', text }
     ];
-  });
+  }, SOLO_MONOLITH);
   await mountPage.click('.mount-button');
   // The mount spends the document it was clicked in — `bootLegacyHtml` writes the picked
   // page over it — so waiting for the button to disappear is what says it happened,
   // rather than a sleep that is either long enough to be slow or short enough to be
   // flaky.
   await mountPage.waitForFunction(() => document.querySelector('.mount-button') === null, POLL);
+
+  // The clicks below land in the mounted page, while it is still the document, because that is the
+  // one state the launcher section above cannot cover: there the link is the launcher's own and its
+  // handler is registered by launcher JS, and here the launcher's listeners went with the document
+  // the mount replaced. An external address has to reach the machine, since the app has no second
+  // window for it to open in, and the address has to arrive whole in the one command Rust accepts.
+  await mountPage.waitForSelector('#beyond');
+  await mountPage.click('#beyond');
+  await waitForMountCall(call => call.command === 'open_external' && call.args.url === 'https://lithic.uk/src/lithic.html');
+  const openedFromWiki = mountCalls.filter(call => call.command === 'open_external');
+  assert.equal(
+    openedFromWiki.length,
+    1,
+    `One click on one external link opens one address: ${JSON.stringify(openedFromWiki)}`
+  );
+  assert.equal(
+    await mountPage.evaluate(() => location.pathname.endsWith('launcher.html')),
+    true,
+    '...and the page stays where it is, because a link that leaves would be the link that dies'
+  );
+
+  // An address the machine will not open is the document's own, and rust accepts http and https only:
+  // a mailto must stay a mailto rather than become a second open.
+  await mountPage.click('#write');
+  assert.equal(
+    mountCalls.filter(call => call.command === 'open_external').length,
+    1,
+    'A mailto is not handed to the machine, so the one address that was opened is still the only one'
+  );
+
+  // ...and a fragment stays the wiki's own, which is the ordinary link the engine draws.
+  await mountPage.click('#home');
+  await mountPage.waitForFunction(() => location.hash === '#Home', POLL);
+  assert.equal(
+    mountCalls.filter(call => call.command === 'open_external').length,
+    1,
+    'A link inside the document is left to the document'
+  );
+
   await openLauncher();
   await mountPage.waitForFunction(() => document.querySelectorAll('.recent-row').length === 4, POLL);
   const afterSingle = await mountedRows();
@@ -5160,7 +5226,11 @@ try {
         await page.waitForSelector('main.container');
         return page.evaluate(() => ({
           lang: document.documentElement.lang,
-          heading: document.querySelector('h1')?.textContent?.trim() ?? ''
+          heading: document.querySelector('h1')?.textContent?.trim() ?? '',
+          // A second witness, from the action card, which renders in every mode with nothing
+          // seeded: German keeps the English word `Launcher` as its window title on purpose
+          // (see the deck), so a heading alone would not tell German from English.
+          buttons: [...document.querySelectorAll('button')].map(node => node.textContent?.trim() ?? '')
         }));
       }
     };
@@ -5169,6 +5239,10 @@ try {
   const english = await speak('en-GB');
   const spanish = await speak('es-ES');
   const french = await speak('fr-FR');
+  const german = await speak('de-DE');
+  // Not a language this build carries, which is the only way to test the fallback: Italian is
+  // a stand-in rather than a claim about the machine running this.
+  const italian = await speak('it-IT');
 
   // A browser that speaks English reads English, and says so on the document, which is what
   // a screen reader and a hyphenation dictionary go by.
@@ -5181,18 +5255,33 @@ try {
   assert.equal(detected.lang, 'es-ES', `A Spanish browser is answered in Spanish with no help from the address: ${JSON.stringify(detected)}`);
   assert.equal(detected.heading, 'Lithic - Lanzador', '...down to the heading');
 
+  // The other two languages the deck carries, read the same way: the machine says which one
+  // it wants and nothing on the address repeats it.
+  const traduit = await french.read(`file://${artifact}`);
+  assert.equal(traduit.lang, 'fr-FR', `A French browser is answered in French: ${JSON.stringify(traduit)}`);
+  assert.equal(traduit.heading, 'Lithic - Lanceur', '...down to the heading');
+  const uebersetzt = await german.read(`file://${artifact}`);
+  assert.equal(uebersetzt.lang, 'de-DE', `A German browser is answered in German: ${JSON.stringify(uebersetzt)}`);
+  assert.equal(uebersetzt.heading, 'Lithic - Launcher', '...with the window title it keeps in German');
+  assert.ok(
+    uebersetzt.buttons.includes('Neuer leerer Lith'),
+    `...and German words in the panel rather than English ones: ${JSON.stringify(uebersetzt.buttons)}`
+  );
+
   // A language this build cannot say falls back to the one it ships, and declares that,
   // rather than declaring the visitor's language over words they cannot read.
-  const fell = await french.read(`file://${artifact}`);
+  const fell = await italian.read(`file://${artifact}`);
   assert.equal(fell.lang, 'en-GB', `A browser this build cannot answer is read the shipped language: ${JSON.stringify(fell)}`);
   assert.equal(fell.heading, 'Lithic - Launcher', '...in English');
 
   // A request outranks the environment, in both directions, which is the escape hatch.
   const asked = await spanish.read(`file://${artifact}?lang=en`);
   assert.equal(asked.lang, 'en-GB', `A Spanish browser asked for English gets English: ${JSON.stringify(asked)}`);
-  const fetched = await french.read(`file://${artifact}?lang=es`);
-  assert.equal(fetched.lang, 'es-ES', `...and a French browser can ask for a language its machine never had: ${JSON.stringify(fetched)}`);
-  const nonsense = await english.read(`file://${artifact}?lang=de`);
+  const fetched = await italian.read(`file://${artifact}?lang=es`);
+  assert.equal(fetched.lang, 'es-ES', `...and a browser can ask for a language its machine never had: ${JSON.stringify(fetched)}`);
+  const askedGerman = await english.read(`file://${artifact}?lang=de`);
+  assert.equal(askedGerman.lang, 'de-DE', `An English browser asked for German gets German: ${JSON.stringify(askedGerman)}`);
+  const nonsense = await english.read(`file://${artifact}?lang=ja`);
   assert.equal(nonsense.heading, 'Lithic - Launcher', 'A language this build cannot say is refused rather than trusted');
 
   // The build pin, which is the other half of the feature and the only half that holds
@@ -5201,15 +5290,15 @@ try {
   // unpinned one every deployment reads by default.
   pinnedArtifactDir = mkdtempSync(join(tmpdir(), 'lithic-pinned-'));
   const pinnedArtifact = join(pinnedArtifactDir, 'launcher-pinned.html');
-  const built = spawnSync(process.execPath, ['scripts/build-launcher.mjs', pinnedArtifact, '--locale=es'], {
+  const built = spawnSync(process.execPath, ['scripts/build-launcher.mjs', pinnedArtifact, '--locale=de'], {
     encoding: 'utf8'
   });
   assert.equal(built.status, 0, `A pinned build has to succeed before it can be read: ${built.stderr?.trim()}`);
   const pinned = await english.read(`file://${pinnedArtifact}`);
-  assert.equal(pinned.lang, 'es-ES', `A pinned build speaks its language to a browser that asked for none: ${JSON.stringify(pinned)}`);
-  assert.equal(pinned.heading, 'Lithic - Lanzador', '...all of it, in a browser speaking another language');
-  const escaped = await spanish.read(`file://${pinnedArtifact}?lang=en`);
-  assert.equal(escaped.heading, 'Lithic - Launcher', '...and the query string still gets somebody out of it');
+  assert.equal(pinned.lang, 'de-DE', `A pinned build speaks its language to a browser that asked for none: ${JSON.stringify(pinned)}`);
+  assert.equal(pinned.buttons.includes('Neuer leerer Lith'), true, '...all of it, in a browser speaking another language');
+  const escaped = await spanish.read(`file://${pinnedArtifact}?lang=es`);
+  assert.equal(escaped.heading, 'Lithic - Lanzador', '...and the query string still gets somebody out of it');
 
   assert.deepEqual(errors, []);
   console.log(`Puppeteer launcher smoke passed (${process.env.HEADED === '1' ? 'headed' : 'headless'})`);

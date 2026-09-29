@@ -292,6 +292,136 @@ test('every injected bootstrap script parses for every launch shape', () => {
   );
 });
 
+/**
+ * The link bootstrap's own body, taken out of a built document the way a browser would run it.
+ *
+ * Running the emitted string rather than a copy of it is the point: the script lives in a template
+ * literal, so this is what catches a stray escape before a mounted wiki is what finds it.
+ */
+function linkBootstrapBody(html: string): string {
+  const body = inlineScriptBodies(html).find((script) => script.includes('__LITHIC_LINK_OPENER__'));
+  assert.ok(body, 'the mount injects an external link bootstrap');
+  return body;
+}
+
+/**
+ * A window and a document just real enough to run that body and click in it: one listener slot, an
+ * anchor to resolve, and each invoke recorded as the command and address the Rust side receives.
+ *
+ * `shape` is which tauri global the app build exposes, since the resolution chain is the one thing
+ * here that a real webview and this harness cannot share.
+ */
+function mountLinkHarness(body: string, options: { shape?: 'v2' | 'v1' | 'bare' | 'none'; origin?: string } = {}) {
+  const opened: Array<{ command: string; url: string }> = [];
+  const invoke = (command: string, args: { url: string }) => {
+    opened.push({ command, url: args.url });
+    return Promise.resolve();
+  };
+  const shape = options.shape ?? 'v2';
+  const tauri = shape === 'none' ? undefined : shape === 'v1' ? { tauri: { invoke } } : shape === 'bare' ? { invoke } : { core: { invoke } };
+  const root: Record<string, unknown> = { location: { origin: options.origin ?? 'https://tauri.localhost' }, __TAURI__: tauri };
+  const listeners: Array<(event: any) => void> = [];
+  root.document = {
+    addEventListener: (type: string, listener: (event: any) => void) => {
+      if (type === 'click') listeners.push(listener);
+    }
+  };
+  const run = () => new Function('window', 'document', body)(root, root.document);
+  run();
+
+  const click = (anchor: Record<string, unknown> | null, event: Record<string, unknown> = {}) => {
+    let prevented = false;
+    const target = anchor ? { closest: (selector: string) => (selector === 'a[href]' ? anchor : null) } : {};
+    for (const listener of listeners) {
+      listener({ button: 0, defaultPrevented: false, target, preventDefault: () => { prevented = true; }, ...event });
+    }
+    return prevented;
+  };
+
+  return { opened, click, listeners, run, root };
+}
+
+// The desktop webview has no second window, so an external link in a mounted wiki is a control that
+// does nothing at all. The click has to be taken where the document is, which is inside the page the
+// mount wrote, and handed to the machine instead.
+test('a mounted wiki hands an external link to the machine, and only in the app', () => {
+  const body = linkBootstrapBody(buildEngineHtml(ENGINE_STUB, { name: 'x.lith', text: '' }));
+
+  const app = mountLinkHarness(body);
+  assert.equal(
+    app.click({ href: 'https://lithic.uk/notes', protocol: 'https:', origin: 'https://lithic.uk' }),
+    true,
+    'the click is claimed, so nothing waits on a window that will not open'
+  );
+  assert.deepEqual(app.opened, [{ command: 'open_external', url: 'https://lithic.uk/notes' }]);
+
+  // Every global shape this bundle is loaded into has to resolve an invoke, v1 and bare included.
+  for (const shape of ['v1', 'bare'] as const) {
+    const other = mountLinkHarness(body, { shape });
+    other.click({ href: 'http://example.test/a', protocol: 'http:', origin: 'http://example.test' });
+    assert.deepEqual(other.opened, [{ command: 'open_external', url: 'http://example.test/a' }], `${shape} resolves an invoke`);
+  }
+
+  // A browser and a hosted instance have their own handling to keep, so nothing is touched there and
+  // no listener is even left behind.
+  const browser = mountLinkHarness(body, { shape: 'none' });
+  assert.equal(browser.click({ href: 'https://lithic.uk/notes', protocol: 'https:', origin: 'https://lithic.uk' }), false);
+  assert.deepEqual(browser.opened, []);
+  assert.equal(browser.listeners.length, 0, 'nothing is registered where it could not be acted on');
+});
+
+test('the link bootstrap leaves every address it cannot open to the document', () => {
+  const body = linkBootstrapBody(buildEngineHtml(ENGINE_STUB, { name: 'x.lith', text: '' }));
+  const harness = mountLinkHarness(body);
+  const offLimits = [
+    { why: 'Rust opens no mailto', anchor: { href: 'mailto:someone@example.test', protocol: 'mailto:', origin: 'null' } },
+    { why: 'a tiddler link is the wiki\'s own', anchor: { href: 'https://tauri.localhost/#Home', protocol: 'https:', origin: 'https://tauri.localhost' } },
+    { why: 'a relative address stays in the page', anchor: { href: 'file:///C:/docs/other.html', protocol: 'file:', origin: 'null' } },
+    { why: 'a local file is not a web address', anchor: { href: 'C:/docs/notes.lith', protocol: 'file:', origin: 'null' } }
+  ];
+  for (const { why, anchor } of offLimits) {
+    assert.equal(harness.click(anchor), false, why);
+  }
+  assert.deepEqual(harness.opened, [], 'nothing off limits reached the machine');
+
+  // And the clicks that are a page's own stay a page's own.
+  const link = { href: 'https://lithic.uk/notes', protocol: 'https:', origin: 'https://lithic.uk' };
+  assert.equal(harness.click(link, { defaultPrevented: true }), false, 'a click already handled is not claimed again');
+  assert.equal(harness.click(link, { button: 1 }), false, 'a middle click belongs to the document');
+  assert.equal(harness.click(null), false, 'a click on the page rather than on a link is nothing');
+  assert.deepEqual(harness.opened, []);
+
+  // A document that carries the bootstrap twice (an engine mount and a monolith injection in one
+  // page) still registers one listener, so one click is one open.
+  harness.run();
+  assert.equal(harness.listeners.length, 1, 'the bootstrap arms once per document');
+});
+
+test('the link bootstrap precedes the boot script, and is injected once', () => {
+  const engine = '<html><head></head><body><script src="/boot.js"></script></body></html>';
+  const html = buildEngineHtml(engine, { name: 'x.lith', text: '' });
+  const at = html.indexOf('__LITHIC_LINK_OPENER__');
+  assert.ok(at >= 0 && at < html.indexOf('src="/boot.js"'), 'the bootstrap is in the document before boot');
+  assert.equal(html.split('__LITHIC_LINK_OPENER__ = true;').length - 1, 1, 'and exactly once');
+});
+
+// A monolith rewrite is the same rewrite as an engine mount: the listeners registered on the old
+// document go with it, so the bootstrap has to be in the page that replaces it.
+test('an HTML monolith carries the link bootstrap as well', () => {
+  let written = '';
+  const globals = globalThis as unknown as { sessionStorage: unknown; document: unknown };
+  const original = { sessionStorage: globals.sessionStorage, document: globals.document };
+  globals.sessionStorage = { setItem: () => {}, getItem: () => null, removeItem: () => {} };
+  globals.document = { open() {}, write(html: string) { written += html; }, close() {} };
+  try {
+    bootLegacyHtml('<html><head><title>page</title></head><body><a href="https://lithic.uk">l</a></body></html>', 'page.html', 'C:/docs/page.html');
+  } finally {
+    globals.sessionStorage = original.sessionStorage;
+    globals.document = original.document;
+  }
+  assert.ok(written.includes('__LITHIC_LINK_OPENER__ = true;'), 'a monolith gets the same treatment as an engine');
+});
+
 test('a read-only remote mount claims no lock and installs no saver', () => {
   const html = buildEngineHtml(ENGINE_STUB, { name: 'my wiki.lith', text: '' }, [], {}, {
     remote: { ...REMOTE_TARGET, readOnly: true }
