@@ -128,6 +128,21 @@ echo "  Purge complete: ${orphaned} orphaned, ${stale} stale lock(s) removed."
 chmod +x "${APP_DIR}/watcher.sh" 2>/dev/null || true
 chmod +x "${SCRIPT_DIR}/github-sync.sh" 2>/dev/null || true
 
+# --- Language pin (optional) ---
+# LITHIC_LOCALE pins this instance's launcher to one language, so somebody who never said
+# which they wanted reads it in the instance's own. It rewrites the redirector and the
+# install manifest rather than the launcher, so an autoupdate cannot undo it and the
+# released artifact is served unchanged. Unset, which is every deployment with no opinion,
+# this does nothing at all. See deploy/pin-launcher-locale.sh for the whole of the rule.
+if [ -n "${LITHIC_LOCALE:-}" ]; then
+  if [ -f "${APP_DIR}/pin-launcher-locale.sh" ]; then
+    bash "${APP_DIR}/pin-launcher-locale.sh" "${PUBLIC_DIR}" ||
+      echo "  WARNING: LITHIC_LOCALE=${LITHIC_LOCALE} was not pinned; the launcher will follow each visitor instead"
+  else
+    echo "  WARNING: LITHIC_LOCALE=${LITHIC_LOCALE} was not pinned; pin-launcher-locale.sh is missing"
+  fi
+fi
+
 # --- Start Watcher ---
 echo "Starting sync watcher..."
 "${APP_DIR}/watcher.sh" &

@@ -89,6 +89,13 @@ The launcher keeps a version history for every wiki you open, so a bad edit is r
 * **History is pruned, not permanent.** When a device's storage crosses roughly 80% of its quota, the oldest-modified wikis lose their caches and history first, and never the last one. Keep a downloaded copy of anything you cannot lose.
 * **A cached copy can outlive its file.** If a wiki is moved, renamed or left on an unmounted drive — or is no longer in the store it was cached from, on an instance — the launcher still lists it, marked as having no file on disk. Rebuilding Recents deletes those entries and their history, and offers to download them first.
 
+## Language
+
+The launcher reads in the language of the device it is opened on, in all three shapes of it: the published web app, the launcher a self-hosted instance serves, and the desktop app, which follows the machine. English and Spanish ship today, and a language the launcher cannot say falls back to English. Two things override that, for when a machine's language is not the one somebody wants to read.
+
+* **`?lang=es` on the address** asks for one page in that language, whatever the device says. It is the review path: the gallery uses it to read a translation without building one, and it is the way out of a pinned deployment.
+* **A build can be pinned**, which is how a deployment speaks one language to everybody. Set `VITE_LAUNCHER_LOCALE=es` for `npm run build:launcher`, or keep it in `launcher-ui/.env` so CI and the artifact freshness gate both see it, and the published site, the desktop bundle and the server tarball are all built Spanish. A self-hosted instance can also pin its own without rebuilding, with `LITHIC_LOCALE=es`; [self-host.md](https://github.com/Xyvir/Lithic/blob/main/self-host.md) has the detail and the two things that pin does not reach.
+
 # Roadmap
 1. Version 1 Released: 
 - Lithic is packaged as a plugin

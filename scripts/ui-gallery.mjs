@@ -578,6 +578,11 @@ async function openBookmark(page, label) {
  *           looked at before it ships: one artifact, every language in it. A deployment
  *           ships one language instead, chosen when the launcher is built
  *           (`VITE_LAUNCHER_LOCALE`, see `launcher-ui/src/copy.ts`).
+ *   detect  run this pane in a browser whose own language is this tag (`es-ES`), with no
+ *           `lang=` on the URL, so the language arrives the way it reaches a visitor,
+ *           through the environment rather than through the address. It needs a browser of
+ *           its own, launched with `--lang`, since the shared one speaks this machine's
+ *           language: a browser preference cannot be set from a page.
  */
 const SHEETS = [
   {
@@ -922,6 +927,24 @@ const SHEETS = [
           await settle(page, 600);
         },
         expect: '.bookmark-row .cache-preview mark.cache-preview-title-mark'
+      },
+      {
+        // The address itself, marked by the query that listed it: the row is here because of
+        // those characters, so those characters are what the row shows, the same way a Lith's
+        // own name answers the search that found it. The rule is the same one; what differs is
+        // that nothing in an address is an extension, so the whole value is markable.
+        name: '262-bookmark-address-match',
+        view: 'wide',
+        mode: 'tauri',
+        seed: { bookmarks: BOOKMARKS },
+        rust: { exists: true, pin: PIN },
+        drive: async (page) => {
+          await page.type('input[aria-label="Search recent Liths"]', 'lithic');
+          await page.waitForSelector('.bookmark-row mark.name-match');
+          await settle(page, 300);
+        },
+        clip: '.recent-section',
+        expect: '.bookmark-row mark.name-match'
       },
       {
         // The one mark a row can carry, on the state that is not a fault: a Lith in a
@@ -2060,6 +2083,31 @@ const SHEETS = [
         seed: { caches: OFFLINE_CACHES },
         drive: goOffline,
         expect: '.offline-banner'
+      },
+      {
+        /*
+         * The other way the same language arrives, and the one every real visitor takes
+         * before any pin has an opinion: nothing on this URL asks for Spanish, the browser
+         * it runs in does (`detect`), so this is the environment being read rather than a
+         * request being answered.
+         *
+         * The drive is what makes the pane a claim rather than a hope. `expect` is a
+         * selector, so a Chromium that ignored `--lang` would photograph an English launcher
+         * and pass, and the whole point of the pane is that the language was not asked for.
+         */
+        name: '909-spanish-detected',
+        view: 'phone',
+        detect: 'es-ES',
+        expect: '.action-pair',
+        drive: async (page) => {
+          const found = await page.evaluate(() => ({
+            lang: document.documentElement.lang,
+            heading: document.querySelector('h1')?.textContent?.trim()
+          }));
+          if (found.lang !== 'es-ES' || found.heading !== 'Lithic - Lanzador') {
+            throw new Error(`this browser did not arrive speaking Spanish: ${JSON.stringify(found)}`);
+          }
+        }
       }
     ]
   }
@@ -2583,10 +2631,30 @@ for (const sheet of SHEETS) {
 // from a fresh page, and the flow resets its own authorization on every code.
 stub = await startSelfHostStub({ artifact: ARTIFACT });
 
-const browser = await puppeteer.launch({
+/** How every pane's browser starts. A pane that asks for a language adds one argument. */
+const LAUNCH = {
   headless: process.env.GALLERY_HEADED === '1' ? false : 'new',
   args: ['--no-sandbox', '--disable-setuid-sandbox']
-});
+};
+const browser = await puppeteer.launch(LAUNCH);
+
+/*
+ * Browsers of their own for the panes that ask for a language by having one rather than by
+ * asking for it on the URL. `navigator.languages` is the browser's own setting and no page
+ * can reach it, so the only honest way to photograph detection is to launch a browser that
+ * is already speaking the language. One per tag, since a sheet may want more than one.
+ */
+const detectedBrowsers = new Map();
+async function browserFor(pane) {
+  if (!pane.detect) return browser;
+  if (!detectedBrowsers.has(pane.detect)) {
+    detectedBrowsers.set(
+      pane.detect,
+      await puppeteer.launch({ ...LAUNCH, args: [...LAUNCH.args, `--lang=${pane.detect}`] })
+    );
+  }
+  return detectedBrowsers.get(pane.detect);
+}
 
 const results = {};
 const failures = [];
@@ -2616,7 +2684,7 @@ try {
     const files = [];
     for (const pane of sheet.panes) {
       try {
-        const { errors, text } = await runPane(browser, pane);
+        const { errors, text } = await runPane(await browserFor(pane), pane);
         files.push(join(RAW_DIR, `${pane.name}.png`));
         results[sheet.id].push({ pane, text });
         drawn += 1;
@@ -2636,6 +2704,7 @@ try {
   }
 } finally {
   await browser.close();
+  for (const extra of detectedBrowsers.values()) await extra.close();
   await stub.close();
 }
 

@@ -1,7 +1,9 @@
 import assert from 'node:assert/strict';
-import { existsSync } from 'node:fs';
+import { spawnSync } from 'node:child_process';
+import { existsSync, mkdtempSync, rmSync } from 'node:fs';
 import { readFile } from 'node:fs/promises';
-import { resolve } from 'node:path';
+import { tmpdir } from 'node:os';
+import { join, resolve } from 'node:path';
 import puppeteer from 'puppeteer';
 
 // The three candidate-PIN verdicts, shared with the gallery's stand-in for Rust so
@@ -67,6 +69,15 @@ const UPLOAD_PICKS = [
  * ago. A timer poll asks the same question and does not depend on anything being drawn.
  */
 const POLL = { polling: 250 };
+
+/*
+ * Browsers started for a language this machine is not speaking, and the scratch build that
+ * carries a pinned language. Both are held here rather than inside the section that uses
+ * them so a failed assertion still tidies up: a browser left open keeps the process alive,
+ * which turns a one-line failure into a run that has to be killed.
+ */
+const languageBrowsers = [];
+let pinnedArtifactDir = null;
 
 const browser = await puppeteer.launch({
   headless: process.env.HEADED === '1' ? false : 'new',
@@ -511,7 +522,7 @@ try {
   const mobileMark = await readMarkAt(600);
   const desktopMark = await readMarkAt(1000);
   assert.equal(mobileMark.markTag, 'A', 'Mobile: the Lithic mark is the project link');
-  assert.equal(mobileMark.markHref, 'https://github.com/Lithic-UK/Lithic', 'Mobile: the mark points at the project');
+  assert.equal(mobileMark.markHref, 'https://github.com/Xyvir/Lithic-UK', 'Mobile: the mark points at the project');
   assert.equal(mobileMark.markLabel, 'Lithic on GitHub', 'Mobile: the mark is labelled for screen readers');
   assert.equal(mobileMark.footerDisplay, 'none', 'Mobile hides the footer Github button');
   assert.equal(desktopMark.markTag, 'A', 'Desktop: the mark is the project link too');
@@ -2074,10 +2085,13 @@ try {
   // all the same, so that these measurements have the two controls in the page's own footer
   // with nothing else around them and no state of their own to settle first.
   // The word is a hint that appears under the cursor; the ✕ is the control and
-  // must neither paint anything at rest nor move when the word arrives.
+  // must neither paint anything at rest nor move when the word arrives. The word itself is
+  // the deck's (`copy.install.dismissText`), so what the artifact has to carry is the
+  // control's own class and that leaf inlined beside it: the literal `>dismiss</span>` left
+  // this file the day the launcher's words moved into `launcher-ui/src/copy.ts`.
   assert.ok(
-    artifactHtml.includes('install-dismiss-label') && artifactHtml.includes('>dismiss</span>'),
-    'Built launcher ships the dismiss affordance with its hover-revealed word'
+    artifactHtml.includes('install-dismiss-label') && artifactHtml.includes('dismissText:"dismiss"'),
+    'Built launcher ships the dismiss affordance with the deck word it reveals on hover'
   );
   await page.evaluate(() => {
     document.querySelector('footer').insertAdjacentHTML(
@@ -2214,6 +2228,35 @@ try {
   assert.notEqual(iconHover.linkBackground, 'rgba(0, 0, 0, 0)', 'The link paints one highlight across itself, icon included');
   assert.equal(iconHover.iconBackground, 'rgba(0, 0, 0, 0)', 'The icon paints no background of its own: it is not a second control');
   assert.equal(iconHover.clickTargetOpensInstance, true, 'Clicking the icon opens the instance');
+
+  // The query that listed the row is marked inside the address, exactly as it is inside a
+  // Lith's own name: a list filtered by a search has to read as an answer to what was typed,
+  // and the address is the row's whole reason for being there. The drawn string is the
+  // label, which is the address without its scheme (`instanceLabel`), so the mark lands on
+  // the characters somebody typed and never on a scheme the row does not draw.
+  await page.type('input.recent-search', 'lithic');
+  await page.waitForFunction(() => document.querySelectorAll('.bookmark-row mark.name-match').length === 1, POLL);
+  const addressMatch = await page.evaluate(() => {
+    const label = document.querySelector('.bookmark-row .bookmark-label');
+    const mark = label?.querySelector('mark.name-match') ?? null;
+    return {
+      rows: document.querySelectorAll('.bookmark-row').length,
+      address: label?.textContent?.trim() ?? null,
+      marked: mark?.textContent ?? null,
+      color: mark ? getComputedStyle(mark).color : null,
+      background: mark ? getComputedStyle(mark).backgroundColor : null
+    };
+  });
+  assert.equal(addressMatch.rows, 1, `Only the instance whose address matched is listed: ${JSON.stringify(addressMatch)}`);
+  assert.equal(addressMatch.address, 'personal.lithic.uk', '...and the row still shows its whole address');
+  assert.equal(addressMatch.marked, 'lithic', 'The run of the address the query matched is marked');
+  assert.equal(addressMatch.color, 'rgb(138, 180, 248)', '...in the same blue a matched name is drawn in');
+  assert.match(
+    addressMatch.background ?? '',
+    /^rgba?\(138, 180, 248/,
+    `...over the same tint, which is what keeps the address still while it is typed against: ${JSON.stringify(addressMatch.background)}`
+  );
+  await page.click('.recent-search-clear');
 
   // --- The way back out of a handed-over instance ---
   // A page the launcher handed this window to is reached at an instance origin
@@ -4418,6 +4461,21 @@ try {
   await vaultPage.evaluate(() => localStorage.removeItem('__lithicSyncFolderNone'));
   await reopenLauncher();
 
+  // --- The addresses the app has to hand to the machine ----------------------------
+  // A browser opens a `target="_blank"` link itself and the desktop app cannot: the webview
+  // has no second window to open, so a click there landed nowhere and the project link read
+  // as a dead control while the update offer, which asks Rust, kept working. So the click is
+  // taken over in that mode and given to Rust's opener, and what it carries is asserted here:
+  // a link that opens the wrong project is the same bug at a slower speed.
+  await vaultPage.click('.brand-icon-wrap.brand-github');
+  await waitForCall(call => call.command === 'open_external');
+  const openedProject = vaultCalls.filter(call => call.command === 'open_external').at(-1);
+  assert.equal(
+    openedProject.args.url,
+    'https://github.com/Xyvir/Lithic-UK',
+    `The project link is handed to the machine rather than to the webview: ${JSON.stringify(openedProject)}`
+  );
+
   // --- The device-code step, which carries the folder it is about to back up ----------
   // The picker belongs to setting a backup up, and that means the screens that end at the
   // commit. The step where GitHub is waited on is one of them: nothing else is happening
@@ -4462,6 +4520,17 @@ try {
     `The authorization instructions are still there: ${JSON.stringify(codeStep.lines)}`
   );
   assert.deepEqual(codeStep.actions, ['Stop waiting'], 'The only action left is abandoning the wait');
+
+  // The other address the app draws, on the step whose whole first instruction is to visit it.
+  // Same route, so a dialog's link and the panel's link cannot end up behaving differently.
+  await vaultPage.click('.git-sync-modal a[href="https://github.com/login/device"]');
+  await waitForCall(call => call.command === 'open_external' && call.args.url === 'https://github.com/login/device');
+  const openedLoginPage = vaultCalls.filter(call => call.command === 'open_external').at(-1);
+  assert.equal(
+    openedLoginPage.args.url,
+    'https://github.com/login/device',
+    `The device-login page is handed to the machine too: ${JSON.stringify(openedLoginPage)}`
+  );
 
   // The pick, taken on the step: it changes what will be committed and nothing else. The
   // flow stays where it is, because nothing has been authorized yet.
@@ -5064,8 +5133,88 @@ try {
   await uploadContext.close();
   await uploadStub.close();
 
+  // --- Which language the launcher speaks, and why -------------------------------
+  //
+  // The deck a page reads is chosen from its environment, so every claim here is about
+  // where the language came from rather than about any word in it. `copy.test.ts` walks
+  // the same order without a browser; this walks it through one, because two of the three
+  // steps are decided by the browser and one of them is decided by the build.
+  //
+  // A browser's own language is a launch argument and no page can reach it, so each
+  // environment under test gets a browser of its own. `--lang` is deliberately the flag
+  // rather than an emulated locale: what is being claimed is that a Spanish machine reads
+  // Spanish, not that the launcher can be told to pretend. English is launched for
+  // explicitly too, so no leg depends on whatever language the machine running this has.
+  const speak = async (tag) => {
+    const own = await puppeteer.launch({
+      headless: process.env.HEADED === '1' ? false : 'new',
+      args: ['--no-sandbox', '--disable-setuid-sandbox', `--lang=${tag}`],
+      defaultViewport: { width: 900, height: 700 }
+    });
+    languageBrowsers.push(own);
+    const context = await own.createBrowserContext();
+    const page = await context.newPage();
+    return {
+      read: async (url) => {
+        await page.goto(url, { waitUntil: 'domcontentloaded' });
+        await page.waitForSelector('main.container');
+        return page.evaluate(() => ({
+          lang: document.documentElement.lang,
+          heading: document.querySelector('h1')?.textContent?.trim() ?? ''
+        }));
+      }
+    };
+  };
+
+  const english = await speak('en-GB');
+  const spanish = await speak('es-ES');
+  const french = await speak('fr-FR');
+
+  // A browser that speaks English reads English, and says so on the document, which is what
+  // a screen reader and a hyphenation dictionary go by.
+  const plain = await english.read(`file://${artifact}`);
+  assert.equal(plain.lang, 'en-GB', `An English browser declares the document English: ${JSON.stringify(plain)}`);
+  assert.equal(plain.heading, 'Lithic - Launcher', '...and reads the launcher in English');
+
+  // The whole point of the environment step: nothing on this URL says Spanish.
+  const detected = await spanish.read(`file://${artifact}`);
+  assert.equal(detected.lang, 'es-ES', `A Spanish browser is answered in Spanish with no help from the address: ${JSON.stringify(detected)}`);
+  assert.equal(detected.heading, 'Lithic - Lanzador', '...down to the heading');
+
+  // A language this build cannot say falls back to the one it ships, and declares that,
+  // rather than declaring the visitor's language over words they cannot read.
+  const fell = await french.read(`file://${artifact}`);
+  assert.equal(fell.lang, 'en-GB', `A browser this build cannot answer is read the shipped language: ${JSON.stringify(fell)}`);
+  assert.equal(fell.heading, 'Lithic - Launcher', '...in English');
+
+  // A request outranks the environment, in both directions, which is the escape hatch.
+  const asked = await spanish.read(`file://${artifact}?lang=en`);
+  assert.equal(asked.lang, 'en-GB', `A Spanish browser asked for English gets English: ${JSON.stringify(asked)}`);
+  const fetched = await french.read(`file://${artifact}?lang=es`);
+  assert.equal(fetched.lang, 'es-ES', `...and a French browser can ask for a language its machine never had: ${JSON.stringify(fetched)}`);
+  const nonsense = await english.read(`file://${artifact}?lang=de`);
+  assert.equal(nonsense.heading, 'Lithic - Launcher', 'A language this build cannot say is refused rather than trusted');
+
+  // The build pin, which is the other half of the feature and the only half that holds
+  // everywhere: a query is lost to a bookmark, an installed app and an offline cache, and
+  // a pin is not. Built here rather than shipped, because the committed artifact is the
+  // unpinned one every deployment reads by default.
+  pinnedArtifactDir = mkdtempSync(join(tmpdir(), 'lithic-pinned-'));
+  const pinnedArtifact = join(pinnedArtifactDir, 'launcher-pinned.html');
+  const built = spawnSync(process.execPath, ['scripts/build-launcher.mjs', pinnedArtifact, '--locale=es'], {
+    encoding: 'utf8'
+  });
+  assert.equal(built.status, 0, `A pinned build has to succeed before it can be read: ${built.stderr?.trim()}`);
+  const pinned = await english.read(`file://${pinnedArtifact}`);
+  assert.equal(pinned.lang, 'es-ES', `A pinned build speaks its language to a browser that asked for none: ${JSON.stringify(pinned)}`);
+  assert.equal(pinned.heading, 'Lithic - Lanzador', '...all of it, in a browser speaking another language');
+  const escaped = await spanish.read(`file://${pinnedArtifact}?lang=en`);
+  assert.equal(escaped.heading, 'Lithic - Launcher', '...and the query string still gets somebody out of it');
+
   assert.deepEqual(errors, []);
   console.log(`Puppeteer launcher smoke passed (${process.env.HEADED === '1' ? 'headed' : 'headless'})`);
 } finally {
   await browser.close();
+  for (const own of languageBrowsers) await own.close();
+  if (pinnedArtifactDir !== null) rmSync(pinnedArtifactDir, { recursive: true, force: true });
 }

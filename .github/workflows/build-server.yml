@@ -95,7 +95,8 @@ jobs:
           cp deploy/autoupdate.sh build/app/autoupdate.sh 2>/dev/null || echo "Warning: autoupdate.sh missing"
           cp deploy/github-sync.sh build/app/scripts/github-sync.sh 2>/dev/null || echo "Warning: github-sync.sh missing"
           cp deploy/lithic-sync.sh build/app/scripts/lithic-sync.sh 2>/dev/null || echo "Warning: lithic-sync.sh missing"
-          chmod +x build/app/entrypoint.sh build/app/watcher.sh build/app/autoupdate.sh build/app/scripts/github-sync.sh build/app/scripts/lithic-sync.sh 2>/dev/null || true
+          cp deploy/pin-launcher-locale.sh build/app/pin-launcher-locale.sh 2>/dev/null || echo "Warning: pin-launcher-locale.sh missing"
+          chmod +x build/app/entrypoint.sh build/app/watcher.sh build/app/autoupdate.sh build/app/scripts/github-sync.sh build/app/scripts/lithic-sync.sh build/app/pin-launcher-locale.sh 2>/dev/null || true
 
       # --- Create tarball ---
       - name: Create God Artifact tarball

@@ -1,5 +1,5 @@
 /**
- * What a search matches in a Lith's name, and where the match lands.
+ * What a search matches in a Lith's name, and where a match lands in a short value a row draws.
  *
  * The extension is not part of a title. It is the same few characters on every row,
  * so matching it turns any query containing "lith" into "every file here" (the list
@@ -16,6 +16,11 @@
  * for the same reason: a name is a short value read at a glance, so its marks are
  * inline runs rather than nodes a template has to cut around. Every occurrence is
  * marked, not just the first. A second one left plain reads as a different word.
+ *
+ * `matchMarkup` is that half on its own, for the rows whose value is not a file name. A
+ * bookmark row draws an instance's address, and the query that listed it has to be visible
+ * inside it for the same reason: the row is the answer to "why is this here", and an
+ * address is read at a glance too. Nothing there is an extension, so nothing is held back.
  */
 
 function escape(value: string): string {
@@ -52,27 +57,40 @@ export function showsForQuery(name: string, query: string): boolean {
 }
 
 /**
- * The name as it is drawn by a row: the whole of it, with every run the query
- * matched inside the title wrapped in a mark, escaped on the way through.
+ * A short value as a row draws it with a query marked in it: every run the query matched
+ * wrapped in a mark, and everything else escaped on the way through.
  *
- * The offsets are read off the displayed name and the title is a prefix of it, so a
- * match can never reach the extension and everything after the last one (the suffix
- * this mark does not cover) is passed through as it was.
+ * The mark carries no meaning of its own beyond being a run of the row's own text, so the
+ * caller only has to be inside something `styles.css` dresses (`mark.name-match`, which
+ * every row that draws one already is). Marking is a substring rule rather than a word rule:
+ * the query is what somebody typed, and a half-typed word has to land where it landed.
  */
-export function titleMarkup(name: string, query: string): string {
+export function matchMarkup(value: string, query: string): string {
   const needle = query.trim().toLowerCase();
-  const title = lithTitle(name);
-  if (!needle) return escape(name);
+  if (!needle) return escape(value);
 
-  const haystack = title.toLowerCase();
+  const haystack = value.toLowerCase();
   let out = '';
   let index = 0;
   let at = haystack.indexOf(needle);
   while (at !== -1) {
-    out += escape(name.slice(index, at));
-    out += `<mark class="name-match">${escape(name.slice(at, at + needle.length))}</mark>`;
+    out += escape(value.slice(index, at));
+    out += `<mark class="name-match">${escape(value.slice(at, at + needle.length))}</mark>`;
     index = at + needle.length;
     at = haystack.indexOf(needle, index);
   }
-  return out + escape(name.slice(index));
+  return out + escape(value.slice(index));
+}
+
+/**
+ * The name as it is drawn by a row: the whole of it, with every run the query
+ * matched inside the title wrapped in a mark, escaped on the way through.
+ *
+ * The title is a prefix of the displayed name, so marking the title and passing the
+ * suffix through is the same string the row would draw unsearched: a match can never
+ * reach the extension, which is not search surface in the first place.
+ */
+export function titleMarkup(name: string, query: string): string {
+  const title = lithTitle(name);
+  return matchMarkup(title, query) + escape(name.slice(title.length));
 }

@@ -1,9 +1,18 @@
 import { mount } from 'svelte';
 import App from './App.svelte';
+import { LOCALE_TAG } from './copy';
 import { hostedInApp, resolveMode } from './mode';
 import './styles.css';
 
 const mode = resolveMode(window.location);
+
+/*
+ * The page's own language declaration, which is not decoration: a screen reader picks its
+ * voice from it, the browser hyphenates and spell-checks by it, and a Spanish page that says
+ * `lang="en"` is wrong about itself in all three. A locale that reads right to left would
+ * set `document.documentElement.dir` here as well.
+ */
+document.documentElement.lang = LOCALE_TAG;
 
 // Preserve the legacy globals expected by the existing launcher integrations.
 window.__LITHIC_LAUNCHER_MODE__ = mode;

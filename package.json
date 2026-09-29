@@ -17,7 +17,8 @@
     "gallery": "node scripts/ui-gallery.mjs",
     "check:offline": "node scripts/check-launcher-offline.mjs --browser",
     "check:copy": "node scripts/check-launcher-copy.mjs",
-    "check:push": "node scripts/check-launcher-copy.mjs && node scripts/check-launcher-artifact.mjs && node scripts/check-launcher-offline.mjs --browser && node scripts/pre-push-check.mjs"
+    "check:locale": "node scripts/check-self-host-locale.mjs",
+    "check:push": "node scripts/check-launcher-copy.mjs && node scripts/check-self-host-locale.mjs && node scripts/check-launcher-artifact.mjs && node scripts/check-launcher-offline.mjs --browser && node scripts/pre-push-check.mjs"
   },
   "author": "Tyler Mills",
   "license": "ISC",

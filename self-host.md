@@ -117,8 +117,27 @@ The server is configured entirely through environment variables:
 | `LITHIC_PASSWORD` | `changeme` | BasicAuth password |
 | `LITHIC_PORT` | `8080` | HTTP listen port |
 | `EPHEMERAL_HOST` | `127.0.0.1` | Hostname of Ephemeral sidecar (e.g. `ephemeral` in Docker) |
+| `LITHIC_LOCALE` | (none) | Pins the launcher's language for this instance, e.g. `es` |
 
 For the LXC install, these are stored in `/etc/default/lithic`.
+
+### Language
+
+`LITHIC_LOCALE=es` pins this instance's launcher to one language for everybody who uses it,
+which is what a self-hoster with a Spanish-speaking team wants without rebuilding anything. It
+is applied when the server starts, by rewriting the two files that belong to a deployment
+rather than to the release: `index.html`, which redirects `/` on to the launcher and now
+brings `?lang=es` when the visitor brought no query of their own, and `manifest.json`, whose
+start URL carries the language so an installed app opens in it as well. The launcher document
+itself is served exactly as released, so the daily autoupdate can replace it without dropping
+the pin.
+
+Left unset, nothing changes: the launcher follows each visitor's own browser language and
+falls back to English. Two things the pin does not reach, both of them deliberate. A link that
+points straight at `/src/launcher.html` with no query of its own is the released document read
+as released, and a browser holding the launcher for offline use from before the pin keeps what
+it cached. A language that has to hold everywhere is a build, with `VITE_LAUNCHER_LOCALE=es`
+set for `npm run build:launcher`.
 
 ---
 

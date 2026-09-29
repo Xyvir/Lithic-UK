@@ -1077,35 +1077,114 @@ const locales = { en, es };
 export type LocaleId = keyof typeof locales;
 
 /**
- * Which locale a page uses.
+ * The BCP-47 tag for each locale, for the places a two-letter key will not do.
  *
- * `asked` is a request, and a request nobody carries is refused rather than trusted: an
- * unknown or misspelled language falls back to English, so a bad link reads as the
- * shipped language instead of a page with no words in it.
+ * A deck is keyed by the short name a URL carries (`es`); a document and a date want the tag
+ * (`es-ES`). Typed as a `Record` over `LocaleId` so a language added to the deck without a
+ * tag is a compile error rather than an English document claiming to be Spanish.
  */
-export function resolveLocale(search: string, built?: string | null): LocaleId {
-  const asked = new URLSearchParams(search).get('lang') || built || '';
-  return asked in locales ? (asked as LocaleId) : 'en';
+const LOCALE_TAGS: Record<LocaleId, string> = { en: 'en-GB', es: 'es-ES' };
+
+/** The key for a language somebody wrote down, or nothing if this build cannot say it. */
+function asLocale(value: string | null | undefined): LocaleId | undefined {
+  const wanted = value?.trim().toLowerCase();
+  if (!wanted) return undefined;
+  return (Object.keys(locales) as LocaleId[]).find((key) => key.toLowerCase() === wanted);
 }
 
 /**
- * The locale this deployment ships, in two steps.
+ * The best locale for a person's own language list, if this build can say any of it.
  *
- * `?lang=es` is the review path: the gallery and anybody with the shipped artifact can see
- * another language without a second build. `VITE_LAUNCHER_LOCALE=es` is the deployment path,
- * and the one a real language site uses: one environment variable at build time produces an
- * artifact that is Spanish everywhere, including in the places a query string cannot reach
- * (a bookmark, a launcher an instance serves, a wiki opened from the app).
- *
- * The `typeof location` test is not decoration: this module is imported by the unit tests,
- * which run in Node with no `location` and no Vite env, and English is the right answer
- * there. Reading the build's own locale is skipped rather than guarded, because Vite can
- * only substitute `import.meta.env.VITE_LAUNCHER_LOCALE` where it appears literally.
+ * Browsers hand over tags rather than languages (`es-419`, `es-MX`, `zh-Hant-TW`), so a tag is
+ * matched by dropping subtags from the right until one lands on a locale this build ships.
+ * Longest first, which is what would let a future `zh-Hant` answer a `zh-Hant-TW` reader
+ * differently from a `zh-CN` one. The caller's order is the person's order and is never
+ * sorted: somebody who lists French before English means it.
  */
-export const LOCALE: LocaleId = resolveLocale(
-  typeof location === 'undefined' ? '' : location.search,
-  typeof location === 'undefined' ? undefined : import.meta.env.VITE_LAUNCHER_LOCALE
-);
+export function matchLanguage(
+  languages: readonly string[] | null | undefined
+): LocaleId | undefined {
+  const keys = Object.keys(locales) as LocaleId[];
+  for (const asked of languages ?? []) {
+    const subtags = asked.trim().toLowerCase().replace(/_/g, '-').split('-').filter(Boolean);
+    for (let take = subtags.length; take > 0; take -= 1) {
+      const found = keys.find((key) => key.toLowerCase() === subtags.slice(0, take).join('-'));
+      if (found) return found;
+    }
+  }
+  return undefined;
+}
+
+/** Everywhere a page's language can come from, strongest first. */
+export type LocaleSources = {
+  /**
+   * The page's own query string. `?lang=es` is a request, and it is answered first. It is
+   * also how a self-hosted instance pins its language: the redirector that sends `/` on to
+   * the launcher brings `?lang=es` for a visit that brought no query of its own.
+   */
+  search?: string;
+  /** The pin this artifact was built with (`VITE_LAUNCHER_LOCALE`). */
+  built?: string | null;
+  /** The person's own languages, in their own order. */
+  languages?: readonly string[] | null;
+};
+
+/**
+ * Which locale a page is read in, in three steps.
+ *
+ *   1. `?lang=es` on the URL. A request rather than a setting, so it outranks everything
+ *      below it: it is how the gallery reviews a translation, how a self-hosted instance
+ *      pins one (its redirector brings the query for a visit that brought none), and how
+ *      anybody overrides a deployment without rebuilding it. A language this build cannot
+ *      say is refused here and the search carries on, so a misspelled link still reads as
+ *      the shipped language.
+ *   2. The build's own pin, which is what a language site uses: one variable at build time
+ *      speaks that language everywhere, including the places a query string cannot reach,
+ *      such as a bookmark, a launcher an instance serves, or a wiki opened from the app.
+ *   3. The person's own languages, which is the environment in every mode at once: the PWA
+ *      reads the browser, an instance's launcher reads the same browser, and the desktop app
+ *      reads the machine, since the webview it runs in is the machine's own.
+ *
+ * The pin outranks detection because that is what a pin is for: a deployment that was built
+ * to speak Spanish says so to everybody, and the query string is the escape hatch rather than
+ * the other way round.
+ *
+ * The sources are passed in rather than read here, so the whole order is a pure function the
+ * unit tests can walk without a browser.
+ */
+export function resolveLocale(sources: LocaleSources = {}): LocaleId {
+  return (
+    asLocale(new URLSearchParams(sources.search ?? '').get('lang')) ??
+    asLocale(sources.built) ??
+    matchLanguage(sources.languages) ??
+    'en'
+  );
+}
+
+/**
+ * The locale this page is read in, assembled from its environment once, at import.
+ *
+ * Every branch is guarded rather than assumed: this module is imported by the unit tests,
+ * which run in Node with no `location`, no `window` and no `navigator`, and English is the
+ * right answer there. The build's own pin is skipped rather than defaulted, because Vite can
+ * only substitute `import.meta.env.VITE_LAUNCHER_LOCALE` where it appears literally.
+ *
+ * `navigator.language` leads the list it already belongs to. In every real browser the two
+ * agree, since `language` is the first entry of `languages`, so nothing is decided
+ * differently, and a locale a reviewer forced with a browser's own tools, which moves
+ * `language` alone, is heard instead of ignored. The desktop app needs no separate reading:
+ * WebView2 and WKWebView report the machine's language here, which is the one a packaged app
+ * is expected to follow.
+ */
+export const LOCALE: LocaleId = resolveLocale({
+  search: typeof location === 'undefined' ? '' : location.search,
+  built: typeof location === 'undefined' ? undefined : import.meta.env.VITE_LAUNCHER_LOCALE,
+  languages:
+    typeof navigator === 'undefined' ? undefined : [navigator.language, ...navigator.languages]
+});
+
+/** The tag this page declares itself in: `document.documentElement.lang`, and every date it draws. */
+export const LOCALE_TAG = LOCALE_TAGS[LOCALE];
 
 /** The deck the rest of the launcher reads. */
 export const copy = locales[LOCALE];

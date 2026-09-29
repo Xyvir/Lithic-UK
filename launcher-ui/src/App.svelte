@@ -1,7 +1,7 @@
 <script lang="ts">
   import { onMount } from 'svelte';
   // Every word this component shows. Nothing below spells copy of its own.
-  import { copy } from './copy';
+  import { LOCALE_TAG, copy } from './copy';
   import { handoffQuery, LAUNCHER_QUERY_PARAM, launcherReturn, withLauncherHandoff, type LauncherMode } from './mode';
   import { createFileBridge, tauriInvoke, tauriListen, saveTextVerifiably } from './file-bridge';
   import { orphanPill, orphanDownloadNote, type OrphanDownloadState } from './orphan-download';
@@ -19,7 +19,7 @@
   import { deleteRemoteFile, fetchRemoteFiles, fetchRemoteWiki, fetchRemoteWikiMeta, probePatchApi, createLockHeartbeat, readRemoteLock, uploadRemoteFile, webdavUrl, resolveSessionId, lithUploadName, type WebdavFile } from './webdav';
   import { normalizeLithName } from './legacy-saver';
   import { searchCachedWikis } from './cache-search';
-  import { showsForQuery, titleMatches, titleMarkup } from './name-match';
+  import { matchMarkup, showsForQuery, titleMatches, titleMarkup } from './name-match';
   import { topHits, type InstanceCacheRead, type InstanceReads } from './instance-search';
   import { computeBackupCoverage, folderOf, hasBackedUpRepo, orphanedEntries, reindexFolders, syncedDirFor, type CoverageRow, type RebuildOrphan } from './backup-coverage';
   import { parseDeviceCode, parseDevicePoll, pollDelayMs, formatUserCode, generateRepoName, partitionRepos } from './github-device';
@@ -298,6 +298,43 @@
       return;
     }
     await installMonolith();
+  }
+
+  /** The project, which the mark and the footer both point at. */
+  const PROJECT_URL = 'https://github.com/Xyvir/Lithic-UK';
+
+  /**
+   * Ask the machine to open an address the launcher does not own.
+   *
+   * In a browser that is a new tab and nothing more. In the desktop app it has to be Rust,
+   * and the reason is worth keeping: the webview has no second window to open, so a
+   * `target="_blank"` click lands nowhere at all. That is how the project link and the
+   * device-login page both became dead controls in the app while the update offer, which
+   * already asks Rust, kept working. The project link, the device-login page and the
+   * introduction all come through here, so they cannot disagree about how an address is
+   * opened. The update offer keeps its own call, because it has a failure to report.
+   */
+  function openExternally(url: string) {
+    if (mode !== 'tauri') {
+      window.open(url, '_blank');
+      return;
+    }
+    // A refused open is not worth a dialog of its own: the address is also in the `href`, and
+    // the browser-side path is what every other mode takes.
+    void tauriInvoke('open_external', { url }).catch(() => {});
+  }
+
+  /**
+   * An anchor's own click, taken over only in the one mode that cannot honour it.
+   *
+   * Everywhere else it is left alone: a browser's handling is what right-click, copy-link and
+   * the modifier keys depend on, and the address stays in the `href` so the control is a link
+   * even if this script never runs.
+   */
+  function openExternalLink(event: MouseEvent, url: string) {
+    if (mode !== 'tauri') return;
+    event.preventDefault();
+    openExternally(url);
   }
 
   /** Hide the install offer; per-mode persistence (IndexedDB / sidecar). */
@@ -2435,7 +2472,7 @@
         // Fall through to the online introduction below.
       }
       if (navigator.onLine) {
-        window.open('https://lithic.uk/intro.html', '_blank');
+        openExternally('https://lithic.uk/intro.html');
       } else {
         mountError = copy.status.introFailed;
       }
@@ -4344,9 +4381,10 @@
            footer's Github button go on mobile without losing the way there. -->
       <a
         class="brand-icon-wrap brand-github"
-        href="https://github.com/Lithic-UK/Lithic"
+        href={PROJECT_URL}
         target="_blank"
         rel="noreferrer"
+        on:click={(event) => openExternalLink(event, PROJECT_URL)}
         aria-label={copy.app.githubLink}
         title={copy.app.githubLink}
       >
@@ -4499,7 +4537,7 @@
             <div class="modal-actions"><button class="modal-action" disabled={!gitRepoInput || !gitTokenInput || gitSyncBusy} on:click={connectGitSync}>{gitSyncBusy ? copy.dialogs.gitSync.connecting : copy.dialogs.gitSync.connectPush}</button></div>
           </details>
         {:else if gitSyncView === 'connecting'}
-          <p>{copy.dialogs.gitSync.stepOne} <a href="https://github.com/login/device" target="_blank" rel="noreferrer">github.com/login/device</a></p>
+          <p>{copy.dialogs.gitSync.stepOne} <a href="https://github.com/login/device" target="_blank" rel="noreferrer" on:click={(event) => openExternalLink(event, 'https://github.com/login/device')}>github.com/login/device</a></p>
           <p>{copy.dialogs.gitSync.stepTwo}</p>
           {#if gitUserCode}
             <div class="user-code-display">{formatUserCode(gitUserCode)}</div>
@@ -4931,7 +4969,7 @@
             <li class="orphan-row">
               <span class="orphan-name" title={row.orphan.path ?? copy.dialogs.rebuild.noFile}>{row.orphan.name}</span>
               {#if !row.orphan.path}<span class="orphan-tag">{copy.dialogs.rebuild.cachedOnly}</span>{/if}
-              {#if dirtyEntries[row.orphan.name]}<span class="orphan-tag dirty" title={copy.dialogs.rebuild.unsavedCaptured(new Date(dirtyEntries[row.orphan.name]).toLocaleString())}>{copy.dialogs.rebuild.unsavedTag}</span>{/if}
+              {#if dirtyEntries[row.orphan.name]}<span class="orphan-tag dirty" title={copy.dialogs.rebuild.unsavedCaptured(new Date(dirtyEntries[row.orphan.name]).toLocaleString(LOCALE_TAG))}>{copy.dialogs.rebuild.unsavedTag}</span>{/if}
               {#if cachedEntries[row.orphan.name]}
                 <button class="recent-icon-button" type="button" aria-label={copy.row.downloadAria(row.orphan.name)} title={copy.row.downloadTitle} on:click={() => downloadCachedSnapshot(row.orphan.name)}>
                   <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 4v11"></path><path d="m7.5 10.5 4.5 4.5 4.5-4.5"></path><path d="M5 19h14"></path></svg>
@@ -5025,7 +5063,7 @@
       <div class="launcher-modal dirty-modal" role="dialog" aria-modal="true" aria-labelledby="dirty-title">
         <h2 id="dirty-title">{copy.dialogs.dirty.title}</h2>
         <p>
-          {copy.dialogs.dirty.body(dirtyInfo.name, dirtyInfo.tiddlers.length, new Date(dirtyInfo.ts).toLocaleString())}
+          {copy.dialogs.dirty.body(dirtyInfo.name, dirtyInfo.tiddlers.length, new Date(dirtyInfo.ts).toLocaleString(LOCALE_TAG))}
         </p>
         <ul class="dirty-tiddler-list">
           {#each dirtyInfo.tiddlers.slice(0, 8) as tiddler (tiddler.title)}
@@ -5137,7 +5175,7 @@
                     type="button"
                     disabled={!cachedEntries[file.name]}
                     aria-label={copy.row.historyAria(file.name)}
-                    title={dirtyEntries[file.name] ? copy.row.unsavedFrom(new Date(dirtyEntries[file.name]).toLocaleString()) : copy.row.showHistory}
+                    title={dirtyEntries[file.name] ? copy.row.unsavedFrom(new Date(dirtyEntries[file.name]).toLocaleString(LOCALE_TAG)) : copy.row.showHistory}
                     on:click={() => openHistoryModal(file.name)}
                   >
                     {#if dirtyEntries[file.name]}
@@ -5178,7 +5216,13 @@
               {:else}
                 <span class="bookmark-icon bookmark-icon-empty" aria-hidden="true"></span>
               {/if}
-              <span class="bookmark-label">{entry.label}</span>
+              <!--
+                The address is drawn the way every other row's name is: with the query that
+                listed the row marked inside it. The label is the address (`instanceLabel`),
+                so the mark lands on the characters the person typed, and a row that is here
+                because of its address reads as an answer rather than as a shorter list.
+              -->
+              <span class="bookmark-label">{@html matchMarkup(entry.label, search)}</span>
             </button>
             {#if mode === 'tauri' && vaultStatus}
               {@const origin = vaultOriginOf(entry.url)}
@@ -5265,7 +5309,7 @@
                 type="button"
                 disabled={!markedRow && !cachedEntries[name]}
                 aria-label={browserOnlyRow ? browserOnlyMarkTitle(name) : unsavedRow ? copy.row.unsavedAria(name) : localOnlyRow ? copy.row.localOnlyAria(name) : copy.row.historyAria(name)}
-                title={browserOnlyRow ? browserOnlyMarkTitle(name) : unsavedRow ? copy.row.unsavedFrom(new Date(dirtyEntries[name]).toLocaleString()) : localOnlyRow ? copy.row.localOnlyTitle : (cachedEntries[name] ? copy.row.showHistory : copy.row.noHistory)}
+                title={browserOnlyRow ? browserOnlyMarkTitle(name) : unsavedRow ? copy.row.unsavedFrom(new Date(dirtyEntries[name]).toLocaleString(LOCALE_TAG)) : localOnlyRow ? copy.row.localOnlyTitle : (cachedEntries[name] ? copy.row.showHistory : copy.row.noHistory)}
                 on:click={() => openHistoryModal(name, browserOnlyRow)}
               >
                 {#if markedRow}
@@ -5299,7 +5343,7 @@
         {#each filteredCached as entry}
           <div class="recent-row cached-only-row">
             <div class="recent-name cached-result" role="note">{@html titleMarkup(entry.name, search)}<span class="cached-size">{formatCacheSize(entry.sizeBytes)}</span><span class="cached-label">{copy.row.cachedLocally}</span></div>
-            {#if dirtyEntries[entry.name] || historyAvailable[entry.name]}<button class="recent-icon-button cache-history-button" class:modified={dirtyEntries[entry.name]} type="button" aria-label={copy.row.historyAria(entry.name)} title={dirtyEntries[entry.name] ? copy.row.unsavedFrom(new Date(dirtyEntries[entry.name]).toLocaleString()) : copy.row.showHistory} on:click={() => openHistoryModal(entry.name)}>
+            {#if dirtyEntries[entry.name] || historyAvailable[entry.name]}<button class="recent-icon-button cache-history-button" class:modified={dirtyEntries[entry.name]} type="button" aria-label={copy.row.historyAria(entry.name)} title={dirtyEntries[entry.name] ? copy.row.unsavedFrom(new Date(dirtyEntries[entry.name]).toLocaleString(LOCALE_TAG)) : copy.row.showHistory} on:click={() => openHistoryModal(entry.name)}>
               {#if dirtyEntries[entry.name]}
                 <svg class="history-download-icon modified" viewBox="56 108 33 36" aria-hidden="true"><path class="history-icon-shape" d="m 73.595508,109.76746 c -7.198235,0 -13.103617,5.58342 -13.647229,12.64471 h -0.0072 V 138.2696 H 58.61606 l 2.32389,4.02559 2.324405,-4.02559 h -1.323433 v -15.85123 c 0.530186,-5.97937 5.534806,-10.65103 11.654586,-10.65103 6.474618,0 11.703161,5.22855 11.703161,11.70316 0,6.47462 -5.228543,11.70161 -11.703161,11.70161 -2.644513,0 -5.080809,-0.87232 -7.037814,-2.34508 v 2.39572 c 2.058162,1.23707 4.46633,1.94924 7.037814,1.94924 7.555498,0 13.703556,-6.14599 13.703556,-13.70149 0,-7.5555 -6.148058,-13.70304 -13.703556,-13.70304 z"></path><path class="history-icon-mark" d="M72.3 116h2.6v9h-2.6z"></path><circle class="history-icon-mark" cx="73.6" cy="128.4" r="1.6"></circle></svg>
               {:else}
@@ -5379,5 +5423,5 @@
     drawn, is the offer's own business; the two sites are mutually exclusive, which is why
     the markup for it is written once, above.
   -->
-  <footer>{#if mode === 'webapp'}<a class="github-link" href="https://github.com/Lithic-UK/Lithic" target="_blank" rel="noreferrer">{copy.app.footerLink}</a>{/if}{#if installOffer && !recentPanelShown}{@render installOfferControl()}{/if}</footer>
+  <footer>{#if mode === 'webapp'}<a class="github-link" href={PROJECT_URL} target="_blank" rel="noreferrer">{copy.app.footerLink}</a>{/if}{#if installOffer && !recentPanelShown}{@render installOfferControl()}{/if}</footer>
 </main>

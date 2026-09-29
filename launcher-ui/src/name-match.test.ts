@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { lithTitle, titleMatches, showsForQuery, titleMarkup } from './name-match.ts';
+import { lithTitle, matchMarkup, titleMatches, showsForQuery, titleMarkup } from './name-match.ts';
 
 test('a title is a name without its extension', () => {
   assert.equal(lithTitle('abcd.lith'), 'abcd');
@@ -78,8 +78,63 @@ test('a name that looks like markup is escaped, marked or not', () => {
 });
 
 /**
- * The displayed name survives the marking: strip the marks and every character of the
- * original is still there, for any query.
+ * An instance's address is marked by the same rule a name is.
+ *
+ * A bookmark row draws the address the query was typed against, so the mark is what makes
+ * a filtered list read as an answer rather than as a shorter list. Nothing in an address is
+ * an extension, so nothing is held back from the mark: the scheme is markable, which is the
+ * only difference from a file name and the reason this half is its own function.
+ */
+test('an address is marked the way a name is', () => {
+  assert.equal(
+    matchMarkup('personal.lithic.uk', 'lith'),
+    'personal.<mark class="name-match">lith</mark>ic.uk'
+  );
+  assert.equal(
+    matchMarkup('https://lithic.lithic.uk', 'lithic'),
+    'https://<mark class="name-match">lithic</mark>.<mark class="name-match">lithic</mark>.uk'
+  );
+  assert.equal(
+    matchMarkup('wiki.foobar.com', 'FOOBAR'),
+    'wiki.<mark class="name-match">foobar</mark>.com'
+  );
+  // The same three answers a name gets: no match is the value untouched, an empty query
+  // marks nothing, and the spaces somebody typed around the query are not part of it.
+  assert.equal(matchMarkup('wiki.foobar.com', 'zzz'), 'wiki.foobar.com');
+  assert.equal(matchMarkup('wiki.foobar.com', ''), 'wiki.foobar.com');
+  assert.equal(
+    matchMarkup('wiki.foobar.com', '  bar  '),
+    'wiki.foo<mark class="name-match">bar</mark>.com'
+  );
+});
+
+/**
+ * A value that looks like markup is escaped whether or not it is marked, because the
+ * caller draws the result as HTML. An address is no exception: a query is the person's,
+ * and a label could be anything a stored bookmark carried.
+ */
+test('an address that looks like markup is escaped too', () => {
+  assert.equal(matchMarkup('a&b<c>.example', 'b'), 'a&amp;<mark class="name-match">b</mark>&lt;c&gt;.example');
+  assert.equal(matchMarkup('quote"s.example', 'zzz'), 'quote&quot;s.example');
+  assert.equal(matchMarkup('quote"s.example', 'quote'), '<mark class="name-match">quote</mark>&quot;s.example');
+});
+
+/** Strip the marks and the escapes, leaving the text a row actually reads as. */
+function stripped(markup: string): string {
+  return markup
+    .replace(/<mark class="name-match">/g, '')
+    .replace(/<\/mark>/g, '')
+    .replace(/&amp;/g, '&')
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'");
+}
+
+/**
+ * The displayed value survives the marking: strip the marks and every character of the
+ * original is still there, for any query. A mark can only ever change where the characters
+ * are dressed, never which ones are drawn.
  */
 test('the markup spells the name back', () => {
   for (const [name, query] of [
@@ -89,14 +144,17 @@ test('the markup spells the name back', () => {
     ['abcd.lith', 'zzz'],
     ['plain', 'lai']
   ] as const) {
-    const stripped = titleMarkup(name, query)
-      .replace(/<mark class="name-match">/g, '')
-      .replace(/<\/mark>/g, '')
-      .replace(/&amp;/g, '&')
-      .replace(/&lt;/g, '<')
-      .replace(/&gt;/g, '>')
-      .replace(/&quot;/g, '"')
-      .replace(/&#39;/g, "'");
-    assert.equal(stripped, name, `${name} / ${query}`);
+    assert.equal(stripped(titleMarkup(name, query)), name, `${name} / ${query}`);
+  }
+});
+
+test('the markup spells the address back too', () => {
+  for (const [address, query] of [
+    ['personal.lithic.uk', 'lith'],
+    ['https://wiki.foobar.com', 'foo'],
+    ['personal.lithic.uk', 'zzz'],
+    ['personal.lithic.uk', '']
+  ] as const) {
+    assert.equal(stripped(matchMarkup(address, query)), address, `${address} / ${query}`);
   }
 });
