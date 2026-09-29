@@ -10,7 +10,7 @@ export interface RecentEntry {
   path?: string;
   /**
    * No file anywhere, on any platform: this row's Lith exists only as a cached
-   * copy in this browser's storage (the index-db-only fallback — see
+   * copy in this browser's storage (the index-db-only fallback: see
    * browser-storage.ts). Recorded on the row rather than inferred from the
    * current mode, because the row outlives the mode it was made in.
    */
@@ -138,7 +138,7 @@ export async function addRecentFile(fileHandle: FileSystemFileHandle, tauriPath:
 
 /** Normalize a stored recents row into RecentEntry shape. */
 function normalizeRecentEntry(f: any): RecentEntry {
-  // Already shaped (has handle/tauriPath keys) — keep as-is.
+  // Already shaped (has handle/tauriPath keys). Keep as-is.
   if (f && typeof f === 'object' && ('handle' in f || 'tauriPath' in f)) {
     return {
       handle: f.handle ?? null,
@@ -165,7 +165,7 @@ export function recentRowName(entry: RecentRow): string {
  *
  * It goes in the same store the handle rows do, and deliberately so. This
  * mode's whole claim is "your Lith is in this browser's storage", and a row
- * parked in localStorage would be the one part of it that is not — quietly
+ * parked in localStorage would be the one part of it that is not. Quietly
  * surviving the site-data clear the user performs to erase everything.
  *
  * `text` is for the mounts whose content is not in the search cache: an HTML
@@ -188,7 +188,7 @@ export async function addBrowserOnlyRecent(name: string, text = '', store: Cache
 
 /**
  * Drop one browser-only row. Matched by name, because it has no handle to
- * compare against — there is nothing on disk for it to be the same *as*.
+ * compare against. There is nothing on disk for it to be the same *as*.
  */
 export async function removeBrowserOnlyRecent(name: string, store: CacheStore = idb): Promise<RecentEntry[]> {
   try {
@@ -216,7 +216,7 @@ export type RecentRow =
 /**
  * The disk path behind a recent row, whatever shape it arrived in.
  *
- * Saves made from *inside* a Lith — a brand-new blank one included — are
+ * Saves made from *inside* a Lith (a brand-new blank one included) are
  * recorded by the engine's saver, which stores `tauriPath` (or a pseudo-handle)
  * rather than `path`. Opening a row has always understood every one of those
  * shapes; anything else that needs the row's folder has to ask the same
@@ -245,7 +245,7 @@ export async function getRecentFiles(): Promise<RecentEntry[]> {
 /**
  * "Dismiss install offer" flag, the browser modes: user chose to hide the
  * install button (e.g. using the launcher as a plain bookmark). Cleared by
- * clearing site data — IndexedDB is the deliberate persistence choice so
+ * clearing site data. IndexedDB is the deliberate persistence choice so
  * "clear cache" is the manual restore path.
  */
 export async function isInstallDismissed(): Promise<boolean> {
@@ -278,8 +278,8 @@ export async function removeRecentFile(
     const newRecentFiles: RecentEntry[] = [];
 
     for (const f of recentFiles) {
-      // A row with no comparable handle — a browser-only row, or a Tauri row
-      // that records its path instead — cannot be the row being removed, so it
+      // A row with no comparable handle (a browser-only row, or a Tauri row
+      // that records its path instead) cannot be the row being removed, so it
       // stays. Dropping these turned any removal into a collision: the row the
       // user did *not* point at was the one that disappeared.
       if (!f.handle?.isSameEntry) {
@@ -328,7 +328,7 @@ export async function clearAllRecentFiles(store: CacheStore = idb): Promise<void
  * tiny RFC 6902-style patch ops, with full snapshots only when diffs stop
  * paying for themselves. The legacy flat `search_cache_<name>` key is kept in
  * sync so search and cached-entry views keep working unchanged. The old
- * bk1/bk2 deep-copy backups are intentionally NOT migrated or written — the
+ * bk1/bk2 deep-copy backups are intentionally NOT migrated or written. The
  * frozen legacy launcher (assets/legacy-launcher.html) is the only producer of those.
  */
 export async function saveSearchCache(fileName: string, text: string): Promise<void> {
@@ -349,7 +349,7 @@ export async function saveSearchCache(fileName: string, text: string): Promise<v
  * True only for the key holding a wiki's whole current text.
  *
  * History snapshots and deltas share the `search_cache_` prefix, and a base
- * snapshot carries a `text` field just like a cache does — so a reader that
+ * snapshot carries a `text` field just like a cache does, so a reader that
  * filters on the prefix alone invents a wiki named after the key's suffix,
  * e.g. `base_recipes.lith_3f2a`. Such an entry is invisible in the list (cached
  * rows only render while a search is active), cannot be opened, and is enough
@@ -378,7 +378,7 @@ export async function deleteWikiHistory(name: string, store: CacheStore = idb): 
  * cache, the legacy launcher's bk1/bk2 deep copies, its versioned history, and
  * any unsaved-edit backup.
  *
- * Used wherever a wiki is deliberately dropped — the row's own remove button,
+ * Used wherever a wiki is deliberately dropped. The row's own remove button,
  * or a rebuild the user confirmed. Leaving any of it behind produces an entry
  * that no list shows and only a search can find: it looks like a file, cannot
  * be opened, and belongs to nothing. Deleting is the honest half of dropping.
@@ -410,7 +410,7 @@ export async function forgetWikiCache(name: string, store: CacheStore = idb): Pr
  * The mounted engine streams changed tiddlers into
  * `dirty_state_<name>` in realtime, debounced; if the tab dies before a
  * real save the unsaved edits survive there. Recovery merges them into the
- * pending-imports queue so the user keeps or discards explicitly — nothing
+ * pending-imports queue so the user keeps or discards explicitly. Nothing
  * is overwritten behind their back. Cleared when the merged handoff is
  * accepted, and treated as orphans by all cleanup flows.
  * --- */
@@ -517,8 +517,8 @@ export type FetchedLith = { text: string; digest: string };
 /**
  * The file this device last fetched for a Lith, if it kept one.
  *
- * Keyed inside the wiki's own cache record, so every cleanup path that already forgets a wiki
- * — a deleted row, a rebuild's orphan sweep, the storage purge — takes this with it.
+ * Keyed inside the wiki's own cache record, so every cleanup path that already forgets a wiki.
+ * A deleted row, a rebuild's orphan sweep, the storage purge) takes this with it.
  */
 export async function readFetchedLith(fileName: string, store: CacheStore = idb): Promise<FetchedLith | null> {
   try {
@@ -534,7 +534,7 @@ export async function readFetchedLith(fileName: string, store: CacheStore = idb)
  * Keep the file a fetch just returned, beside the digest it was fetched at.
  *
  * The parsed cache text is what search reads; this is the document as the instance had it, which
- * is the only form the patch API's base can take — so a device holding both can ask whether the
+ * is the only form the patch API's base can take, so a device holding both can ask whether the
  * instance has moved on and, when it has not, mount its own copy instead of downloading the file
  * again. A file with no digest is not saved: without one there is nothing to compare against, and
  * a copy nobody can check is storage spent on nothing.
@@ -593,8 +593,8 @@ export type SearchCacheRecord = {
   /**
    * The file exactly as this device received it, and the digest the instance gave for it.
    *
-   * `text` above is *parsed* tiddlers — what search reads, and the baseline the drift check saves
-   * — so it cannot be handed back to the patch API, whose base has to be the bytes the server
+   * `text` above is *parsed* tiddlers (what search reads, and the baseline the drift check saves,
+   * so it cannot be handed back to the patch API, whose base has to be the bytes the server
    * hashed. These three are that copy, and they are what makes a second open of a 10 MB Lith cost
    * one metadata read rather than the file (see `readFetchedLith`).
    */
@@ -612,8 +612,8 @@ export type CacheStore = {
 
 /**
  * Proactive storage purge: when overall origin usage crosses the threshold,
- * delete the oldest-modified wikis' caches — flat key plus their full
- * versioned history — (never the last one) until usage drops below it.
+ * delete the oldest-modified wikis' caches (flat key plus their full
+ * versioned history) (never the last one) until usage drops below it.
  * Runs at launcher boot; best-effort on every environment.
  * The store and estimate fn are injectable for tests.
  */

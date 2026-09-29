@@ -173,7 +173,7 @@ test('diffLines trims common head and tail before diffing', () => {
     lines!.filter((entry) => entry.type !== 'context').map((entry) => [entry.type, entry.line]),
     [['remove', 'c\n'], ['add', 'C\n']]
   );
-  // 2 trimmed head + (remove, add) + 2 trimmed tail — the untouched ends are
+  // 2 trimmed head + (remove, add) + 2 trimmed tail. The untouched ends are
   // carried as context rather than re-emitted, which is what keeps hunks valid.
   assert.equal(lines!.length, 6, 'head/tail are kept as context, not re-emitted as changes');
 });

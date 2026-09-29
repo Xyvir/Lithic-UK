@@ -97,7 +97,7 @@ test('a verdict that is not ok turns the icon red with its own reason', () => {
   }
 });
 
-test('unmanaged is not a failure — it is the marker check saying nothing is synced', () => {
+test('unmanaged is not a failure. It is the marker check saying nothing is synced', () => {
   assert.equal(healthFailure('unmanaged'), null);
   assert.equal(healthFailure('ok'), null);
   assert.equal(healthFailure(null), null);
@@ -105,7 +105,7 @@ test('unmanaged is not a failure — it is the marker check saying nothing is sy
 
 test('a push that failed outranks a healthy verdict', () => {
   // The repository is reachable and the token works, yet the last save provably
-  // did not land — the first-hand evidence has to win, or the icon lies.
+  // did not land. The first-hand evidence has to win, or the icon lies.
   const indicator = syncIndicator({
     hasMarker: true,
     health: 'ok',

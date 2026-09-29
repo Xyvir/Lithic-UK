@@ -125,7 +125,7 @@ test('module serializer: wiki fields -> valid notebook JSON', () => {
   assert.equal(out.cells[1].outputs[0].output_type, 'stream');
   assert.deepEqual(out.cells[1].outputs[0].text, ['hello\n', 'world']);
   assert.equal(out.cells[2].cell_type, 'raw');
-  // JSON must round-trip (i.e. parse) — it IS valid notebook JSON.
+  // JSON must round-trip (i.e. parse). It IS valid notebook JSON.
   assert.ok(JSON.parse(JSON.stringify(out)));
 });
 

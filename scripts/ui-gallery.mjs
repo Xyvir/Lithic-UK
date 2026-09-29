@@ -573,6 +573,11 @@ async function openBookmark(page, label) {
  *           own `aria-label`, for the one entry that has no heading to point at. The
  *           walk asserts the dialog is in the DOM before the shot, and every claim is
  *           what the coverage report at the end of the run is built from.
+ *   locale  read this pane in another language the deck carries (`es`), which it asks for
+ *           as `?lang=`. That is the review path, and the reason a translation can be
+ *           looked at before it ships: one artifact, every language in it. A deployment
+ *           ships one language instead, chosen when the launcher is built
+ *           (`VITE_LAUNCHER_LOCALE`, see `launcher-ui/src/copy.ts`).
  */
 const SHEETS = [
   {
@@ -1880,6 +1885,183 @@ const SHEETS = [
         expect: '.recent-foot .install-button'
       }
     ]
+  },
+  {
+    /*
+     * The launcher in Spanish, which is the point of the deck in `launcher-ui/src/copy.ts`.
+     * Every pane here is the same state as an English one above it, asked for the same way,
+     * with `locale: 'es'` added: that is the *review* path for a translation, and it exists so
+     * a language can be looked at without building it. A deployment ships one language
+     * instead, chosen when the artifact is built.
+     *
+     * Nine panes, chosen for the copy rather than the layout: the two action labels, the
+     * list's own words and tooltips, then the five dialogs that are mostly sentences (the
+     * backup, the history, the recovery prompt, the two credential shapes), the offline
+     * banner, and the install offer's button. Between them they are every surface where a
+     * translation is more than a word swap.
+     *
+     * Nothing here is asserted about the language: `expect` is a selector, like every other
+     * pane, so a pane that asked for Spanish and got English would still pass. What proves the
+     * translation is the deck itself. `const es: Copy` in `copy.ts` fails to compile if a leaf
+     * is missing, and these panes are how a person reads the result.
+     *
+     * Two things stay in the shipped language on purpose, both of them by design rather than
+     * by omission: the mock's login verdicts (those sentences are Rust's own, reproduced from
+     * `classify_login`), and every address, repository name and file name, since those are
+     * data rather than copy.
+     */
+    id: 'launcher-spanish',
+    title: 'El lanzador, en español. The same states, read in the deck’s second language',
+    tile: '3x',
+    panes: [
+      {
+        // The actions and the list, with the tooltips that a pointer sees. The search box's
+        // placeholder and its own label are the two strings a phone user meets first.
+        name: '900-spanish-launcher',
+        view: 'wide',
+        locale: 'es',
+        seed: {
+          recents: [handleRow('notas.lith'), handleRow('ideas.lith')],
+          caches: { 'search_cache_notas.lith': cache([{ title: 'A', text: 'texto de la nota' }]) },
+          meta: { 'search_cache_meta_notas.lith': history(), 'search_cache_meta_ideas.lith': history() }
+        },
+        expect: '.history-download-icon'
+      },
+      {
+        name: '901-spanish-actions',
+        view: 'phone',
+        locale: 'es',
+        expect: '.action-pair'
+      },
+      {
+        // The offer's own two words, at the size they are read at.
+        name: '902-spanish-install-offer',
+        view: 'wide',
+        scale: 3,
+        mode: 'webapp',
+        locale: 'es',
+        drive: offerPwaInstall,
+        clip: '.install-offer',
+        expect: '.install-button'
+      },
+      {
+        // The backup dialog, with the token form open: the folder line, the one sentence
+        // that says what the button does, and both of the form's placeholders.
+        name: '903-spanish-github-sync',
+        view: 'dialog',
+        modal: 'gitsync-title',
+        mode: 'tauri',
+        locale: 'es',
+        rust: { exists: false, pin: PIN, entries: [], path: VAULT_PATH },
+        seed: { recents: [diskRow('notas.lith')] },
+        drive: async (page) => {
+          await page.click('.sync-button');
+          await page.waitForSelector('.git-sync-modal');
+          await page.evaluate(() => document.querySelector('.git-sync-modal .git-sync-advanced summary').click());
+          await settle(page, 300);
+        },
+        clip: '.git-sync-modal',
+        expect: '.git-sync-advanced'
+      },
+      {
+        // A version chain: the heading the row opens, the three badges, and the one line
+        // that says reverting is manual.
+        name: '904-spanish-version-history',
+        view: 'wide',
+        modal: 'history-title',
+        locale: 'es',
+        seed: {
+          recents: [handleRow('notas.lith')],
+          caches: { 'search_cache_notas.lith': cache([{ title: 'A', text: 'texto de la nota' }]) },
+          meta: { 'search_cache_meta_notas.lith': versionChain() }
+        },
+        drive: async (page) => {
+          await page.click('.cache-history-button');
+          await page.waitForSelector('.history-list li');
+          await settle(page, 300);
+        },
+        clip: '.history-modal',
+        expect: '.history-badge.delta'
+      },
+      {
+        // The recovery prompt, which is the longest sentence the launcher says: a count, a
+        // filename and a timestamp in one clause, and the only pane where Spanish word order
+        // around an interpolated name can be checked by eye.
+        name: '905-spanish-unsaved-edits',
+        view: 'dialog',
+        modal: 'dirty-title',
+        locale: 'es',
+        storage: 'index-db',
+        seed: {
+          recents: [browserRow('notas.lith')],
+          caches: { 'search_cache_notas.lith': cache([{ title: 'A', text: 'texto de la nota' }]) },
+          meta: {
+            'dirty_state_notas.lith': {
+              ts: SAVED_AT,
+              tiddlers: Array.from({ length: 10 }, (_, index) => ({
+                title: `Borrador ${index + 1}`,
+                text: `edición ${index + 1}`
+              }))
+            }
+          }
+        },
+        drive: async (page) => {
+          await page.click('.recent-row .recent-name');
+          await page.waitForSelector('.dirty-modal');
+          await settle(page, 300);
+        },
+        clip: '.dirty-modal',
+        expect: '.dirty-tiddler-list li'
+      },
+      {
+        // Creating a vault: the PIN to choose, the PIN to repeat, and the two fields of the
+        // credential itself. A row's key is the only way in, so this is the shape a first
+        // save takes.
+        name: '906-spanish-save-login',
+        view: 'dialog',
+        modal: 'credential-offer-title',
+        mode: 'tauri',
+        locale: 'es',
+        seed: { bookmarks: BOOKMARKS },
+        rust: { exists: false, pin: PIN, entries: [], path: VAULT_PATH },
+        drive: async (page) => {
+          await openRowKey(page, 'wiki.foobar.com');
+        },
+        clip: '.vault-modal',
+        expect: '.credential-offer-user'
+      },
+      {
+        // The manager before the PIN: the count it can state without a secret, the line that
+        // says what opening does, and the one destructive control.
+        name: '907-spanish-saved-logins',
+        view: 'dialog',
+        modal: 'vault-title',
+        mode: 'tauri',
+        locale: 'es',
+        seed: { bookmarks: BOOKMARKS },
+        rust: {
+          exists: true,
+          pin: PIN,
+          entries: [{ origin: 'https://personal.lithic.uk', user: 'keeper' }],
+          path: VAULT_PATH
+        },
+        drive: openVaultManager,
+        clip: '.vault-modal',
+        expect: '.vault-count'
+      },
+      {
+        // The banner, and the only state where the launcher has to explain itself in one
+        // line about a list the reader can no longer fully trust.
+        name: '908-spanish-offline',
+        view: 'wide',
+        mode: 'self-host',
+        server: true,
+        locale: 'es',
+        seed: { caches: OFFLINE_CACHES },
+        drive: goOffline,
+        expect: '.offline-banner'
+      }
+    ]
   }
 ];
 
@@ -1926,6 +2108,7 @@ function paneUrl(pane) {
   const params = [];
   if (pane.mode) params.push(`mode=${pane.mode}`);
   if (pane.storage) params.push(`storage=${pane.storage}`);
+  if (pane.locale) params.push(`lang=${pane.locale}`);
   const base = pane.server ? `${stub.origin}/launcher.html` : `file://${ARTIFACT}`;
   return `${base}${params.length ? `?${params.join('&')}` : ''}`;
 }
@@ -1940,10 +2123,17 @@ function paneUrl(pane) {
  * to reach the state; the alternative would be a pane that photographs a case nobody can
  * see.
  */
-async function offerPwaInstall(page) {
+async function offerPwaInstall(page, label = null) {
   await page.evaluate(() => window.dispatchEvent(new Event('beforeinstallprompt', { cancelable: true })));
   await page.waitForFunction(
-    () => document.querySelector('.install-button')?.textContent.trim() === 'Install App'
+    (expected) => {
+      const text = document.querySelector('.install-button')?.textContent.trim();
+      // No word asked for: the offer's existence is the event's answer, and that is the
+      // whole of what this drive has to establish.
+      return expected === null ? Boolean(text) : text === expected;
+    },
+    {},
+    label
   );
 }
 
@@ -2129,13 +2319,62 @@ const UNPHOTOGRAPHED = {
  */
 async function dialogsInSource() {
   const source = await readFile(resolve('launcher-ui/src/App.svelte'), 'utf8');
+  const english = englishLeaves(await readFile(resolve('launcher-ui/src/copy.ts'), 'utf8'));
   const found = new Map();
   source.split('\n').forEach((line, index) => {
     if (!line.includes('role="dialog"')) return;
-    const named = /aria-labelledby="([^"]+)"/.exec(line) ?? /aria-label="([^"]+)"/.exec(line);
-    if (named && !found.has(named[1])) found.set(named[1], index + 1);
+    // An id is the name that matters: it is what `aria-labelledby` points at, no language
+    // touches it, and a Spanish pane can claim it as readily as an English one.
+    const literal = /aria-labelledby="([^"]+)"/.exec(line) ?? /aria-label="([^"]+)"/.exec(line);
+    if (literal) {
+      if (!found.has(literal[1])) found.set(literal[1], index + 1);
+      return;
+    }
+    // One dialog is named by its own label instead of a heading, and since the copy moved
+    // into the deck that label is a reference rather than a string. The claim a pane makes
+    // has to name what the DOM actually says, so the reference is resolved against the
+    // English deck: a pane is written in the shipped language, and this is where that
+    // language lives. A reference this cannot resolve is reported as a pane claiming a
+    // dialog the source does not declare, which is loud rather than quiet.
+    const reference = /aria-label=\{copy\.([A-Za-z0-9_.]+)\}/.exec(line);
+    if (!reference) return;
+    const value = english.get(reference[1]);
+    if (value && !found.has(value)) found.set(value, index + 1);
   });
   return found;
+}
+
+/**
+ * The English deck's leaves, as `path` → the string it holds.
+ *
+ * Walked by indentation, the only structure this needs: a line that opens `{` starts a
+ * level, and a line whose value is a quoted string is a leaf. It reads `const en = {` up to
+ * the brace that closes it and stops, because a translation holds the same strings in the
+ * same keys and the answer wanted here is the shipped language's.
+ *
+ * Deliberately shallow. It resolves the handful of leaves a dialog's name is drawn from and
+ * is not a parser for the deck: a leaf whose value is built the night before (a function, a
+ * concatenation) simply is not in the map, and the report says so out loud.
+ */
+function englishLeaves(source) {
+  const start = source.indexOf('const en = {');
+  const end = source.indexOf('\n};', start);
+  const leaves = new Map();
+  if (start === -1 || end === -1) return leaves;
+  const stack = [];
+  for (const line of source.slice(start, end).split('\n')) {
+    const key = /^(\s*)([A-Za-z0-9_]+):/.exec(line);
+    if (!key) continue;
+    const indent = key[1].length;
+    while (stack.length > 0 && stack[stack.length - 1].indent >= indent) stack.pop();
+    const value = /:\s*(?:'([^']*)'|"([^"]*)")/.exec(line);
+    if (value) {
+      leaves.set([...stack.map((level) => level.name), key[2]].join('.'), value[1] ?? value[2]);
+    } else if (line.trimEnd().endsWith('{')) {
+      stack.push({ indent, name: key[2] });
+    }
+  }
+  return leaves;
 }
 
 /** Who draws what, and what nothing draws. */

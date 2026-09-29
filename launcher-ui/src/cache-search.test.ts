@@ -17,7 +17,7 @@ test('does not match empty or absent queries', () => {
 test('a query only in a tiddler\u2019s stamps is not a match', () => {
   // The exact shape a real cache has, and the exact complaint: `te` occurs in the
   // word creaTE d (and inside `text/vnd.tiddlywiki`), so a match was reported and
-  // the panel then printed the entry's JSON — the matched field was not the body.
+  // the panel then printed the entry's JSON. The matched field was not the body.
   const cached = JSON.stringify([
     {
       title: 'BP 1230 Avenue of the Americas',

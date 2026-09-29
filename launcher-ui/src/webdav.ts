@@ -4,11 +4,11 @@
  * This is the Svelte launcher's port of the legacy `runtime.webdav` fragment,
  * extended for the new save workflow. Two paths coexist on purpose:
  *
- *   Plain WebDAV (`/sync/`)  — listing, upload, delete and presence locks. Kept
+ *   Plain WebDAV (`/sync/`). Listing, upload, delete and presence locks. Kept
  *     byte-compatible with the legacy launcher so the data directory stays
  *     browsable over WebDAV (VS Code, `cp -r /data` backups).
  *
- *   Patch API (`/api/lithic/`) — git-backed saves. The client fetches a wiki
+ *   Patch API (`/api/lithic/`). Git-backed saves. The client fetches a wiki
  *     with its content digest, and on save sends only the changed lines; the
  *     server verifies the digest, applies the patch with `git apply` and
  *     commits. Git is therefore the source of truth for history and rollback,
@@ -16,7 +16,7 @@
  *
  * The patch API is same-origin only (self-host keeps its private API, per the
  * deployment architecture), so probePatchApi() gates it: an instance without
- * the API — or a non-self-host mount — falls back to the legacy full-file PUT.
+ * the API (or a non-self-host mount) falls back to the legacy full-file PUT.
  */
 
 export const WEBDAV_BASE = '/sync/';
@@ -35,7 +35,7 @@ export type WebdavFile = {
    * The launcher draws this beside the row instead of the date: a store is written to
    * constantly, so its own timestamps all read "today" and tell a reader nothing about
    * which Lith they are about to open. A store that answers without the length is not a
-   * failure — the row simply says a name and no more, which is what it did before.
+   * failure. The row simply says a name and no more, which is what it did before.
    */
   sizeBytes: number | null;
 };
@@ -322,7 +322,7 @@ export type RemoteFileMeta = { digest: string; rev: string; size: number | null 
  *
  * `unchanged` carries only the metadata, so the caller mounts the copy it already holds. `file`
  * carries the wiki, and is the answer both when the file moved on and when the instance is older
- * than the metadata read — in which case the body that came back *is* the read the caller was
+ * than the metadata read. In which case the body that came back *is* the read the caller was
  * about to make, so nothing was spent finding that out.
  */
 export type RemoteWikiRead =
@@ -350,7 +350,7 @@ export function parseRemoteMeta(body: string, digest: string, rev: string): Remo
  * Ask whether the copy this device holds is still the instance's copy.
  *
  * `meta=1` is the deployment's metadata read: the digest, the revision and the size, no body. It
- * is the difference between opening a 10 MB Lith and *knowing* about it — a device that already
+ * is the difference between opening a 10 MB Lith and *knowing* about it. A device that already
  * holds that content mounts its own copy and never fetches the file.
  *
  * Only worth asking when the patch API answers, because the digest is the API's own. An instance

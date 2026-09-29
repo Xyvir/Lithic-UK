@@ -293,7 +293,7 @@ test('removing a browser-only row takes that row and leaves the rest', async () 
 test('a row with no comparable handle survives removing some other file', async () => {
   // Regression: removal used to keep only rows whose handle answered
   // isSameEntry, so pointing at one file quietly deleted every handle-less row
-  // beside it — which is every row the fallback mode makes.
+  // beside it. Which is every row the fallback mode makes.
   const store = new MemoryIdb([[
     'recentFiles',
     [

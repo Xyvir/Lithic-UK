@@ -112,7 +112,7 @@ export function applyTiddlerPatch(base: TiddlerMap, patch: readonly JsonPatchOp[
 /**
  * ES5 source for the engine bootstrap. Evaluated inline inside the mounted
  * wiki (no module graph there); defines window.__LITHIC_JSON_PATCH__ with the
- * exact same behavior as the functions above — kept in lockstep by tests.
+ * exact same behavior as the functions above. Kept in lockstep by tests.
  */
 export const JSON_PATCH_RUNTIME = `(function (root) {
   'use strict';

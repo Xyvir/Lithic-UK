@@ -17,7 +17,7 @@
  *   - a final line without a trailing newline is followed by git's
  *     `\ No newline at end of file` marker on the side that lacks it.
  *
- * Diffing is Myers' greedy algorithm over lines, which is O(ND) — fast exactly
+ * Diffing is Myers' greedy algorithm over lines, which is O(ND). Fast exactly
  * when the edit is small, which is the case for a wiki save. A rewrite that
  * exceeds MAX_DIFF_DISTANCE bails out (returns null) so the caller sends a full
  * file instead of a patch that is larger than the file it replaces. That is the
@@ -181,7 +181,7 @@ function diffMiddle(a: readonly string[], b: readonly string[], maxDistance: num
 /**
  * Emit a `git apply`-compatible patch for one file.
  *
- * Returns '' when the two texts are identical — nothing to send at all — and
+ * Returns '' when the two texts are identical (nothing to send at all) and
  * null when the edit is too large to diff, which means "send the whole file".
  * The two cases MUST stay distinguishable: collapsing them would silently skip
  * a save whose diff bailed out.
@@ -198,7 +198,7 @@ export function createUnifiedPatch(baseText: string, nextText: string, path: str
 /**
  * Render the path half of a `---`/`+++` header the way git renders it.
  *
- * Spaces are NOT special — git's parser takes the rest of the line after the
+ * Spaces are NOT special. Git's parser takes the rest of the line after the
  * `--- ` marker, so a spaced filename stays literal. Only quotes, backslashes
  * and control bytes force C-quoting, and when that happens git quotes the
  * WHOLE path including the `a/`/`b/` prefix (quoting just the name produces a

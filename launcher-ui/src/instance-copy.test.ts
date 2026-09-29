@@ -64,6 +64,6 @@ test('the line is said only when there is something to say', () => {
   // No answer at all (a refused command) is the same situation as a refused clear.
   assert.equal(drop(null), `Could not clear the cached copy of ${label}`);
   // A platform with no hook never offered this, so a row that goes quietly is the whole
-  // of what the × does there — and saying otherwise would invent a failure.
+  // of what the × does there, and saying otherwise would invent a failure.
   assert.equal(drop({ supported: false, cleared: false }), null);
 });

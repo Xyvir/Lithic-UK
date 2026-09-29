@@ -12,7 +12,7 @@
  *     adjacent indented lines are separate sibling nodes (outline style)
  *
  * All node tiddlers render as markdown (`type: text/markdown`) regardless of
- * the source extension — double-clicking a block shows the source text.
+ * the source extension. Double-clicking a block shows the source text.
  *
  * Round-trip guarantee: parse(serialize(tree)) === tree, and serializing a
  * freshly parsed tree reproduces the original bytes (CRLF aside). Nodes the
@@ -197,7 +197,7 @@ export function scratchNodeTitle(base: string, index: number): string {
 }
 
 /**
- * Every stream tiddler carries `stream-type` — the streams plugin assigns it to
+ * Every stream tiddler carries `stream-type`. The streams plugin assigns it to
  * `default` on the nodes it creates, and Lithic's own creators do the same
  * (`$:/core/ui/Actions/new-journal`, the streams action macros). The scratch
  * mount is the one place that used to leave it off, and that is not cosmetic:
@@ -205,8 +205,8 @@ export function scratchNodeTitle(base: string, index: number): string {
  * `stream-list` and `stream-type` (see
  * wiki/external/tiddlystudy/plugins/streams/.../get-stream-nodes.js). Without
  * it the walk stops at the document root, whose text is empty, so every filter
- * built on that operator — Copy Story River, the context menu's copy body text
- * — copies nothing at all from a scratch document. `stream-type` is never
+ * built on that operator (Copy Story River, the context menu's copy body text)
+ * copies nothing at all from a scratch document. `stream-type` is never
  * serialized back to the file: the scratch saver writes flat text from the
  * stream-list, and a .tid mount keeps the file's own header fields.
  */

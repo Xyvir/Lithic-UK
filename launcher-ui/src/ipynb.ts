@@ -16,7 +16,7 @@
  *     metadata + nbformat versions) so saves preserve kernelspec/language_info
  *
  * Notebook staleness caveats (deliberate): execution counts reset to null and
- * image outputs are dropped on import — the editor is a text surface.
+ * image outputs are dropped on import. The editor is a text surface.
  */
 
 import { scratchTiddlers, type ScratchNode, type ScratchParseResult } from './scratch-wiki.ts';

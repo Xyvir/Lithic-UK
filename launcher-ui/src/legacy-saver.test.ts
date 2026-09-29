@@ -41,7 +41,7 @@ test('a save excludes what the launcher itself injects', () => {
 });
 
 // The list is hand-maintained while the engine's plugin set is whatever the wiki
-// build produced, so they drift silently — lithic-patch-mermaid and lithic-save
+// build produced, so they drift silently. Lithic-patch-mermaid and lithic-save
 // were both shipped in lithic.html and both absent here, which is how two plugin
 // bundles ended up inside a saved one-tiddler wiki. Asserted against the shipped
 // artifact so the next plugin addition fails here instead of in a user's file.

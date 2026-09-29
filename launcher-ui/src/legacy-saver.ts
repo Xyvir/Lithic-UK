@@ -1,3 +1,4 @@
+import { copy } from './copy.ts';
 import { serializeJsonToLith } from './lithic-format.ts';
 
 export type SaverTiddler = Record<string, unknown>;
@@ -61,7 +62,7 @@ export const DEFAULT_PLUGINS: string[] = [
  * Tiddlers the launcher itself puts into every mounted wiki: the shared widget
  * override and the Ephemeral API integration, plus the plugin-library flag the
  * engine bootstrap sets. They are part of how Lithic runs, not the user's
- * content, so a save must not write them into a .lith — the next mount injects
+ * content, so a save must not write them into a .lith. The next mount injects
  * them again on top, and the copy in the file goes stale. `~` is the launcher's
  * own marking for an injected override, which is why a prefix rule covers the
  * whole class.
@@ -108,11 +109,11 @@ export function createLithSaver(options?: {
       const saveOptions = isJsonMode
         ? {
             suggestedName: options?.suggestedName ?? 'new.lith',
-            types: [{ description: 'Lithic Monolith', accept: { 'application/x-lith': ['.lith'] } }]
+            types: [{ description: copy.fileTypes.monolith, accept: { 'application/x-lith': ['.lith'] } }]
           }
         : {
             suggestedName: 'lith.html',
-            types: [{ description: 'Lithic HTML File', accept: { 'text/html': ['.html', '.htm'] } }]
+            types: [{ description: copy.fileTypes.html, accept: { 'text/html': ['.html', '.htm'] } }]
           };
 
       pickerPromise ??= picker(saveOptions);

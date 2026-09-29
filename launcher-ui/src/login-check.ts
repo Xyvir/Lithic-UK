@@ -1,5 +1,5 @@
 /**
- * Asking an instance whether a login works — either one already saved, or one that
+ * Asking an instance whether a login works. Either one already saved, or one that
  * has only been typed into a dialog.
  *
  * Kept out of the launcher component because the second case is a small state
@@ -13,25 +13,26 @@
  * catch them; the instance is the only thing that can say a password is wrong.
  */
 
+import { copy } from './copy.ts';
 import { tauriInvoke } from './file-bridge.ts';
 
 /**
  * What a check of a login concluded.
  *
  * The names are the ones Rust sends, so the class on a row and the outcome the app
- * decided are the same word — including "no longer asks for a password", which is a
+ * decided are the same word. Including "no longer asks for a password", which is a
  * verdict of its own rather than a kind of success.
  */
 export type LoginCheckState = 'busy' | 'accepted' | 'refused' | 'not-required' | 'unclear' | 'unreachable';
 
 /** Short enough for a row, keeping the distinctions Rust made. */
 export const LOGIN_CHECK_LABELS: Record<LoginCheckState, string> = {
-  busy: 'Checking…',
-  accepted: 'Signs in',
-  refused: 'Refused',
-  'not-required': 'Not asked',
-  unclear: 'Unclear',
-  unreachable: 'No answer'
+  busy: copy.loginCheck.busy,
+  accepted: copy.loginCheck.accepted,
+  refused: copy.loginCheck.refused,
+  'not-required': copy.loginCheck.notRequired,
+  unclear: copy.loginCheck.unclear,
+  unreachable: copy.loginCheck.unreachable
 };
 
 /** A verdict, and the sentence that says why, for somewhere with room for it. */
@@ -50,7 +51,7 @@ export function loginVerdict(outcome: string, detail: string): LoginVerdict {
 
 /**
  * A command that refused is an answer too: nothing was sent, so nothing was proved
- * either way — and least of all that the password is wrong.
+ * either way, and least of all that the password is wrong.
  */
 export function loginVerdictFromError(error: unknown): LoginVerdict {
   return { state: 'unreachable', detail: error instanceof Error ? error.message : String(error) };
@@ -65,7 +66,7 @@ export type LoginCheckAsk = (origin: string, user: string, password: string) => 
 /**
  * Ask an instance whether a login would be accepted.
  *
- * The one place the launcher sends a password that is saved nowhere — to the
+ * The one place the launcher sends a password that is saved nowhere. To the
  * instance's own origin, which is where it is about to be sent anyway, and only
  * because the form it was typed into exists to sign in to that instance.
  */
@@ -107,8 +108,8 @@ export const LOGIN_CHECK_SETTLE_MS = 600;
  * which is the same design with one more input to wire and one more way for the
  * verdict to be about text nobody can see any more.
  *
- * Nothing it reports outlives a change to the boxes — `report(null)` runs on every
- * call — so a verdict on screen always describes the text in them right now. An
+ * Nothing it reports outlives a change to the boxes (`report(null)` runs on every
+ * call) so a verdict on screen always describes the text in them right now. An
  * answer that arrives for text somebody has since edited is dropped (`issued`),
  * which is the case that would otherwise leave a sentence about a password nobody
  * has typed any more.

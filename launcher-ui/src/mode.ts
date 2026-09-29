@@ -8,7 +8,7 @@ export type LauncherMode = (typeof MODES)[number];
  */
 const MODE_QUERY_KEYS = ['mode', 'launcher-mode', 'launcher_mode'];
 
-/** Whatever carries the injected Tauri global — `window` in a real document. */
+/** Whatever carries the injected Tauri global. `window` in a real document. */
 type TauriHost = { __TAURI__?: unknown };
 
 function defaultTauriHost(): TauriHost | undefined {
@@ -26,8 +26,8 @@ export function servedByApp(location: Location): boolean {
 
 /**
  * Whether the app's API is reachable from this document. With `withGlobalTauri`
- * the global is injected into every document the webview loads — the app's own
- * pages and a bookmarked instance's page alike — so on its own it says "there is
+ * the global is injected into every document the webview loads (the app's own
+ * pages and a bookmarked instance's page alike) so on its own it says "there is
  * a desktop app behind this window", never "this document is the launcher".
  */
 export function tauriApiAvailable(host: TauriHost | undefined = defaultTauriHost()): boolean {
@@ -71,20 +71,20 @@ export const LAUNCHER_QUERY_PARAM = 'q';
  * Two annotations ride on the URL, both of them because the page that arrives
  * cannot work either out for itself:
  *
- *   `mode=self-host` — the launcher only lets an origin be bookmarked after
+ *   `mode=self-host`. The launcher only lets an origin be bookmarked after
  *   `verifyInstanceUrl` read its Lithic manifest, so "opened from the bookmark
  *   list" *is* "this is a Lithic instance". The page itself usually cannot say
  *   so: it is served at the origin root rather than under `/sync/`, may carry no
  *   declaration, and a tidy address like `personal.example.uk` gives nothing
- *   away. Without this it would resolve to `webapp` — no remote pill, no
- *   same-origin API — which is the breakage bookmarks keep running into.
+ *   away. Without this it would resolve to `webapp` (no remote pill, no
+ *   same-origin API) which is the breakage bookmarks keep running into.
  *
- *   `lithic-from=<launcher>` — the address to come back to. It has to travel
+ *   `lithic-from=<launcher>`. The address to come back to. It has to travel
  *   with the navigation: a document outside the app's URL may not invoke Rust
  *   (see `hostedInApp`) and cannot guess the app's origin, which differs per
  *   platform (`tauri://localhost` vs `https://tauri.localhost`).
  *
- *   `q=<words>` — only when the handover is a search. The launcher's global search shows
+ *   `q=<words>`. Only when the handover is a search. The launcher's global search shows
  *   one hit per instance and no more, so the instance's own launcher is where the rest of
  *   them are read; arriving already searching is what makes that a step rather than a
  *   retyping. An instance running an older build ignores it and simply opens.
@@ -106,7 +106,7 @@ export function withLauncherHandoff(instanceUrl: string, launcherHref: string, q
 /**
  * The search a page was handed, or an empty string when it was not handed one.
  *
- * Read once, at mount, and then taken back out of the address — see the launcher's
+ * Read once, at mount, and then taken back out of the address. See the launcher's
  * `onMount`: the query belongs to the handover, not to the URL the instance then owns,
  * so a reload starts on the instance's own list rather than silently searching again.
  */
@@ -173,7 +173,7 @@ export function launcherReturn(
   const marked = safeLauncherUrl(new URLSearchParams(location.search).get(LAUNCHER_ORIGIN_PARAM));
   if (marked) {
     // Remember it, because the instance's own pages are reached by its own links
-    // and carry no marker — without this the way back would survive exactly one
+    // and carry no marker. Without this the way back would survive exactly one
     // click. Session storage, not local: the launcher handed over this window, so
     // that is the scope the address is meaningful in.
     try {
@@ -191,7 +191,7 @@ export function launcherReturn(
 /**
  * An instance naming itself. The legacy launcher reads the same tag, so a
  * deployment that already carries it keeps working when it moves to this
- * launcher. It is the explicit half of the answer — see `servedByInstance` for
+ * launcher. It is the explicit half of the answer. See `servedByInstance` for
  * the half that has to be inferred, because the launcher artifact is shared and
  * so cannot carry a tag of its own.
  */
@@ -209,14 +209,14 @@ const PUBLIC_LAUNCHER_HOSTS = ['lithic.uk', 'www.lithic.uk'];
 /**
  * Whether the origin that served this document is somebody's instance.
  *
- * The launcher is one artifact shipped to every deployment — `autoupdate.sh`
+ * The launcher is one artifact shipped to every deployment (`autoupdate.sh`
  * pulls the same `src/launcher.html` into an instance's public directory that
- * GitHub Pages serves from the PWA's — so the file cannot declare what it is: the
+ * GitHub Pages serves from the PWA's) so the file cannot declare what it is: the
  * same bytes are both. Every explicit declaration there is (`?mode=`, the `/sync/`
  * path, the meta tag) is therefore something the launcher an instance serves does
  * not have. What it does have is the fact that a copy of this launcher arriving
  * over http(s) from anywhere that is not a published deployment arrived from a
- * server somebody runs — and an instance serves this file precisely so its own
+ * server somebody runs, and an instance serves this file precisely so its own
  * `/sync/` can be listed beside it. This is the inference the pre-Svelte launcher
  * made, and the reason a directly-opened instance needs no declaration at all.
  *
@@ -253,8 +253,8 @@ export function resolveMode(
   if (forced) return forced;
 
   // Only the app's own page is the app. The global alone is not enough: it is
-  // injected into every document the window loads, so a bookmarked instance —
-  // served by its own server, in this same window — used to claim `tauri` here
+  // injected into every document the window loads, so a bookmarked instance (
+  // served by its own server, in this same window) used to claim `tauri` here
   // and then take every local-only path built on it: invoking Rust, reindexing
   // this machine's folders, offering to write an install beside the exe. All of
   // that against a page whose content belongs to someone else's server.

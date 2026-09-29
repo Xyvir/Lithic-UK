@@ -61,7 +61,7 @@ body { overflow: hidden; background: #181818; }
  * `scrollbar-color` is set on the element, so the standard pair cannot sit
  * alongside them: it lives behind a feature query that only matches engines
  * without the pseudo-elements (Firefox). Hoisting it back out silently returns
- * the launcher to the platform scrollbar — square, with its arrow buttons. */
+ * the launcher to the platform scrollbar. Square, with its arrow buttons. */
 *::-webkit-scrollbar { width: 4px; height: 4px; }
 *::-webkit-scrollbar-button { display: none; }
 *::-webkit-scrollbar-track { background: transparent; }
@@ -71,7 +71,7 @@ body { overflow: hidden; background: #181818; }
  * The recent list is the one scroll area whose scrollbar is furniture rather than
  * information: it is hidden until the list is in use, in every mode, because the panel is
  * almost entirely list and the thumb is the only thing in its right padding. A phone is
- * where that shows most — there the four pixels sit alone between the rows and the border.
+ * where that shows most. There the four pixels sit alone between the rows and the border.
  *
  * Transparent rather than taken away: the gutter has to stay reserved (`scrollbar-gutter:
  * stable` on `.recent-list`) or the rows would step sideways every time the bar comes and
@@ -85,7 +85,7 @@ body { overflow: hidden; background: #181818; }
  *
  * The same limit is what keeps a pointer out of this: `.recent-list:hover
  * ::-webkit-scrollbar-thumb` reports the colour it asks for through
- * `getComputedStyle`, and paints nothing — measured in headless and headed Chromium alike,
+ * `getComputedStyle`, and paints nothing. Measured in headless and headed Chromium alike,
  * with the lane widened to 14px so the thumb could not hide. A rule that only exists to be
  * read is worse than no rule, so there is none: the thumb is not a drag target, and the
  * list is moved by the wheel the same way it always was.
@@ -94,7 +94,7 @@ body { overflow: hidden; background: #181818; }
  * because that is what lets these rules beat the universal ones above: a class outranks the
  * bare `*` at equal pseudo-element count. The consequence is worth stating, since the
  * universal brightness on hover (`*::-webkit-scrollbar-thumb:hover`) ties with the first of
- * these and the later rule wins — the thumb no longer brightens under the pointer. There is
+ * these and the later rule wins. The thumb no longer brightens under the pointer. There is
  * nothing to brighten: the bar is only on screen while the list is moving, and the gesture
  * that drew it does not need a hover state as well. */
 .recent-list::-webkit-scrollbar-thumb { background-color: transparent; }
@@ -131,7 +131,7 @@ body { overflow: hidden; background: #181818; }
      left edge and drawn in the margin outside it. */
   position: relative;
 }
-/* The heading's trailing control, which is the mode's own button — the way back out of
+/* The heading's trailing control, which is the mode's own button. The way back out of
    a handed-over page is not in here, because it may not take room from the mark. The
    wrapper stays so the free space is claimed in one place rather than by whichever
    button this mode happens to render. */
@@ -179,14 +179,14 @@ h1 { flex: none; min-width: 0; margin: 0; color: #f4edf5; font-size: 1.8rem; fon
 }
 .help-button:hover { border-color: #666; background: #242424; }
 /* "Back to the main launcher". Rendered only for a page the app's window loaded
-   from elsewhere (a bookmarked instance — see launcherReturn in mode.ts), where
+   from elsewhere (a bookmarked instance: see launcherReturn in mode.ts), where
    the desktop window has no browser chrome and no other control returns: without
    it, reaching an instance's own launcher is a one-way trip.
 
    It is drawn in the page's margin, left of the mark, and out of the heading's row: it
    exists on only some of the pages the heading does, and a control that comes and goes
    must not carry the mark and the title with it. `right: calc(100% + 8px)` measures from
-   the heading's own left edge, which is the mark's — the mark is the row's first item —
+   the heading's own left edge, which is the mark's (the mark is the row's first item)
    so the circle stays 8px clear of it whatever the mark turns out to be.
 
    `top: calc(50% - 5px)` is the mark's centre and not the heading's: the heading's 10px
@@ -220,8 +220,8 @@ h1 { flex: none; min-width: 0; margin: 0; color: #f4edf5; font-size: 1.8rem; fon
   stroke-linecap: round;
   stroke-linejoin: round;
 }
-/* Below the width where the column still has a margin wide enough to hold it — 600px of
-   column plus the 46px it needs either side — it goes back into the heading's own row,
+/* Below the width where the column still has a margin wide enough to hold it (600px of
+   column plus the 46px it needs either side) it goes back into the heading's own row,
    ahead of the mark. 15px of page margin cannot hold a 38px circle, and a control hanging
    off the edge of the window is worse than one that has moved: at this width the mark and
    the title have already given up their place to the phone layout. */
@@ -230,7 +230,7 @@ h1 { flex: none; min-width: 0; margin: 0; color: #f4edf5; font-size: 1.8rem; fon
 }
 /* Status-reactive like the legacy #github-sync-btn: grey = not synced,
    amber = verifying, green = verified, purple pulsing = syncing, red = the
-   backup is not landing. Colour alone is not the signal — the glyph below
+   backup is not landing. Colour alone is not the signal. The glyph below
    carries the same state for anyone who cannot tell amber from green. */
 .sync-button {
   position: relative;
@@ -516,8 +516,8 @@ h1 { flex: none; min-width: 0; margin: 0; color: #f4edf5; font-size: 1.8rem; fon
 /* The folder line. A button since 2026-09-25, and a button only while the backup is being
    set up (see `gitSyncFolderEditable`): it is the one thing in the dialog the user can
    change about what is being backed up, and it used to be plain text, which left Disconnect
-   as the only way to aim the backup elsewhere. It keeps the plain look it had — a boxed row
-   would read as a form field rather than as the current answer — so the affordance is the
+   as the only way to aim the backup elsewhere. It keeps the plain look it had (a boxed row
+   would read as a form field rather than as the current answer) so the affordance is the
    hint on the right and the hover. */
 .sync-folder {
   display: flex;
@@ -633,8 +633,8 @@ h1 { flex: none; min-width: 0; margin: 0; color: #f4edf5; font-size: 1.8rem; fon
   /* Written with the footer in the selector because order alone does not carry it:
    * both of these are declared further down the sheet, and at equal specificity the
    * later rule wins, so a bare `.install-offer` here would be overridden by the very
-   * rule it exists to cancel. The offer still has to *arrive*, it just does not move
-   * — its hidden state lives in the keyframes, not in the element's own style, so with
+   * rule it exists to cancel. The offer still has to *arrive*, it just does not move.
+   * Its hidden state lives in the keyframes, not in the element's own style, so with
    * no animation it renders where it belongs instead of fading in from nowhere. */
   .recent-foot .install-offer, footer .install-offer { animation: none; }
   .recent-foot .install-dismiss, footer .install-dismiss { animation: none; }
@@ -647,7 +647,7 @@ code { color: #8ab4f8; }
  * install button were (`bottom/left/right: 15px` there; 22px is our own gutter
  * and matches the bottom band). The band spans the whole window so its control
  * clears the column rather than hugging it on a wide screen. The band used to be a
- * fixed 800px wide, which put each control just outside the 600px column — and put
+ * fixed 800px wide, which put each control just outside the 600px column, and put
  * the 115px install button 15px *over* the column's right edge, on top of the
  * recent rows' own controls. The install offer no longer rides in this band (see
  * `.install-offer` below); the Github link is what is left, and it is the one
@@ -668,7 +668,7 @@ footer > * { pointer-events: auto; }
 /* Install offer wraps button + dismiss affordance as one unit; margin-auto
  * pinning moves to the wrapper so it survives the extra child.
  *
- * It stands in the window's bottom-right corner — the opposite one to the Github
+ * It stands in the window's bottom-right corner. The opposite one to the Github
  * link, both of them outside the 600px column on a window wide enough to have a
  * corner to spare. Positioned rather than laid out in a row, because it does not
  * live in the footer on a phone: there the offer sits beside the panel's rebuild
@@ -680,15 +680,15 @@ footer > * { pointer-events: auto; }
 .install-offer { margin-left: auto; display: inline-flex; align-items: center; gap: 8px; position: fixed; right: 22px; bottom: 20px; }
 /* The offer rises into place instead of being painted there.
  *
- * Its state is a question the app cannot answer itself — is a copy installed, is it
- * older than this build, is the release it came from still the newest — so the element
+ * Its state is a question the app cannot answer itself (is a copy installed, is it
+ * older than this build, is the release it came from still the newest) so the element
  * is not rendered at all until an answer is in (see `installOfferReady`). That makes this
  * the offer's entrance rather than a decorative touch: without it the button lands on a
  * footer that was, a moment ago, sitting empty, and the eye reads a pop-in as something
  * still loading. A settled rise reads as the app having decided.
  *
  * 6px and a fade, 180ms, easing out, so the label is legible long before the motion is
- * over — this is a control the user may press in the same second it appears, and anything
+ * over. This is a control the user may press in the same second it appears, and anything
  * slower or bouncier would be motion standing between them and it. The travel is upward
  * because the offer comes up from the footer's own edge, which is where it was always
  * going to be if it had been there from the start. */
@@ -719,7 +719,7 @@ footer > * { pointer-events: auto; }
  * as the word appears and the button's box does not resize, so hovering cannot
  * make the control shift out from under the cursor. It keeps its own ink box, so
  * nothing is clipped, and because it is a child of the button, its (invisible)
- * area is part of the hover target — the word appears exactly where the cursor
+ * area is part of the hover target. The word appears exactly where the cursor
  * already is, and the control's footprint stays the width the always-visible word
  * used to give it. The 4px left padding is the gap the two sit with, and it can
  * be this tight because the gap no longer comes from a laid-out word space. */
@@ -839,7 +839,7 @@ footer > * { pointer-events: auto; }
 .modal-action.secondary { border-color: #454545; background: transparent; color: #ddd; }
 /*
  * The primary action, when what it does cannot be undone: the same shape as the outlined
- * primary in the red the rest of the app refuses in — `.vault-danger`'s colour, so the key
+ * primary in the red the rest of the app refuses in. `.vault-danger`'s colour, so the key
  * in the manager and the question it opens never disagree about which act this is. It is
  * not the outlined primary's opposite number; `.modal-action` is the ordinary case and this
  * is the one a caller has to ask for, because only the caller knows what its own button
@@ -849,7 +849,7 @@ footer > * { pointer-events: auto; }
 .modal-action.danger:hover:not(:disabled) { background: rgb(224 138 122 / 20%); color: #ff9d88; }
 .recent-modal { position: relative; width: min(100%, 700px); max-height: 80vh; padding: 20px; border: 1px solid #454545; border-radius: 10px; background: #252525; box-shadow: 0 12px 40px #000; }
 .recent-modal h2 { margin: 0 0 14px; font-size: 1.5rem; }
-/* The ×, and the only dismiss a dialog carries — whatever the label would have been. A
+/* The ×, and the only dismiss a dialog carries. Whatever the label would have been. A
  * Cancel, Close or Done beside it runs the same function, so the action row is left to the
  * decisions the dialog exists to make: save, open, forget, or nothing at all. A dialog with
  * no decisions in it has no action row (the manager's shape before a vault exists). Where a
@@ -860,12 +860,12 @@ footer > * { pointer-events: auto; }
 .modal-close { position: absolute; top: 8px; right: 10px; padding: 0 8px; border: 0; background: transparent; color: #ff5555; font-size: 1.8rem; cursor: pointer; }
 /* Saved instance logins (the credential vault). The controls for it are the key in
  * the bookmark dialog (the vault as a whole) and the key on each bookmark row (one
- * instance) — see `.vault-manager-button` and `.vault-row-button`. */
+ * instance). See `.vault-manager-button` and `.vault-row-button`. */
 /*
  * The bookmark dialog's two actions are the choice that dialog offers, so they take
  * its row in equal halves. `flex: 1 1 0`, not the row's own `flex: 1 1 auto`: growing
  * from each label's own width adds an equal *share* of the spare space to two
- * different widths, so the shorter label stays narrower — which is how the second
+ * different widths, so the shorter label stays narrower. Which is how the second
  * option reads as the lesser one rather than as the other one. At the dialog's own
  * width that is equal to the pixel (202px and 202px), where the same row measured
  * 198px beside 206px when the basis was the labels'.
@@ -883,7 +883,7 @@ footer > * { pointer-events: auto; }
  * The vault's own manager, inside the dialog that owns the same thing it does: an
  * instance's address. It sits there rather than in the launcher's action row, where
  * it spent permanent space on a control you reach for only while setting an instance
- * up. Grey while nothing is saved, green once something is — the same two states,
+ * up. Grey while nothing is saved, green once something is. The same two states,
  * and the same two colours, as the key on a bookmark row, because they mean the same
  * thing (here, "the vault holds logins").
  *
@@ -891,13 +891,13 @@ footer > * { pointer-events: auto; }
  * and a labelled control that has gone uniformly grey reads as disabled.
  *
  * Its glyph and its label are centred as one group, because the half of the row it
- * takes is wider than the two of them together — left-aligned they would read as a
+ * takes is wider than the two of them together. Left-aligned they would read as a
  * button somebody forgot to finish. It has no `flex` of its own: the row rule above
  * sizes both of the dialog's actions.
  *
  * The horizontal padding is the row's own 10px, not the 14px the glyph used to get.
- * That extra 8px was the button's whole *minimum* width — a flex item is never narrower
- * than min-content, which for this one is padding + glyph + gap + label — and it put the
+ * That extra 8px was the button's whole *minimum* width (a flex item is never narrower
+ * than min-content, which for this one is padding + glyph + gap + label) and it put the
  * minimum 4px over the half the row gives it, so the pair measured 198px beside 206px
  * however the basis was set. The glyph has its 10px of air and the centring instead.
  */
@@ -917,7 +917,7 @@ footer > * { pointer-events: auto; }
 .vault-forget { flex: 0 0 auto; padding: 0 4px; border: 0; background: transparent; color: #ff5555; font-size: 1.1rem; line-height: 1; cursor: pointer; }
 .vault-forget:disabled { opacity: 0.4; cursor: default; }
 /* Check a saved login against its instance. Only offered in the list, because the
- * password has to be readable to send it — that is, only once the PIN has been given. */
+ * password has to be readable to send it. That is, only once the PIN has been given. */
 .vault-test { flex: 0 0 auto; display: grid; place-items: center; padding: 0 4px; border: 0; background: transparent; color: #8ab4f8; cursor: pointer; }
 .vault-test:hover:not(:disabled) { color: #a9c9ff; }
 .vault-test:disabled { opacity: 0.4; cursor: default; }
@@ -943,7 +943,7 @@ footer > * { pointer-events: auto; }
 .vault-empty { color: #8f8f8f; }
 /* Every input in a modal is full width; a checkbox is not a field, and letting
  * it stretch is the same trap the repo picker documents above. It rides in a label row
- * — the PIN's, or a field's — where it costs no row of its own, and it sits at the far end
+ * (the PIN's, or a field's) where it costs no row of its own, and it sits at the far end
  * of that row. What sets the row's width is the field it labels: `.pin-entry` is
  * shrink-wrapped to its boxes, and a password field's row spans the input, so the toggle
  * lands on the right edge of the characters it reveals rather than beside the word. */
@@ -985,15 +985,15 @@ footer > * { pointer-events: auto; }
 .vault-pin { display: grid; grid-template-columns: minmax(0, max-content) auto; justify-content: center; align-items: center; margin-top: 12px; }
 /* The label, and whatever belongs to the field rather than to a reader of the dialog: its
  * Show toggle. The row is as wide as the field it labels, so `space-between` parks the
- * toggle on that field's right edge — in line with the end of the characters it reveals,
- * which is where a reader looks for it — and `gap` is the air that keeps it off the label
+ * toggle on that field's right edge (in line with the end of the characters it reveals,
+ * which is where a reader looks for it) and `gap` is the air that keeps it off the label
  * on a dialog narrow enough for the two to meet. */
 .pin-head { display: flex; align-items: center; justify-content: space-between; gap: 1em; margin-bottom: 5px; }
 .pin-label { display: block; color: #a5a5a5; font-size: 0.85rem; }
 /* Shrink-wrapped to the boxes below it rather than filling the grid column they sit in: six
  * 46px boxes stop well short of a desktop dialog's edge, and the head row has to stop where
  * they do for the toggle to land on their right edge. `max-width` is what makes the narrow
- * case work — a phone clamps this to the column, the boxes shrink with it (`min-width: 0`),
+ * case work. A phone clamps this to the column, the boxes shrink with it (`min-width: 0`),
  * and the two still end in the same place. */
 .pin-entry { display: block; width: max-content; max-width: 100%; }
 .pin-boxes { display: flex; gap: 6px; }
@@ -1010,17 +1010,17 @@ footer > * { pointer-events: auto; }
 /* The right padding is the gap between a row and the scrollbar: without it the
  * thumb sits on the row's remove button. Legacy did the same.
  * `scrollbar-gutter: stable` reserves the scrollbar's width inside the list even
- * when it is short enough not to scroll, so typing in the search box — which
- * filters rows out and removes the scrollbar — never makes the rows jump wider.
+ * when it is short enough not to scroll, so typing in the search box (which
+ * filters rows out and removes the scrollbar) never makes the rows jump wider.
  * The negative right margin pulls the list out by that reserved width plus the
  * gap, which parks the scrollbar in `.recent-section`'s right padding instead of
  * between the rows and the search box, so the rows end exactly where the search
  * box and the button below do. The list stays flush left, so every element in the
- * panel shares both edges — and those edges are the action card's too, which is
+ * panel shares both edges, and those edges are the action card's too, which is
  * why this pull is 8px and not more: 4px thumb + 4px gap, leaving 4px of the
  * panel's padding between the thumb and the border.
  * The pull is the thumb's width (pinned by the rule at the top of this file) plus
- * that gap, which lands the rows within a fraction of a pixel of the search box —
+ * that gap, which lands the rows within a fraction of a pixel of the search box.
  * the reserved width itself is rounded to whole pixels when the display scale is
  * fractional. Restore the standard `scrollbar-width`/`scrollbar-color` pair and
  * the platform scrollbar is 10-11px wide, which puts the rows a pixel or two past
@@ -1085,13 +1085,13 @@ footer > * { pointer-events: auto; }
 /*
  * One mark sits left of the history control, nearest the name it is about: the
  * clock is a control any row can have, while this is a fact about the file
- * behind the row, and a fact reads before a control. It used to be three marks
- * — a grey exclamation for a Lith outside the backed-up folder, an amber one for
+ * behind the row, and a fact reads before a control. It used to be three marks.
+ * A grey exclamation for a Lith outside the backed-up folder, an amber one for
  * a Lith with no file at all, and a red clock for edits never saved. They all
  * open the same history dialog, and the dialog now answers each in turn, so the
  * row carries one icon instead: the history control with an exclamation where
  * the clock hands sit, in yellow. Yellow rather than the old clock's warning
- * red, because two of the three states are not faults — the file is safe where
+ * red, because two of the three states are not faults. The file is safe where
  * the user put it, it simply is not where the backup is.
  */
 .cache-history-button.modified,
@@ -1128,7 +1128,7 @@ footer > * { pointer-events: auto; }
  * The mark inside the note's own name, in the install button's blue rather than the
  * context mark's amber: the title says *which* note matched, the context says where
  * inside it. Same blue as the button because that is already this app's "this is the
- * thing" colour — and two marks in one panel would otherwise read as the same fact
+ * thing" colour, and two marks in one panel would otherwise read as the same fact
  * said twice. Written with the element in the selector so it outranks the rule above,
  * which is the one that colours every other mark in the panel. */
 .cache-preview mark.cache-preview-title-mark { color: #8ab4f8; background: transparent; }
@@ -1168,7 +1168,7 @@ footer > * { pointer-events: auto; }
    means something next to the repository it describes. */
 .backup-status { margin: 0 0 10px; color: #b3acb5; font-size: 0.78rem; }
 /* One box for both footer controls, so the row reads symmetrical: same height,
- * same side padding, same radius, same label size — only the face differs,
+ * same side padding, same radius, same label size. Only the face differs,
  * because the install offer is the primary action.
  *
  * The height comes from min-height with no vertical padding, and the line height
@@ -1214,7 +1214,7 @@ footer > * { pointer-events: auto; }
  * window corners hold: the Github link is gone by then (the mark above carries the
  * same link), and the install offer has left the corner for the panel's own foot
  * row, which is inside the panel and needs no room made for it. The band was
- * therefore 76px of nothing under the last row of an instance's list — the emptiest
+ * therefore 76px of nothing under the last row of an instance's list. The emptiest
  * on a phone, where the list has the least to spare.
  */
 @media (min-width: 601px) and (max-width: 899px) {
@@ -1251,13 +1251,13 @@ footer > * { pointer-events: auto; }
    * phone the corner is width taken from the panel (the window is barely wider than
    * the column), while the row the rebuild control already occupies is one button
    * wide. `position: relative` rather than `static` because the offer's box is what
-   * the dismiss affordance is placed against — with no containing block of its own,
+   * the dismiss affordance is placed against. With no containing block of its own,
    * the ✕ would fly out to the container's corner. Its place is its place in the row,
    * so the corner offsets go back to `auto`. */
   /* The box is clipped while it shrinks into the row (see the keyframes below), and that
    * clip is load-bearing twice over: it hides the button's label while the box is narrower
    * than the label, and `overflow` other than `visible` is what removes a flex item's
-   * automatic minimum size — without it the box could never be narrower than its own label
+   * automatic minimum size. Without it the box could never be narrower than its own label
    * and the row would snap instead of travelling. Settled, the box is exactly its label's
    * width, so nothing is cut off: what the clip does eat is a focus ring, which is drawn
    * outside the button, so the phone row brings the ring inside the button instead, in the
@@ -1277,10 +1277,10 @@ footer > * { pointer-events: auto; }
  *
  * `width: auto` as an animation target is `interpolate-size`; without the feature the
  * engine cannot interpolate to a keyword, so this rule asks for it in a feature query and
- * the offer keeps the plain reveal above — landing at full width with the control stepping
+ * the offer keeps the plain reveal above. Landing at full width with the control stepping
  * aside in a single frame. Measured through this keyframe with the offer on the left and
  * the rebuild control on the right: 0/326, 23.6/302, 43.8/282, 61.2/264, 76.2/250 at 0, 45,
- * 90, 135 and 180ms. The travel is the whole 180ms — which `max-width: 0 -> 100%` does not
+ * 90, 135 and 180ms. The travel is the whole 180ms. Which `max-width: 0 -> 100%` does not
  * give: that box reaches its natural width 25% of the way in, so the motion would be over
  * in 45ms and the remaining 135ms would be a row standing still.
  *
@@ -1303,13 +1303,13 @@ footer > * { pointer-events: auto; }
 
 /*
  * The bookmark tile is no longer dropped on the narrowest launchers: the vault's
- * manager — changing the secret, or forgetting every login — is reached through the
+ * manager (changing the secret, or forgetting every login) is reached through the
  * dialog that tile opens, so hiding it would strand the vault with no way in. It was
  * worth 48px when this rule was written; the control that used to sit beside it now
  * lives inside that dialog, which is where the room came from.
  *
  * Below the width where the two text buttons and the tile still sit on one line
- * (about 350px — the text buttons do not shrink below their labels) the row wraps
+ * (about 350px: the text buttons do not shrink below their labels) the row wraps
  * instead, and the tile takes a line of its own rather than being clipped.
  */
 @media (max-width: 350px) {
@@ -1389,7 +1389,7 @@ body.drag-over::after {
 /*
  * What joins two versions: the gap between two entries, with the chevron centred in it.
  * The list runs newest at the top, so the chevron points down at the version the row above
- * was written from — which is the one fact the panel otherwise left to the timestamps.
+ * was written from. Which is the one fact the panel otherwise left to the timestamps.
  * The connector owns the spacing, which is why an entry carries no bottom margin of its own:
  * one gap, drawn, instead of a margin plus a decoration inside it.
  */
@@ -1415,7 +1415,7 @@ body.drag-over::after {
  * row mark that opened it: the fallback's claim, at the only place a touch screen
  * can still read it, and the adaptive header's offer to copy a Lith that sits
  * outside every backed-up folder into the folder that is backed up. One box,
- * because they are one kind of statement — a fact about this Lith that the
+ * because they are one kind of statement. A fact about this Lith that the
  * versions below are the answer to. Scoped to the dialog so they outrank the
  * plain grey every other `.launcher-modal` paragraph wears.
  */
@@ -1427,7 +1427,7 @@ body.drag-over::after {
 }
 /*
  * Only the offer carries an action, and the button sits at the end of the sentence
- * it answers — the shape of the history rows below, so the offer reads as one more
+ * it answers. The shape of the history rows below, so the offer reads as one more
  * row of the same list. The sentence is given the room and the button keeps its
  * size, so the label never wraps into a stack.
  */
@@ -1473,14 +1473,14 @@ body.drag-over::after {
 .orphan-pill { padding: 1px 7px; border-radius: 999px; font-size: 0.7rem; white-space: nowrap; }
 .orphan-pill.saved { background: rgb(91 158 92 / 22%); color: #9ede94; }
 .orphan-pill.unverified { background: rgb(224 179 65 / 16%); color: #e6c46a; }
-/* "2 of 5 saved" — the line that says when Proceed is safe. */
+/* "2 of 5 saved". The line that says when Proceed is safe. */
 .orphan-progress { margin: 10px 0 0; color: #9ede94; font-size: 0.8rem; text-align: center; }
 
 /* --- Offline mode: a cached self-host launcher whose instance is out of reach --- */
 /*
  * The one global notice the launcher ever draws. A saved self-host launcher whose instance
- * cannot be answered is a different launcher from the same page online — its list is this
- * device's copies rather than the server's — and that is a fact about the screen, so it is
+ * cannot be answered is a different launcher from the same page online (its list is this
+ * device's copies rather than the server's) and that is a fact about the screen, so it is
  * said once at the top instead of on each row. Amber is deliberately the same tone a row's
  * unfinished mark uses (`#e0b347`): the banner and the exclamations are two halves of one
  * fact, and giving the global half its own colour would read as a second problem.
@@ -1527,7 +1527,7 @@ body.drag-over::after {
 .remote-line { display: flex; align-items: center; gap: 8px; margin-top: 2px; min-width: 0; }
 /* The heading line's only child, and the whole of what the heading says beyond the
    title: the name of the open Lith. .remote-pill went first (the emoji icon already
-   says which launcher you are looking at) and .remote-refresh after it — asking the
+   says which launcher you are looking at) and .remote-refresh after it. Asking the
    server for its list again is what a page reload is, so a button for it was one more
    control to explain in a heading. `.recent-group-label` and `.remote-dot` are gone
    with the device's own rows: this mode lists the store and nothing else, so there is
@@ -1540,7 +1540,7 @@ body.drag-over::after {
    the centring is stated rather than inherited, because a plain <button> centres
    its content by UA style and `stretch` here would have dropped this label 3.5px
    below the row beneath it. The icon centres on that same line, which the sibling
-   markup could not do — it was centred on the row, 3.5px lower than its label. */
+   markup could not do. It was centred on the row, 3.5px lower than its label. */
 .bookmark-name { display: flex; align-items: center; gap: 10px; }
 .bookmark-icon {
   flex: none; align-self: center; width: 24px; height: 24px;
@@ -1559,7 +1559,7 @@ body.drag-over::after {
 /* The mark as a link (webapp and the desktop app). Same 52px frame as the
  * button; `.brand-icon-wrap` resets `cursor` to default and this is an <a>, so
  * both the pointer and the underline have to be asked for. Hover uses the same
- * accent as the install button — the app's interactive colour — so the mark
+ * accent as the install button (the app's interactive colour) so the mark
  * reads as a way out rather than as decoration. */
 .brand-github { cursor: pointer; text-decoration: none; }
 .brand-github:hover .brand-icon, .brand-github:focus-visible .brand-icon { border-color: #8ab4f8; }
@@ -1578,7 +1578,7 @@ body.drag-over::after {
  *
  * `calc(100vh - 40px)` rather than the 80vh the other dialogs take, and rather than a
  * rounder 90vh: the whole grid is the thing being reviewed, and this is the tallest state
- * the picker has — ten rows on a phone, where 80vh cut the last row off a 390x700 and 90vh
+ * the picker has. Ten rows on a phone, where 80vh cut the last row off a 390x700 and 90vh
  * was nineteen pixels short of it. Forty is the overlay's own padding, 20px on each side,
  * which is what keeps a dialog off the edges of the window, so this asks for every pixel the
  * window can spare and still takes none of them. A phone short enough to outrun even that
@@ -1599,7 +1599,7 @@ body.drag-over::after {
    */
   display: grid; grid-template-columns: repeat(auto-fill, minmax(32px, 1fr)); gap: 4px;
   /* No inner scroll region: the modal owns the only scrollbar (same reason as
-     .repo-list — two scrollbars a few pixels apart is unusable). */
+     .repo-list. Two scrollbars a few pixels apart is unusable). */
   padding: 6px; border: 1px solid #3a3a3a;
   border-radius: 7px; background: #2c2c2c;
 }

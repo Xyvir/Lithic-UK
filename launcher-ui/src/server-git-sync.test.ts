@@ -193,7 +193,7 @@ test('the button asks the instance, and its four states are the legacy four', ()
   // Not asked yet: amber rather than grey, because grey would be an answer.
   assert.equal(serverSyncIndicator(null, now, false).state, 'checking');
 
-  // The instance did not answer at all — the one state that is about the
+  // The instance did not answer at all. The one state that is about the
   // launcher's own request rather than about the backup.
   const unreachable = serverSyncIndicator(null, now, true);
   assert.equal(unreachable.state, 'error');

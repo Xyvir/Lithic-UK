@@ -5,7 +5,7 @@
  * the git work. A self-hosted instance is the opposite arrangement: `/data` is
  * already the repository, the server commits and pushes on every save, and the
  * launcher page is only a console for it. That difference is why these calls are
- * `fetch` against `/api/github/` rather than IPC — there is nothing to do on
+ * `fetch` against `/api/github/` rather than IPC. There is nothing to do on
  * this device, and the token never touches it.
  *
  * Ported from the legacy launcher (`launcher-fragments/runtime.js`), which drove
@@ -14,10 +14,11 @@
  * decisions are pure functions here (testable without a server), and the failure
  * of a request is a value the caller renders rather than an `alert`.
  *
- * The CGI answers raw GitHub JSON on the OAuth routes — including GitHub's own
- * error codes — so the messages below are the server's, translated once.
+ * The CGI answers raw GitHub JSON on the OAuth routes (including GitHub's own
+ * error codes) so the messages below are the server's, translated once.
  */
 
+import { copy } from './copy.ts';
 import {
   parseDeviceCode,
   parseServerDevicePoll,
@@ -55,7 +56,7 @@ async function readJson(response: Response): Promise<unknown> {
  * Is this server backed up to GitHub, and when did it last sync?
  *
  * `null` rather than a thrown error: wherever this is called, "the instance did
- * not answer" is a state to render, not an exception to catch — and on a plain
+ * not answer" is a state to render, not an exception to catch, and on a plain
  * WebDAV server it is the *ordinary* answer, since there is no CGI to route to.
  */
 export async function fetchServerSyncStatus(
@@ -88,14 +89,14 @@ export async function requestServerDeviceCode(
   try {
     const response = await fetcher(`${base}device-code`, { headers: { Accept: 'application/json' } });
     const payload = await readJson(response);
-    if (!response.ok) return { ok: false, message: 'GitHub did not answer with a code.' };
+    if (!response.ok) return { ok: false, message: copy.serverSync.noCode };
     const code = parseDeviceCode(payload);
     if (code) return code;
     const record = (payload ?? {}) as Record<string, unknown>;
     const detail = typeof record.error_description === 'string' ? record.error_description : record.error;
     return { ok: false, message: typeof detail === 'string' && detail ? detail : 'GitHub did not answer with a code.' };
   } catch {
-    return { ok: false, message: 'Could not reach this server for a code.' };
+    return { ok: false, message: copy.serverSync.unreachableForCode };
   }
 }
 
@@ -126,13 +127,13 @@ export async function listServerRepos(
       headers: { Accept: 'application/json' }
     });
     const payload = await readJson(response);
-    if (!response.ok || !Array.isArray(payload)) return { ok: false, message: 'Could not list your repositories.' };
+    if (!response.ok || !Array.isArray(payload)) return { ok: false, message: copy.serverSync.noRepos };
     const repos = (payload as Array<{ full_name?: unknown }>)
       .map((repo) => (typeof repo?.full_name === 'string' ? repo.full_name : ''))
       .filter(Boolean);
     return partitionRepos(repos.map((full_name) => ({ full_name })));
   } catch {
-    return { ok: false, message: 'Could not list your repositories.' };
+    return { ok: false, message: copy.serverSync.noRepos };
   }
 }
 
@@ -155,7 +156,7 @@ export async function createServerRepo(
     const detail = typeof payload?.message === 'string' ? payload.message : '';
     return { ok: false, message: detail || 'Could not create the repository.' };
   } catch {
-    return { ok: false, message: 'Could not create the repository.' };
+    return { ok: false, message: copy.serverSync.noCreate };
   }
 }
 
@@ -183,7 +184,7 @@ export async function setupServerSync(
     const detail = typeof payload?.message === 'string' ? payload.message : '';
     return { ok: false, message: setupFailureNote(detail) };
   } catch {
-    return { ok: false, message: 'Could not reach this server to set the backup up.' };
+    return { ok: false, message: copy.serverSync.unreachableForSetup };
   }
 }
 
@@ -210,7 +211,7 @@ export async function disconnectServerSync(
  * The CGI hands back whatever `git` wrote, which is several lines at best and a
  * transcript at worst. The last line is the one git failed on, so that is the
  * one that gets shown; the whole log stays for the caller to put in a tooltip.
- * Picking a line rather than truncating the blob is deliberate — a truncated
+ * Picking a line rather than truncating the blob is deliberate. A truncated
  * transcript hides the sentence that says what went wrong.
  */
 export function setupFailureNote(message: string): string {
@@ -219,16 +220,16 @@ export function setupFailureNote(message: string): string {
     .map((line) => line.trim())
     .filter(Boolean);
   const last = lines.length > 0 ? lines[lines.length - 1] : '';
-  if (!last) return 'Setup failed.';
+  if (!last) return copy.serverSync.setupFailed;
   const clipped = last.length > 160 ? `${last.slice(0, 157)}…` : last;
-  return `Setup failed: ${clipped}`;
+  return copy.serverSync.setupFailedDetail(clipped);
 }
 
 /**
  * The heading button's state on a server.
  *
  * Simpler than the desktop truth table (git-sync-health.ts) because the server
- * answers one question — connected, repository, last sync — and does the git
+ * answers one question (connected, repository, last sync) and does the git
  * work itself. What is left is the same four states the legacy `#github-sync-btn`
  * had: grey when nothing is set up, green when it is, purple while a sync is
  * recent, red when the instance did not answer. Nothing here claims the backup
@@ -239,13 +240,13 @@ export function serverSyncIndicator(
   now: number,
   failed: boolean
 ): { state: SyncIndicator; title: string } {
-  if (failed) return { state: 'error', title: 'GitHub Sync: this instance did not answer' };
-  if (!status) return { state: 'checking', title: 'GitHub Sync: checking…' };
-  if (!status.connected) return { state: 'idle', title: 'GitHub Sync' };
-  const target = status.repo ? `github.com/${status.repo}` : 'connected';
+  if (failed) return { state: 'error', title: copy.sync.serverFailed };
+  if (!status) return { state: 'checking', title: copy.sync.checking };
+  if (!status.connected) return { state: 'idle', title: copy.dialogs.gitSync.title };
+  const target = status.repo ? `github.com/${status.repo}` : copy.sync.connectedLabel;
   const age = verifiedAge(status.lastSync, now);
   if (status.lastSync > 0 && now - status.lastSync < SYNC_FRESH_MS) {
-    return { state: 'syncing', title: `GitHub Sync: syncing to ${target}…` };
+    return { state: 'syncing', title: copy.sync.serverSyncing(target) };
   }
-  return { state: 'connected', title: `GitHub Sync: ${target}${age ? `, last synced ${age} ago` : ''}` };
+  return { state: 'connected', title: copy.sync.serverConnected(target, age) };
 }

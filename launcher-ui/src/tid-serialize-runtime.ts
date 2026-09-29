@@ -1,6 +1,6 @@
 /**
  * ES5 runtime injected into the mounted engine for scratch-mode saves of
- * `.tid` files: mirrors serializeTidFile (scratch-wiki.ts) — quoted multi-line
+ * `.tid` files: mirrors serializeTidFile (scratch-wiki.ts). Quoted multi-line
  * field values are JSON-stringified, `text` becomes the body after the blank
  * separator, and every non-text field serializes in its stored order.
  *

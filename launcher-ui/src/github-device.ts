@@ -7,6 +7,8 @@
  * this module keeps the parsing + poll-loop timing logic testable in plain TS.
  */
 
+import { copy } from './copy.ts';
+
 export interface DeviceCodeResponse {
   device_code: string;
   user_code: string;
@@ -38,7 +40,7 @@ export function parseDeviceCode(raw: unknown): DeviceCodeResponse | null {
 
 /** Parse one poll result into a decision the poll loop can act on. */
 export function parseDevicePoll(raw: unknown): DevicePollResult {
-  if (!raw || typeof raw !== 'object') return { kind: 'failed', message: 'Unexpected response from GitHub' };
+  if (!raw || typeof raw !== 'object') return { kind: 'failed', message: copy.deviceFlow.unexpected };
   const record = raw as Record<string, unknown>;
   if (typeof record.access_token === 'string' && record.access_token) {
     return { kind: 'authorized', token: record.access_token };
@@ -46,7 +48,7 @@ export function parseDevicePoll(raw: unknown): DevicePollResult {
   if (record.pending === true) {
     return { kind: 'pending', slowDown: record.slow_down === true };
   }
-  return { kind: 'failed', message: 'Authorization failed or expired. Generate a new code.' };
+  return { kind: 'failed', message: copy.deviceFlow.failed };
 }
 
 /**
@@ -55,12 +57,12 @@ export function parseDevicePoll(raw: unknown): DevicePollResult {
  * The desktop app's polls are normalized in Rust (`{pending: true}`), so
  * `parseDevicePoll` above is the shape Rust hands back. A self-hosted instance
  * has no normalization step: the JSON here is GitHub's own, error codes and all,
- * which is why the codes are named rather than collapsed into one failure —
+ * which is why the codes are named rather than collapsed into one failure.
  * `expired_token` is not the same answer as `access_denied`, and only the second
  * one means somebody said no.
  */
 export function parseServerDevicePoll(raw: unknown): DevicePollResult {
-  if (!raw || typeof raw !== 'object') return { kind: 'failed', message: 'Unexpected response from GitHub' };
+  if (!raw || typeof raw !== 'object') return { kind: 'failed', message: copy.deviceFlow.unexpected };
   const record = raw as Record<string, unknown>;
   if (typeof record.access_token === 'string' && record.access_token) {
     return { kind: 'authorized', token: record.access_token };
@@ -71,11 +73,11 @@ export function parseServerDevicePoll(raw: unknown): DevicePollResult {
     case 'slow_down':
       return { kind: 'pending', slowDown: true };
     case 'expired_token':
-      return { kind: 'failed', message: 'That code expired. Start again for a new one.' };
+      return { kind: 'failed', message: copy.deviceFlow.expired };
     case 'access_denied':
-      return { kind: 'failed', message: 'Authorization denied on GitHub.' };
+      return { kind: 'failed', message: copy.deviceFlow.denied };
     default:
-      return { kind: 'failed', message: 'Authorization failed or expired. Generate a new code.' };
+      return { kind: 'failed', message: copy.deviceFlow.failed };
   }
 }
 

@@ -18,8 +18,8 @@ export type CachedWikiMatch = CachedSearchResult & {
  *
  * A cached wiki is a tiddler array, and a tiddler carries bookkeeping as well as
  * content: `created` and `modified` stamps, `type`, `tags`, and whatever a mount
- * injected. Searching every field made those strings search surface — the query
- * `te` matched `creaTEd` — and because the context was then cut from a field that
+ * injected. Searching every field made those strings search surface (the query
+ * `te` matched `creaTEd`) and because the context was then cut from a field that
  * was not the body, the panel printed raw JSON at the user instead of their note.
  * Only the note's own text and its own name are content anyone would search for.
  */
@@ -49,7 +49,7 @@ function parseTiddlers(text: string): Array<Record<string, unknown>> | null {
 }
 
 /**
- * Mark every occurrence of the query inside a short value — a tiddler's own name.
+ * Mark every occurrence of the query inside a short value. A tiddler's own name.
  *
  * Every occurrence rather than the first, because a title is read at a glance and a
  * second occurrence left unmarked reads as a different word. The mark is classed so

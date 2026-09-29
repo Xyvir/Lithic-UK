@@ -4,7 +4,7 @@
  * In the desktop app the sync unit is a *folder*, not the app: the connected
  * repository is the folder the wiki lives in, and every connected folder keeps
  * its own `.git`. So a Lith opened from anywhere else is perfectly safe but
- * outside the backup — a coverage fact worth stating, not a fault worth
+ * outside the backup. A coverage fact worth stating, not a fault worth
  * flagging. Calling it an error would put a warning on every row of a fresh
  * install and teach people to ignore warnings.
  *
@@ -88,7 +88,7 @@ export function folderTargets(rows: readonly CoverageRow[]): Array<{ folder: str
  * mean by "the synced folder". Rows are the same order the list shows, which is
  * also the order things are adopted in.
  *
- * `null` when nothing is backed up — a state the caller cannot act in, since a
+ * `null` when nothing is backed up. A state the caller cannot act in, since a
  * local-only mark only exists once some folder is covered.
  */
 export function syncedDirFor(
@@ -111,7 +111,7 @@ export type RebuildOrphan = { name: string; path: string | null };
 
 /**
  * Everything a rebuild would remove: recent rows whose file the fresh listing
- * does not contain, and cached copies whose wiki is not in the listing at all —
+ * does not contain, and cached copies whose wiki is not in the listing at all.
  * including ones no list shows any more.
  *
  * The second group matters as much as the first. An entry only a search can
@@ -148,7 +148,7 @@ export function orphanedEntries(
 /**
  * Folders a rebuild should list: every backed-up repository root, plus the
  * folder of every known row. The roots come first so what it discovers starts
- * where the backup does. Each is listed flat — a rebuild top-ups the list with
+ * where the backup does. Each is listed flat. A rebuild top-ups the list with
  * the folder's own files rather than descending into it, because a folder is
  * the unit the user adds.
  */
@@ -162,7 +162,7 @@ export function reindexFolders(
   // one folder two ways. A repository root arrives from the backend as a plain path
   // (`C:\Lithic`), with no separator on the end, while a row's own folder is cut out of
   // a file path and keeps one (`C:\Lithic\`). The listing is flat, so those two names
-  // return the same files — and a rebuild *replaces* the list with what it found, which
+  // return the same files, and a rebuild *replaces* the list with what it found, which
   // would make every one of them a duplicate row.
   const add = (folder: string) => {
     if (!folder) return;

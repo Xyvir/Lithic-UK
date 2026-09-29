@@ -5,15 +5,15 @@
  * The icon belongs to the *instance*, not to the browser that set it, so the workflow has
  * three parts:
  *
- *   the choice   — the emoji itself is left in the store root (`ICON_SETTING`), one line of
+ *   the choice. The emoji itself is left in the store root (`ICON_SETTING`), one line of
  *                  plain text, where every client reads it: an instance opened in a
  *                  browser that has never seen it shows the icon its owner picked. It
  *                  travels with the store, so a backup carries the choice and a connect
  *                  brings it back with the icons.
- *   locally      — the launcher header icon and the browser tab favicon, so the instance
+ *   locally. The launcher header icon and the browser tab favicon, so the instance
  *                  is recognizable while you are standing on it. `localStorage` holds a
  *                  mirror of the choice, used only when the instance cannot be asked.
- *   server-side  — every favicon / touch-icon size is rendered from the emoji on a canvas
+ *   server-side. Every favicon / touch-icon size is rendered from the emoji on a canvas
  *                  client-side and PUT into `/sync/`, with `custom.ico` LAST because the
  *                  inotify watcher treats that write as the signal to copy the whole
  *                  pre-sized set into the public directory. The setting is written
@@ -24,6 +24,7 @@
  * Everything DOM-touching is injectable (canvas factory, fetcher, storage) so
  * the upload contract is unit-testable in plain Node.
  */
+import { copy } from './copy.ts';
 import { WEBDAV_BASE } from './webdav.ts';
 
 /**
@@ -40,15 +41,15 @@ import { WEBDAV_BASE } from './webdav.ts';
  * same day, and the count is the reason every time: a grid fills only when the glyph count
  * divides its column count, and one count has to divide both the phone's eight columns and
  * the dialog's ten, where under a hundred only 40 and 80 do. The lightning bolt came back
- * first, because it is the one whose absence showed — on a 390px phone 70 glyphs left the
- * last row a cell short, which reads as a missing icon rather than as the end of a list —
+ * first, because it is the one whose absence showed (on a 390px phone 70 glyphs left the
+ * last row a cell short, which reads as a missing icon rather than as the end of a list)
  * and a globe with it to reach 72, which fills a nine-column grid but not the ten-column one
  * the dialog is drawn at. The owner then asked for the count that fills both, so the list is
  * 80: ten full eight-wide rows on a phone, eight full ten-wide rows in a 440px dialog,
  * neither a scrollbar. (At 400 the dialog would draw nine columns, which 80 does not divide;
  * at 460 it would draw eleven.) The eight that came back for it are the
  * ones that read as a subject of their own rather than as a second version of something
- * already offered — the fire, the snowflake, the herb, four buildings and the ballot box —
+ * already offered (the fire, the snowflake, the herb, four buildings and the ballot box)
  * so the cull's real work, the near-duplicates and the faces, stands as it did. See
  * agents.md.
  *
@@ -77,7 +78,7 @@ export const EMOJI_LIST: string[] = [
  * reads it (see `readServerEmoji`), so somebody opening an instance for the first time in
  * a browser that has never seen it gets the icon its owner picked, not the shipped mark.
  * It sits in the same directory as the wikis and the icon renders, so it is in the git
- * tree too — a backup carries the choice, and connecting a server brings it back along
+ * tree too. A backup carries the choice, and connecting a server brings it back along
  * with the icons. The deployment needs nothing from it beyond that: its watcher copies the
  * icons the browser rendered, and this file only says which character they are.
  */
@@ -85,7 +86,7 @@ export const ICON_SETTING = 'favicon.conf';
 
 /**
  * The pre-sized icon set written on save. Order matters: `custom.ico` is the
- * watcher's doorbell and must stay last (legacy parity — see deploy/watcher.sh).
+ * watcher's doorbell and must stay last (legacy parity: see deploy/watcher.sh).
  */
 export const ICON_TARGETS: Array<{ path: string; size: number }> = [
   { path: 'favicon-16x16.png', size: 16 },
@@ -105,7 +106,7 @@ export const ICON_DOORBELL = 'custom.ico';
  * The mark an instance's own header draws: the largest of the renders it publishes.
  *
  * One of `ICON_TARGETS`, so it is a file the picker writes and the deployment's watcher
- * copies into the public directory — which is what makes it the instance's current icon
+ * copies into the public directory. Which is what makes it the instance's current icon
  * rather than a picture of one. The shipped set lives at the same address, so an instance
  * that has never had an icon picked still answers here.
  */
@@ -117,12 +118,12 @@ export const INSTANCE_MARK_FILE = '/mstile-150x150.png';
  * Root-absolute and same-origin on purpose: the launcher page is served *by* the instance,
  * so this is the instance's own file. The legacy launcher's header was this exact
  * `<img src="/mstile-150x150.png">` with an `onerror` fallback, and it read the same address
- * for the same reason — the mark beside the title is the instance's identity, and a client
+ * for the same reason. The mark beside the title is the instance's identity, and a client
  * that draws the project's own mark there makes every instance look alike.
  *
  * Null is the page with no instance behind it at all (a downloaded copy, the desktop app's
- * own): a file has no root to read this from. An instance that answers 404 — a store whose
- * icon set was never published — is the other half of the same question, and is handled at
+ * own): a file has no root to read this from. An instance that answers 404 (a store whose
+ * icon set was never published) is the other half of the same question, and is handled at
  * the image, which is the only place that can tell the difference.
  */
 export function instanceMarkUrl(
@@ -133,7 +134,7 @@ export function instanceMarkUrl(
 }
 
 export const INSTANCE_EMOJI_KEY = 'lithic-icon-emoji';
-/** Legacy background behind the glyph — every generated icon matches it. */
+/** Legacy background behind the glyph. Every generated icon matches it. */
 export const ICON_BACKGROUND = '#333';
 
 export type Canvas2DLike = {
@@ -312,7 +313,7 @@ export async function uploadInstanceIcon(
       options.onProgress?.(saved, total);
     }
     const blob = await emojiIconBlob(emoji, target.size, createCanvas);
-    if (!blob) return { ok: false, saved, total, error: 'Could not render the icon (no canvas).' };
+    if (!blob) return { ok: false, saved, total, error: copy.dialogs.icon.canvasFailed };
     try {
       const response = await fetcher(`${base}${target.path}`, {
         method: 'PUT',
@@ -338,7 +339,7 @@ export async function uploadInstanceIcon(
  *
  * The two deletes are ordered like the writes they undo, and the doorbell is last for
  * the same reason there: until it goes, nothing has been decided. An instance that had
- * no choice recorded still answers true — the state asked for is the state reached.
+ * no choice recorded still answers true. The state asked for is the state reached.
  */
 export async function clearInstanceIcon(
   options: { fetcher?: typeof fetch; base?: string } = {}
@@ -370,7 +371,7 @@ export function bustIconCache(delayMs = 2000): void {
 /**
  * The mirror of the instance's choice, kept in this browser.
  *
- * It is not the setting — the store is — and it is never consulted while the instance
+ * It is not the setting (the store is) and it is never consulted while the instance
  * answers: it exists so an instance that cannot be asked (a proxy in the way, a plain
  * WebDAV box behind a broken CGI) still shows the icon this browser last saw, instead of
  * falling back to the shipped mark for no reason the user can see.

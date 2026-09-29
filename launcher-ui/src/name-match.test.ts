@@ -66,7 +66,7 @@ test('nothing is marked where nothing matched, and an empty query marks nothing'
 
 /**
  * A row's name is a file name, so it can carry the characters that would otherwise
- * be markup — and the caller draws this string as HTML.
+ * be markup, and the caller draws this string as HTML.
  */
 test('a name that looks like markup is escaped, marked or not', () => {
   assert.equal(titleMarkup('a&b<c>.lith', ''), 'a&amp;b&lt;c&gt;.lith');

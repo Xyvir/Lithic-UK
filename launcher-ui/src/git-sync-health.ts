@@ -18,8 +18,8 @@
  * assuming the best.
  *
  * The same reasoning applies to grey, one step earlier. Grey means "nothing is
- * synced here", which the launcher cannot say until the marker read comes back
- * — so the first paint asks the question in amber instead of asserting there is
+ * synced here", which the launcher cannot say until the marker read comes back,
+ * so the first paint asks the question in amber instead of asserting there is
  * nothing to ask about. Returning to the launcher from a wiki makes this
  * visible: a reload discards the marker state, and the icon used to spend that
  * window grey, reading as "not set up" for a folder that is synced.
@@ -27,6 +27,8 @@
  * Everything here is pure, so the truth table is testable without Tauri, a
  * network, or a real expired token.
  */
+
+import { copy } from './copy.ts';
 
 /** Verdicts `git_sync_heartbeat` can return. */
 export type HealthState =
@@ -57,23 +59,23 @@ export const SYNC_PULSE_MS = 4_000;
  * near-identical: the same fault has no business reading two different ways
  * depending on where the user looks.
  *
- * `unmanaged` is not a failure — it is the marker check reporting that nothing
+ * `unmanaged` is not a failure. It is the marker check reporting that nothing
  * is synced here, which the caller renders as idle.
  */
 export function healthFailure(health: HealthState | null | undefined): string | null {
   switch (health) {
     case 'readonly':
-      return 'this token can only read the repository. Reconnect to allow pushes.';
+      return copy.sync.readonly;
     case 'auth':
-      return 'GitHub rejected this token. Reconnect to sign in again.';
+      return copy.sync.auth;
     case 'missing':
-      return 'the repository is missing or not shared with this token.';
+      return copy.sync.missing;
     case 'throttled':
-      return 'GitHub is rate-limiting this device. Saves stay local for now.';
+      return copy.sync.throttled;
     case 'offline':
-      return 'cannot reach github.com. Saves stay on this device.';
+      return copy.sync.offline;
     case 'malformed':
-      return "this folder's saved remote is unreadable. Reconnect to repair it.";
+      return copy.sync.malformed;
     default:
       return null;
   }
@@ -142,33 +144,33 @@ export function syncIndicator(input: SyncIndicatorInput): SyncIndicatorResult {
   // A backup that is running right now, reported by the side that is doing it.
   // Above the marker check because the launcher reloads into this state: the
   // wiki that was just left is the one whose push is still going.
-  if (backupInFlight) return { state: 'syncing', title: 'GitHub Sync: syncing…' };
+  if (backupInFlight) return { state: 'syncing', title: copy.sync.syncing };
 
   // The marker read has not answered yet. This is the window that used to be
   // grey, which said "not set up" about a folder nobody had looked at yet.
-  if (hasMarker === null) return { state: 'checking', title: 'GitHub Sync: checking…' };
+  if (hasMarker === null) return { state: 'checking', title: copy.sync.checking };
 
   // Nothing is synced here: a stale verdict or a stale failure would put a
   // warning on a folder that is simply not part of any backup.
-  if (!hasMarker) return { state: 'idle', title: 'GitHub Sync' };
+  if (!hasMarker) return { state: 'idle', title: copy.dialogs.gitSync.title };
 
-  if (now < syncingUntil) return { state: 'syncing', title: 'GitHub Sync: syncing…' };
+  if (now < syncingUntil) return { state: 'syncing', title: copy.sync.syncing };
 
   if (lastPushError) {
-    return { state: 'error', title: `GitHub Sync: the last save did not upload (${lastPushError})` };
+    return { state: 'error', title: copy.sync.lastSaveFailed(lastPushError) };
   }
 
   const failure = healthFailure(health);
-  if (failure) return { state: 'error', title: `GitHub Sync: ${failure}` };
+  if (failure) return { state: 'error', title: copy.sync.failure(failure) };
 
-  if (!health) return { state: 'checking', title: 'GitHub Sync: verifying the connection…' };
+  if (!health) return { state: 'checking', title: copy.sync.verifying };
 
   const age = verifiedAge(input.verifiedAt, now);
-  const target = input.repo ? `github.com/${input.repo}` : 'connected';
-  return { state: 'connected', title: `GitHub Sync: ${target}${age ? `, verified ${age} ago` : ''}` };
+  const target = input.repo ? `github.com/${input.repo}` : copy.sync.connectedLabel;
+  return { state: 'connected', title: copy.sync.connected(target, age) };
 }
 
-/** "45s" / "3m" / "2h" — how long ago the verdict was obtained. */
+/** "45s" / "3m" / "2h". How long ago the verdict was obtained. */
 export function verifiedAge(verifiedAt: number | null | undefined, now: number): string | null {
   if (!verifiedAt) return null;
   const seconds = Math.max(0, Math.round((now - verifiedAt) / 1000));
@@ -197,7 +199,7 @@ export interface HeartbeatGate {
   now: number;
   /** A hidden window has nobody looking at the icon. */
   hidden: boolean;
-  /** The user just asked — the dialog opened, or a push just failed. */
+  /** The user just asked. The dialog opened, or a push just failed. */
   force?: boolean;
 }
 

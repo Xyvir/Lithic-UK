@@ -1,10 +1,11 @@
+import { copy } from './copy.ts';
 import type { LauncherMode } from './mode.ts';
 
 /**
  * Where a browser mount's saves land.
  *
  *   'file'     the File System Access API is present, so a picked file can be
- *              written back in place — Chromium on every desktop platform.
+ *              written back in place. Chromium on every desktop platform.
  *   'index-db' it is not, which is every browser on macOS except Chrome (Safari
  *              is the only browser a PWA can be installed from there, and
  *              Firefox has never shipped the API either). No file is ever
@@ -12,7 +13,7 @@ import type { LauncherMode } from './mode.ts';
  *              and the launcher's existing cache, version history and download
  *              flows are the only copies that exist.
  *
- * The distinction is not a preference — it is the platform's answer to "can
+ * The distinction is not a preference. It is the platform's answer to "can
  * this tab write a file it was not given".
  */
 export type StorageMode = 'file' | 'index-db';
@@ -63,27 +64,22 @@ export function storageModeOverride(search: string): string | null {
  *
  * The claim is deliberately absolute: nothing in this mode writes a file, so
  * every row it produces is volatile for the same reason, and the mark is not a
- * problem to be cleared — it is what the Lith *is* until the user downloads a
+ * problem to be cleared. It is what the Lith *is* until the user downloads a
  * copy of it. Clearing site data is the browser's own equivalent of deleting
  * the folder, which is why the launcher offers no `Reset Recents` here.
  *
  * A list that opens with a paragraph of explanation is worse at being a list, so
  * the title on the mark carries all of it. `title` reaches a pointer and
- * `aria-label` a screen reader, but a touch screen reaches neither — which is what
+ * `aria-label` a screen reader, but a touch screen reaches neither. Which is what
  * the dialog below is for.
  */
-export const BROWSER_ONLY_TOOLTIP =
-  'Browser storage only. This Lith is kept in this browser’s cache, and nothing here is written back to a file. ' +
-  'That copy is intrinsically volatile. Clearing site data, or the browser reclaiming space, will lose it. ' +
-  'Download your own hard copies from its version history.';
+export const BROWSER_ONLY_TOOLTIP = copy.row.browserOnlyClaim;
 
 /**
  * The same claim, said where a touch screen can read it: the version-history dialog
  * the mark itself opens, above the versions whose download is the way out.
  */
-export const BROWSER_ONLY_HISTORY_NOTE =
-  'Browser storage only. This Lith has no file, so what this browser holds is the only copy there is. ' +
-  'Download a version to keep one you can mount again.';
+export const BROWSER_ONLY_HISTORY_NOTE = copy.row.browserOnlyNote;
 
 /**
  * The row mark's title: the wiki's name, then what is true of it.
@@ -94,5 +90,5 @@ export const BROWSER_ONLY_HISTORY_NOTE =
  * where it would be most visible.
  */
 export function browserOnlyMarkTitle(name: string): string {
-  return `${name}. ${BROWSER_ONLY_TOOLTIP}`;
+  return copy.row.browserOnly(name);
 }

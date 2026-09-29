@@ -116,9 +116,9 @@ export function isPayloadShareUrl(text: string): boolean {
 
 /**
  * Build a pin payload from a search cache: the tiddler matching `title` gets
- * the Dogear tag (which pins it to the top of the story river — the modern
+ * the Dogear tag (which pins it to the top of the story river: the modern
  * replacement for the deprecated $:/config/TiddlyTools/Pin mechanism). Only
- * the pinned tiddler is returned — injecting it over the engine's store
+ * the pinned tiddler is returned. Injecting it over the engine's store
  * refreshes that one tiddler with its cached (last-saved) content plus the
  * pin tag, and the next save persists the Dogear tag into the file.
  * Returns null when the cache does not contain the tiddler.

@@ -2,8 +2,8 @@
  * What a search matches in a Lith's name, and where the match lands.
  *
  * The extension is not part of a title. It is the same few characters on every row,
- * so matching it turns any query containing "lith" into "every file here" — the list
- * answers with everything and says nothing — and the highlighted fragment lands on
+ * so matching it turns any query containing "lith" into "every file here" (the list
+ * answers with everything and says nothing) and the highlighted fragment lands on
  * the suffix rather than on the word that was typed. `abcd.lith` is not a match for
  * "lith"; `lithography.lith` is, because the word is in its name.
  *
@@ -15,7 +15,7 @@
  * The drawing half returns HTML, as `cache-search` does for a tiddler's own name, and
  * for the same reason: a name is a short value read at a glance, so its marks are
  * inline runs rather than nodes a template has to cut around. Every occurrence is
- * marked, not just the first — a second one left plain reads as a different word.
+ * marked, not just the first. A second one left plain reads as a different word.
  */
 
 function escape(value: string): string {
@@ -56,8 +56,8 @@ export function showsForQuery(name: string, query: string): boolean {
  * matched inside the title wrapped in a mark, escaped on the way through.
  *
  * The offsets are read off the displayed name and the title is a prefix of it, so a
- * match can never reach the extension and everything after the last one — the suffix
- * this mark does not cover — is passed through as it was.
+ * match can never reach the extension and everything after the last one (the suffix
+ * this mark does not cover) is passed through as it was.
  */
 export function titleMarkup(name: string, query: string): string {
   const needle = query.trim().toLowerCase();

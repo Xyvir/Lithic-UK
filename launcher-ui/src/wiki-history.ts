@@ -13,7 +13,7 @@ import type { CacheStore } from './storage.ts';
  *
  * Every save diffs the new state against HEAD (RFC 6902-style ops over
  * title-keyed tiddlers), so versions are tiny field-level deltas instead of
- * full-text deep copies — a chain of N versions costs roughly one snapshot
+ * full-text deep copies. A chain of N versions costs roughly one snapshot
  * plus the size of what actually changed. Materializing any version is
  * deterministic: newest base at-or-before it + replayed deltas, exactly like
  * `git checkout <sha>`.
@@ -167,7 +167,7 @@ export class KeyvalWikiHistory implements WikiHistoryStore {
     if (!head?.map || forceBase || bytesOf(JSON.stringify(ops)) > bytesOf(tiddlerJsonText) / 2) {
       // First version for this wiki, the delta stopped paying for itself
       // (more than half the size of a full snapshot), or the file drifted:
-      // start a new base segment — prior history stays intact/materializable.
+      // start a new base segment. Prior history stays intact/materializable.
       id = versionId(now, tiddlerJsonText);
       await this.store.set(baseKey(name, id), { id, text: tiddlerJsonText });
       const entry: VersionMeta = { id, ts: now, sizeBytes: bytesOf(tiddlerJsonText), isBase: true };
@@ -252,7 +252,7 @@ export class KeyvalWikiHistory implements WikiHistoryStore {
   /**
    * Trim the chain to `maxVersions`, oldest-first, keeping every retained
    * version materializable. When the oldest entry is a base (the common
-   * case — bases root every chain), it is "re-based away": its successor is
+   * case. Bases root every chain), it is "re-based away": its successor is
    * materialized and promoted to the new base, so we only ever shed the
    * single oldest state.
    */
@@ -277,7 +277,7 @@ export class KeyvalWikiHistory implements WikiHistoryStore {
         continue;
       }
 
-      if (oldest.isBase) return; // Single version and still over — nothing safe to drop.
+      if (oldest.isBase) return; // Single version and still over. Nothing safe to drop.
       await this.store.del(deltaKey(name, oldest.id));
       meta.versions = meta.versions.filter((version) => version.id !== oldest.id);
       overflow -= 1;

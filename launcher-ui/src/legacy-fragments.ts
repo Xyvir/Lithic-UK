@@ -12,7 +12,7 @@ export type LauncherFragment = {
  *
  * Status notes:
  * - Self-host parity landed: runtime.webdav and ui.emoji are migrated, with
- *   two deliberate departures from the legacy launcher — saves send a git
+ *   two deliberate departures from the legacy launcher. Saves send a git
  *   patch instead of re-serializing the whole wiki, and the instance icon is
  *   rendered client-side into the pre-sized favicon set (legacy needed the
  *   same PUTs, so the ordering contract is unchanged).

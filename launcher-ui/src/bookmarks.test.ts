@@ -39,7 +39,7 @@ test('normalizes self-host instance URLs to origin', () => {
 
 test('refuses a spelled-out scheme rather than reading it as a host', () => {
   // `https://` used to be prefixed to anything without one, so `ftp://other.example`
-  // parsed as the origin `https://ftp` — a bookmark to a machine that does not exist,
+  // parsed as the origin `https://ftp`. A bookmark to a machine that does not exist,
   // saved without a complaint.
   assert.throws(() => normalizeInstanceUrl('ftp://other.example'), /HTTP or HTTPS/);
   assert.throws(() => normalizeInstanceUrl('file:///c:/liths/wiki.lith'), /HTTP or HTTPS/);
@@ -148,7 +148,7 @@ test('fetchInstanceIcon falls back to favicon.ico and gives up quietly', async (
   assert.match((await fetchInstanceIcon('https://protected.test', fetcher)) ?? '', /^data:image\/x-icon;base64,/);
   assert.deepEqual(requests, ['https://protected.test/favicon-32x32.png', 'https://protected.test/favicon.ico']);
 
-  // Protected instances answer 401 with an HTML login page — no icon, no throw.
+  // Protected instances answer 401 with an HTML login page. No icon, no throw.
   const protectedFetcher = (async () => new Response('<html>login</html>', { status: 401 })) as unknown as typeof fetch;
   assert.equal(await fetchInstanceIcon('https://protected.test', protectedFetcher), null);
 

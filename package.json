@@ -16,7 +16,8 @@
     "test:puppeteer:headed": "HEADED=1 node scripts/test-puppeteer-launcher.mjs",
     "gallery": "node scripts/ui-gallery.mjs",
     "check:offline": "node scripts/check-launcher-offline.mjs --browser",
-    "check:push": "node scripts/check-launcher-artifact.mjs && node scripts/check-launcher-offline.mjs --browser && node scripts/pre-push-check.mjs"
+    "check:copy": "node scripts/check-launcher-copy.mjs",
+    "check:push": "node scripts/check-launcher-copy.mjs && node scripts/check-launcher-artifact.mjs && node scripts/check-launcher-offline.mjs --browser && node scripts/pre-push-check.mjs"
   },
   "author": "Tyler Mills",
   "license": "ISC",

@@ -124,7 +124,7 @@ class ActionEphemeralWidget extends Widget {
             try {
                 data = await response.json();
             } catch (parseErr) {
-                data = null; // non-JSON error body — fall through to status handling
+                data = null; // non-JSON error body. Fall through to status handling
             }
             if (!response.ok) {
                 const detail = (data && typeof data.detail === "string" && data.detail.trim())

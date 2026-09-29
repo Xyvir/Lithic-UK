@@ -44,7 +44,7 @@ test('sync paths resolve to self-host mode', () => {
 
 test('a launcher served by an instance is that instance, however it is reached', () => {
   // The deployment this exists for: `/` redirects to `/src/launcher.html`, which is
-  // the same file the PWA is served from — so nothing in the document says
+  // the same file the PWA is served from, so nothing in the document says
   // "instance": no meta tag, no `/sync/` in the path, and a hostname that is
   // nobody's published deployment. The server that sent it is the evidence.
   assert.equal(resolveMode(location('https://personal.lithic.uk/src/launcher.html')), 'self-host');
@@ -80,10 +80,10 @@ test('the injected global alone does not make an instance’s page the app', () 
   // The regression this exists for: the app injects __TAURI__ into every
   // document its window loads, so a bookmarked instance used to claim `tauri`
   // and take every local-only path built on it: Rust IPC, this machine's disk,
-  // an install offered beside the exe — all against somebody else's server.
+  // an install offered beside the exe. All against somebody else's server.
   const host = { __TAURI__: {} };
   // The global says there is an app behind the window, never that it served this
-  // document. `personal.example.uk` served it, so this is that instance's page —
+  // document. `personal.example.uk` served it, so this is that instance's page.
   // with or without a declaration, and with or without a global in the window.
   assert.equal(resolveMode(location('https://personal.example.uk/'), doc(false), host), 'self-host');
   assert.equal(resolveMode(location('https://personal.example.uk/'), doc(true), host), 'self-host');

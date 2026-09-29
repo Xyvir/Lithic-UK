@@ -3,8 +3,8 @@
  *
  * The × on a bookmarked instance means "throw this away", and the app is the only side
  * that can act on the whole of it. The bookmark list is this launcher's own storage, so
- * removing an entry needs nothing; the instance's *downloaded copy* — its launcher page,
- * its scripts, its icons — sits under that instance's origin, and a page may only touch
+ * removing an entry needs nothing; the instance's *downloaded copy* (its launcher page,
+ * its scripts, its icons) sits under that instance's origin, and a page may only touch
  * its own origin's storage. No amount of re-adding the bookmark reaches it, which is
  * exactly how a stuck instance used to be possible.
  *
@@ -18,6 +18,7 @@
  * already removed the bookmark, and the one thing left to do about it is say so.
  */
 
+import { copy } from './copy.ts';
 import { tauriInvoke } from './file-bridge.ts';
 
 /** The command Rust answers. Both sides have to agree on this word (see `lib.rs`). */
@@ -27,7 +28,7 @@ export const FORGET_INSTANCE_COPY = 'forget_instance_copy';
  * What dropping the copy did.
  *
  * `supported` is the platform, not the attempt: on a system with no webview hook the
- * gesture never promised this half, so nothing is said. `cleared` is the attempt — false
+ * gesture never promised this half, so nothing is said. `cleared` is the attempt. False
  * on a supported platform means the copy is still there, which is the case worth a
  * sentence.
  */
@@ -69,10 +70,10 @@ export async function forgetInstanceCopy(
  *
  * Silence in two cases, for the same reason: nothing was promised and nothing was lost.
  * A platform without a hook never offered to drop anything (`supported`), and an attempt
- * that worked has nothing to report — the row disappearing is the feedback.
+ * that worked has nothing to report. The row disappearing is the feedback.
  */
 export function copyDropNote(label: string, drop: CopyDrop | null): string | null {
   if (drop?.supported === false) return null;
   if (drop?.cleared) return null;
-  return `Could not clear the cached copy of ${label}`;
+  return copy.instanceCopy.failed(label);
 }

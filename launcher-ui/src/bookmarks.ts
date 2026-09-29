@@ -1,15 +1,17 @@
 /**
- * Bookmarked self-hosted instances — the "meta-launcher" list.
+ * Bookmarked self-hosted instances. The "meta-launcher" list.
  *
  * The bookmark affordance is deliberately ABSENT from self-host mode: its whole
  * purpose is for an installed PWA or the Tauri app to act as a front end to
  * several different instances (personal, work, …). The one thing that makes
  * such a list usable is telling the instances apart, so each entry keeps the
- * instance's *own* icon — the emoji favicon its owner set (see
- * `instance-icon.ts`) — cached locally as a data URL. Caching (rather than
+ * instance's *own* icon (the emoji favicon its owner set (see
+ * `instance-icon.ts`)) cached locally as a data URL. Caching (rather than
  * pointing an `<img>` at the remote favicon) means the list still shows the
  * right icons offline, in the Tauri WebView, and across a redeploy.
  */
+import { copy } from './copy.ts';
+
 export const BOOKMARKS_KEY = 'bookmarkedInstances';
 /** Re-fetch an entry's icon after this long; beyond it the icon may be stale. */
 export const ICON_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000;
@@ -29,7 +31,7 @@ export type BookmarkEntry = {
 /**
  * The origin of a typed address, or a refusal.
  *
- * A bare host is given `https://`, which is the whole of the convenience here — and the
+ * A bare host is given `https://`, which is the whole of the convenience here, and the
  * one trap: a *spelled-out* scheme was read as a host, because the prefix went on before
  * anything was parsed. `ftp://other.example` became the origin `https://ftp`, so a
  * bookmark to a machine that does not exist was saved, and the guard below never ran:
@@ -39,14 +41,14 @@ export type BookmarkEntry = {
  */
 export function normalizeInstanceUrl(value: string): string {
   const input = value.trim();
-  if (!input) throw new Error('Enter a self-hosted Lithic instance URL.');
+  if (!input) throw new Error(copy.bookmarkErrors.needUrl);
   const scheme = /^([a-z][a-z0-9+.-]*):(?!\d)/i.exec(input);
-  if (scheme && !/^https?$/i.test(scheme[1])) throw new Error('Use an HTTP or HTTPS instance URL.');
+  if (scheme && !/^https?$/i.test(scheme[1])) throw new Error(copy.bookmarkErrors.needHttp);
   const url = new URL(/^https?:\/\//i.test(input) ? input : `https://${input}`);
-  if (url.protocol !== 'http:' && url.protocol !== 'https:') throw new Error('Use an HTTP or HTTPS instance URL.');
+  if (url.protocol !== 'http:' && url.protocol !== 'https:') throw new Error(copy.bookmarkErrors.needHttp);
   // `https:foo` parses with an empty host and the origin `null`, which is not an address
   // any fetch can be aimed at.
-  if (!url.hostname) throw new Error('Enter a self-hosted Lithic instance URL.');
+  if (!url.hostname) throw new Error(copy.bookmarkErrors.needUrl);
   return url.origin;
 }
 
@@ -76,7 +78,7 @@ function toEntry(value: unknown): BookmarkEntry | null {
     entry.icon = record.icon;
     entry.iconFetchedAt = typeof record.iconFetchedAt === 'number' ? record.iconFetchedAt : 0;
   }
-  // A stored `manualAuth: true` — the old "don't ask again" — is simply not read
+  // A stored `manualAuth: true` (the old "don't ask again") is simply not read
   // any more: the offer it silenced is now the only place a password can be typed,
   // and it carries "open without saving" for the answer the flag used to stand for.
   // Entries that still carry it lose it on the next write, since this rebuilds.
@@ -175,7 +177,7 @@ function svgDataUrl(text: string): string | null {
  *
  * Cross-origin, so the instance must allow it (this repo's deployment sends
  * `Access-Control-Allow-Origin` for the icon paths, though a hand-rolled server
- * often does not — see `fetchInstanceIconNative`, which the desktop app uses for
+ * often does not. See `fetchInstanceIconNative`, which the desktop app uses for
  * exactly that case). A null result is normal and non-fatal: protected
  * instances, offline servers, and hosts that never customized their icon all
  * land here, and the UI falls back to the remote URL or a plain label.

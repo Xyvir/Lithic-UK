@@ -30,7 +30,7 @@ function readStore(html: string): Array<Record<string, string>> {
 // Regression: a file exported from the in-wiki exporter opened with a blank
 // line, which the parser read as the field separator, so the first tiddler
 // arrived with no title. Injecting an unnamed tiddler aborts the boot into a
-// blank page with no error form — the whole mount was lost to one stray
+// blank page with no error form. The whole mount was lost to one stray
 // newline. A tiddler with no title is now dropped instead.
 test('a title-less tiddler is dropped instead of bricking the boot', () => {
   const html = buildEngineHtml(
@@ -100,7 +100,7 @@ test('injected saver suggests the handoff filename in the Save As picker', () =>
 });
 
 test('bootLegacyWiki boots the engine in place so the launcher URL stays in the address bar', async () => {
-  // Minimal engine stub — just needs to be valid HTML so injectTiddlers and
+  // Minimal engine stub. Just needs to be valid HTML so injectTiddlers and
   // injectSaverBootstrap can run without throwing.
   const engineStub = '<html><head></head><body><script class="tiddlywiki-tiddler-store" type="application/json">[]</script></body></html>';
 
@@ -122,7 +122,7 @@ test('bootLegacyWiki boots the engine in place so the launcher URL stays in the 
     replace(url: string) { blobNavigated = true; }
   };
   globalAny.location = locationMock;
-  // fetchEngine() reads window.location.href — Node has no global `window`, so
+  // fetchEngine() reads window.location.href. Node has no global `window`, so
   // point it at the same location mock used for location.replace().
   globalAny.window = { location: locationMock };
   globalAny.localStorage = {
@@ -182,7 +182,7 @@ test('engine bootstrap keeps the dirty watcher inert for HTML monolith mode', ()
 test('HTML monolith saves record the same searchable history as a lith', () => {
   const html = buildEngineHtml(ENGINE_STUB, { name: 'x.html', text: '' }, [], {}, { isHtmlMode: true });
   const start = html.indexOf('writable.write(_text)');
-  // Anchor on the NEXT `var lithText` — the saver emits one earlier, inside
+  // Anchor on the NEXT `var lithText`. The saver emits one earlier, inside
   // saveRemote, which would otherwise put the slice's end before its start.
   const end = html.indexOf('var lithText', start);
   assert.ok(start >= 0 && end > start, 'the monolith save branch is present');
@@ -391,7 +391,7 @@ test('mounting an HTML monolith records its own file as the save target', () => 
 });
 
 // The engine's own entry has to stay a pointer. The injected saver reads a name and a path from it
-// and never the body, and it was handed the whole handoff — so the second write of the same mount
+// and never the body, and it was handed the whole handoff, so the second write of the same mount
 // spent a session store's few megabytes on a document too, and a 10 MB Lith died there as well.
 // This is the leg that was missing when the recents mirror was fixed for the same 10 MB file.
 test('the engine mount records the save target rather than the document', async () => {
@@ -440,8 +440,8 @@ test('the engine mount records the save target rather than the document', async 
   assert.ok(pointer.length < 1024, `the entry is a pointer and not a document: ${pointer.length} bytes`);
 });
 
-// The launcher's own handoff key, which is what the reported failure named. It is bookkeeping —
-// the engine boots from the page this launcher writes, not from this key — so a store that will
+// The launcher's own handoff key, which is what the reported failure named. It is bookkeeping (
+// the engine boots from the page this launcher writes, not from this key) so a store that will
 // not take it may not cost the mount. The teeth: with the write unguarded this throws, and the
 // mount dies with `QuotaExceededError` under "Could not open …".
 test('a handoff the session store refuses may not cost the mount', () => {

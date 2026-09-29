@@ -1,6 +1,6 @@
 /**
  * Scratch editor support: the Tauri app (and local webapp) opens everyday
- * text files — .md / .txt / .tid / .json — as scratch wiki streams, turning
+ * text files (.md / .txt / .tid / .json) as scratch wiki streams, turning
  * Lithic into a fancy text editor where the file stays in place on disk.
  *
  * Mount:  flat file -> scratchTiddlers -> streams node tiddlers (markdown)
@@ -45,7 +45,7 @@ export function isHtmlMonolithName(name: string): boolean {
  * Whether the mounted engine streams this file's unsaved edits into the
  * launcher's `dirty_state_<name>` recovery backup.
  *
- * Every local file does, including scratch documents — the engine keys their
+ * Every local file does, including scratch documents. The engine keys their
  * backup on the same file name the launcher mounts, so a mount that skipped
  * recovery would take the file on disk and silently drop the edits captured
  * since the last save. An HTML monolith does not: a page may carry its own
@@ -61,7 +61,7 @@ export function tracksUnsavedEdits(name: string): boolean {
 /**
  * The one name a mount files everything under: its recent row, its flat search
  * cache, its version history and its dirty-state key. Getting this wrong is not
- * cosmetic — a mount whose cache name differs from its row name shows a row with
+ * cosmetic. A mount whose cache name differs from its row name shows a row with
  * a dead history button and lists a cached wiki no file corresponds to.
  *
  * Scratch documents and HTML monoliths save back in place as themselves, so they
@@ -83,11 +83,11 @@ export function resolveScratchKind(name: string): ScratchKind | null {
 
 /**
  * Resolve the ScratchPlan for a handoff. Plain text payloads parse as
- * markdown-style scratch (the .md default — Lithic's streams are the
+ * markdown-style scratch (the .md default: Lithic's streams are the
  * authoring format, so round-trips keep the source intact).
  *
  * The root title is the file name WITH its extension, because that title is
- * what the mounted wiki shows as the document — `notes.md`, `book.ipynb` — and
+ * what the mounted wiki shows as the document (`notes.md`, `book.ipynb`) and
  * a bare stem would name nothing in particular. This is the one place the
  * title is derived; both the injected root tiddler and the engine global the
  * saver serializes from come from here, so they cannot disagree. A name that is

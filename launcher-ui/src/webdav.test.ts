@@ -309,7 +309,7 @@ test('fetchRemoteWikiMeta asks about the file instead of asking for it', async (
 });
 
 // An instance older than the metadata read ignores the parameter and answers with the file. Read as
-// metadata that answer is nothing, and the caller would fetch the same bytes a second time — so the
+// metadata that answer is nothing, and the caller would fetch the same bytes a second time, so the
 // state it reports is the whole point: one request, and the file is in hand.
 test('a server that ignores the metadata read answers with the file, and the answer is used', async () => {
   const read = await fetchRemoteWikiMeta(

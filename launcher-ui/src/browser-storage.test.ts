@@ -25,8 +25,8 @@ test('a browser without it falls back to browser storage', () => {
 });
 
 test('the desktop app and a self-host instance are never storage-only', () => {
-  // Neither one needs a picker — Rust writes the file, WebDAV writes the
-  // server's copy — so a missing API there is not the launcher's problem.
+  // Neither one needs a picker (Rust writes the file, WebDAV writes the
+  // server's copy) so a missing API there is not the launcher's problem.
   assert.equal(resolveStorageMode('tauri', {}), 'file');
   assert.equal(resolveStorageMode('self-host', {}), 'file');
   assert.equal(resolveStorageMode('tauri', {}, 'index-db'), 'file');

@@ -57,7 +57,7 @@ test('hasBackedUpRepo is false while nothing is backed up', () => {
 });
 
 test('syncedDirFor picks the covered folder of the newest row that has one', () => {
-  // The newest rows are the stray ones — which is exactly the state a local-only
+  // The newest rows are the stray ones. Which is exactly the state a local-only
   // mark appears in, so walking past them to the first covered row is the case
   // that matters, not an edge case.
   const rows = [
@@ -171,7 +171,7 @@ test('reindexFolders walks repository roots first, then every known folder', () 
  * The same folder, spelled the two ways it arrives. A repository root comes back
  * from the backend with no separator on the end; a row's folder is cut out of a
  * file path and keeps one. They are one directory, the listing is flat, and the
- * rebuild replaces the list with what the listing found — so listing both would
+ * rebuild replaces the list with what the listing found, so listing both would
  * put every Lith in the folder on the list twice.
  */
 test('reindexFolders lists one folder once, whatever its spelling', () => {
@@ -187,8 +187,8 @@ test('reindexFolders lists one folder once, whatever its spelling', () => {
 });
 
 /**
- * A row's folder is kept when nothing covers it — the folder that is not backed up
- * yet is still listed, so a rebuild finds its siblings — and whitespace inside a
+ * A row's folder is kept when nothing covers it (the folder that is not backed up
+ * yet is still listed, so a rebuild finds its siblings) and whitespace inside a
  * name is never touched.
  */
 test('reindexFolders keeps unbacked folders and their names exactly', () => {

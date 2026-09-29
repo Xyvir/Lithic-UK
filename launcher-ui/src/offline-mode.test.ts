@@ -45,7 +45,7 @@ test('the banner copy is the legacy notice, dash-free', () => {
   // of them is the half a rewrite kept dropping: the copies open read-only.
   assert.match(OFFLINE_BODY, /saved copies/);
   assert.match(OFFLINE_BODY, /read-only/);
-  assert.equal(/[—–]/.test(`${OFFLINE_TITLE} ${OFFLINE_BODY}`), false);
+  assert.equal(/[\u2013\u2014]/.test(`${OFFLINE_TITLE} ${OFFLINE_BODY}`), false);
 });
 
 test('the banner copy is two short clauses, not a paragraph', () => {

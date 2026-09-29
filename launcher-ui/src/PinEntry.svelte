@@ -5,19 +5,20 @@
    * Box entry rather than a text field, because the PIN has a fixed length and a
    * fixed alphabet: one character per box, anything else refused as it is typed,
    * and the last box filling up is the signal to go. That last part is the whole
-   * entry method — `complete` fires the moment the sixth character lands, so
+   * entry method. `complete` fires the moment the sixth character lands, so
    * opening an instance is six characters and nothing else.
    *
    * Case is folded here and again in Rust (`normalize_secret`), which is what makes
    * "case-insensitive" a fact about the file rather than a claim about the boxes.
    */
   import { onMount, tick } from 'svelte';
+  import { copy } from './copy';
 
   /** The PIN, always the folded form: upper case, letters and digits only. */
   export let value = '';
   export let length = 6;
   /** Shown above the boxes, and the group's accessible name. */
-  export let label = 'PIN';
+  export let label = copy.common.pin;
   /**
    * Fired as soon as the last box is filled, with the completed PIN. The value is
    * passed rather than left to be read back out of the binding: this is the one
@@ -29,15 +30,15 @@
   export let reveal = false;
   /**
    * Render that toggle in the label row, at the far end of it. The row is as wide as the
-   * boxes below it (see `.pin-entry`), so the far end is the boxes' own right edge — the
-   * end of the entry it reveals — rather than an em after the word "PIN", where it sat
+   * boxes below it (see `.pin-entry`), so the far end is the boxes' own right edge (the
+   * end of the entry it reveals) rather than an em after the word "PIN", where it sat
    * over the middle of them. Asked for by the shapes where these boxes are the only way in:
    * a PIN that is typed once and never repeated has no other way to be checked by eye, and
    * a PIN that is repeated below confirms itself, so it is offered no toggle at all rather
    * than a switch nobody needs.
    */
   export let revealToggle = false;
-  /** Bump this to empty the boxes and take focus again — a new attempt. */
+  /** Bump this to empty the boxes and take focus again. A new attempt. */
   export let reset = 0;
   /** Bump this to move the caret into the first empty box. */
   export let focusSignal = 0;
@@ -56,7 +57,7 @@
   /**
    * The boxes are read from the DOM: six of them, in order, and nothing to keep in step.
    *
-   * `.pin-box` rather than `input`, because the label row may hold a Show checkbox — an
+   * `.pin-box` rather than `input`, because the label row may hold a Show checkbox. An
    * `input` too, and earlier in the document, so the looser query would count seven and
    * paint the PIN into the toggle.
    */
@@ -64,7 +65,7 @@
     return root ? [...root.querySelectorAll<HTMLInputElement>('.pin-box')] : [];
   }
 
-  /** The model is the source of truth, so the DOM follows it — never the reverse. */
+  /** The model is the source of truth, so the DOM follows it. Never the reverse. */
   function paint() {
     boxes().forEach((box, index) => {
       box.value = digits[index] ?? '';
@@ -102,8 +103,8 @@
   });
 
   /**
-   * Fill from `index` with whatever arrived — one keystroke, or a whole PIN pasted
-   * into one box — and report a full PIN. Anything outside the alphabet is dropped
+   * Fill from `index` with whatever arrived (one keystroke, or a whole PIN pasted
+   * into one box) and report a full PIN. Anything outside the alphabet is dropped
    * rather than rejected, so a stray symbol never fills a box.
    */
   function fill(index: number, raw: string) {
@@ -163,7 +164,7 @@
   <div class="pin-head">
     <span class="pin-label">{label}</span>
     {#if revealToggle}
-      <label class="vault-reveal"><input type="checkbox" bind:checked={reveal} /> Show</label>
+      <label class="vault-reveal"><input type="checkbox" bind:checked={reveal} /> {copy.common.show}</label>
     {/if}
   </div>
   <div class="pin-boxes" role="group" aria-label={label}>
@@ -183,7 +184,7 @@
         autocorrect="off"
         spellcheck="false"
         {disabled}
-        aria-label={`${label}, character ${index + 1} of ${length}`}
+        aria-label={copy.common.characterAria(label, index + 1, length)}
         on:input={(event) => fill(index, (event.currentTarget as HTMLInputElement).value)}
         on:keydown={(event) => keydown(index, event)}
         on:paste={(event) => paste(index, event)}

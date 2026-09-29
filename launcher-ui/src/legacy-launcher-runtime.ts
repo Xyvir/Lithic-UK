@@ -1,3 +1,4 @@
+import { copy } from './copy.ts';
 import { parseLithToJSON } from './lithic-format.ts';
 import { resolveScratchKind, resolveScratchPlan, parseScratchSource, parseTidFile } from './scratch-editor.ts';
 import { tagRootDogear } from './pending-imports.ts';
@@ -25,7 +26,7 @@ export type RemoteTarget = {
   digest: string;
   apiAvailable: boolean;
   /**
-   * Open without claiming the lock or installing a saver — the legacy
+   * Open without claiming the lock or installing a saver. The legacy
    * "Active Session Detected → Open Read-Only" path, used when someone else's
    * lock is still live and this session must not write over their copy.
    */
@@ -93,7 +94,7 @@ async function fetchEngine(): Promise<string> {
     // Report the actionable error below.
   }
 
-  throw new Error('Could not load the Lithic engine locally, from the offline cache, or online.');
+  throw new Error(copy.status.engineMissing);
 }
 
 function injectTiddlers(html: string, tiddlers: Array<Record<string, string>>): string {
@@ -145,12 +146,12 @@ function injectSaverBootstrap(
   // The active file name keys the transient dirty-state backup in IndexedDB.
   // An HTML monolith leaves it empty and opts out: a page may carry its own
   // recovery through add-ons or plugins, and the launcher must not interpose on
-  // what the page does with its own edits. Searchable history is unaffected —
+  // what the page does with its own edits. Searchable history is unaffected.
   // the save path records that for monoliths too, from what actually lands.
   const activeFileNameJson = isHtmlMode ? '""' : JSON.stringify(suggestedFileName || 'new.lith').replace(/</g, '\\u003c');
   const saveTypes = isHtmlMode
-    ? [{ description: 'Lithic HTML File', accept: { 'text/html': ['.html', '.htm'] } }]
-    : [{ description: 'Lithic Monolith', accept: { 'application/x-lith': ['.lith'] } }, { description: 'Jupyter Notebook', accept: { 'application/x-ipynb+json': ['.ipynb'] } }];
+    ? [{ description: copy.fileTypes.html, accept: { 'text/html': ['.html', '.htm'] } }]
+    : [{ description: copy.fileTypes.monolith, accept: { 'application/x-lith': ['.lith'] } }, { description: copy.fileTypes.notebookOne, accept: { 'application/x-ipynb+json': ['.ipynb'] } }];
   const saveTypesJson = JSON.stringify(saveTypes);
   const htmlModeLiteral = isHtmlMode ? 'true' : 'false';
   const driftedFromHeadLiteral = driftedFromHead ? 'true' : 'false';
@@ -240,8 +241,8 @@ function injectSaverBootstrap(
           // Tauri pseudo-handles (no getFile) must not enter the recents
           // store: record their disk path so the launcher re-opens via the
           // Rust read command, not the File System Access API. The browser-only
-          // pseudo-handle is the same kind of thing for the opposite reason —
-          // there is no file at all — and is flagged so the launcher lists it
+          // pseudo-handle is the same kind of thing for the opposite reason (
+          // there is no file at all) and is flagged so the launcher lists it
           // as volatile rather than offering to re-open it.
           var newEntry = fileHandle.__lithicTauriPath__
             ? { handle: null, name: fileHandle.name, tauriPath: fileHandle.__lithicTauriPath__ }
@@ -475,7 +476,7 @@ function injectSaverBootstrap(
         if (!changes) return;
         var titles = Object.keys(changes);
         if (titles.length === 0) return;
-        // Skip engine plumbing ($:/ state, plugins) — user content only.
+        // Skip engine plumbing ($:/ state, plugins). User content only.
         // NOTE: no regex literal here. This whole bootstrap is one template
         // literal, so backslash escapes get consumed at build time and would
         // emit a script that fails to parse. indexOf needs no escapes.
@@ -612,8 +613,8 @@ function injectSaverBootstrap(
     var remote = ${remoteJson};
 
     // Scratch (fancy text editor) save: serialize the wiki back to the
-    // original flat format — stream nodes for .md/.txt, a .tid document for
-    // .tid, verbatim body for .json — and write it to the same file.
+    // original flat format (stream nodes for .md/.txt, a .tid document for
+    // .tid, verbatim body for .json) and write it to the same file.
     function serializeScratchPayload() {
       var twNow = root.$tw;
       if (!twNow || !twNow.wiki || !twNow.wiki.getTiddler) return null;
@@ -711,7 +712,7 @@ function injectSaverBootstrap(
 
     // --- Index-db-only save path ---------------------------------------------
     // The platform gave this tab no way to write a file, so the cached copy is
-    // not a backup of the save — it *is* the save. It writes exactly the keys a
+    // not a backup of the save. It *is* the save. It writes exactly the keys a
     // real save writes (the flat search cache and the versioned history), which
     // is what keeps everything downstream working unchanged: the recents row,
     // the search index, unsaved-edit recovery, and the version-history modal
@@ -774,7 +775,7 @@ function injectSaverBootstrap(
         if (scratchMode !== 'off') {
           var payload = serializeScratchPayload();
           if (typeof payload !== 'string') {
-            callback(new Error('Scratch serialization failed; file left unchanged.'));
+            callback(new Error(copy.status.scratchSaveFailed));
             return;
           }
           var writableP = handle.createWritable
@@ -822,7 +823,7 @@ function injectSaverBootstrap(
         if (tw && tw.wiki && tw.wiki.deleteTiddler) {
           tw.wiki.deleteTiddler('$:/state/DisableAutoSaver');
         }
-        // Git-synced file (Tauri): auto-commit the save best-effort — never
+        // Git-synced file (Tauri): auto-commit the save best-effort. Never
         // blocks or fails the save itself, and Rust skips non-Lithic repos.
         // Reports what the backup did, not just that it ran, so the launcher's
         // icon can show a push that never landed instead of pulsing green over
@@ -855,7 +856,7 @@ function injectSaverBootstrap(
             }).catch(function(error) {
               // The save is on disk either way; the backup is what did not
               // happen, and a managed folder is the only place that matters.
-              announce({ managed: true, error: (error && error.message) || 'the sync backend did not answer' });
+              announce({ managed: true, error: (error && error.message) || copy.sync.backendSilent });
             });
           } catch (e) { /* sync is opportunistic */ }
         }
@@ -914,8 +915,8 @@ function injectEngineGlobals(html: string, globals: Record<string, string>): str
 }
 
 /**
- * The scratch mount's root tiddler title: the parsed plan's base — the file
- * name with its extension — matching parseScratchSource's injected root
+ * The scratch mount's root tiddler title: the parsed plan's base (the file
+ * name with its extension) matching parseScratchSource's injected root
  * tiddler. Asked of resolveScratchPlan rather than re-derived here, so the
  * injected root and the engine global the saver serializes from cannot
  * disagree. Returns the name unchanged for non-scratch files.
@@ -956,7 +957,7 @@ function parseHandoffImported(name: string, text: string): Array<Record<string, 
       return [marked, ...parsed.slice(1)];
     }
     // .md/.txt/.json saves never serialize the tags field, so the root can
-    // carry Dogear unconditionally — it opens the document at the top of
+    // carry Dogear unconditionally. It opens the document at the top of
     // the story river, matching shared payloads.
     return tagRootDogear(parsed);
   }
@@ -979,7 +980,7 @@ export function buildEngineHtml(
     ? parseHandoffImported(handoff.name, handoff.text)
     : (handoff.payloadTiddlers ?? []);
   // File tiddlers first, then queued pending imports (payload, Ephemeral
-  // integration, etc.) so later entries win on title conflicts — mirrors the
+  // integration, etc.) so later entries win on title conflicts. Mirrors the
   // legacy launcher, which appends window.pendingImports after the store.
   // An entry without a title is dropped rather than injected: TiddlyWiki cannot
   // store an unnamed tiddler, and handing it one aborts the boot into a blank
@@ -1045,11 +1046,11 @@ export async function bootLegacyWiki(
 
   // A pointer, not the document: the injected saver reads a name and a path from here and never
   // the body, which is what the monolith branch below has always recorded. This used to be handed
-  // the whole handoff — body and all — so it threw on the line after the launcher's own, on the
+  // the whole handoff (body and all) so it threw on the line after the launcher's own, on the
   // same mount, for the same reason (see writeHandoff).
   setActiveFile({ name: handoff.name, path: handoff.path });
   // Boot the engine into the current document so the launcher URL stays in
-  // the address bar — a plain refresh / "return to launcher" lands back on
+  // the address bar. A plain refresh / "return to launcher" lands back on
   // the launcher UI. This mirrors the legacy launcher.html boot path, which
   // uses the same document.open/write/close mechanism from a module script.
   document.open();
@@ -1098,11 +1099,11 @@ export function readHandoff(): LauncherHandoff | null {
  *
  * This build does not rely on it: the engine boots into the launcher's own document and the
  * payload is already in the page `buildEngineHtml` writes, and nothing navigates to the engine
- * with `?mount` any more. It is kept for the reader that is left — an engine cached from an older
- * build — and it is exactly what broke a big file. A session store's whole budget is a few
+ * with `?mount` any more. It is kept for the reader that is left (an engine cached from an older
+ * build) and it is exactly what broke a big file. A session store's whole budget is a few
  * megabytes, and this key was handed the entire document: a 10 MB Lith failed its own mount with
  * `QuotaExceededError`, surfaced as "Could not open …", on an instance and in the desktop app
- * alike. Note this is not the key `persistRecentRows` fixed — that one was the recents mirror, and
+ * alike. Note this is not the key `persistRecentRows` fixed. That one was the recents mirror, and
  * the mount died here first.
  *
  * A handoff is bookkeeping, and bookkeeping may never cost a mount, so this never throws: a
@@ -1125,8 +1126,8 @@ function setActiveFile(pointer: { name?: string; path?: string }): void {
 /**
  * Write a session-store entry, or leave it unwritten.
  *
- * What these entries hold can be re-read from disk or the server, so a store that refuses one — a
- * full quota, a quarantined storage area — must not be able to stop a mount. The failures here are
+ * What these entries hold can be re-read from disk or the server, so a store that refuses one (a
+ * full quota, a quarantined storage area) must not be able to stop a mount. The failures here are
  * the store's business, not the mount's.
  */
 function storeInSession(key: string, value: unknown): void {

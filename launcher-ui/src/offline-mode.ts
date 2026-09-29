@@ -15,6 +15,7 @@
  * describing a launcher that no longer exists.
  */
 
+import { copy } from './copy.ts';
 import type { LauncherMode } from './mode.ts';
 
 /**
@@ -55,22 +56,22 @@ export function looksUnreachable(error: unknown): boolean {
  * happened to the reader. The retired launcher's own notice led with the symptom, and it
  * is the one line that explains why a list they know changed shape.
  */
-export const OFFLINE_TITLE = 'Server unreachable';
+export const OFFLINE_TITLE = copy.offline.title;
 
 /**
  * The banner's one line: what is listed, and what opening it does.
  *
  * The legacy launcher's wording, which said this better than a rewrite did and is where the
- * shape comes from: `Server unreachable — showing local cache. Files open in read-only
+ * shape comes from: `Server unreachable. Showing local cache. Files open in read-only
  * mode.` Its two clauses survive here (what is on screen, and the read-only consequence the
  * row tooltips would otherwise carry one row at a time); its em dash does not, because the
  * copy rules ban dashes and ask for a period instead (agents.md). "This device's saved
  * copies" is the half the reader needs: the list is theirs, not the server's.
  */
-export const OFFLINE_BODY = 'Showing this device’s saved copies. Liths open read-only.';
+export const OFFLINE_BODY = copy.offline.body;
 
 /** The mark's title while offline: the reason a row reads as local-only. */
-export const OFFLINE_ROW_MARK_TITLE = 'Only on this device while offline.';
+export const OFFLINE_ROW_MARK_TITLE = copy.offline.rowMarkTitle;
 
 /** What opening a listed row does while offline. */
-export const OFFLINE_ROW_OPEN_TITLE = 'Open this device’s copy read-only';
+export const OFFLINE_ROW_OPEN_TITLE = copy.offline.rowOpenTitle;

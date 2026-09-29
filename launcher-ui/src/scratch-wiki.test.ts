@@ -150,7 +150,7 @@ test('scratchTiddlers: root carries stream-list, nodes carry parent/gap/markdown
  * The streams `get-stream-nodes` operator only recurses into a node that has
  * BOTH `stream-list` and `stream-type`. The scratch mount is the stream creator
  * that used to leave `stream-type` off, which silently truncated every walk to
- * the document root — whose text is blank — so Copy Story River copied an empty
+ * the document root (whose text is blank) so Copy Story River copied an empty
  * string from a scratch document. Verified against the built engine: with the
  * field, the same button copies the whole outliner body.
  */

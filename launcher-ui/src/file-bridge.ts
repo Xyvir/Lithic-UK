@@ -4,11 +4,13 @@
  * A pick is a *reference* to a file, not its contents: it carries a `path` (the
  * desktop app) or a `handle` (the browser's own picker), which is what opening or
  * reading it again later needs. `text` is filled only where the picker had no
- * other way to hand the file over — the classic `<input type=file>` gives names
- * and bytes and nothing else — and is otherwise read on demand by `readText`.
+ * other way to hand the file over (the classic `<input type=file>` gives names
+ * and bytes and nothing else) and is otherwise read on demand by `readText`.
  * That distinction is the point of it: a multi-file pick is a list of liths
  * nobody has opened, and each one is a whole wiki.
  */
+import { copy } from './copy.ts';
+
 export interface PickedLith {
   name: string;
   path?: string;
@@ -31,8 +33,8 @@ type TauriApi = { invoke: (command: string, args?: Record<string, unknown>) => P
  * Resolve the Tauri invoke function across versions: Tauri v1 exposes
  * window.__TAURI__.tauri.invoke and Tauri v2 exposes window.__TAURI__.core.invoke
  * (both under withGlobalTauri), with the bare window.__TAURI__.invoke accepted
- * too. The launcher bundle ships to all three — the desktop app, the hosted site
- * and a portable folder — so it has to work whichever one is hosting it.
+ * too. The launcher bundle ships to all three (the desktop app, the hosted site
+ * and a portable folder) so it has to work whichever one is hosting it.
  */
 /**
  * Exposed so UI surfaces (e.g. the desktop Install button) can invoke
@@ -78,7 +80,7 @@ function tauriEventApi(): TauriEventApi | null {
 
 /**
  * Subscribe to an event emitted from Rust (Tauri's `emit`), returning
- * an unsubscribe function — or null outside Tauri, so callers can register
+ * an unsubscribe function, or null outside Tauri, so callers can register
  * unconditionally. `listen` is async, so an unsubscribe that arrives before the
  * subscription resolves cancels it on arrival instead of leaking the handler.
  */
@@ -115,8 +117,8 @@ interface FilePickerHandle {
  *
  * The distinction is the whole point: the desktop app writes through Rust and
  * the Chromium file picker resolves after `close()`, so both prove the bytes
- * landed. The legacy `<a download>` fallback cannot — the browser never reports
- * whether a download finished — so it reports `started`, and callers must not
+ * landed. The legacy `<a download>` fallback cannot (the browser never reports
+ * whether a download finished) so it reports `started`, and callers must not
  * present that as a file that exists.
  */
 export async function saveTextVerifiably(fileName: string, text: string): Promise<SaveOutcome> {
@@ -141,7 +143,7 @@ export async function saveTextVerifiably(fileName: string, text: string): Promis
     try {
       const handle = (await picker({
         suggestedName: fileName,
-        types: [{ description: 'Lithic Monolith', accept: { 'application/x-lith': ['.lith'] } }]
+        types: [{ description: copy.fileTypes.monolith, accept: { 'application/x-lith': ['.lith'] } }]
       })) as FilePickerHandle;
       const writable = await handle.createWritable();
       await writable.write(text);
@@ -169,16 +171,16 @@ export async function saveTextVerifiably(fileName: string, text: string): Promis
 
 async function fetchText(url: string): Promise<string> {
   const response = await fetch(url);
-  if (!response.ok) throw new Error(`Unable to load wiki engine (${response.status})`);
+  if (!response.ok) throw new Error(copy.status.engineUnavailable(String(response.status)));
   return response.text();
 }
 
 const OPEN_TYPES = [
-  { description: 'Lithic Monolith', accept: { 'application/x-lith': ['.lith'] } },
-  { description: 'Lithic JSON Backups', accept: { 'application/json': ['.json'] } },
-  { description: 'Lithic HTML Files', accept: { 'text/html': ['.html', '.htm'] } },
-  { description: 'Editable text files', accept: { 'text/plain': ['.md', '.txt', '.tid'] } },
-  { description: 'Jupyter Notebooks', accept: { 'application/x-ipynb+json': ['.ipynb'] } }
+  { description: copy.fileTypes.monolith, accept: { 'application/x-lith': ['.lith'] } },
+  { description: copy.fileTypes.json, accept: { 'application/json': ['.json'] } },
+  { description: copy.fileTypes.htmlMany, accept: { 'text/html': ['.html', '.htm'] } },
+  { description: copy.fileTypes.text, accept: { 'text/plain': ['.md', '.txt', '.tid'] } },
+  { description: copy.fileTypes.notebook, accept: { 'application/x-ipynb+json': ['.ipynb'] } }
 ];
 
 /**
@@ -186,7 +188,7 @@ const OPEN_TYPES = [
  *
  * Only Chromium's `showOpenFilePicker` can answer with several files that stay
  * openable: each one comes back as a handle, which is what a Recents row needs
- * to find the file again — and a handle is also how its contents are read later,
+ * to find the file again, and a handle is also how its contents are read later,
  * so nothing is read here. The classic `<input type=file>` hands over names and
  * bytes and nothing else, so it stays single-select rather than offering a
  * multi-select whose extra picks could never be reopened.
@@ -236,7 +238,7 @@ function browserBridge(): FileBridge {
         try {
           const handle = await (window as any).showSaveFilePicker({
             suggestedName: suggestedName.toLowerCase().endsWith('.lith') ? suggestedName : `${suggestedName}.lith`,
-            types: [{ description: 'Lithic Monolith', accept: { 'application/x-lith': ['.lith'] } }]
+            types: [{ description: copy.fileTypes.monolith, accept: { 'application/x-lith': ['.lith'] } }]
           });
           const writable = await handle.createWritable();
           await writable.write(text);

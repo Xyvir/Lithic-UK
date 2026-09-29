@@ -20,7 +20,7 @@ test('parses CRLF blocks', () => {
 // Regression: the in-wiki exporter prefixes its first block with a blank line,
 // and taking the first blank line as the field separator turned that whole
 // field section into body text. The result was a tiddler with no title, which
-// the engine refuses to boot around — the file looked corrupted rather than
+// the engine refuses to boot around. The file looked corrupted rather than
 // carrying one stray newline.
 test('a leading blank line does not swallow the first block of fields', () => {
   const source = '\n\ntitle: First\ntype: text/markdown\n\nlith body\n⁂⁂⁂\n\n\ntitle: Second\n\nsecond body';

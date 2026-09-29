@@ -13,7 +13,7 @@ import {
 /** Evaluate the ES5 runtime string the same way the engine bootstrap will. */
 function loadRuntime(): Record<string, any> {
   // The runtime picks its root via `typeof window !== 'undefined'`, so simply
-  // supply a sandbox window — no text munging of the runtime needed.
+  // supply a sandbox window. No text munging of the runtime needed.
   const sandbox: Record<string, any> = {};
   new Function('window', 'globalThis', JSON_PATCH_RUNTIME)(sandbox, sandbox);
   return sandbox.__LITHIC_JSON_PATCH__;

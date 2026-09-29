@@ -39,7 +39,7 @@ export type InstanceReads = Record<string, InstanceCacheRead>;
  *   2. Within that, the instance's most recently saved wiki wins, which is the order
  *      the caches arrived in.
  *
- * A cache whose only match is a stamp contributes nothing — `searchCachedWiki` decides
+ * A cache whose only match is a stamp contributes nothing. `searchCachedWiki` decides
  * that, and this does not second-guess it.
  */
 export function topHit(read: InstanceCacheRead, query: string): InstanceHit | null {

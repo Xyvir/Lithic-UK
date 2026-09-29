@@ -108,7 +108,7 @@ function storage() {
   } as unknown as Storage;
 }
 
-test('the icon doorbell is written last — the watcher depends on it', () => {
+test('the icon doorbell is written last. The watcher depends on it', () => {
   assert.equal(ICON_TARGETS[ICON_TARGETS.length - 1].path, ICON_DOORBELL);
   assert.equal(ICON_TARGETS.filter((target) => target.path === ICON_DOORBELL).length, 1);
   const paths = ICON_TARGETS.map((target) => target.path);
@@ -313,7 +313,7 @@ test('instanceMarkUrl names the instance\'s own file, and null when there is no 
   assert.equal(instanceMarkUrl({ protocol: 'http:' }), '/mstile-150x150.png');
   assert.ok(ICON_TARGETS.some((target) => `/${target.path}` === INSTANCE_MARK_FILE), 'and it is one of the renders the set writes');
   // A page with no instance behind it has no root to read that from, and the caller draws
-  // the shipped mark instead — which is what the desktop app and every file:// copy get.
+  // the shipped mark instead. Which is what the desktop app and every file:// copy get.
   assert.equal(instanceMarkUrl({ protocol: 'file:' }), null);
   assert.equal(instanceMarkUrl({ protocol: 'tauri:' }), null);
   assert.equal(instanceMarkUrl(null), null);
@@ -332,7 +332,7 @@ test('the emoji shortlist is the culled one, and small enough for its grid', () 
   // What the cull still keeps out, spelled out so it cannot drift back one glyph at a time:
   // the near-duplicates (one of each pair or three kept), every face, and the speaking head.
   // The ten that came back are not on it: the lightning bolt (its absence showed), a globe,
-  // and the eight that carry the count to 80 — the fire, the snowflake, the herb, four
+  // and the eight that carry the count to 80. The fire, the snowflake, the herb, four
   // buildings and the ballot box (see the list).
   const dropped = [
     '📍', '📈', '📉', '⚗️', '🖥️', '🌏', '🌺', '🌻',

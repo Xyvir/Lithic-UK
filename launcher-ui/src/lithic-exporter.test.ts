@@ -3,18 +3,18 @@ import fs from 'node:fs';
 import test from 'node:test';
 
 // The in-wiki .lith exporter is wikitext, so it cannot be unit-tested by
-// importing it — but the three mistakes that shipped bugs are all visible in
+// importing it, but the three mistakes that shipped bugs are all visible in
 // its source text, and each one is easy to reintroduce while "simplifying" the
 // markup. They are pinned here instead:
 //
 //   1. Transcluding $:/core/templates/tid-tiddler prefixes every block with a
 //      blank line (that template starts with a newline), and an export that
-//      begins with a blank line was being read as a file with no title — which
+//      begins with a blank line was being read as a file with no title. Which
 //      the engine will not boot around, so the mount white-screened.
 //   2. A bare `-[prefix[x]]` exclusion run is re-evaluated against non-shadow
 //      tiddlers only, so every engine shadow survived it and a baseline tiddler
 //      landed in a user's export.
-//   3. The export default was the word "tiddlers" — TiddlyWiki jargon, and not
+//   3. The export default was the word "tiddlers". TiddlyWiki jargon, and not
 //      the name of anything in Lithic.
 const EXPORTER = new URL('../../wiki/local-plugins/lithic-core/$__lithic_exporter_lith.tid', import.meta.url);
 const source = fs.readFileSync(EXPORTER, 'utf8').replace(/\r\n/g, '\n');
