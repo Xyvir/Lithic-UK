@@ -4,6 +4,7 @@ import {
   BROWSER_ONLY_HISTORY_NOTE,
   BROWSER_ONLY_TOOLTIP,
   browserOnlyMarkTitle,
+  rememberRowKind,
   resolveStorageMode,
   storageModeOverride,
   supportsFileAccessApi
@@ -75,4 +76,31 @@ test('neither the mark nor the dialog note reaches for a dash to join two clause
   // The claim leads with its own sentence rather than a dash: what it is, then what that
   // means, which is the shape the offline banner uses too.
   assert.match(BROWSER_ONLY_HISTORY_NOTE, /^Browser storage only\. This Lith has no file,/);
+});
+
+test('a declared browser mount never writes files, however capable the browser is', () => {
+  // A shim serves the launcher from loopback and promises one data model, so a save that
+  // landed in a Downloads folder would be the second copy of a Lith with no file.
+  assert.equal(resolveStorageMode('webapp', picker, null, true), 'index-db');
+  assert.equal(resolveStorageMode('webapp', {}, null, true), 'index-db');
+  // The query is still the escape hatch, being how the fallback is exercised by hand.
+  assert.equal(resolveStorageMode('webapp', picker, 'file', true), 'file');
+  assert.equal(resolveStorageMode('webapp', picker, 'index-db', true), 'index-db');
+  // Neither the app nor an instance is a browser mount, so neither is affected.
+  assert.equal(resolveStorageMode('tauri', picker, null, true), 'file');
+  assert.equal(resolveStorageMode('self-host', picker, null, true), 'file');
+  // And a page that declared nothing keeps the platform's own answer.
+  assert.equal(resolveStorageMode('webapp', picker, null, false), 'file');
+});
+
+test('a browser-only page never remembers a row built on a handle', () => {
+  // The rule that stops a Chromium shim claiming a file: its picker hands files over as
+  // handles, and every save in this mode goes to browser storage instead, so the row has to
+  // be the browser-only one whatever the picker returned.
+  assert.equal(rememberRowKind(true, true), 'browser-only');
+  assert.equal(rememberRowKind(true, false), 'browser-only');
+  // Away from a browser-only page a handle is what makes the row reopenable, and a name
+  // with no handle is a row that can only be read back from the store.
+  assert.equal(rememberRowKind(false, true), 'handle');
+  assert.equal(rememberRowKind(false, false), 'plain');
 });

@@ -195,6 +195,23 @@ export function launcherReturn(
  * the half that has to be inferred, because the launcher artifact is shared and
  * so cannot carry a tag of its own.
  */
+/**
+ * A process saying it is *not* an instance. It serves the launcher and the wiki and nothing
+ * else, so nothing here has a server of its own and `self-host` would be a lie.
+ *
+ * The tag exists because the launcher file cannot carry it, for the same reason it cannot
+ * carry `lithic-webdav` (see `servedByInstance`): the same bytes are an instance's own
+ * launcher, so what this page is can only be said by whoever sent it. A local shim is the
+ * first sender that is neither an instance nor a published deployment, and it is the one
+ * sender the address cannot answer for, since a loopback origin is an instance by the
+ * machine rule below.
+ */
+export const BROWSER_ONLY_META = 'lithic-browser-only';
+
+export function declaresBrowserOnly(doc: Pick<Document, 'querySelector'> | null): boolean {
+  return Boolean(doc && doc.querySelector(`meta[name="${BROWSER_ONLY_META}"]`));
+}
+
 function declaresInstance(doc: Pick<Document, 'querySelector'> | null): boolean {
   return Boolean(doc && doc.querySelector('meta[name="lithic-webdav"]'));
 }
@@ -227,7 +244,9 @@ const PUBLIC_LAUNCHER_HOSTS = ['lithic.uk', 'www.lithic.uk'];
  * part of the rule rather than a detail of it.
  *
  * localhost, `127.0.0.1` and `.local` are not named here: those are instances by
- * their own rule, which is about a machine rather than about a guess.
+ * their own rule, which is about a machine rather than about a guess. A document that
+ * declares `lithic-browser-only` is the one exception, because a shim on the user's own
+ * machine is reached at exactly that address and is not an instance.
  */
 export function servedByInstance(location: Location): boolean {
   // Only http(s) can have a `/sync/` behind it; `tauri:` and `file:` are the app
@@ -259,6 +278,16 @@ export function resolveMode(
   // this machine's folders, offering to write an install beside the exe. All of
   // that against a page whose content belongs to someone else's server.
   if (tauriApiAvailable(host) && servedByApp(location)) return 'tauri';
+
+  // A process that says it is browser-only is the launcher standing on its own, which is
+  // what a local shim serves. It has to outrank the machine rules below, because the shim
+  // is reached at exactly the address those rules read as an instance. An instance's own
+  // declarations outrank it in turn, so no deployment is talked out of being what it says
+  // it is.
+  const browserOnly = declaresBrowserOnly(doc)
+    && !declaresInstance(doc)
+    && !location.pathname.startsWith('/sync/');
+  if (browserOnly) return 'webapp';
 
   const isSelfHost = location.pathname.startsWith('/sync/')
     || declaresInstance(doc)

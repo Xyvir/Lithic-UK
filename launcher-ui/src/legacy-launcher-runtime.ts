@@ -732,6 +732,40 @@ function injectSaverBootstrap(
       });
     }
 
+    // --- Index-db-only monolith save path ------------------------------------
+    // A monolith is a page, not a tiddler store, so this save has two halves and
+    // they land in two different places. The page text is what reopens the mount,
+    // so it goes onto the recents row the launcher reads it from: tiddler JSON
+    // cannot rebuild a page that carries its own scripts, plugins and styles. The
+    // page's own tiddler store, where it has one, then goes where every other
+    // mount records it, so a browser-only monolith stays searchable and its row
+    // keeps the version chain and the copies those versions offer.
+    function saveMonolithToBrowserStorage(tw, pageText, callback) {
+      if (typeof pageText !== 'string' || pageText === '') {
+        callback(new Error(${JSON.stringify(copy.status.monolithSaveFailed)}));
+        return;
+      }
+      var fileName = (handle && handle.name) || ${suggestedNameJson};
+      var target = browserOnlyHandle(fileName);
+      handle = target;
+      root.__LITHIC_FILE_HANDLE__ = target;
+      var savedRow = idbKeyval.get('recentFiles').then(function(raw) {
+        var rows = (raw || []).map(function(f) { return (f && (f.handle || f.name)) ? f : { handle: f, name: f ? f.name : '', tauriPath: null }; });
+        rows = rows.filter(function(f) { return (f.handle ? f.handle.name : f.name) !== fileName; });
+        rows.unshift({ handle: null, name: fileName, tauriPath: null, browserOnly: true, text: pageText });
+        if (rows.length > 20) rows = rows.slice(0, 20);
+        return idbKeyval.set('recentFiles', rows);
+      });
+      var jsonText = (tw && tw.wiki && tw.wiki.getTiddlersAsJson) ? tw.wiki.getTiddlersAsJson(userTiddlerFilter) : '';
+      return Promise.all([
+        savedRow,
+        jsonText ? saveSearchCache(fileName, jsonText) : null
+      ]).then(function() { callback(null); }, function(err) {
+        console.error('Lithic monolith browser-storage save failed:', err);
+        callback(err);
+      });
+    }
+
     var save = function(_text, _method, callback) {
       var tw = root.$tw;
       if (remote) {
@@ -739,7 +773,11 @@ function injectSaverBootstrap(
         return true;
       }
       if (browserOnly) {
-        saveToBrowserStorage(tw, callback);
+        if (${htmlModeLiteral}) {
+          saveMonolithToBrowserStorage(tw, _text, callback);
+        } else {
+          saveToBrowserStorage(tw, callback);
+        }
         return true;
       }
       var saveOptions = {
@@ -775,7 +813,7 @@ function injectSaverBootstrap(
         if (scratchMode !== 'off') {
           var payload = serializeScratchPayload();
           if (typeof payload !== 'string') {
-            callback(new Error(copy.status.scratchSaveFailed));
+            callback(new Error(${JSON.stringify(copy.status.scratchSaveFailed)}));
             return;
           }
           var writableP = handle.createWritable
@@ -1136,8 +1174,13 @@ export async function bootLegacyWiki(
  * Mount a TiddlyWiki HTML monolith directly (legacy "Mount ... HTML from
  * Disk" behavior): the file is itself a full wiki page, so it is served
  * as-is rather than injected into a fresh engine.
+ *
+ * `browserOnly` is the index-db-only fallback, and for a monolith it is a different
+ * answer than the file path: the serialized page text goes back into the recents row
+ * the launcher reads the monolith from, because tiddler JSON cannot rebuild a page
+ * that carries its own scripts, plugins and styles.
  */
-export function bootLegacyHtml(html: string, suggestedFileName?: string, path?: string): void {
+export function bootLegacyHtml(html: string, suggestedFileName?: string, path?: string, browserOnly = false): void {
   // HTML monoliths keep their own tiddler store and are served as-is, but a
   // raw-HTML saver is injected so saves write the engine's serialized page back
   // to a .html file instead of falling through to TiddlyWiki's built-in
@@ -1145,7 +1188,7 @@ export function bootLegacyHtml(html: string, suggestedFileName?: string, path?: 
   // bootstrap goes in with it, because this rewrite of the launcher document is
   // exactly where an external link in the mounted page dies the same way.
   const withSaver = injectMountedLinkBootstrap(
-    suggestedFileName ? injectSaverBootstrap(html, suggestedFileName, true) : html
+    suggestedFileName ? injectSaverBootstrap(html, suggestedFileName, true, false, 'off', null, browserOnly) : html
   );
   if (suggestedFileName) {
     // Record which file this is, exactly as the engine mount does. The injected

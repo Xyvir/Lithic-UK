@@ -15,6 +15,14 @@ function location(url: string): Location {
   return new URL(url) as unknown as Location;
 }
 
+/** A document that says it is a browser mount rather than an instance. */
+function browserDoc(browserOnly: boolean): Pick<Document, 'querySelector'> {
+  return {
+    querySelector: (selector: string) =>
+      browserOnly && selector.includes('lithic-browser-only') ? ({} as Element) : null
+  };
+}
+
 /** A document that does (or does not) declare itself a Lithic instance. */
 function doc(declares: boolean): Pick<Document, 'querySelector'> {
   return {
@@ -201,4 +209,28 @@ test('a remembered address is validated like a handed-over one', () => {
   };
   assert.equal(launcherReturn(location('https://example.uk/'), undefined, poisoned), null);
   assert.equal(launcherReturn(location('https://example.uk/'), { __TAURI__: {} }, poisoned)?.kind, 'history');
+});
+
+test('a process that says it is browser-only is a browser mount, wherever it is reached', () => {
+  // A shim serves the launcher an instance serves, from the address an instance would be
+  // reached at, so the address is the one signal that cannot answer for it.
+  assert.equal(resolveMode(location('http://127.0.0.1:17800/src/launcher.html'), browserDoc(true)), 'webapp');
+  assert.equal(resolveMode(location('http://localhost:17800/src/launcher.html'), browserDoc(true)), 'webapp');
+  assert.equal(resolveMode(location('http://lithic.local/src/launcher.html'), browserDoc(true)), 'webapp');
+  // Undeclared, those addresses are still an instance, which is what keeps a server
+  // somebody runs on their own machine readable.
+  assert.equal(resolveMode(location('http://127.0.0.1:17800/src/launcher.html'), browserDoc(false)), 'self-host');
+  assert.equal(resolveMode(location('http://localhost:17800/src/launcher.html'), browserDoc(false)), 'self-host');
+});
+
+test('an instance outranks the browser-only declaration, however it declares itself', () => {
+  const both = {
+    querySelector: (selector: string) =>
+      selector.includes('lithic-webdav') || selector.includes('lithic-browser-only') ? ({} as Element) : null
+  };
+  assert.equal(resolveMode(location('http://127.0.0.1:17800/src/launcher.html'), both), 'self-host');
+  assert.equal(resolveMode(location('http://127.0.0.1:17800/sync/wiki'), browserDoc(true)), 'self-host');
+  // And an explicit query still beats both, which is the switch that always wins.
+  assert.equal(resolveMode(location('http://127.0.0.1:17800/?mode=self-host'), browserDoc(true)), 'self-host');
+  assert.equal(resolveMode(location('http://127.0.0.1:17800/?mode=webapp'), browserDoc(false)), 'webapp');
 });

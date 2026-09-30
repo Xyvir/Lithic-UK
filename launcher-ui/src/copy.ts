@@ -567,6 +567,7 @@ const en = {
     indexProgress: (label: string, position: number, total: number, name: string) =>
       `${label} ${position} of ${total} · ${name}`,
     scratchSaveFailed: 'Scratch serialization failed; file left unchanged.',
+    monolithSaveFailed: 'Page serialization failed; the stored copy is unchanged.',
     noHistory: 'No versioned history is available for this wiki yet.',
     noHistoryVersion: 'That version could not be materialized from the history chain.',
     introFailed: 'Could not load the introduction.',
@@ -1094,6 +1095,7 @@ const es: Copy = {
     indexProgress: (label: string, position: number, total: number, name: string) =>
       `${label} ${position} de ${total} · ${name}`,
     scratchSaveFailed: 'Falló la serialización del borrador; el archivo no se tocó.',
+    monolithSaveFailed: 'Falló la serialización de la página; la copia guardada no se tocó.',
     noHistory: 'Todavía no hay historial de versiones para este wiki.',
     noHistoryVersion: 'Esa versión no se pudo reconstruir desde la cadena del historial.',
     introFailed: 'No se pudo cargar la introducción.',
@@ -1615,6 +1617,7 @@ const fr: Copy = {
     indexProgress: (label: string, position: number, total: number, name: string) =>
       `${label} ${position} sur ${total} · ${name}`,
     scratchSaveFailed: 'Échec de la sérialisation du brouillon ; le fichier n’a pas été touché.',
+    monolithSaveFailed: 'Échec de la sérialisation de la page ; la copie enregistrée n’a pas été touchée.',
     noHistory: 'Aucun historique de versions n’est encore disponible pour ce wiki.',
     noHistoryVersion: 'Cette version n’a pas pu être reconstruite depuis l’historique.',
     introFailed: 'Impossible de charger l’introduction.',
@@ -2133,6 +2136,7 @@ const de: Copy = {
     indexProgress: (label: string, position: number, total: number, name: string) =>
       `${label} ${position} von ${total} · ${name}`,
     scratchSaveFailed: 'Serialisieren des Entwurfs fehlgeschlagen; die Datei blieb unverändert.',
+    monolithSaveFailed: 'Serialisieren der Seite fehlgeschlagen; die gespeicherte Kopie blieb unverändert.',
     noHistory: 'Für dieses Wiki gibt es noch keinen Versionsverlauf.',
     noHistoryVersion: 'Diese Version konnte nicht aus dem Verlauf erzeugt werden.',
     introFailed: 'Die Einführung konnte nicht geladen werden.',

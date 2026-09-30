@@ -283,6 +283,10 @@ test('every injected bootstrap script parses for every launch shape', () => {
   assertInjectedScriptsParse(buildEngineHtml(ENGINE_STUB, { name: 'x.html', text: '' }, [], {}, { isHtmlMode: true }), 'html monolith');
   assertInjectedScriptsParse(buildEngineHtml(ENGINE_STUB, { name: 'x.lith', text: '' }, [], {}, { browserOnly: true }), 'browser storage only');
   assertInjectedScriptsParse(
+    buildEngineHtml(ENGINE_STUB, { name: 'x.html', text: '' }, [], {}, { isHtmlMode: true, browserOnly: true }),
+    'monolith in browser storage only'
+  );
+  assertInjectedScriptsParse(
     buildEngineHtml(ENGINE_STUB, { name: 'my wiki.lith', text: '' }, [], {}, { remote: REMOTE_TARGET }),
     'self-host remote'
   );
@@ -623,7 +627,9 @@ test('browser-storage-only mounts save into IndexedDB instead of asking for a fi
   // reach for a picker no platform in this mode has.
   assert.match(html, /var browserOnly = true;/);
   assert.match(html, /function saveToBrowserStorage\(tw, callback\)/);
-  assert.match(html, /if \(browserOnly\) \{\n        saveToBrowserStorage\(tw, callback\);\n        return true;\n      \}/);
+  // A Lith still writes the tiddler JSON the search cache and the version chain are
+  // built from; only a monolith has nothing that a tiddler store can hold.
+  assert.match(html, /if \(browserOnly\) \{\n        if \(false\) \{\n          saveMonolithToBrowserStorage\(tw, _text, callback\);\n        \} else \{\n          saveToBrowserStorage\(tw, callback\);\n        \}\n        return true;\n      \}/);
   // The save writes the same two keys a real save writes: the flat cache the
   // recents row and search read, and the versioned history the download modal
   // materialises a hard copy from.
@@ -635,6 +641,63 @@ test('browser-storage-only mounts save into IndexedDB instead of asking for a fi
   // …and its recents row is recorded as having no file, which is what the
   // launcher marks as volatile instead of offering to re-open.
   assert.match(html, /__lithicBrowserOnly__\n\s+\? \{ handle: null, name: fileHandle\.name, tauriPath: null, browserOnly: true \}/);
+});
+
+// A monolith is a page rather than a tiddler store, so its browser-only save has two
+// halves: the page text, which is what reopens it, onto its own recents row, and the
+// page's tiddler store where every other mount records it, because tiddler JSON alone
+// cannot rebuild a page that carries its own scripts, plugins and styles.
+test('an HTML monolith in browser-only mode saves the page text into its own row', () => {
+  const html = buildEngineHtml(ENGINE_STUB, { name: 'page.html', text: '' }, [], {}, { isHtmlMode: true, browserOnly: true });
+
+  assert.match(html, /var browserOnly = true;/);
+  // The monolith branch is chosen ahead of the tiddler-JSON saver, and before anything
+  // can reach for a picker that this mode's platforms do not have.
+  assert.match(html, /if \(browserOnly\) \{\n        if \(true\) \{\n          saveMonolithToBrowserStorage\(tw, _text, callback\);\n        \} else \{/);
+
+  // What it writes first is the browser-only row the launcher reads back, with the page
+  // text on the row itself, keyed on the mount's own name and laid over the row it replaces.
+  const start = html.indexOf('function saveMonolithToBrowserStorage');
+  const end = html.indexOf('var save = function(_text, _method, callback)');
+  assert.ok(start >= 0 && end > start, 'the monolith saver is present');
+  const saver = html.slice(start, end);
+  assert.match(saver, /browserOnly: true, text: pageText/, 'the page text travels on the row');
+  assert.match(saver, /\|\| "page\.html"/, 'keyed on the mount name rather than a leftover handoff');
+  assert.match(saver, /!== fileName/, 'and written in place of the row it supersedes');
+  // The second half is the one the file path already records for a monolith, so a
+  // browser-only monolith stays findable by search and keeps its version chain.
+  assert.match(saver, /saveSearchCache\(fileName, jsonText\)/, 'the tiddler store is still indexed');
+  assert.doesNotMatch(saver, /dirty_state_/, 'but never writes an unsaved-edit backup');
+  assertInjectedScriptsParse(html, 'monolith browser-only');
+});
+
+// A browser-only monolith has no picker anywhere in its future (Firefox and Safari ship
+// none at all), so the mount has to carry the mode in with it.
+test('a browser-only monolith mount compiles the browser-storage saver in', () => {
+  let written = '';
+  const globals = globalThis as unknown as { sessionStorage: unknown; document: unknown };
+  const original = { sessionStorage: globals.sessionStorage, document: globals.document };
+  globals.sessionStorage = { setItem: () => {}, getItem: () => null, removeItem: () => {} };
+  globals.document = { open() {}, write(html: string) { written += html; }, close() {} };
+  try {
+    bootLegacyHtml('<html><head></head><body>page</body></html>', 'page.html', undefined, true);
+  } finally {
+    globals.sessionStorage = original.sessionStorage;
+    globals.document = original.document;
+  }
+  assert.match(written, /var browserOnly = true;/);
+  assert.match(written, /saveMonolithToBrowserStorage\(tw, _text, callback\)/);
+});
+
+// The bootstrap runs inside the mounted document, where the launcher's own `copy` module
+// does not exist. A failure message read out of it throws a ReferenceError instead of
+// reaching the user, so every one of them is baked in as a literal at build time.
+test('injected failure copy is a literal the mounted document can read', () => {
+  const scratch = buildEngineHtml(ENGINE_STUB, { name: 'notes.txt', text: '' }, [], {}, { scratchMode: 'text' });
+  assert.doesNotMatch(scratch, /copy\.status\./, 'no launcher module reference survives into the mounted document');
+  assert.match(scratch, /new Error\("Scratch serialization failed; file left unchanged\."\)/);
+  const monolith = buildEngineHtml(ENGINE_STUB, { name: 'page.html', text: '' }, [], {}, { isHtmlMode: true, browserOnly: true });
+  assert.match(monolith, /new Error\("Page serialization failed; the stored copy is unchanged\."\)/);
 });
 
 test('an ordinary mount does not get the browser-storage save path', () => {

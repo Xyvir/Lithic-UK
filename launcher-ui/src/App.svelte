@@ -2,7 +2,7 @@
   import { onMount } from 'svelte';
   // Every word this component shows. Nothing below spells copy of its own.
   import { LOCALE_TAG, copy, type LaunchEntry } from './copy';
-  import { handoffQuery, LAUNCHER_QUERY_PARAM, launcherReturn, withLauncherHandoff, type LauncherMode } from './mode';
+  import { declaresBrowserOnly, handoffQuery, LAUNCHER_QUERY_PARAM, launcherReturn, withLauncherHandoff, type LauncherMode } from './mode';
   import { createFileBridge, tauriInvoke, tauriListen, saveTextVerifiably } from './file-bridge';
   import { orphanPill, orphanDownloadNote, type OrphanDownloadState } from './orphan-download';
   import { isScratchFileName, isHtmlMonolithName, tracksUnsavedEdits, resolveMountName, resolveScratchKind, type ScratchKind } from './scratch-editor';
@@ -10,7 +10,7 @@
   import { bootLegacyWiki, bootLegacyHtml, writeHandoff, type RemoteTarget } from './legacy-launcher-runtime';
   import { EMOJI_LIST, uploadInstanceIcon, clearInstanceIcon, emojiFaviconUrl, applyFavicon, bustIconCache, readInstanceEmoji, readServerEmoji, saveInstanceEmoji, clearInstanceEmoji, instanceMarkUrl } from './instance-icon';
   import { getRecentFiles, addRecentFile, removeRecentFile, addBrowserOnlyRecent, removeBrowserOnlyRecent, clearAllRecentFiles, purgeOldestCachesIfNeeded, saveSearchCache, forgetWikiCache, cachedWikiNames, idb, getSearchCacheText, readFetchedLith, rememberFetchedLith, listWikiVersions, wikiHasHistory, downloadWikiVersion, getDirtyState, clearDirtyState, listDirtyRecoveries, isWikiDriftedFromHead, isInstallDismissed, setInstallDismissed, recentDiskPath, type RecentEntry } from './storage';
-  import { resolveStorageMode, storageModeOverride, browserOnlyMarkTitle, type StorageMode } from './browser-storage';
+  import { rememberRowKind, resolveStorageMode, storageModeOverride, browserOnlyMarkTitle, type StorageMode } from './browser-storage';
   import { readBookmarkEntries, saveBookmark, removeBookmark, setBookmarkIcon, refreshBookmarkIcon, verifyInstanceUrl, normalizeInstanceUrl, instanceLabel, type BookmarkEntry, type InstanceVerification } from './bookmarks';
   import { LOGIN_CHECK_LABELS, askInstanceAboutLogin, loginVerdict, loginVerdictFromError, typedLoginCheck, type LoginCheckState, type LoginVerdict } from './login-check';
   import { copyDropNote, forgetInstanceCopy } from './instance-copy';
@@ -52,10 +52,17 @@
    * this browser's own storage. Settled once, at boot: the answer cannot change
    * while the page lives, and every mount below inherits it.
    */
+  /**
+   * Whether the process that served this document said it is not an instance. Read once,
+   * with the mode and for the same reason: what served the page cannot change while the
+   * page lives.
+   */
+  const browserOnly = declaresBrowserOnly(typeof document === 'undefined' ? null : document);
   const storageMode: StorageMode = resolveStorageMode(
     mode,
     typeof window === 'undefined' ? undefined : (window as unknown as { showSaveFilePicker?: unknown }),
-    typeof window === 'undefined' ? null : storageModeOverride(window.location.search)
+    typeof window === 'undefined' ? null : storageModeOverride(window.location.search),
+    browserOnly
   );
   /**
    * The index-db-only fallback: no Lith mounted here has a file behind it, so
@@ -2056,10 +2063,12 @@
   }
 
   async function remember(file: { name: string; path?: string; text?: string; handle?: any }) {
-    if (file.handle) {
-      recentFiles = await addRecentFile(file.handle, file.path ?? null);
-      persistRecentsSidecar();
-    } else if (indexDbOnly) {
+    // Which store this row belongs in is `rememberRowKind`'s rule, and it answers
+    // browser-only before it looks at a handle: a row built on one would claim a file that
+    // every save in this mode leaves exactly as it was. The handle is still how the pick's
+    // bytes were read, once, before it gets here.
+    const kind = rememberRowKind(indexDbOnly, Boolean(file.handle));
+    if (kind === 'browser-only') {
       // Nothing here has a file to remember and nothing can, so the row says so,
       // and is stored in the store the Lith's content is stored in. An HTML
       // monolith has no tiddler snapshot to read its page back from, so its
@@ -2069,6 +2078,9 @@
         file.name,
         isHtmlMonolithName(file.name) ? file.text ?? '' : ''
       );
+      persistRecentsSidecar();
+    } else if (kind === 'handle') {
+      recentFiles = await addRecentFile(file.handle, file.path ?? null);
       persistRecentsSidecar();
     } else {
       const name = file.name;
@@ -2209,7 +2221,9 @@
       // HTML-mode saver injected that writes the page back (legacy parity).
       // The path travels with it so the saver targets the file the user
       // actually opened, not a handoff left behind by an earlier mount.
-      await bootLegacyHtml(contents, safeName, path);
+      // In the browser-storage fallback there is no file to write back to, so the
+      // serialized page goes into the monolith's own recents row instead.
+      await bootLegacyHtml(contents, safeName, path, indexDbOnly);
       return;
     }
     const handoff = { name: safeName, path, text: contents };

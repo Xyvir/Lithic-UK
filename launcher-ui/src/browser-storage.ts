@@ -11,7 +11,8 @@ import type { LauncherMode } from './mode.ts';
  *              Firefox has never shipped the API either). No file is ever
  *              opened or written: the browser's own storage *is* the document,
  *              and the launcher's existing cache, version history and download
- *              flows are the only copies that exist.
+ *              flows are the only copies that exist. A page whose server declared
+ *              itself browser-only is here on purpose, with the API present.
  *
  * The distinction is not a preference. It is the platform's answer to "can
  * this tab write a file it was not given".
@@ -35,17 +36,24 @@ export function supportsFileAccessApi(host: PickerHost | null | undefined): bool
  * and a self-host instance writes to its own server, so neither one has a use
  * for the fallback and neither may be talked into it. `forced` is the query
  * parameter, so the fallback can be exercised (and the Chromium path kept
- * honest) on a platform that does have the API.
+ * honest) on a platform that does have the API. `browserOnly` is the page's own
+ * server saying it has no process behind it at all, which settles the answer
+ * even where the API is present.
  */
 export function resolveStorageMode(
   mode: LauncherMode,
   host: PickerHost | null | undefined = typeof window === 'undefined' ? undefined : (window as PickerHost),
-  forced?: string | null
+  forced?: string | null,
+  browserOnly = false
 ): StorageMode {
   if (mode !== 'webapp') return 'file';
   const override = forced?.trim().toLowerCase();
   if (override === 'index-db' || override === 'indexdb' || override === 'browser') return 'index-db';
   if (override === 'file') return 'file';
+  // A page whose own server declared it browser-only has no process behind it to write a
+  // file into, so a capable browser is not the answer there: a shim promises one data
+  // model, and a save that lands in a Downloads folder makes that two.
+  if (browserOnly) return 'index-db';
   return supportsFileAccessApi(host) ? 'file' : 'index-db';
 }
 
@@ -56,6 +64,27 @@ export function storageModeOverride(search: string): string | null {
   } catch {
     return null;
   }
+}
+
+/**
+ * Which kind of recents row a mount leaves behind.
+ *
+ *   'browser-only' nothing this page produces can be written to a file, so the row claims
+ *                  the browser's own copy and says so
+ *   'handle'       a file the platform can write back to, which is how it is reopened
+ *   'plain'        a name, or a path the running shape reaches without a handle
+ *
+ * The browser-only answer is asked first, ahead of the handle, and that order is the rule
+ * rather than a detail of any one caller. Chromium's picker hands its files over as handles
+ * and the other browsers cannot, so a page that decided its saves go to browser storage and
+ * then built the row out of the handle would describe a document nobody is updating: the
+ * file would be left exactly as it was found while the row claimed to hold it.
+ */
+export type RecentRowKind = 'browser-only' | 'handle' | 'plain';
+
+export function rememberRowKind(browserOnly: boolean, hasHandle: boolean): RecentRowKind {
+  if (browserOnly) return 'browser-only';
+  return hasHandle ? 'handle' : 'plain';
 }
 
 /**
