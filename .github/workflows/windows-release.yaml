@@ -30,6 +30,17 @@ jobs:
         if: ${{ inputs.tag_name != '' }}
         run: Move-Item -Force src/lith.html src/lithic.html
 
+      # The light distribution, uploaded by the same prod run as the flagship. It is
+      # unpacked OUTSIDE src/ on purpose: src/ is the Tauri frontendDist, so a file left
+      # there is embedded in the executable, and the full build would then carry a light
+      # wiki it never loads. It is copied over src/lithic.html only for the second build.
+      - name: Download Built Light Wiki Artifact
+        if: ${{ inputs.tag_name != '' }}
+        uses: actions/download-artifact@v5
+        with:
+          name: built-wiki-light
+          path: light-wiki
+
       - name: Setup Node.js
         uses: actions/setup-node@v5
         with:
@@ -102,10 +113,15 @@ jobs:
            # fails here.
            if ($tag -match '(\d{4})\.(\d{2})\.(\d{2})-(\d{4})') {
              $exe = "Lithic_$($Matches[2]).$($Matches[3]).$($Matches[1].Substring(2))-$($Matches[4]).exe"
+             # The same stamp with the engine's own word in front, so the two downloads
+             # sit together in the release and neither is mistaken for the other.
+             $exeLight = "Lithic-light_$($Matches[2]).$($Matches[3]).$($Matches[1].Substring(2))-$($Matches[4]).exe"
            } else {
              $exe = "Lithic_$tag.exe"
+             $exeLight = "Lithic-light_$tag.exe"
            }
            echo "exe=$exe" >> $env:GITHUB_OUTPUT
+           echo "exe_light=$exeLight" >> $env:GITHUB_OUTPUT
            # Semver for the exe's FileVersion/ProductVersion resources:
            # tauri-build derives them from the config's top-level `version`
            # (it moved out of `package` in Tauri 2), which we patch via
@@ -157,6 +173,55 @@ jobs:
             exit 1
           }
 
+      # The light executable: the same launcher and the same Rust, with the flash-sized
+      # wiki as the engine instead of the flagship. Built second, so the full binary is
+      # already copied out of target/release, and without bundling, because the installer
+      # was made for the full build and a second one would only collide with its name.
+      - name: Swap in the Light Engine
+        run: |
+          if (Test-Path 'light-wiki/lithic-light.html') {
+            $engine = 'light-wiki/lithic-light.html'
+          } elseif (Test-Path 'variants/lithic-light.html') {
+            # A manual dispatch with no wiki artifact to hand: the committed light
+            # distribution is the best engine available, and it is a real one.
+            $engine = 'variants/lithic-light.html'
+          } else {
+            Write-Error 'No light engine to swap in (neither the downloaded artifact nor variants/lithic-light.html).'
+            exit 1
+          }
+          Copy-Item -Force $engine src/lithic.html
+          Write-Host "Light engine: $engine"
+
+      - name: Build Light Executable
+        run: |
+          # tauri embeds the frontend through a compile-time macro that reads
+          # build.frontendDist, so the crate calling it has to look dirty or the swap
+          # would ship the previous engine under the new name. Touching its source is
+          # that signal.
+          (Get-Item src-tauri/src/lib.rs).LastWriteTime = Get-Date
+          npm run tauri build -- --no-bundle
+        env:
+          TAURI_CONFIG: ${{ steps.tag.outputs.tauri_config }}
+          LITHIC_BUILD_TAG: ${{ steps.tag.outputs.date }}
+
+      - name: Report Light Artifact Size
+        run: |
+          $file = Get-Item "src-tauri/target/release/Lithic.exe"
+          $mb = [math]::Round($file.Length / 1MB, 2)
+          Write-Host "$mb MB  Lithic.exe (light engine)"
+          "| Lithic.exe (light engine) | $mb MB |" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append
+
+      - name: Stage Light Executable
+        run: |
+          $built = "src-tauri/target/release/Lithic.exe"
+          if (Test-Path $built) {
+            Copy-Item $built -Destination "${{ steps.tag.outputs.exe_light }}"
+            Write-Host "Created ${{ steps.tag.outputs.exe_light }}"
+          } else {
+            Write-Error "Build failed: no light executable at $built."
+            exit 1
+          }
+
       - name: Create Release
         uses: softprops/action-gh-release@v3
         env:
@@ -167,3 +232,4 @@ jobs:
           prerelease: false
           files: |
             ${{ steps.tag.outputs.exe }}
+            ${{ steps.tag.outputs.exe_light }}
