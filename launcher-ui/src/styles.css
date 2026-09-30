@@ -31,27 +31,84 @@
   src: url('./fonts/lithic-serif-700.woff2') format('woff2');
 }
 
+/* lithic-palette:start, generated from color-palette.ts */
+:root {
+  --lithic-surface-app: #181818;
+  --lithic-surface-panel: #252525;
+  --lithic-surface-card: #2c2c2c;
+  --lithic-surface-control: #333333;
+  --lithic-surface-raise: #3d3d3d;
+  --lithic-surface-light: #f4f4f4;
+  --lithic-line: #454545;
+  --lithic-line-faint: #383838;
+  --lithic-line-hover: #5c5c5c;
+  --lithic-line-thumb: #6b6b6b;
+  --lithic-line-search: #929292;
+  --lithic-ink-strong: #f4edf5;
+  --lithic-ink: #e7e1e9;
+  --lithic-ink-soft: #cccccc;
+  --lithic-ink-muted: #a5a5a5;
+  --lithic-ink-faint: #8a8a8a;
+  --lithic-ink-ghost: #777777;
+  --lithic-ink-inverse: #ffffff;
+  --lithic-shadow: #000000;
+  --lithic-accent: #8ab4f8;
+  --lithic-accent-light: #a7c6fb;
+  --lithic-accent-rim: #5a7fbf;
+  --lithic-accent-ink: #121212;
+  --lithic-amber: #ffb74d;
+  --lithic-amber-mark: #ff9800;
+  --lithic-amber-progress: #e0b341;
+  --lithic-amber-soft: #e2c07c;
+  --lithic-amber-rim: #a37b1f;
+  --lithic-amber-rim-deep: #6b5a2a;
+  --lithic-ok: #7ba86f;
+  --lithic-ok-light: #9cc78f;
+  --lithic-ok-rim: #5d8a52;
+  --lithic-ok-pale: #9ede94;
+  --lithic-danger: #ff5555;
+  --lithic-danger-hover: #ff7777;
+  --lithic-danger-status: #ff8888;
+  --lithic-danger-soft: #e08a7a;
+  --lithic-danger-deep: #b3261e;
+  --lithic-sync: #bb86fc;
+  --lithic-sync-deep: #8d5fd3;
+  --lithic-accent-wash-12: rgb(138 180 248 / 12%);
+  --lithic-accent-wash-20: rgb(138 180 248 / 20%);
+  --lithic-accent-wash-70: rgb(138 180 248 / 70%);
+  --lithic-amber-wash-10: rgb(224 179 65 / 10%);
+  --lithic-amber-wash-16: rgb(255 183 77 / 16%);
+  --lithic-amber-wash-45: rgb(224 179 65 / 45%);
+  --lithic-ok-wash-22: rgb(123 168 111 / 22%);
+  --lithic-danger-wash-12: rgb(224 138 122 / 12%);
+  --lithic-danger-wash-20: rgb(224 138 122 / 20%);
+  --lithic-shadow-wash-30: rgb(0 0 0 / 30%);
+  --lithic-shadow-wash-50: rgb(0 0 0 / 50%);
+  --lithic-shadow-wash-72: rgb(0 0 0 / 72%);
+  --lithic-sheen-wash-7: rgb(255 255 255 / 7%);
+}
+/* lithic-palette:end */
 :root {
   font-family: 'Vollkorn', serif;
-  color: #e7e1e9;
-  background: #181818;
+  color: var(--lithic-ink);
+  background: var(--lithic-surface-app);
   font-synthesis: none;
 }
 
 * { box-sizing: border-box; font-family: inherit; }
 html, body, #app { height: 100%; margin: 0; }
-body { overflow: hidden; background: #181818; }
+body { overflow: hidden; background: var(--lithic-surface-app); }
 
 /* Thin dark scrollbars, ported from the legacy launcher and then narrowed past
  * it: a 4px rounded thumb on a transparent track. The engine default is a light
- * grey slab with arrow buttons, which was the brightest thing on a #252525 panel,
- * and the platform scrollbar draws square ends whatever colour you paint it.
+ * grey slab with arrow buttons, which was the brightest thing on the panel's
+ * own grey, and the platform scrollbar draws square ends whatever colour you paint it.
  *
  * The width is load-bearing, not taste: with the thumb at 4px the panel's side
  * padding can swallow the thumb plus its gap and still leave the rows ending
  * where the action card's buttons do (see .recent-section and .recent-list). The
  * thumb is a brighter grey than the 6px one it replaces because four pixels of
- * #454545 on #252525 is not a scrollbar anyone can find.
+ * it on the panel (`line.thumb` over `surface.panel`) is not a scrollbar anyone can find.
  *
  * These pseudo-elements are the only way to get that: `::-webkit-scrollbar-button`
  * is what removes the arrows at the tops and bottoms, and the thumb's radius is
@@ -65,8 +122,8 @@ body { overflow: hidden; background: #181818; }
 *::-webkit-scrollbar { width: 4px; height: 4px; }
 *::-webkit-scrollbar-button { display: none; }
 *::-webkit-scrollbar-track { background: transparent; }
-*::-webkit-scrollbar-thumb { background-color: #6b6b6b; border-radius: 999px; }
-*::-webkit-scrollbar-thumb:hover { background-color: #8a8a8a; }
+*::-webkit-scrollbar-thumb { background-color: var(--lithic-line-thumb); border-radius: 999px; }
+*::-webkit-scrollbar-thumb:hover { background-color: var(--lithic-ink-faint); }
 /*
  * The recent list is the one scroll area whose scrollbar is furniture rather than
  * information: it is hidden until the list is in use, in every mode, because the panel is
@@ -80,7 +137,7 @@ body { overflow: hidden; background: #181818; }
  * The class is written by the action in App.svelte and the change is a cut rather than a
  * fade, and that is a limit rather than a choice: Blink paints a scrollbar from its
  * un-animated style, so freezing a transition *and* an animation on this pseudo-element and
- * screenshotting the lane in a headed browser gives the same 192 pixels of #6b6b6b at 0%,
+ * screenshotting the lane in a headed browser gives the same 192 pixels of the thumb tone at 0%,
  * 50% and 100%. There is no lever between transparent and drawn.
  *
  * The same limit is what keeps a pointer out of this: `.recent-list:hover
@@ -98,13 +155,13 @@ body { overflow: hidden; background: #181818; }
  * nothing to brighten: the bar is only on screen while the list is moving, and the gesture
  * that drew it does not need a hover state as well. */
 .recent-list::-webkit-scrollbar-thumb { background-color: transparent; }
-.recent-list.scrolling::-webkit-scrollbar-thumb { background-color: #6b6b6b; }
+.recent-list.scrolling::-webkit-scrollbar-thumb { background-color: var(--lithic-line-thumb); }
 @supports not selector(::-webkit-scrollbar) {
-  * { scrollbar-width: thin; scrollbar-color: #6b6b6b transparent; }
+  * { scrollbar-width: thin; scrollbar-color: var(--lithic-line-thumb) transparent; }
   /* The same rule in the standard pair: a transparent thumb keeps the gutter reserved in
    * Firefox exactly as a transparent `::-webkit-scrollbar-thumb` keeps it in Chromium. */
   .recent-list { scrollbar-color: transparent transparent; }
-  .recent-list.scrolling { scrollbar-color: #6b6b6b transparent; }
+  .recent-list.scrolling { scrollbar-color: var(--lithic-line-thumb) transparent; }
 }
 
 .container {
@@ -116,7 +173,7 @@ body { overflow: hidden; background: #181818; }
   min-height: 430px;
   margin: 0 auto;
   padding: 15px;
-  background: #181818;
+  background: var(--lithic-surface-app);
 }
 
 .heading {
@@ -126,7 +183,7 @@ body { overflow: hidden; background: #181818; }
   min-height: 58px;
   margin-bottom: 12px;
   padding-bottom: 10px;
-  border-bottom: 1px solid #414141;
+  border-bottom: 1px solid var(--lithic-line);
   /* The containing block for .back-to-launcher, which is measured off this row's
      left edge and drawn in the margin outside it. */
   position: relative;
@@ -140,7 +197,7 @@ body { overflow: hidden; background: #181818; }
 .heading-copy h1 { margin: 0; }
 
 h1, h2, h3, button, input, textarea, select { font-family: 'Vollkorn', Georgia, serif; }
-h1 { flex: none; min-width: 0; margin: 0; color: #f4edf5; font-size: 1.8rem; font-weight: 600; line-height: 1.2; }
+h1 { flex: none; min-width: 0; margin: 0; color: var(--lithic-ink-strong); font-size: 1.8rem; font-weight: 600; line-height: 1.2; }
 .brand-icon-wrap {
   display: block;
   flex: 0 0 52px;
@@ -159,9 +216,9 @@ h1 { flex: none; min-width: 0; margin: 0; color: #f4edf5; font-size: 1.8rem; fon
   display: block;
   width: 52px;
   height: 52px;
-  border: 3px solid #444;
+  border: 3px solid var(--lithic-line);
   border-radius: 6px;
-  background: #f4f4f4;
+  background: var(--lithic-surface-light);
   object-fit: contain;
   overflow: hidden;
 }
@@ -171,13 +228,13 @@ h1 { flex: none; min-width: 0; margin: 0; color: #f4edf5; font-size: 1.8rem; fon
   width: 38px;
   height: 38px;
   padding: 0;
-  border: 2px solid #393939;
+  border: 2px solid var(--lithic-line-faint);
   border-radius: 50%;
   background: transparent;
-  color: #aaa;
+  color: var(--lithic-ink-muted);
   font-size: 1.35rem;
 }
-.help-button:hover { border-color: #666; background: #242424; }
+.help-button:hover { border-color: var(--lithic-line-hover); background: var(--lithic-surface-panel); }
 /* "Back to the main launcher". Rendered only for a page the app's window loaded
    from elsewhere (a bookmarked instance: see launcherReturn in mode.ts), where
    the desktop window has no browser chrome and no other control returns: without
@@ -202,15 +259,15 @@ h1 { flex: none; min-width: 0; margin: 0; color: #f4edf5; font-size: 1.8rem; fon
   width: 38px;
   height: 38px;
   padding: 0;
-  border: 2px solid #393939;
+  border: 2px solid var(--lithic-line-faint);
   border-radius: 50%;
   background: transparent;
-  color: #8ab4f8;
+  color: var(--lithic-accent);
   cursor: pointer;
   transition: color 0.2s, border-color 0.2s, background 0.2s;
 }
-.back-to-launcher:hover { border-color: #666; background: #242424; color: #a7c6fb; }
-.back-to-launcher:focus-visible { outline: 2px solid #8ab4f8; outline-offset: 2px; }
+.back-to-launcher:hover { border-color: var(--lithic-line-hover); background: var(--lithic-surface-panel); color: var(--lithic-accent-light); }
+.back-to-launcher:focus-visible { outline: 2px solid var(--lithic-accent); outline-offset: 2px; }
 .back-to-launcher svg {
   width: 20px;
   height: 20px;
@@ -239,10 +296,10 @@ h1 { flex: none; min-width: 0; margin: 0; color: #f4edf5; font-size: 1.8rem; fon
   width: 38px;
   height: 38px;
   padding: 0;
-  border: 2px solid #393939;
+  border: 2px solid var(--lithic-line-faint);
   border-radius: 50%;
   background: transparent;
-  color: #8a8a8a;
+  color: var(--lithic-ink-faint);
   cursor: pointer;
   transition: color 0.2s, border-color 0.2s;
 }
@@ -255,18 +312,18 @@ h1 { flex: none; min-width: 0; margin: 0; color: #f4edf5; font-size: 1.8rem; fon
   stroke-linecap: round;
   stroke-linejoin: round;
 }
-.sync-button:hover { border-color: #666; background: #242424; color: #bbb; }
-.sync-button.connected { color: #7ba86f; border-color: #5d8a52; }
-.sync-button.connected:hover { color: #9cc78f; }
+.sync-button:hover { border-color: var(--lithic-line-hover); background: var(--lithic-surface-panel); color: var(--lithic-ink-muted); }
+.sync-button.connected { color: var(--lithic-ok); border-color: var(--lithic-ok-rim); }
+.sync-button.connected:hover { color: var(--lithic-ok-light); }
 /* Amber, not green: "the folder is wired up and we are finding out whether the
    backup still works" is a third thing, and pretending it is green is how a
    broken sync stays invisible. Deliberately slower than the syncing pulse, so
    the two never read as the same state. */
-.sync-button.checking { color: #e0b341; border-color: #a37b1f; animation: sync-check 2.6s ease-in-out infinite; }
-.sync-button.checking:hover { color: #f0c96a; }
-.sync-button.syncing { color: #bb86fc; border-color: #8d5fd3; animation: sync-pulse 1.5s ease-in-out infinite; }
-.sync-button.error { color: #f44336; border-color: #a93226; }
-.sync-button.error:hover { color: #ff6f63; }
+.sync-button.checking { color: var(--lithic-amber-progress); border-color: var(--lithic-amber-rim); animation: sync-check 2.6s ease-in-out infinite; }
+.sync-button.checking:hover { color: var(--lithic-amber-soft); }
+.sync-button.syncing { color: var(--lithic-sync); border-color: var(--lithic-sync-deep); animation: sync-pulse 1.5s ease-in-out infinite; }
+.sync-button.error { color: var(--lithic-danger); border-color: var(--lithic-danger-deep); }
+.sync-button.error:hover { color: var(--lithic-danger-hover); }
 @keyframes sync-pulse {
   0% { transform: scale(1); opacity: 1; }
   50% { transform: scale(1.1); opacity: 0.7; }
@@ -289,17 +346,17 @@ h1 { flex: none; min-width: 0; margin: 0; color: #f4edf5; font-size: 1.8rem; fon
   height: 13px;
   border-radius: 50%;
 }
-.sync-glyph.ring { border: 2px solid #e0b341; background: #141414; }
-.sync-glyph.dot { background: #7ba86f; }
-.sync-glyph.alert { background: #c0392b; color: #fff; font-size: 10px; font-weight: 700; line-height: 1; }
+.sync-glyph.ring { border: 2px solid var(--lithic-amber-progress); background: var(--lithic-surface-app); }
+.sync-glyph.dot { background: var(--lithic-ok); }
+.sync-glyph.alert { background: var(--lithic-danger-deep); color: var(--lithic-ink-inverse); font-size: 10px; font-weight: 700; line-height: 1; }
 
 /* Device-flow connect view (github.com/login/device + user code). */
 .user-code-display {
   margin: 14px auto;
   padding: 12px 18px;
-  border: 1px dashed var(--border-color, #444);
+  border: 1px dashed var(--border-color, var(--lithic-line));
   border-radius: 8px;
-  background: rgba(255, 255, 255, 0.03);
+  background: var(--lithic-sheen-wash-7);
   font-size: 1.6rem;
   font-weight: 700;
   letter-spacing: 0.12em;
@@ -317,17 +374,17 @@ h1 { flex: none; min-width: 0; margin: 0; color: #f4edf5; font-size: 1.8rem; fon
   width: 100%;
   padding: 10px 12px;
   margin-bottom: 6px;
-  border: 1px solid var(--border-color, #333);
+  border: 1px solid var(--border-color, var(--lithic-surface-control));
   border-radius: 8px;
-  background: #2c2c2c;
-  color: #e7e1e9;
+  background: var(--lithic-surface-card);
+  color: var(--lithic-ink);
   font: inherit;
   text-align: left;
   cursor: pointer;
 }
 .repo-card span { flex: 1 1 auto; min-width: 0; overflow-wrap: anywhere; }
-.repo-card:hover { border-color: #6b6b6b; }
-.repo-card.selected { border-color: var(--accent-color, #8ab4f8); background: rgba(138, 180, 248, 0.12); }
+.repo-card:hover { border-color: var(--lithic-line-thumb); }
+.repo-card.selected { border-color: var(--accent-color, var(--lithic-accent)); background: var(--lithic-accent-wash-12); }
 /* Higher specificity than `.launcher-modal input` on purpose: that rule gives
    every input in a modal `width: 100%` and padding, which turned the radio into
    a full-width box that swallowed the row and squeezed the repo name into a
@@ -339,21 +396,21 @@ h1 { flex: none; min-width: 0; margin: 0; color: #f4edf5; font-size: 1.8rem; fon
   padding: 0;
   border: 0;
   background: none;
-  accent-color: var(--accent-color, #8ab4f8);
+  accent-color: var(--accent-color, var(--lithic-accent));
 }
-.repo-card.create { border-style: dashed; color: var(--accent-color, #8ab4f8); font-weight: 600; }
+.repo-card.create { border-style: dashed; color: var(--accent-color, var(--lithic-accent)); font-weight: 600; }
 .repo-filter {
   width: 100%;
   padding: 9px 10px;
   margin-top: 10px;
-  border: 1px solid var(--border-color, #333);
+  border: 1px solid var(--border-color, var(--lithic-surface-control));
   border-radius: 8px;
-  background: var(--input-bg, #1d1d1d);
-  color: var(--text-color, #eee);
+  background: var(--input-bg, var(--lithic-surface-app));
+  color: var(--text-color, var(--lithic-ink));
 }
 .repo-group-label {
   margin: 12px 0 4px;
-  color: #b3acb5;
+  color: var(--lithic-ink-muted);
   font-size: 0.74rem;
   text-transform: uppercase;
   letter-spacing: 0.06em;
@@ -364,14 +421,14 @@ h1 { flex: none; min-width: 0; margin: 0; color: #f4edf5; font-size: 1.8rem; fon
    single scroll container, so a long repo list just makes it taller. */
 .repo-list li { padding: 3px 0; font-size: 0.9rem; }
 .repo-list .repo-card { font-size: 0.9rem; }
-.git-sync-note { margin: 8px 0 0; color: #a9a2ab; font-size: 0.85rem; }
+.git-sync-note { margin: 8px 0 0; color: var(--lithic-ink-muted); font-size: 0.85rem; }
 .git-sync-advanced { margin-top: 14px; }
 .git-sync-advanced summary {
-  color: #c8c2ca;
+  color: var(--lithic-ink-soft);
   font-size: 0.85rem;
   cursor: pointer;
 }
-.git-sync-advanced summary:hover { color: #f4edf5; }
+.git-sync-advanced summary:hover { color: var(--lithic-ink-strong); }
 .git-sync-advanced input { margin-top: 10px; }
 
 .launcher-actions { flex: 0 0 auto; margin-top: 16px; }
@@ -381,10 +438,10 @@ h1 { flex: none; min-width: 0; margin: 0; color: #f4edf5; font-size: 1.8rem; fon
   gap: 10px;
   margin-bottom: 0.8rem;
   padding: 12px;
-  border: 1px solid #414141;
+  border: 1px solid var(--lithic-line);
   border-radius: 8px;
-  background: #252525;
-  box-shadow: 0 4px 6px rgb(0 0 0 / 30%);
+  background: var(--lithic-surface-panel);
+  box-shadow: 0 4px 6px var(--lithic-shadow-wash-30);
 }
 .action-button {
   flex: 1 1 auto;
@@ -393,14 +450,14 @@ h1 { flex: none; min-width: 0; margin: 0; color: #f4edf5; font-size: 1.8rem; fon
   min-height: 0;
   height: 60px;
   padding: 12px 10px;
-  border: 1px solid #454545;
+  border: 1px solid var(--lithic-line);
   border-radius: 7px;
-  background: #333;
-  color: #eee;
+  background: var(--lithic-surface-control);
+  color: var(--lithic-ink);
   font: 1rem 'Vollkorn', serif;
   cursor: pointer;
 }
-.action-button:hover:not(:disabled) { background: #3d3d3d; border-color: #5c5c5c; }
+.action-button:hover:not(:disabled) { background: var(--lithic-surface-raise); border-color: var(--lithic-line-hover); }
 .action-pair { align-items: stretch; }
 .action-pair .action-button { min-width: max-content; }
 .action-pair .mount-button { flex: 1 1 auto; }
@@ -409,9 +466,9 @@ h1 { flex: none; min-width: 0; margin: 0; color: #f4edf5; font-size: 1.8rem; fon
   min-height: 60px;
   margin: 0;
   padding: 0;
-  border: 1px solid #454545;
+  border: 1px solid var(--lithic-line);
   border-radius: 7px;
-  background: #333;
+  background: var(--lithic-surface-control);
 }
 .action-pair .bookmark-button svg { width: 20px; height: 24px; overflow: visible; }
 .action-button:disabled { cursor: wait; opacity: 0.55; }
@@ -422,14 +479,14 @@ h1 { flex: none; min-width: 0; margin: 0; color: #f4edf5; font-size: 1.8rem; fon
   width: 48px;
   min-height: 0;
   height: 60px;
-  border: 1px solid #454545;
+  border: 1px solid var(--lithic-line);
   border-radius: 7px;
-  background: #333;
-  color: #8ab4f8;
+  background: var(--lithic-surface-control);
+  color: var(--lithic-accent);
   cursor: pointer;
 }
 .bookmark-button svg { width: 22px; height: 24px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linejoin: round; overflow: visible; }
-.bookmark-button:hover { background: #3d3d3d; }
+.bookmark-button:hover { background: var(--lithic-surface-raise); }
 .mount-card { gap: 0; }
 .mount-card .action-button { border-right: 0; border-radius: 7px 0 0 7px; }
 .mount-card .bookmark-button { flex-basis: 48px; border-left: 0; border-radius: 0 7px 7px 0; }
@@ -449,10 +506,10 @@ h1 { flex: none; min-width: 0; margin: 0; color: #f4edf5; font-size: 1.8rem; fon
    * itself stays clear of the panel's border. Both sides are padded equally, so
    * the content column stays centred on the panel. */
   padding: 12px;
-  border: 1px solid #414141;
+  border: 1px solid var(--lithic-line);
   border-radius: 8px;
-  background: #252525;
-  box-shadow: 0 4px 6px rgb(0 0 0 / 30%);
+  background: var(--lithic-surface-panel);
+  box-shadow: 0 4px 6px var(--lithic-shadow-wash-30);
 }
 .recent-section .recent-search { margin-bottom: 0; }
 .recent-search-wrap { position: relative; }
@@ -465,14 +522,14 @@ h1 { flex: none; min-width: 0; margin: 0; color: #f4edf5; font-size: 1.8rem; fon
   height: 20px;
   transform: translateY(-50%);
   fill: none;
-  stroke: #929292;
+  stroke: var(--lithic-line-search);
   stroke-width: 1.8;
   stroke-linecap: round;
   pointer-events: none;
   z-index: 1;
 }
 .recent-search:focus + .recent-search-clear,
-.recent-search-clear:hover { color: #ff5555; }
+.recent-search-clear:hover { color: var(--lithic-danger); }
 .recent-search-wrap:focus-within .recent-search-icon { opacity: 0.2; }
 .recent-search-clear {
   position: absolute;
@@ -486,18 +543,18 @@ h1 { flex: none; min-width: 0; margin: 0; color: #f4edf5; font-size: 1.8rem; fon
   border: 0;
   border-radius: 6px;
   background: transparent;
-  color: #ff5555;
+  color: var(--lithic-danger);
   font: 1.6rem/1 'Vollkorn', serif;
   cursor: pointer;
 }
 
 .status-line {
   min-height: 1.2em;
-  color: #999;
+  color: var(--lithic-ink-muted);
   font-size: 0.78rem;
   line-height: 1.2;
 }
-.status-line.error { color: #ff8888; }
+.status-line.error { color: var(--lithic-danger-status); }
 /* Sync progress: stage line from Rust plus a live seconds count, so a first
  * connect (fetch + rescue writes + commit + push) never reads as a hung app. */
 .sync-progress {
@@ -505,7 +562,7 @@ h1 { flex: none; min-width: 0; margin: 0; color: #f4edf5; font-size: 1.8rem; fon
   align-items: center;
   gap: 7px;
   margin: 10px 0 0;
-  color: #ddd;
+  color: var(--lithic-ink);
   font-size: 0.8rem;
   line-height: 1.3;
 }
@@ -528,15 +585,15 @@ h1 { flex: none; min-width: 0; margin: 0; color: #f4edf5; font-size: 1.8rem; fon
   padding: 0;
   border: 0;
   background: none;
-  color: #b3acb5;
+  color: var(--lithic-ink-muted);
   font: inherit;
   font-size: 0.78rem;
   line-height: 1.3;
   text-align: left;
   cursor: pointer;
 }
-.sync-folder:hover:not(:disabled) { color: #ded8e0; }
-.sync-folder:focus-visible { outline: 1px solid #7a6f7f; outline-offset: 2px; }
+.sync-folder:hover:not(:disabled) { color: var(--lithic-ink); }
+.sync-folder:focus-visible { outline: 1px solid var(--lithic-line-thumb); outline-offset: 2px; }
 .sync-folder:disabled { cursor: default; }
 /* The same line once the repository is connected, with the picker gone: it is the answer
    rather than a control, so it may not offer a hover or a text cursor. Drawn as a `<div>`
@@ -544,7 +601,7 @@ h1 { flex: none; min-width: 0; margin: 0; color: #f4edf5; font-size: 1.8rem; fon
 .sync-folder.readonly { cursor: default; }
 .sync-folder-label {
   flex: 0 0 auto;
-  color: #8f8892;
+  color: var(--lithic-ink-faint);
   font-size: 0.68rem;
   letter-spacing: 0.06em;
   text-transform: uppercase;
@@ -560,19 +617,19 @@ h1 { flex: none; min-width: 0; margin: 0; color: #f4edf5; font-size: 1.8rem; fon
 /* Nothing was worked out, so there is no path to name: the line says so in the place a
    path would be, dimmer and oblique so it does not read as a folder called that. */
 .sync-folder.empty .sync-folder-path {
-  color: #7d7680;
+  color: var(--lithic-ink-ghost);
   font-style: italic;
 }
 .sync-folder-change {
   flex: 0 0 auto;
   margin-left: auto;
   padding-left: 6px;
-  color: #8f8892;
+  color: var(--lithic-ink-faint);
   font-size: 0.68rem;
   letter-spacing: 0.06em;
   text-transform: uppercase;
 }
-.sync-folder:hover:not(:disabled) .sync-folder-change { color: #b3acb5; text-decoration: underline; }
+.sync-folder:hover:not(:disabled) .sync-folder-change { color: var(--lithic-ink-muted); text-decoration: underline; }
 /* The way back to the automatic folder, and the only way there is: it appears only while
    an override is in force, so the dialog is a line shorter when nothing was picked. */
 .sync-folder-reset { margin: -6px 0 10px; text-align: right; }
@@ -581,13 +638,13 @@ h1 { flex: none; min-width: 0; margin: 0; color: #f4edf5; font-size: 1.8rem; fon
   padding: 0;
   border: 0;
   background: none;
-  color: #8f8892;
+  color: var(--lithic-ink-faint);
   font: inherit;
   font-size: 0.72rem;
   cursor: pointer;
 }
-.sync-folder-reset button:hover:not(:disabled) { color: #ded8e0; text-decoration: underline; }
-.sync-elapsed { margin-left: auto; color: #9a9a9a; font-variant-numeric: tabular-nums; }
+.sync-folder-reset button:hover:not(:disabled) { color: var(--lithic-ink); text-decoration: underline; }
+.sync-elapsed { margin-left: auto; color: var(--lithic-ink-muted); font-variant-numeric: tabular-nums; }
 /* Bare text, inside the progress line it stops: a first connect to a large
    folder is minutes long, and waiting is not the only reasonable answer. */
 .sync-cancel {
@@ -596,7 +653,7 @@ h1 { flex: none; min-width: 0; margin: 0; color: #f4edf5; font-size: 1.8rem; fon
   padding: 0;
   border: 0;
   background: none;
-  color: #8ab4f8;
+  color: var(--lithic-accent);
   font: inherit;
   cursor: pointer;
 }
@@ -605,8 +662,8 @@ h1 { flex: none; min-width: 0; margin: 0; color: #f4edf5; font-size: 1.8rem; fon
   flex: 0 0 auto;
   width: 12px;
   height: 12px;
-  border: 2px solid #555;
-  border-top-color: #8ab4f8;
+  border: 2px solid var(--lithic-line);
+  border-top-color: var(--lithic-accent);
   border-radius: 50%;
   animation: sync-spin 0.9s linear infinite;
 }
@@ -642,7 +699,7 @@ h1 { flex: none; min-width: 0; margin: 0; color: #f4edf5; font-size: 1.8rem; fon
   .sync-spinner { animation-duration: 2.5s; }
 }
 
-code { color: #8ab4f8; }
+code { color: var(--lithic-accent); }
 /* Pinned to the window corners, the way the legacy launcher's Github link and
  * install button were (`bottom/left/right: 15px` there; 22px is our own gutter
  * and matches the bottom band). The band spans the whole window so its control
@@ -730,7 +787,7 @@ footer > * { pointer-events: auto; }
   padding: 0 4px;
   border: 0;
   background: none;
-  color: #000;
+  color: var(--lithic-shadow);
   font: 0.55rem/1 'Vollkorn', Georgia, serif;
   cursor: pointer;
   animation: dismiss-nudge 2.8s ease-in-out 1.2s 3;
@@ -746,22 +803,22 @@ footer > * { pointer-events: auto; }
   transform: translate(0.35em, -50%);
   transition: opacity 0.16s ease, transform 0.16s ease;
 }
-.install-dismiss:hover { color: #b3261e; }
+.install-dismiss:hover { color: var(--lithic-danger-deep); }
 /* The label takes the ink back from the hover red: it is revealed by the same hover that
    reddens the ✕, so without this it would arrive already red. */
 .install-dismiss:hover .install-dismiss-label,
-.install-dismiss:focus-visible .install-dismiss-label { opacity: 1; transform: translate(0, -50%); color: #000; }
-.install-dismiss:focus-visible { outline: 1px solid #ffb74d; }
+.install-dismiss:focus-visible .install-dismiss-label { opacity: 1; transform: translate(0, -50%); color: var(--lithic-shadow); }
+.install-dismiss:focus-visible { outline: 1px solid var(--lithic-amber); }
 @keyframes dismiss-nudge {
   0%, 100% { transform: scale(1); }
   50% { transform: scale(1.08); }
 }
-.modal-overlay { position: fixed; inset: 0; display: grid; place-items: center; padding: 20px; background: rgb(0 0 0 / 72%); z-index: 10; }
-.launcher-modal { position: relative; width: min(100%, 460px); max-height: 80vh; overflow-x: hidden; overflow-y: auto; padding: 22px; border: 1px solid #454545; border-radius: 10px; background: #252525; box-shadow: 0 12px 40px #000; }
+.modal-overlay { position: fixed; inset: 0; display: grid; place-items: center; padding: 20px; background: var(--lithic-shadow-wash-72); z-index: 10; }
+.launcher-modal { position: relative; width: min(100%, 460px); max-height: 80vh; overflow-x: hidden; overflow-y: auto; padding: 22px; border: 1px solid var(--lithic-line); border-radius: 10px; background: var(--lithic-surface-panel); box-shadow: 0 12px 40px var(--lithic-shadow); }
 .launcher-modal h2 { margin: 0 0 14px; }
-.launcher-modal p { color: #ccc; line-height: 1.5; }
-.launcher-modal input { width: 100%; padding: 12px 10px; border: 1px solid #454545; border-radius: 7px; background: #333; color: #eee; font: inherit; }
-.launcher-modal input:focus { outline: none; border-color: #ffb74d; }
+.launcher-modal p { color: var(--lithic-ink-soft); line-height: 1.5; }
+.launcher-modal input { width: 100%; padding: 12px 10px; border: 1px solid var(--lithic-line); border-radius: 7px; background: var(--lithic-surface-control); color: var(--lithic-ink); font: inherit; }
+.launcher-modal input:focus { outline: none; border-color: var(--lithic-amber); }
 .new-lith-inline {
   flex: 1 1 auto;
   min-width: 0;
@@ -770,9 +827,9 @@ footer > * { pointer-events: auto; }
   align-items: center;
   gap: 4px;
   padding: 7px 10px;
-  border: 1px solid #454545;
+  border: 1px solid var(--lithic-line);
   border-radius: 7px;
-  background: #333;
+  background: var(--lithic-surface-control);
   animation: new-lith-pop 0.18s ease-out;
 }
 @keyframes new-lith-pop {
@@ -786,14 +843,14 @@ footer > * { pointer-events: auto; }
   height: 100%;
   min-height: 38px;
   padding: 8px 44px 8px 10px;
-  border: 1px solid #ff9800;
+  border: 1px solid var(--lithic-amber-mark);
   border-radius: 7px;
-  background: #3a3a3a;
-  color: #eee;
+  background: var(--lithic-surface-control);
+  color: var(--lithic-ink);
   font: 0.95rem 'Vollkorn', Georgia, serif;
 }
-.new-lith-field input::placeholder { color: #8a8a8a; opacity: 1; }
-.new-lith-field input:focus { outline: none; border-color: #ffb74d; }
+.new-lith-field input::placeholder { color: var(--lithic-ink-faint); opacity: 1; }
+.new-lith-field input:focus { outline: none; border-color: var(--lithic-amber); }
 .new-lith-check {
   position: absolute;
   top: 50%;
@@ -807,14 +864,14 @@ footer > * { pointer-events: auto; }
   border: 0;
   border-radius: 6px;
   background: transparent;
-  color: #4caf50;
+  color: var(--lithic-ok);
   font-size: 1.15rem;
   font-weight: 700;
   line-height: 1;
   cursor: pointer;
 }
-.new-lith-check:hover { background: rgb(255 255 255 / 8%); }
-.new-lith-check.invalid { color: #ffb300; }
+.new-lith-check:hover { background: var(--lithic-sheen-wash-7); }
+.new-lith-check.invalid { color: var(--lithic-amber-mark); }
 .new-lith-warn { width: 22px; height: 22px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
 .new-lith-close { border-radius: 6px; }
 .new-lith-error {
@@ -823,20 +880,20 @@ footer > * { pointer-events: auto; }
   left: 0;
   z-index: 3;
   padding: 2px 8px;
-  border: 1px solid #454545;
+  border: 1px solid var(--lithic-line);
   border-radius: 5px;
-  background: #2a2a2a;
-  color: #ffb300;
+  background: var(--lithic-surface-card);
+  color: var(--lithic-amber-mark);
   font-size: 0.78rem;
   line-height: 1.4;
   white-space: nowrap;
-  box-shadow: 0 2px 6px rgb(0 0 0 / 45%);
+  box-shadow: 0 2px 6px var(--lithic-shadow-wash-50);
 }
 /* Buttons stay on one line and move to their own row when the modal is too
    narrow for all of them, instead of squeezing the label into a stack. */
 .modal-actions { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 18px; }
-.modal-action { flex: 1 1 auto; white-space: nowrap; padding: 10px; border: 1px solid #8ab4f8; border-radius: 7px; background: rgb(138 180 248 / 12%); color: #8ab4f8; cursor: pointer; }
-.modal-action.secondary { border-color: #454545; background: transparent; color: #ddd; }
+.modal-action { flex: 1 1 auto; white-space: nowrap; padding: 10px; border: 1px solid var(--lithic-accent); border-radius: 7px; background: var(--lithic-accent-wash-12); color: var(--lithic-accent); cursor: pointer; }
+.modal-action.secondary { border-color: var(--lithic-line); background: transparent; color: var(--lithic-ink); }
 /*
  * The primary action, when what it does cannot be undone: the same shape as the outlined
  * primary in the red the rest of the app refuses in. `.vault-danger`'s colour, so the key
@@ -845,9 +902,9 @@ footer > * { pointer-events: auto; }
  * is the one a caller has to ask for, because only the caller knows what its own button
  * costs.
  */
-.modal-action.danger { border-color: #e08a7a; background: rgb(224 138 122 / 12%); color: #e08a7a; }
-.modal-action.danger:hover:not(:disabled) { background: rgb(224 138 122 / 20%); color: #ff9d88; }
-.recent-modal { position: relative; width: min(100%, 700px); max-height: 80vh; padding: 20px; border: 1px solid #454545; border-radius: 10px; background: #252525; box-shadow: 0 12px 40px #000; }
+.modal-action.danger { border-color: var(--lithic-danger-soft); background: var(--lithic-danger-wash-12); color: var(--lithic-danger-soft); }
+.modal-action.danger:hover:not(:disabled) { background: var(--lithic-danger-wash-20); color: var(--lithic-danger-soft); }
+.recent-modal { position: relative; width: min(100%, 700px); max-height: 80vh; padding: 20px; border: 1px solid var(--lithic-line); border-radius: 10px; background: var(--lithic-surface-panel); box-shadow: 0 12px 40px var(--lithic-shadow); }
 .recent-modal h2 { margin: 0 0 14px; font-size: 1.5rem; }
 /* The ×, and the only dismiss a dialog carries. Whatever the label would have been. A
  * Cancel, Close or Done beside it runs the same function, so the action row is left to the
@@ -857,7 +914,7 @@ footer > * { pointer-events: auto; }
  * "Stop waiting" abandons an authorization and keeps the dialog open, and a rebuild's
  * "Cancel" is the choice not to drop the rows it just listed. A yes/no confirmation is the
  * one dialog with no × at all, because there both answers are decisions. */
-.modal-close { position: absolute; top: 8px; right: 10px; padding: 0 8px; border: 0; background: transparent; color: #ff5555; font-size: 1.8rem; cursor: pointer; }
+.modal-close { position: absolute; top: 8px; right: 10px; padding: 0 8px; border: 0; background: transparent; color: var(--lithic-danger); font-size: 1.8rem; cursor: pointer; }
 /* Saved instance logins (the credential vault). The controls for it are the key in
  * the bookmark dialog (the vault as a whole) and the key on each bookmark row (one
  * instance). See `.vault-manager-button` and `.vault-row-button`. */
@@ -901,72 +958,72 @@ footer > * { pointer-events: auto; }
  * minimum 4px over the half the row gives it, so the pair measured 198px beside 206px
  * however the basis was set. The glyph has its 10px of air and the centring instead.
  */
-.modal-action.vault-manager-button { display: flex; align-items: center; justify-content: center; gap: 8px; padding: 10px; color: #a5a5a5; }
+.modal-action.vault-manager-button { display: flex; align-items: center; justify-content: center; gap: 8px; padding: 10px; color: var(--lithic-ink-muted); }
 .modal-action.vault-manager-button svg { flex: 0 0 auto; width: 17px; height: 17px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; overflow: visible; }
-.modal-action.vault-manager-button:hover { color: #ddd; }
-.modal-action.vault-manager-button.has-logins { color: #7ba86f; border-color: #5d8a52; }
-.modal-action.vault-manager-button.has-logins:hover { color: #9cc78f; }
+.modal-action.vault-manager-button:hover { color: var(--lithic-ink); }
+.modal-action.vault-manager-button.has-logins { color: var(--lithic-ok); border-color: var(--lithic-ok-rim); }
+.modal-action.vault-manager-button.has-logins:hover { color: var(--lithic-ok-light); }
 .vault-modal { width: min(100%, 560px); }
-.vault-modal h3.vault-subhead { margin: 18px 0 0; font-size: 1rem; color: #ddd; }
+.vault-modal h3.vault-subhead { margin: 18px 0 0; font-size: 1rem; color: var(--lithic-ink); }
 .vault-modal .vault-field { display: block; margin: 12px 0 0; }
-.vault-modal .vault-field > span { display: block; margin-bottom: 5px; color: #a5a5a5; font-size: 0.85rem; }
+.vault-modal .vault-field > span { display: block; margin-bottom: 5px; color: var(--lithic-ink-muted); font-size: 0.85rem; }
 .vault-list { display: flex; flex-direction: column; gap: 6px; margin: 14px 0 0; padding: 0; list-style: none; }
-.vault-list li { display: flex; align-items: center; gap: 10px; padding: 9px 10px; border: 1px solid #3d3d3d; border-radius: 7px; background: #2e2e2e; }
+.vault-list li { display: flex; align-items: center; gap: 10px; padding: 9px 10px; border: 1px solid var(--lithic-surface-raise); border-radius: 7px; background: var(--lithic-surface-card); }
 .vault-origin { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.vault-user { flex: 0 1 auto; max-width: 38%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: #a0a0a0; font-size: 0.86rem; }
-.vault-forget { flex: 0 0 auto; padding: 0 4px; border: 0; background: transparent; color: #ff5555; font-size: 1.1rem; line-height: 1; cursor: pointer; }
+.vault-user { flex: 0 1 auto; max-width: 38%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--lithic-ink-muted); font-size: 0.86rem; }
+.vault-forget { flex: 0 0 auto; padding: 0 4px; border: 0; background: transparent; color: var(--lithic-danger); font-size: 1.1rem; line-height: 1; cursor: pointer; }
 .vault-forget:disabled { opacity: 0.4; cursor: default; }
 /* Check a saved login against its instance. Only offered in the list, because the
  * password has to be readable to send it. That is, only once the PIN has been given. */
-.vault-test { flex: 0 0 auto; display: grid; place-items: center; padding: 0 4px; border: 0; background: transparent; color: #8ab4f8; cursor: pointer; }
-.vault-test:hover:not(:disabled) { color: #a9c9ff; }
+.vault-test { flex: 0 0 auto; display: grid; place-items: center; padding: 0 4px; border: 0; background: transparent; color: var(--lithic-accent); cursor: pointer; }
+.vault-test:hover:not(:disabled) { color: var(--lithic-accent-light); }
 .vault-test:disabled { opacity: 0.4; cursor: default; }
 .vault-test svg { width: 17px; height: 17px; fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; }
 /* What the instance said, in the same vocabulary the keys use: green for a login
  * that works, red for one it refused, amber for an instance that stopped asking,
  * grey for anything that never answered. The sentence behind it is the tooltip. */
 .vault-check { flex: 0 0 auto; font-size: 0.78rem; white-space: nowrap; }
-.vault-check.busy { color: #a5a5a5; }
-.vault-check.accepted { color: #7ba86f; }
-.vault-check.refused { color: #e08a7a; }
-.vault-check.not-required { color: #e0b341; }
-.vault-check.unclear, .vault-check.unreachable { color: #8f8f8f; }
+.vault-check.busy { color: var(--lithic-ink-muted); }
+.vault-check.accepted { color: var(--lithic-ok); }
+.vault-check.refused { color: var(--lithic-danger-soft); }
+.vault-check.not-required { color: var(--lithic-amber-progress); }
+.vault-check.unclear, .vault-check.unreachable { color: var(--lithic-ink-faint); }
 /* The same verdict the rows carry, said as a sentence instead of a label: a dialog
  * has room for the reason, and this is the one place a login that is not saved yet
  * can be told it is wrong before it is written down. */
 .vault-check-line { margin: 8px 0 0; font-size: 0.86rem; line-height: 1.45; }
-.vault-check-line.busy { color: #a5a5a5; }
-.vault-check-line.accepted { color: #7ba86f; }
-.vault-check-line.refused { color: #e08a7a; }
-.vault-check-line.not-required { color: #e0b341; }
-.vault-check-line.unclear, .vault-check-line.unreachable { color: #8f8f8f; }
-.vault-empty { color: #8f8f8f; }
+.vault-check-line.busy { color: var(--lithic-ink-muted); }
+.vault-check-line.accepted { color: var(--lithic-ok); }
+.vault-check-line.refused { color: var(--lithic-danger-soft); }
+.vault-check-line.not-required { color: var(--lithic-amber-progress); }
+.vault-check-line.unclear, .vault-check-line.unreachable { color: var(--lithic-ink-faint); }
+.vault-empty { color: var(--lithic-ink-faint); }
 /* Every input in a modal is full width; a checkbox is not a field, and letting
  * it stretch is the same trap the repo picker documents above. It rides in a label row
  * (the PIN's, or a field's) where it costs no row of its own, and it sits at the far end
  * of that row. What sets the row's width is the field it labels: `.pin-entry` is
  * shrink-wrapped to its boxes, and a password field's row spans the input, so the toggle
  * lands on the right edge of the characters it reveals rather than beside the word. */
-.vault-reveal { display: flex; align-items: center; gap: 8px; color: #a5a5a5; font-size: 0.88rem; cursor: pointer; }
-.vault-reveal input { width: auto; margin: 0; padding: 0; accent-color: #8ab4f8; }
+.vault-reveal { display: flex; align-items: center; gap: 8px; color: var(--lithic-ink-muted); font-size: 0.88rem; cursor: pointer; }
+.vault-reveal input { width: auto; margin: 0; padding: 0; accent-color: var(--lithic-accent); }
 /* The band word, and the whole of the dialog's copy about a chosen PIN: the arithmetic
  * behind it is the word's tooltip. Its class is the band Rust returned, so the colour
  * cannot drift from the band. Colours are the ones `.vault-check-line` already uses for
  * the instance's own answers. */
-.vault-band { margin: 0 0 0 14px; color: #e0b341; font-size: 0.9rem; font-weight: 600; white-space: nowrap; }
-.vault-band.refused { color: #e08a7a; }
-.vault-band.weak { color: #e08a7a; }
-.vault-band.average { color: #e0b341; }
-.vault-band.strong { color: #7ba86f; }
-.vault-notice { color: #7ba86f; font-size: 0.86rem; }
-.vault-path { margin-top: 14px; color: #7d7d7d; font-size: 0.78rem; overflow-wrap: anywhere; }
-.vault-path code { color: #9a9a9a; }
+.vault-band { margin: 0 0 0 14px; color: var(--lithic-amber-progress); font-size: 0.9rem; font-weight: 600; white-space: nowrap; }
+.vault-band.refused { color: var(--lithic-danger-soft); }
+.vault-band.weak { color: var(--lithic-danger-soft); }
+.vault-band.average { color: var(--lithic-amber-progress); }
+.vault-band.strong { color: var(--lithic-ok); }
+.vault-notice { color: var(--lithic-ok); font-size: 0.86rem; }
+.vault-path { margin-top: 14px; color: var(--lithic-ink-ghost); font-size: 0.78rem; overflow-wrap: anywhere; }
+.vault-path code { color: var(--lithic-ink-muted); }
 /* What the vault holds, said without opening it: the count comes from the file's
  * origin index, which is readable without the PIN. */
-.vault-count { margin: 12px 0 0; color: #b9b9b9; }
+.vault-count { margin: 12px 0 0; color: var(--lithic-ink-muted); }
 /* The one line a dialog gets before it asks for something: what it is asking, and
  * no more. Everything the vault does is discoverable from the controls themselves. */
-.vault-sub { margin: 0 0 4px; color: #a5a5a5; font-size: 0.9rem; }
+.vault-sub { margin: 0 0 4px; color: var(--lithic-ink-muted); font-size: 0.9rem; }
 /* The PIN boxes. Their widths are flexible on purpose: six of them have to fit the
  * dialog on a phone, so they grow to a comfortable size and stop there rather than
  * setting a width that would push the last one onto its own line. Six boxes stop well
@@ -989,7 +1046,7 @@ footer > * { pointer-events: auto; }
  * which is where a reader looks for it) and `gap` is the air that keeps it off the label
  * on a dialog narrow enough for the two to meet. */
 .pin-head { display: flex; align-items: center; justify-content: space-between; gap: 1em; margin-bottom: 5px; }
-.pin-label { display: block; color: #a5a5a5; font-size: 0.85rem; }
+.pin-label { display: block; color: var(--lithic-ink-muted); font-size: 0.85rem; }
 /* Shrink-wrapped to the boxes below it rather than filling the grid column they sit in: six
  * 46px boxes stop well short of a desktop dialog's edge, and the head row has to stop where
  * they do for the toggle to land on their right edge. `max-width` is what makes the narrow
@@ -1002,11 +1059,11 @@ footer > * { pointer-events: auto; }
 .pin-box:disabled { opacity: 0.5; }
 /* The one control knowing the PIN cannot undo, so it is set apart rather than
  * styled like the secondaries beside it. */
-.vault-danger { color: #e08a7a; }
-.vault-danger:hover:not(:disabled) { color: #ff9d88; }
+.vault-danger { color: var(--lithic-danger-soft); }
+.vault-danger:hover:not(:disabled) { color: var(--lithic-danger-soft); }
 .recent-search { width: 100%; height: 52px; padding: 12px 42px;
-  border: 1px solid #454545; border-radius: 7px; background: #333; color: #eee; font: inherit; }
-.recent-search:focus { outline: none; border-color: #ffb74d; }
+  border: 1px solid var(--lithic-line); border-radius: 7px; background: var(--lithic-surface-control); color: var(--lithic-ink); font: inherit; }
+.recent-search:focus { outline: none; border-color: var(--lithic-amber); }
 /* The right padding is the gap between a row and the scrollbar: without it the
  * thumb sits on the row's remove button. Legacy did the same.
  * `scrollbar-gutter: stable` reserves the scrollbar's width inside the list even
@@ -1034,9 +1091,9 @@ footer > * { pointer-events: auto; }
   min-height: 52px;
   margin-bottom: 6px;
   overflow: hidden;
-  border: 1px solid #454545;
+  border: 1px solid var(--lithic-line);
   border-radius: 7px;
-  background: #333;
+  background: var(--lithic-surface-control);
 }
 .recent-name {
   flex: 1;
@@ -1045,15 +1102,15 @@ footer > * { pointer-events: auto; }
   border: 0;
   outline: 0;
   background: transparent;
-  color: #eee;
+  color: var(--lithic-ink);
   text-align: left;
   cursor: pointer;
 }
-.recent-name:hover { background: rgb(255 255 255 / 5%); }
+.recent-name:hover { background: var(--lithic-sheen-wash-7); }
 .cached-result { cursor: default; }
 .cached-result:hover { background: transparent; }
-.cached-size { display: inline-block; margin-left: 1em; color: #777; font-size: 0.78em; font-weight: 400; white-space: nowrap; }
-.cached-label { display: block; margin-top: 2px; color: #8ab4f8; font-size: 0.72rem; opacity: 0.8; }
+.cached-size { display: inline-block; margin-left: 1em; color: var(--lithic-ink-ghost); font-size: 0.78em; font-weight: 400; white-space: nowrap; }
+.cached-label { display: block; margin-top: 2px; color: var(--lithic-accent); font-size: 0.72rem; opacity: 0.8; }
 .recent-icon-button {
   flex: 0 0 36px;
   display: grid;
@@ -1061,13 +1118,13 @@ footer > * { pointer-events: auto; }
   padding: 0;
   border: 0;
   background: transparent;
-  color: #b5b5b5;
+  color: var(--lithic-ink-muted);
   cursor: pointer;
 }
-.recent-icon-button:hover { background: rgb(255 255 255 / 7%); color: #8ab4f8; }
+.recent-icon-button:hover { background: var(--lithic-sheen-wash-7); color: var(--lithic-accent); }
 .recent-icon-button:disabled { opacity: 0.25; cursor: default; }
 .recent-icon-button svg { width: 21px; height: 21px; fill: none; stroke: currentColor; stroke-width: 1.55; stroke-linecap: round; stroke-linejoin: round; }
-.cache-history-button { color: #bcbcbc; }
+.cache-history-button { color: var(--lithic-ink-muted); }
 /*
  * The saved-logins key on a bookmark row. Grey means nothing is saved for this
  * address and clicking sets one up; green means a login is saved and clicking
@@ -1075,13 +1132,13 @@ footer > * { pointer-events: auto; }
  * is in the vault before the PIN has been typed. Written after the
  * `.recent-icon-button` rules so the two states win on hover, which is where a
  * row's icon buttons all react. */
-.vault-row-button { color: #8a8a8a; }
+.vault-row-button { color: var(--lithic-ink-faint); }
 /* Told not to ask again: still nothing saved, said a shade quieter than the plain
  * grey so the two "nothing saved here" states are not indistinguishable. */
-.vault-row-button.manual { color: #6f6f6f; }
-.vault-row-button.covered { color: #7ba86f; }
-.vault-row-button:hover:enabled { color: #8ab4f8; }
-.vault-row-button.covered:hover:enabled { color: #9cc78f; }
+.vault-row-button.manual { color: var(--lithic-ink-ghost); }
+.vault-row-button.covered { color: var(--lithic-ok); }
+.vault-row-button:hover:enabled { color: var(--lithic-accent); }
+.vault-row-button.covered:hover:enabled { color: var(--lithic-ok-light); }
 /*
  * One mark sits left of the history control, nearest the name it is about: the
  * clock is a control any row can have, while this is a fact about the file
@@ -1095,7 +1152,7 @@ footer > * { pointer-events: auto; }
  * the user put it, it simply is not where the backup is.
  */
 .cache-history-button.modified,
-.cache-history-button.modified:hover { color: #e0b347; }
+.cache-history-button.modified:hover { color: var(--lithic-amber-progress); }
 .cache-history-button.modified:disabled { opacity: 1; }
 .history-download-icon { width: 19px !important; height: 21px !important; overflow: visible; }
 .history-icon-shape,
@@ -1106,11 +1163,11 @@ footer > * { pointer-events: auto; }
   width: max-content;
   max-width: min(430px, 42vw);
   padding: 4px 10px;
-  border: 1px solid #454545;
+  border: 1px solid var(--lithic-line);
   border-radius: 6px;
-  background: #252525;
-  color: #eee;
-  box-shadow: 0 4px 10px rgb(0 0 0 / 50%);
+  background: var(--lithic-surface-panel);
+  color: var(--lithic-ink);
+  box-shadow: 0 4px 10px var(--lithic-shadow-wash-50);
   font: 0.65rem/1.25 ui-monospace, monospace;
   white-space: pre;
   overflow: hidden;
@@ -1121,9 +1178,9 @@ footer > * { pointer-events: auto; }
 }
 
 .cache-preview:hover {
-  border-color: #8ab4f8;
+  border-color: var(--lithic-accent);
 }
-.cache-preview mark { color: #ff9800; background: transparent; font-weight: 700; }
+.cache-preview mark { color: var(--lithic-amber-mark); background: transparent; font-weight: 700; }
 /*
  * The mark inside the note's own name, in the install button's blue rather than the
  * context mark's amber: the title says *which* note matched, the context says where
@@ -1131,7 +1188,7 @@ footer > * { pointer-events: auto; }
  * thing" colour, and two marks in one panel would otherwise read as the same fact
  * said twice. Written with the element in the selector so it outranks the rule above,
  * which is the one that colours every other mark in the panel. */
-.cache-preview mark.cache-preview-title-mark { color: #8ab4f8; background: transparent; }
+.cache-preview mark.cache-preview-title-mark { color: var(--lithic-accent); background: transparent; }
 /*
  * The characters a query matched, inside a row's own title.
  *
@@ -1146,27 +1203,27 @@ footer > * { pointer-events: auto; }
  * cannot take: it is drawn *and* re-measured on each key, and on a dark row a run
  * that is only coloured reads as part of the name rather than as an answer. */
 .recent-name mark.name-match {
-  color: #8ab4f8;
-  background: rgba(138, 180, 248, 0.2);
+  color: var(--lithic-accent);
+  background: var(--lithic-accent-wash-20);
   border-radius: 3px;
 }
-.remove-recent { color: #ff5555; }
-.remove-recent:hover { color: #ff7777; }
-.empty { padding: 20px; color: #999; text-align: center; }
+.remove-recent { color: var(--lithic-danger); }
+.remove-recent:hover { color: var(--lithic-danger-hover); }
+.empty { padding: 20px; color: var(--lithic-ink-muted); text-align: center; }
 .recent-foot { display: flex; align-items: stretch; gap: 10px; }
-.reset-cache { width: 100%; padding: 11px; border: 1px dashed #454545; border-radius: 7px; background: transparent; color: #ddd; cursor: pointer; }
+.reset-cache { width: 100%; padding: 11px; border: 1px dashed var(--lithic-line); border-radius: 7px; background: transparent; color: var(--lithic-ink); cursor: pointer; }
 /* The rebuild/reset control takes whatever the row has left, which is all of it when the
  * install offer is not beside it (every width above a phone, and a phone whose browser
  * has made no offer). `min-width: 0` because the label is the last thing to give: below
  * that the button would hold its own min-content width and push the offer out of the row
  * rather than letting the two share it. */
 .recent-foot .reset-cache { min-width: 0; flex: 1 1 auto; }
-.reset-cache:disabled { color: #8a8a8a; cursor: default; }
+.reset-cache:disabled { color: var(--lithic-ink-faint); cursor: default; }
 /* Coverage is a count, not a warning: how much of the list is backed up. */
 /* How much of the recent list is covered, read in the dialog about backups
    rather than under the list itself: it is a statement about sync, and it only
    means something next to the repository it describes. */
-.backup-status { margin: 0 0 10px; color: #b3acb5; font-size: 0.78rem; }
+.backup-status { margin: 0 0 10px; color: var(--lithic-ink-muted); font-size: 0.78rem; }
 /* One box for both footer controls, so the row reads symmetrical: same height,
  * same side padding, same radius, same label size. Only the face differs,
  * because the install offer is the primary action.
@@ -1183,23 +1240,23 @@ footer > * { pointer-events: auto; }
   justify-content: center;
   min-height: 48px;
   padding: 0 16px;
-  border: 1px solid #494949;
+  border: 1px solid var(--lithic-line);
   border-radius: 8px;
-  background: #333;
-  color: #ddd;
+  background: var(--lithic-surface-control);
+  color: var(--lithic-ink);
   font: 1rem/1.15 'Vollkorn', Georgia, serif;
   text-decoration: none;
 }
 /* Same 1px border, in the button's own colour: dropping it would make the
  * primary action 2px shorter than the link beside it. */
-.install-button { border-color: #8ab4f8; background: #8ab4f8; color: #121212; font-weight: 600; cursor: pointer; }
+.install-button { border-color: var(--lithic-accent); background: var(--lithic-accent); color: var(--lithic-accent-ink); font-weight: 600; cursor: pointer; }
 /* The manual update offer, in the launcher's amber rather than the install
  * button's blue: it is a different kind of action, a hand-off to the user's own
  * browser and a download they drive, and it must not read as the same button as
  * Install or Update Install. The base rule's dark ink carries over, so only the
  * face changes and the control keeps its size. The amber is the sheet's existing
  * one, already the focus outline's colour. */
-.install-button.update-available { border-color: #ffb74d; background: #ffb74d; }
+.install-button.update-available { border-color: var(--lithic-amber); background: var(--lithic-amber); }
 
 /*
  * On wide windows each control clears the 600px launcher column entirely, so
@@ -1263,7 +1320,7 @@ footer > * { pointer-events: auto; }
    * outside the button, so the phone row brings the ring inside the button instead, in the
    * button's own ink. */
   .recent-foot .install-offer { position: relative; right: auto; bottom: auto; overflow: hidden; }
-  .recent-foot .install-button:focus-visible { outline: 2px solid #121212; outline-offset: -3px; }
+  .recent-foot .install-button:focus-visible { outline: 2px solid var(--lithic-accent-ink); outline-offset: -3px; }
 }
 
 /*
@@ -1329,17 +1386,17 @@ footer > * { pointer-events: auto; }
   display: flex;
   flex-direction: column;
   overflow: hidden;
-  border: 1px solid #454545;
+  border: 1px solid var(--lithic-line);
   border-radius: 8px;
-  background: #252525;
-  box-shadow: 0 10px 25px rgb(0 0 0 / 50%);
+  background: var(--lithic-surface-panel);
+  box-shadow: 0 10px 25px var(--lithic-shadow-wash-50);
 }
 .pending-imports-header {
   display: flex;
   justify-content: space-between;
   align-items: center;
   padding: 10px 12px;
-  border-bottom: 1px solid #454545;
+  border-bottom: 1px solid var(--lithic-line);
   font-weight: 600;
   font-size: 1rem;
 }
@@ -1358,10 +1415,10 @@ footer > * { pointer-events: auto; }
 }
 .pending-imports li {
   margin-bottom: 4px;
-  color: #e7e1e9;
+  color: var(--lithic-ink);
 }
 .pending-imports li.tiddler-list {
-  color: #888;
+  color: var(--lithic-ink-faint);
   font-size: 0.8rem;
 }
 
@@ -1370,9 +1427,9 @@ body.drag-over::after {
   content: '';
   position: fixed;
   inset: 15px;
-  border: 3px dashed #8ab4f8;
+  border: 3px dashed var(--lithic-accent);
   border-radius: 12px;
-  background: rgb(138 180 248 / 70%);
+  background: var(--lithic-accent-wash-70);
   z-index: 10000;
   pointer-events: none;
 }
@@ -1380,11 +1437,11 @@ body.drag-over::after {
 /* --- History trail modal --- */
 .history-modal { width: min(100%, 540px); }
 .history-modal h2 { margin-bottom: 12px; padding-right: 30px; overflow-wrap: anywhere; }
-.history-empty { color: #999; }
+.history-empty { color: var(--lithic-ink-muted); }
 .history-list { list-style: none; margin: 0; padding: 0; max-height: 46vh; overflow: auto; }
 .history-entry {
   display: flex; align-items: center; gap: 10px;
-  padding: 8px 10px; border: 1px solid #3a3a3a; border-radius: 7px; background: #2c2c2c;
+  padding: 8px 10px; border: 1px solid var(--lithic-surface-control); border-radius: 7px; background: var(--lithic-surface-card);
 }
 /*
  * What joins two versions: the gap between two entries, with the chevron and the distance
@@ -1396,23 +1453,23 @@ body.drag-over::after {
 .history-link { display: flex; align-items: center; justify-content: center; gap: 8px; height: 20px; }
 .history-link svg {
   width: 13px; height: 8px;
-  fill: none; stroke: #6f6f6f; stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round;
+  fill: none; stroke: var(--lithic-ink-ghost); stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round;
 }
 /* The distance itself, in a grey near the chevron's own: smaller than the timestamp it reads,
  * because it is a reading of two stamps rather than a third fact about the version. */
-.history-gap { color: #8a8a8a; font-size: 0.74em; white-space: nowrap; }
+.history-gap { color: var(--lithic-ink-faint); font-size: 0.74em; white-space: nowrap; }
 .history-badge {
   flex: none; padding: 1px 6px; border-radius: 9px;
-  border: 1px solid #5a7fbf; color: #8ab4f8; font-size: 0.66em; text-transform: uppercase; letter-spacing: 0.04em;
+  border: 1px solid var(--lithic-accent-rim); color: var(--lithic-accent); font-size: 0.66em; text-transform: uppercase; letter-spacing: 0.04em;
   white-space: nowrap;
 }
-.history-badge.delta { border-color: #6d6d6d; color: #aaa; }
-.history-badge.sync { border-color: #5a9a78; color: #8de0ad; }
-.history-time { flex: 1; min-width: 0; color: #ddd; font-size: 0.84em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.history-size { flex: none; color: #888; font-size: 0.76em; white-space: nowrap; }
-.history-download-button { flex: 0 0 32px; color: #8ab4f8; border-radius: 6px; }
-.history-download-button:hover { background: rgb(138 180 248 / 16%); color: #8ab4f8; }
-.history-note { margin-top: 14px; color: #888; font-size: 0.8em; line-height: 1.45; }
+.history-badge.delta { border-color: var(--lithic-line-thumb); color: var(--lithic-ink-muted); }
+.history-badge.sync { border-color: var(--lithic-ok-rim); color: var(--lithic-ok-pale); }
+.history-time { flex: 1; min-width: 0; color: var(--lithic-ink); font-size: 0.84em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.history-size { flex: none; color: var(--lithic-ink-faint); font-size: 0.76em; white-space: nowrap; }
+.history-download-button { flex: 0 0 32px; color: var(--lithic-accent); border-radius: 6px; }
+.history-download-button:hover { background: var(--lithic-accent-wash-12); color: var(--lithic-accent); }
+.history-note { margin-top: 14px; color: var(--lithic-ink-faint); font-size: 0.8em; line-height: 1.45; }
 /*
  * The history dialog's two notices, above the versions and in the yellow of the
  * row mark that opened it: the fallback's claim, at the only place a touch screen
@@ -1424,9 +1481,9 @@ body.drag-over::after {
  */
 .history-modal .browser-only-history-note,
 .history-modal .history-backup-offer {
-  margin: 0 0 14px; padding: 10px 12px; border: 1px solid #6b5a2a; border-radius: 7px;
-  background: rgb(224 179 71 / 10%);
-  color: #e2c07c; font-size: 0.82rem; line-height: 1.45;
+  margin: 0 0 14px; padding: 10px 12px; border: 1px solid var(--lithic-amber-rim-deep); border-radius: 7px;
+  background: var(--lithic-amber-wash-10);
+  color: var(--lithic-amber-soft); font-size: 0.82rem; line-height: 1.45;
 }
 /*
  * Only the offer carries an action, and the button sits at the end of the sentence
@@ -1438,7 +1495,7 @@ body.drag-over::after {
 /* The colour has to be said again here, and to this depth: `.launcher-modal p` names
  * the paragraph itself, so inheriting from the box above is not enough and the
  * sentence would quietly paint in the dialog's ordinary grey. */
-.history-modal .history-backup-offer p { flex: 1; min-width: 0; margin: 0; color: #e2c07c; }
+.history-modal .history-backup-offer p { flex: 1; min-width: 0; margin: 0; color: var(--lithic-amber-soft); }
 .history-modal .history-backup-offer .modal-action { flex: 0 0 auto; margin: 0; padding: 8px 12px; }
 
 /* The launcher's own confirmation, replacing `window.confirm`, which the desktop
@@ -1449,10 +1506,10 @@ body.drag-over::after {
 /* --- Transient (dirty) recovery --- */
 .dirty-modal { width: min(100%, 480px); }
 .dirty-tiddler-list {
-  margin: 12px 0 0; padding: 8px 10px 8px 26px; border: 1px solid #3a3a3a; border-radius: 7px;
-  background: #2c2c2c; color: #ccc; font-size: 0.85em; max-height: 30vh; overflow: auto;
+  margin: 12px 0 0; padding: 8px 10px 8px 26px; border: 1px solid var(--lithic-surface-control); border-radius: 7px;
+  background: var(--lithic-surface-card); color: var(--lithic-ink-soft); font-size: 0.85em; max-height: 30vh; overflow: auto;
 }
-.dirty-tiddler-list .dirty-more { color: #888; list-style: none; margin-left: -14px; }
+.dirty-tiddler-list .dirty-more { color: var(--lithic-ink-faint); list-style: none; margin-left: -14px; }
 /*
  * Rebuild confirmation: the rows it is about to drop because their file has
  * gone missing. Each keeps the list's history/download button, so a real file
@@ -1460,24 +1517,24 @@ body.drag-over::after {
  */
 .orphan-modal { width: min(100%, 520px); }
 .orphan-list {
-  margin: 12px 0 0; padding: 4px 10px; border: 1px solid #3a3a3a; border-radius: 7px;
-  background: #2c2c2c; max-height: 34vh; overflow-y: auto;
+  margin: 12px 0 0; padding: 4px 10px; border: 1px solid var(--lithic-surface-control); border-radius: 7px;
+  background: var(--lithic-surface-card); max-height: 34vh; overflow-y: auto;
 }
-.orphan-row { display: flex; align-items: center; gap: 8px; padding: 4px 0; border-top: 1px solid #383838; }
+.orphan-row { display: flex; align-items: center; gap: 8px; padding: 4px 0; border-top: 1px solid var(--lithic-line-faint); }
 .orphan-row:first-child { border-top: 0; }
-.orphan-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: #ddd; font-size: 0.88rem; }
-.orphan-tag { padding: 1px 6px; border-radius: 999px; background: #3a3a3a; color: #a8a8a8; font-size: 0.7rem; white-space: nowrap; }
-.orphan-tag.dirty { background: rgb(255 157 128 / 16%); color: #ff9d80; }
-.orphan-warning { margin: 10px 0 0; color: #ff9d80; font-size: 0.82rem; }
+.orphan-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--lithic-ink); font-size: 0.88rem; }
+.orphan-tag { padding: 1px 6px; border-radius: 999px; background: var(--lithic-surface-control); color: var(--lithic-ink-muted); font-size: 0.7rem; white-space: nowrap; }
+.orphan-tag.dirty { background: var(--lithic-danger-wash-12); color: var(--lithic-danger-soft); }
+.orphan-warning { margin: 10px 0 0; color: var(--lithic-danger-soft); font-size: 0.82rem; }
 /* A row's download result. Only `.saved` may claim the copy is on this device:
  * the fallback save path cannot confirm a browser download finished, so it gets
  * the amber tone and a different label rather than a green check it has not
  * earned. */
 .orphan-pill { padding: 1px 7px; border-radius: 999px; font-size: 0.7rem; white-space: nowrap; }
-.orphan-pill.saved { background: rgb(91 158 92 / 22%); color: #9ede94; }
-.orphan-pill.unverified { background: rgb(224 179 65 / 16%); color: #e6c46a; }
+.orphan-pill.saved { background: var(--lithic-ok-wash-22); color: var(--lithic-ok-pale); }
+.orphan-pill.unverified { background: var(--lithic-amber-wash-16); color: var(--lithic-amber-soft); }
 /* "2 of 5 saved". The line that says when Proceed is safe. */
-.orphan-progress { margin: 10px 0 0; color: #9ede94; font-size: 0.8rem; text-align: center; }
+.orphan-progress { margin: 10px 0 0; color: var(--lithic-ok-pale); font-size: 0.8rem; text-align: center; }
 
 /* --- Offline mode: a cached self-host launcher whose instance is out of reach --- */
 /*
@@ -1485,8 +1542,9 @@ body.drag-over::after {
  * cannot be answered is a different launcher from the same page online (its list is this
  * device's copies rather than the server's) and that is a fact about the screen, so it is
  * said once at the top instead of on each row. Amber is deliberately the same tone a row's
- * unfinished mark uses (`#e0b347`): the banner and the exclamations are two halves of one
- * fact, and giving the global half its own colour would read as a second problem.
+ * unfinished mark uses (`amber.progress`): the banner and the exclamations are two
+ * halves of one fact, and giving the global half its own colour would read as a second
+ * problem.
  *
  * Drawn as a sibling of the heading rather than inside it, so it cannot move the mark, the
  * title or the heading's own buttons, which are the same three things in every mode. It
@@ -1498,10 +1556,10 @@ body.drag-over::after {
   gap: 9px;
   margin: 0 0 12px;
   padding: 9px 12px;
-  border: 1px solid rgb(224 179 71 / 45%);
+  border: 1px solid var(--lithic-amber-wash-45);
   border-radius: 7px;
-  background: rgb(224 179 71 / 10%);
-  color: #e0b347;
+  background: var(--lithic-amber-wash-10);
+  color: var(--lithic-amber-progress);
 }
 .offline-banner-icon {
   flex: 0 0 18px;
@@ -1515,8 +1573,8 @@ body.drag-over::after {
   stroke-linejoin: round;
 }
 .offline-banner-copy { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
-.offline-banner-copy strong { color: #f0d585; font-size: 0.86rem; font-weight: 600; line-height: 1.25; }
-.offline-banner-copy span { color: #d9c48a; font-size: 0.78rem; line-height: 1.35; }
+.offline-banner-copy strong { color: var(--lithic-amber-soft); font-size: 0.86rem; font-weight: 600; line-height: 1.25; }
+.offline-banner-copy span { color: var(--lithic-amber-soft); font-size: 0.78rem; line-height: 1.35; }
 /*
  * A phone gets that line one notch smaller, because there it was the widest thing in the
  * banner: at the desktop size it wrapped under a one-line heading and read as a paragraph
@@ -1535,7 +1593,7 @@ body.drag-over::after {
    control to explain in a heading. `.recent-group-label` and `.remote-dot` are gone
    with the device's own rows: this mode lists the store and nothing else, so there is
    no second group to head or to mark these rows apart from. */
-.remote-file { min-width: 0; color: #bbb; font-size: 0.76rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.remote-file { min-width: 0; color: var(--lithic-ink-muted); font-size: 0.76rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 /* The icon lives *inside* .recent-name (see the markup): the cached instance icon
    is part of the link, so the hover and focus highlight has to cover it rather
    than stop beside it. Two consequences worth keeping: the inset comes from the
@@ -1549,7 +1607,7 @@ body.drag-over::after {
   flex: none; align-self: center; width: 24px; height: 24px;
   border-radius: 5px; object-fit: contain;
 }
-.bookmark-icon-empty { border: 1px dashed #4a4a4a; background: #2c2c2c; }
+.bookmark-icon-empty { border: 1px dashed var(--lithic-line); background: var(--lithic-surface-card); }
 /* Truncating span rather than bare text: a flex container turns loose text into an
    anonymous item, which cannot ellipsis, and a long host name would then push the
    remove button out of the row. */
@@ -1564,26 +1622,26 @@ body.drag-over::after {
  */
 .instance-truncated-note {
   flex: none; align-self: center; max-width: 40%; overflow: hidden;
-  margin-right: 6px; color: #9a9a9a; font-size: 0.62rem; white-space: nowrap; text-overflow: ellipsis;
+  margin-right: 6px; color: var(--lithic-ink-muted); font-size: 0.62rem; white-space: nowrap; text-overflow: ellipsis;
 }
 
 /* --- Instance icon picker ------------------------------------------------ */
 .brand-icon-wrap.pickable { cursor: pointer; }
-.brand-icon-wrap.pickable:hover .brand-icon { border-color: #ffb74d; }
-.brand-icon-wrap.pickable:focus-visible { outline: 2px solid #ffb74d; outline-offset: 2px; border-radius: 8px; }
+.brand-icon-wrap.pickable:hover .brand-icon { border-color: var(--lithic-amber); }
+.brand-icon-wrap.pickable:focus-visible { outline: 2px solid var(--lithic-amber); outline-offset: 2px; border-radius: 8px; }
 /* The mark as a link (webapp and the desktop app). Same 52px frame as the
  * button; `.brand-icon-wrap` resets `cursor` to default and this is an <a>, so
  * both the pointer and the underline have to be asked for. Hover uses the same
  * accent as the install button (the app's interactive colour) so the mark
  * reads as a way out rather than as decoration. */
 .brand-github { cursor: pointer; text-decoration: none; }
-.brand-github:hover .brand-icon, .brand-github:focus-visible .brand-icon { border-color: #8ab4f8; }
-.brand-github:focus-visible { outline: 2px solid #8ab4f8; outline-offset: 2px; border-radius: 8px; }
+.brand-github:hover .brand-icon, .brand-github:focus-visible .brand-icon { border-color: var(--lithic-accent); }
+.brand-github:focus-visible { outline: 2px solid var(--lithic-accent); outline-offset: 2px; border-radius: 8px; }
 .brand-icon-wrap.brand-emoji-wrap .brand-emoji {
-  display: grid; place-items: center; width: 52px; height: 52px; border: 3px solid #444;
-  border-radius: 6px; background: #f4f4f4; font-size: 1.7rem; line-height: 1;
+  display: grid; place-items: center; width: 52px; height: 52px; border: 3px solid var(--lithic-line);
+  border-radius: 6px; background: var(--lithic-surface-light); font-size: 1.7rem; line-height: 1;
 }
-.brand-icon-wrap.pickable:hover .brand-emoji { border-color: #ffb74d; }
+.brand-icon-wrap.pickable:hover .brand-emoji { border-color: var(--lithic-amber); }
 /*
  * 440px, not the 460 the other dialogs take, and the width is load-bearing: it decides how
  * many columns the grid below draws, and the picker's 80 glyphs fill ten of them exactly.
@@ -1615,12 +1673,12 @@ body.drag-over::after {
   display: grid; grid-template-columns: repeat(auto-fill, minmax(32px, 1fr)); gap: 4px;
   /* No inner scroll region: the modal owns the only scrollbar (same reason as
      .repo-list. Two scrollbars a few pixels apart is unusable). */
-  padding: 6px; border: 1px solid #3a3a3a;
-  border-radius: 7px; background: #2c2c2c;
+  padding: 6px; border: 1px solid var(--lithic-surface-control);
+  border-radius: 7px; background: var(--lithic-surface-card);
 }
 .emoji-btn {
   display: grid; place-items: center; width: 100%; height: 34px; padding: 0; border: 1px solid transparent;
   border-radius: 6px; background: transparent; font-size: 1.15rem; line-height: 1; cursor: pointer;
 }
-.emoji-btn:hover { background: rgb(255 255 255 / 8%); }
-.emoji-btn.selected { border-color: #ffb74d; background: rgb(255 183 77 / 16%); }
+.emoji-btn:hover { background: var(--lithic-sheen-wash-7); }
+.emoji-btn.selected { border-color: var(--lithic-amber); background: var(--lithic-amber-wash-16); }

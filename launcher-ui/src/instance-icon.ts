@@ -26,6 +26,7 @@
  */
 import { copy } from './copy.ts';
 import { WEBDAV_BASE } from './webdav.ts';
+import { paletteValue } from './color-palette.ts';
 
 /**
  * The glyphs the picker offers, in the order (and the groups) they are laid out in.
@@ -134,8 +135,12 @@ export function instanceMarkUrl(
 }
 
 export const INSTANCE_EMOJI_KEY = 'lithic-icon-emoji';
-/** Legacy background behind the glyph. Every generated icon matches it. */
-export const ICON_BACKGROUND = '#333';
+/**
+ * Legacy background behind the glyph. Every generated icon matches it, and it is the same
+ * `surface.control` grey the launcher's own controls are drawn in (see `color-palette.ts`),
+ * because the icon this paints replaces the mark on a button in that row.
+ */
+export const ICON_BACKGROUND = paletteValue('surface.control');
 
 export type Canvas2DLike = {
   fillStyle: string;
