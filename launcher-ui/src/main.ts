@@ -1,10 +1,14 @@
 import { mount } from 'svelte';
 import App from './App.svelte';
 import { LOCALE_TAG } from './copy';
-import { hostedInApp, resolveMode } from './mode';
+import { declaresBrowserOnly, hostedInApp, resolveMode } from './mode';
 import './styles.css';
 
 const mode = resolveMode(window.location);
+// A page the shim served declares itself browser-only (see `mode.ts`). Read from
+// the document rather than from the mode, since the shim's loopback address alone
+// cannot say what answered it.
+const browserOnly = declaresBrowserOnly(document);
 
 /*
  * The page's own language declaration, which is not decoration: a screen reader picks its
@@ -29,8 +33,11 @@ mount(App, {
   props: { mode }
 });
 
-// PWA offline support (legacy launcher registers the same worker).
-if ('serviceWorker' in navigator) {
+// PWA offline support (the legacy launcher registers the same worker), and its
+// deliberate absence on a page the shim served: that server runs on the same
+// machine as the browser it opened, so it has no offline mode to keep and no
+// cache that could answer a navigation with a launcher older than itself.
+if (!browserOnly && 'serviceWorker' in navigator) {
   navigator.serviceWorker.register('/offline-service-worker.js').catch(() => {
     // Registration is best-effort; the launcher works without it.
   });

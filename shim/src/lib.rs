@@ -36,9 +36,13 @@
 //!     [`loopback_alias`]: `localhost:5484` and `127.0.0.1:5484` are two origins
 //!     too, so the served page redirects the `localhost` spelling to the address
 //!     the shim opens.
-//!   * A page that is never installed is evictable storage. Serving the manifest
-//!     and the service worker is what makes the shim's address installable as an
-//!     app, which is the one path from "a browser tab" to durable storage.
+//!   * A page that is never installed is evictable storage, so the manifest ships
+//!     with the launcher, which keeps its name and its icons. No service worker
+//!     does: this server runs on the same machine as the browser it opened, so
+//!     there is no offline mode to keep, and a worker answers navigations out of a
+//!     cache keyed by whole URLs, which is how a launcher an older build cached
+//!     came to be served in place of the one on disk. The launcher skips the
+//!     registration on a page this shim served; see `main.ts`.
 
 use std::fs;
 use std::io::{BufRead, BufReader, Read, Write};
@@ -96,10 +100,14 @@ pub const LOOPBACK_HOST: &str = "127.0.0.1";
 
 /// Files without which the payload is not a launcher. Checked before the port is
 /// bound so a broken layout fails with a list rather than with half a page.
-pub const REQUIRED_PAYLOAD: [&str; 5] = [
+///
+/// The service worker the published launcher registers is deliberately not here:
+/// the shim has no offline mode, and a cached launcher is what an old worker would
+/// answer a navigation with. A payload that happens to carry the file is the
+/// checkout the shim can also run from, not anything the AppImage ships.
+pub const REQUIRED_PAYLOAD: [&str; 4] = [
     "index.html",
     "manifest.json",
-    "offline-service-worker.js",
     "src/launcher.html",
     "src/lithic.html",
 ];
@@ -137,7 +145,7 @@ const MAX_HEAD_BYTES: usize = 16 * 1024;
 ///   5. Any ancestor of the executable's directory that holds `src/launcher.html`.
 ///      This is the repository checkout, which is why the shim runs from
 ///      `cargo run` with no setup at all: the root of this repo already carries
-///      the launcher, the engine, the manifest and the service worker.
+///      the launcher, the engine and the manifest.
 pub fn default_payload_root(
     exe_dir: &Path,
     appdir: Option<&Path>,
@@ -858,7 +866,6 @@ mod tests {
             for (path, contents) in [
                 ("index.html", "<html><head></head><body>redirect</body></html>"),
                 ("manifest.json", "{\"name\":\"Lithic\"}"),
-                ("offline-service-worker.js", "const VERSION = '0.0.0'"),
                 ("src/launcher.html", "<html><head><title>Launcher</title></head><body></body></html>"),
                 ("src/lithic.html", "<html><head></head><body>engine</body></html>"),
                 ("src/app-icon.png", "png"),
@@ -934,6 +941,16 @@ mod tests {
         assert!(payload_problems(&payload.root).is_empty());
         fs::remove_file(payload.root.join("src/lithic.html")).expect("remove engine");
         assert_eq!(payload_problems(&payload.root), vec!["src/lithic.html".to_string()]);
+    }
+
+    #[test]
+    fn a_payload_without_a_service_worker_is_complete() {
+        // The service worker the published launcher registers is not something the
+        // shim serves, so a payload that has none is a payload the AppImage could
+        // ship. The fixture writes none, which is what the AppDir now copies.
+        let payload = Payload::new("no-worker");
+        assert!(!payload.root.join("offline-service-worker.js").exists());
+        assert!(payload_problems(&payload.root).is_empty());
     }
 
     #[test]

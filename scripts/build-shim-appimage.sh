@@ -75,11 +75,13 @@ fi
 
 # The files without which the AppDir is not a launcher. The shim checks these
 # again before it binds a port, so a build that gets past this line cannot ship
-# an artifact that fails at start-up.
+# an artifact that fails at start-up. A service worker is deliberately absent,
+# since the shim has no offline mode and a cached launcher is what an old worker
+# would answer a navigation with; the launcher skips that registration on a page
+# the shim served.
 required=(
   index.html
   manifest.json
-  offline-service-worker.js
   src/launcher.html
   src/lithic.html
 )
