@@ -5106,8 +5106,8 @@
                   Beside it, in grey, the distance between the two as one unit: the answer
                   to a question two long timestamps otherwise leave to mental arithmetic.
                   Decorative, so it stays out of the accessibility tree (the stamps either
-                  side of it already say exactly when each version was written) and the pair
-                  is centred in the gap it owns.
+                  side of it already say exactly when each version was written) and the chevron
+                  is pinned to the column's centre line, the distance hung off its right.
                 -->
                 <li class="history-link" aria-hidden="true">
                   <svg viewBox="0 0 14 8" aria-hidden="true"><path d="M1.5 6.5 7 1.5l5.5 5"></path></svg>
@@ -5190,7 +5190,7 @@
       <div class="recent-search-wrap">
         <svg class="recent-search-icon" viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="7.5"></circle><path d="m16.5 16.5 4 4"></path></svg>
         <input class="recent-search" aria-label={copy.recent.searchAria} placeholder={copy.recent.searchPlaceholder} bind:value={search} on:keydown={handleSearchKeydown} />
-        {#if search}<button class="recent-search-clear" type="button" aria-label={copy.recent.clearSearch} on:click={() => search = ''}>×</button>{/if}
+        {#if search}<button class="recent-search-clear" type="button" aria-label={copy.recent.clearSearch} on:click={() => search = ''}><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m7 7 10 10M17 7 7 17"></path></svg></button>{/if}
       </div>
       <div class="recent-list" use:trackListScroll>
         {#if isSelfHost()}

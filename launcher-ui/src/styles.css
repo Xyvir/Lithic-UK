@@ -544,9 +544,14 @@ h1 { flex: none; min-width: 0; margin: 0; color: var(--lithic-ink-strong); font-
   border-radius: 6px;
   background: transparent;
   color: var(--lithic-danger);
-  font: 1.6rem/1 'Vollkorn', serif;
   cursor: pointer;
 }
+/*
+ * The row remove X, drawn here by the same path at the same size. The search clear is not
+ * a row button and cannot take that class, so it carries the sizing itself: as a text glyph
+ * it sat on its own baseline and read as a bigger, lower X than the rows beside it.
+ */
+.recent-search-clear svg { width: 21px; height: 21px; fill: none; stroke: currentColor; stroke-width: 1.55; stroke-linecap: round; stroke-linejoin: round; }
 
 .status-line {
   min-height: 1.2em;
@@ -1038,8 +1043,18 @@ footer > * { pointer-events: auto; }
  * is what lets the boxes squeeze instead of wrapping. The 14px the band sits off the
  * boxes is a margin rather than a column-gap, because a column-gap is charged for the
  * empty second column too in the dialogs that carry no band, putting the boxes 7px off
- * centre in the shape that has nothing else on the line. */
+ * centre in the shape that has nothing else on the line. The one dialog whose rows carry a band
+ * overrides it below, because a band is a second thing sharing that line. */
 .vault-pin { display: grid; grid-template-columns: minmax(0, max-content) auto; justify-content: center; align-items: center; margin-top: 12px; }
+/*
+ * The dialog that chooses a PIN and asks for it twice is the only place the band word rides
+ * beside the boxes, and centring each row on its own put the two rows' left edges in different
+ * places: the width of "Average" moved the row that carried it and not the row that did not.
+ * Both rows start where the label and the dialog's other fields start, so their boxes line up,
+ * and the band lands to the right of the boxes instead of pushing them sideways.
+ */
+.vault-pin.credential-offer-pin,
+.vault-pin.credential-offer-pin-confirm { justify-content: start; }
 /* The label, and whatever belongs to the field rather than to a reader of the dialog: its
  * Show toggle. The row is as wide as the field it labels, so `space-between` parks the
  * toggle on that field's right edge (in line with the end of the characters it reveals,
@@ -1444,20 +1459,32 @@ body.drag-over::after {
   padding: 8px 10px; border: 1px solid var(--lithic-surface-control); border-radius: 7px; background: var(--lithic-surface-card);
 }
 /*
- * What joins two versions: the gap between two entries, with the chevron and the distance
- * between them centred in it. The list runs newest at the top, so the chevron points up, from
- * the older version below to the newer one above, which is the way the trail is read back.
- * The connector owns the spacing, which is why an entry carries no bottom margin of its own:
- * one gap, drawn, instead of a margin plus a decoration inside it.
+ * What joins two versions: the gap between two entries. The chevron is pinned to the column's
+ * own centre line, so the arrows read as one straight spine down the trail instead of drifting
+ * sideways as the distance beside them grows or shrinks. The list runs newest at the top, so the
+ * chevron points up, from the older version below to the newer one above, which is the way the
+ * trail is read back. The connector owns the spacing, which is why an entry carries no bottom
+ * margin of its own: one gap, drawn, instead of a margin plus a decoration inside it.
  */
-.history-link { display: flex; align-items: center; justify-content: center; gap: 8px; height: 20px; }
+.history-link { position: relative; height: 20px; }
 .history-link svg {
+  position: absolute; top: 50%; left: 50%;
   width: 13px; height: 8px;
+  transform: translate(-50%, -50%);
   fill: none; stroke: var(--lithic-ink-ghost); stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round;
 }
-/* The distance itself, in a grey near the chevron's own: smaller than the timestamp it reads,
- * because it is a reading of two stamps rather than a third fact about the version. */
-.history-gap { color: var(--lithic-ink-faint); font-size: 0.74em; white-space: nowrap; }
+/*
+ * The distance itself, in a grey near the chevron's own and hung to the right of it: smaller
+ * than the timestamp it reads, because it is a reading of two stamps rather than a third fact
+ * about the version. Taken out of flow so its length cannot pull the chevron off the centre
+ * line; the gutter is the 8px the pair used to carry, less the chevron's own half width.
+ */
+.history-gap {
+  position: absolute; top: 50%; left: 50%;
+  margin-left: 14px;
+  transform: translateY(-50%);
+  color: var(--lithic-ink-faint); font-size: 0.74em; white-space: nowrap;
+}
 .history-badge {
   flex: none; padding: 1px 6px; border-radius: 9px;
   border: 1px solid var(--lithic-accent-rim); color: var(--lithic-accent); font-size: 0.66em; text-transform: uppercase; letter-spacing: 0.04em;
