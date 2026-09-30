@@ -1776,26 +1776,26 @@ fn classify_manifest(status: u16, body: &[u8]) -> &'static str {
     }
 }
 
-/// Is this address a Lithic instance, in a way the browser cannot check?
 /// The cached wikis other instances keep in this app's own storage.
 ///
 /// The launcher asks for the addresses it bookmarked and gets back whatever their
-/// origins have cached. Nothing here reaches the network, and the argument is the
-/// limit of what can be read: an address the user did not save is never looked at.
+/// origins have cached. The argument is the limit of what can be read: an address the
+/// user did not save is never looked at.
 ///
-/// Empty is a complete answer. Every way this can come to nothing — an origin with no
-/// Lithic storage, a store never written, a runtime without the protocol, a platform
-/// without the hook — is "no cached wikis here", which the launcher shows as nothing.
+/// Empty is a complete answer. An origin with no Lithic storage, a store that was never
+/// written, an instance that could not be reached, a platform without the hook — every
+/// one of them is "no cached wikis here", which the launcher shows as nothing. There is
+/// no error path because none of these is the user's problem to be told about;
+/// `truncated` is the one thing that is not empty, and it says a cap stopped the read.
 #[tauri::command]
 async fn instance_cache_search(
     app: tauri::AppHandle,
     origins: Vec<String>,
 ) -> Vec<instance_search::InstanceCacheRead> {
-    // The protocol calls belong to the thread that owns the webview, and they wait for
-    // it to answer, so this runs on a blocking task while the launcher's search stays
-    // responsive.
-    let Some(window) = tauri::Manager::get_webview_window(&app, "main") else { return Vec::new() };
-    tauri::async_runtime::spawn_blocking(move || instance_search::read_caches(&window, &origins))
+    // Each origin's read opens its own hidden window and waits for the main thread to
+    // answer it, so this runs on a blocking task while the launcher's search stays
+    // responsive. The launcher's own window is not involved: the reader is its own.
+    tauri::async_runtime::spawn_blocking(move || instance_search::read_caches(&app, &origins))
         .await
         .unwrap_or_default()
 }

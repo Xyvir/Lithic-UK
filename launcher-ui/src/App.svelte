@@ -1870,7 +1870,12 @@
   $: filteredBookmarks = bookmarks.filter((entry) =>
     entry.label.toLowerCase().includes(search.toLowerCase()) ||
     entry.url.toLowerCase().includes(search.toLowerCase()) ||
-    Boolean(instanceCacheHits[entry.url]?.preview)
+    Boolean(instanceCacheHits[entry.url]?.preview) ||
+    // A partly read instance is listed even with nothing to show for it, because the
+    // alternative is the one answer this search must never give: nothing at all, when
+    // the truth is that an older Lith in there might match and was not read. The row
+    // then carries the sentence that says so.
+    Boolean(search.trim() && instanceReads[entry.url]?.truncated)
   );
 
   $: filteredCached = Object.values(cachedEntries).filter((entry) => {
@@ -5371,6 +5376,15 @@
                 on:click={() => openBookmarkedInstance(entry.url, search.trim())}
                 on:keydown={(event) => (event.key === 'Enter' || event.key === ' ') && openBookmarkedInstance(entry.url, search.trim())}
               >{@html instanceCacheHits[entry.url].preview}</div>
+            {/if}
+            <!--
+              The read of an instance is bounded, and this says so where the answer it
+              bounds is drawn. The alternative is a row that looks like a complete answer
+              while an older Lith in the same instance matches and is simply not read,
+              which is the one failure a search cannot show the user by being empty.
+            -->
+            {#if mode === 'tauri' && search.trim() && instanceReads[entry.url]?.truncated}
+              <span class="instance-truncated-note">{copy.row.instanceTruncated}</span>
             {/if}
             <button class="recent-icon-button remove-recent" type="button" aria-label={copy.row.removeBookmarkAria(entry.url)} on:click={() => removeInstanceBookmark(entry.url, entry.label)}><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m7 7 10 10M17 7 7 17"></path></svg></button>
           </div>

@@ -1554,6 +1554,18 @@ body.drag-over::after {
    anonymous item, which cannot ellipsis, and a long host name would then push the
    remove button out of the row. */
 .bookmark-label { min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+/*
+ * The row's own admission that an instance was only partly searched.
+ *
+ * It sits inside the row rather than in the panel beside it because the panel is the
+ * hit and this is a caveat about the list the hit came from. Deliberately dimmer and
+ * smaller than the address: it is a footnote to the row, not a second label, and the
+ * ellipsis keeps a long address and this sentence from fighting over the same line.
+ */
+.instance-truncated-note {
+  flex: none; align-self: center; max-width: 40%; overflow: hidden;
+  margin-right: 6px; color: #9a9a9a; font-size: 0.62rem; white-space: nowrap; text-overflow: ellipsis;
+}
 
 /* --- Instance icon picker ------------------------------------------------ */
 .brand-icon-wrap.pickable { cursor: pointer; }

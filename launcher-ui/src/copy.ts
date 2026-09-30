@@ -390,6 +390,9 @@ const en = {
     openSearchingAria: (label: string, query: string) => `Open ${label} searching for “${query}”`,
     openSearchingTitle: (label: string) => `Open ${label} and search for this`,
     removeBookmarkAria: (url: string) => `Remove bookmark ${url}`,
+    // A search into an instance reads a bounded amount of its cache, and an instance
+    // bigger than that would otherwise answer with a silently shorter list.
+    instanceTruncated: 'Only the newest Liths here were searched',
     pinAria: (name: string, title: string) => `Open ${name} and pin “${title}” to top`,
     openAria: (name: string) => `Open ${name}`,
     pinTitle: 'Open and pin this tiddler',
@@ -924,6 +927,7 @@ const es: Copy = {
     openSearchingAria: (label: string, query: string) => `Abrir ${label} buscando “${query}”`,
     openSearchingTitle: (label: string) => `Abrir ${label} y buscar esto`,
     removeBookmarkAria: (url: string) => `Quitar el marcador ${url}`,
+    instanceTruncated: 'Solo se buscó en los Liths más recientes',
     pinAria: (name: string, title: string) => `Abrir ${name} y fijar “${title}” arriba`,
     openAria: (name: string) => `Abrir ${name}`,
     pinTitle: 'Abrir y fijar este tiddler',
@@ -1439,6 +1443,7 @@ const fr: Copy = {
     openSearchingAria: (label: string, query: string) => `Ouvrir ${label} en cherchant « ${query} »`,
     openSearchingTitle: (label: string) => `Ouvrir ${label} et chercher ceci`,
     removeBookmarkAria: (url: string) => `Retirer le marque-page ${url}`,
+    instanceTruncated: 'Seuls les Liths les plus récents ont été cherchés',
     pinAria: (name: string, title: string) => `Ouvrir ${name} et épingler « ${title} » en haut`,
     openAria: (name: string) => `Ouvrir ${name}`,
     pinTitle: 'Ouvrir et épingler ce tiddler',
@@ -1951,6 +1956,7 @@ const de: Copy = {
     openSearchingAria: (label: string, query: string) => `${label} öffnen und nach „${query}“ suchen`,
     openSearchingTitle: (label: string) => `${label} öffnen und danach suchen`,
     removeBookmarkAria: (url: string) => `Lesezeichen ${url} entfernen`,
+    instanceTruncated: 'Nur die neuesten Liths wurden durchsucht',
     pinAria: (name: string, title: string) => `${name} öffnen und „${title}“ oben anheften`,
     openAria: (name: string) => `${name} öffnen`,
     pinTitle: 'Diesen Tiddler öffnen und anheften',
