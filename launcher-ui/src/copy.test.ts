@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { LOCALE, LOCALE_TAG, copy, decks, matchLanguage, resolveLocale } from './copy.ts';
+import { LOCALE, LOCALE_TAG, copy, decks, matchLanguage, resolveLocale, type LocaleId } from './copy.ts';
 
 test('Node reads the deck in English, since there is no environment to read', () => {
   // The guards in `copy.ts` exist for this: `location`, `window` and `navigator` are all
@@ -125,5 +125,34 @@ test('every deck says the same things in the same places', () => {
   const english = leaves(decks.en).map(([path]) => path).sort();
   for (const [id, deck] of Object.entries(decks)) {
     assert.deepEqual(leaves(deck).map(([path]) => path).sort(), english, `the ${id} deck does not line up with English`);
+  }
+});
+
+test('the desktop install offer names the menu the platform actually puts the app in', () => {
+  // One launcher file ships to every desktop platform, so this sentence is the only place
+  // either platform's own name for its own menu appears. "Start Menu" on an AppImage would
+  // be a plainly wrong claim, and the offer is read before the button is pressed, so the
+  // wrong claim is the whole impression of the install.
+  //
+  // The Windows noun per language is listed so the check can be positive rather than a
+  // guess about wording: a translated deck spelling it differently is a compile error
+  // rather than a missed case.
+  const windowsMenu: Record<LocaleId, string> = {
+    en: 'Start Menu',
+    es: 'menú Inicio',
+    fr: 'menu Démarrer',
+    de: 'Startmenü'
+  };
+  for (const [id, deck] of Object.entries(decks)) {
+    const windows = deck.install.offer.desktop('start-menu');
+    const linux = deck.install.offer.desktop('application-menu');
+    assert.notEqual(linux, windows, `${id} says the same thing about both platforms`);
+    assert.ok(
+      !linux.includes(windowsMenu[id as LocaleId]),
+      `${id} names the Windows menu where the app goes in the system menu: ${linux}`
+    );
+    // The third branch is for a platform that reports no entry at all, and it still has to
+    // be a sentence rather than a gap.
+    assert.ok(deck.install.offer.desktop(null).trim().length > 0, `${id} has no answer for a platform with no menu`);
   }
 });

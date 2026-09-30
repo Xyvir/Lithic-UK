@@ -40,6 +40,16 @@ const BROWSER_ONLY_TOOLTIP =
   'That copy is intrinsically volatile. Clearing site data, or the browser reclaiming space, will lose it. ' +
   'Download your own hard copies from its version history.';
 
+/**
+ * Where installing puts the app, as the desktop app reports it.
+ *
+ * A token rather than a noun, because the noun is a translation: Rust knows the platform
+ * and this file knows the language, and neither can spell the other's half. `platform`
+ * sends this in its capability report, and `install.offer.desktop` turns it into the
+ * sentence the offer shows.
+ */
+export type LaunchEntry = 'start-menu' | 'application-menu';
+
 const en = {
   app: {
     /** The window title and the heading, which are the same words on purpose. */
@@ -65,11 +75,20 @@ const en = {
       updateAvailable: 'Update Available',
       updateInstall: 'Update Install'
     },
-    /** Why the button is worth pressing, per platform. */
+    /**
+     * Why the button is worth pressing, per platform. `desktop` reads the platform's own
+     * answer about where installing puts the app, because a Start Menu is not what Linux
+     * calls it and a Mac installs by being dragged out of a disk image.
+     */
     offer: {
       browser: 'Add the launcher to this device',
       update: 'Download the new version, then press Update Install',
-      desktop: 'Copy to Documents and add a Start Menu shortcut'
+      desktop: (entry: LaunchEntry | null): string =>
+        entry === 'application-menu'
+          ? 'Copy to Documents and add it to the application menu'
+          : entry === 'start-menu'
+            ? 'Copy to Documents and add a Start Menu shortcut'
+            : 'Copy the app somewhere permanent'
     },
     dismissTitle: 'Hide the install offer',
     dismissAria: 'Dismiss install offer',
@@ -620,7 +639,12 @@ const es: Copy = {
     offer: {
       browser: 'Añade el lanzador a este dispositivo',
       update: 'Descarga la nueva versión y pulsa Instalar actualización',
-      desktop: 'Copia a Documentos y crea un acceso en el menú Inicio'
+      desktop: (entry: LaunchEntry | null): string =>
+        entry === 'application-menu'
+          ? 'Copia a Documentos y añádelo al menú de aplicaciones'
+          : entry === 'start-menu'
+            ? 'Copia a Documentos y crea un acceso en el menú Inicio'
+            : 'Copia la app en un sitio permanente'
     },
     dismissTitle: 'Ocultar la oferta de instalación',
     dismissAria: 'Descartar la oferta de instalación',
@@ -1136,7 +1160,12 @@ const fr: Copy = {
     offer: {
       browser: 'Ajouter le lanceur à cet appareil',
       update: 'Téléchargez la nouvelle version, puis appuyez sur Installer la mise à jour',
-      desktop: 'Copier dans Documents et créer un raccourci dans le menu Démarrer'
+      desktop: (entry: LaunchEntry | null): string =>
+        entry === 'application-menu'
+          ? 'Copier dans Documents et l’ajouter au menu des applications'
+          : entry === 'start-menu'
+            ? 'Copier dans Documents et créer un raccourci dans le menu Démarrer'
+            : 'Copier l’application dans un dossier permanent'
     },
     dismissTitle: 'Masquer la proposition d’installation',
     dismissAria: 'Fermer la proposition d’installation',
@@ -1649,7 +1678,12 @@ const de: Copy = {
     offer: {
       browser: 'Launcher zu diesem Gerät hinzufügen',
       update: 'Lade die neue Version herunter und tippe auf Update installieren',
-      desktop: 'Nach Dokumente kopieren und eine Verknüpfung im Startmenü anlegen'
+      desktop: (entry: LaunchEntry | null): string =>
+        entry === 'application-menu'
+          ? 'Nach Dokumente kopieren und dem Anwendungsmenü hinzufügen'
+          : entry === 'start-menu'
+            ? 'Nach Dokumente kopieren und eine Verknüpfung im Startmenü anlegen'
+            : 'Die App an einen festen Ort kopieren'
     },
     dismissTitle: 'Installationsangebot ausblenden',
     dismissAria: 'Installationsangebot schließen',

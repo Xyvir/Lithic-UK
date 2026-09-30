@@ -1,7 +1,7 @@
 <script lang="ts">
   import { onMount } from 'svelte';
   // Every word this component shows. Nothing below spells copy of its own.
-  import { LOCALE_TAG, copy } from './copy';
+  import { LOCALE_TAG, copy, type LaunchEntry } from './copy';
   import { handoffQuery, LAUNCHER_QUERY_PARAM, launcherReturn, withLauncherHandoff, type LauncherMode } from './mode';
   import { createFileBridge, tauriInvoke, tauriListen, saveTextVerifiably } from './file-bridge';
   import { orphanPill, orphanDownloadNote, type OrphanDownloadState } from './orphan-download';
@@ -167,6 +167,14 @@
   // The manual Update Available offer is hidden like the rest, because a user
   // who defers updates wants to manage them by hand, and that is their answer.
   let installDismissed = false;
+  // What the desktop app can do on this platform, as the Rust side reports it, read
+  // before the offer is allowed to exist. It is what decides whether there is an offer
+  // at all: an AppImage installs into the application menu and a Mac bundle installs by
+  // being dragged out of a disk image, so neither has the Windows answer, and a platform
+  // with nothing to offer should say nothing rather than draw a button that does not
+  // work. `platformEntry` is only for the sentence, never for deciding anything.
+  let platformInstallable = false;
+  let platformEntry: LaunchEntry | null = null;
 
   async function refreshInstallState() {
     if (mode !== 'tauri') {
@@ -177,6 +185,16 @@
       return;
     }
     let launchedFromInstall = false;
+    try {
+      const capabilities = await tauriInvoke<{ install: boolean; launch_entry: LaunchEntry | null }>('platform_capabilities');
+      platformInstallable = capabilities.install;
+      platformEntry = capabilities.launch_entry;
+    } catch {
+      // A capability report that could not be read is not an install. The offer stays
+      // hidden rather than promising something this platform may not do.
+      platformInstallable = false;
+      platformEntry = null;
+    }
     try {
       const result = await tauriInvoke<{ installed: boolean; up_to_date: boolean; running_from_install: boolean }>('install_status');
       installState = result.installed ? (result.up_to_date ? 'current' : 'stale') : 'uninstalled';
@@ -247,7 +265,7 @@
   $: installOffer =
     installOfferReady && !(installDismissed && installState !== 'stale')
       ? mode === 'tauri'
-        ? installState === 'current'
+        ? installState === 'current' || !platformInstallable
           ? null
           : 'desktop'
         : $pwaInstall.installable
@@ -278,7 +296,7 @@
       ? copy.install.offer.browser
       : installState === 'update'
         ? copy.install.offer.update
-        : copy.install.offer.desktop);
+        : copy.install.offer.desktop(platformEntry));
 
   /**
    * The offer's primary action: prompt the browser, install, update the install, or open
@@ -1504,12 +1522,14 @@
     installBusy = true;
     installStatus = '';
     try {
-      const result = await tauriInvoke<{ path: string; start_menu: string | null }>('install_monolith');
-      // The Start Menu entry is the part worth mentioning: it is what makes the
-      // app launchable (and pinnable) instead of a file in Documents.
-      installStatus = result.start_menu ? `${result.path}. Start Menu shortcut added.` : result.path;
+      const result = await tauriInvoke<{ path: string; entry: string | null }>('install_monolith');
+      // The tooltip is where the file went. The line names the entry instead when there is
+      // one, because that is the thing the user can click. Neither sentence is written
+      // here: what installing does on this platform is said once, in the offer's own copy,
+      // and both of these are paths.
+      installStatus = result.path;
       installState = 'current';
-      status = copy.install.installed(result.path);
+      status = copy.install.installed(result.entry ?? result.path);
       // The status line animates while it has text; retire the message
       // once it has had a moment to be read.
       setTimeout(() => { if (status.startsWith(copy.install.installedPrefix)) status = ''; }, 6000);

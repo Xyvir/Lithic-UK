@@ -10,6 +10,7 @@ mod gitcore;
 mod instance_search;
 mod instance_copy;
 mod cdp;
+mod platform;
 
 struct StartupFile(Mutex<Option<String>>);
 
@@ -51,9 +52,8 @@ fn read_lith_path(path: String) -> Result<LithFile, String> {
 /// has been installed (Documents\Lithic), else the exe's own folder so
 /// thumb-drive bundles start where the liths live.
 fn dialog_start_dir() -> Option<PathBuf> {
-    install_target()
-        .filter(|path| path.is_file())
-        .and_then(|path| path.parent().map(|parent| parent.to_path_buf()))
+    platform::install_dir()
+        .filter(|dir| dir.is_dir())
         .or_else(exe_dir)
 }
 
@@ -225,117 +225,35 @@ fn copy_lith_to_synced_dir(path: String, folder: String) -> Result<SavedLithFile
     })
 }
 
-/// Canonical per-user install target for the monolith executable: visible
-/// Documents\Lithic\Lithic.exe, falling back out of the way when Documents
-/// is unavailable. Shared by install and status queries.
-fn install_target() -> Option<PathBuf> {
-    dirs::document_dir()
-        .map(|docs| docs.join("Lithic"))
-        .or_else(|| dirs::data_local_dir().map(|local| local.join("Programs").join("Lithic")))
-        .or_else(|| dirs::home_dir().map(|home| home.join("Lithic")))
-        .map(|dir| dir.join("Lithic.exe"))
-}
+// Where the app installs to, and whether this process is that copy, are platform
+// questions and live in `platform`: the folder and the file name both differ per
+// operating system, and on Linux the answer is the AppImage the user launched rather
+// than the executable inside its temporary mount. See `platform::install_dir`,
+// `platform::install_target`, `platform::running_image` and
+// `platform::launched_from_install`.
 
-/// Whether this process *is* the installed copy — the same file as the install
-/// target, not merely the same bytes.
-///
-/// `up_to_date` is a byte comparison, and an identical portable copy passes it
-/// too. Only file identity answers "was the app launched from where it installs
-/// to", and that is the state the manual update offer belongs to: an installed
-/// exe has no newer copy on disk to copy over itself, so the download page is
-/// its only way forward. Both sides are canonicalised so a symlink or a short
-/// path cannot make the same file look like two.
-fn launched_from_install() -> bool {
-    let Some(target) = install_target() else { return false };
-    let Ok(exe) = std::env::current_exe() else { return false };
-    match (fs::canonicalize(exe), fs::canonicalize(target)) {
-        (Ok(exe), Ok(target)) => exe == target,
-        _ => false,
-    }
-}
-
-/// What an install did, so the launcher can say where the program went and
-/// whether it also picked up a Start Menu entry.
+/// What an install did, so the launcher can say where the program went and whether it
+/// also became launchable from the platform's own launcher.
 #[derive(serde::Serialize)]
 struct InstallResult {
     path: String,
+    /// The launcher entry this install created, when the platform creates one: a Start
+    /// Menu shortcut, a desktop entry, or nothing at all where placing the app is the
+    /// user's own drag from a disk image.
+    entry: Option<String>,
+    /// The same value under the name the launcher artifact committed in this repository
+    /// asks for. Kept for the one release in which a launcher copy built before this
+    /// rename can meet a Rust side built after it: that copy reads `start_menu` and this
+    /// field is the only thing it knows to look at. A launcher built from this source
+    /// reads `entry`.
     start_menu: Option<String>,
 }
 
-/// Write a Windows shell link.
-///
-/// Through the shell's own `IShellLink`, rather than by hand-rolling the binary
-/// format or scripting a launcher: Windows owns the format, so the result is
-/// exactly what "Create shortcut" would have made and behaves like it —
-/// pinnable, renameable, movable, and readable by Explorer and the taskbar.
-#[cfg(windows)]
-fn write_shell_link(link: &Path, exe: &Path) -> Result<(), String> {
-    use windows::core::{HSTRING, Interface};
-    use windows::Win32::System::Com::{
-        CoCreateInstance, CoInitializeEx, CoUninitialize, IPersistFile, CLSCTX_INPROC_SERVER,
-        COINIT_APARTMENTTHREADED,
-    };
-    use windows::Win32::UI::Shell::{IShellLinkW, ShellLink};
-
-    let exe_text = exe.to_string_lossy().into_owned();
-    let working_dir = exe
-        .parent()
-        .map(|parent| parent.to_string_lossy().into_owned())
-        .unwrap_or_default();
-
-    // SAFETY: COM is initialized on this thread before the objects are created,
-    // and every HSTRING outlives the call that reads it.
-    unsafe {
-        // Anything other than success means COM could not be started here. The
-        // usual case is RPC_E_CHANGED_MODE — this thread already owns a
-        // different apartment model — which is fine: every apartment can build
-        // a shell link, and that state is the caller's to unwind, not ours.
-        let owned_apartment = CoInitializeEx(None, COINIT_APARTMENTTHREADED).is_ok();
-        let written = (|| -> Result<(), String> {
-            let shell_link: IShellLinkW = CoCreateInstance(&ShellLink, None, CLSCTX_INPROC_SERVER)
-                .map_err(|error| error.to_string())?;
-            shell_link
-                .SetPath(&HSTRING::from(exe_text.as_str()))
-                .map_err(|error| error.to_string())?;
-            shell_link
-                .SetWorkingDirectory(&HSTRING::from(working_dir.as_str()))
-                .map_err(|error| error.to_string())?;
-            shell_link
-                .SetDescription(&HSTRING::from("Lithic — local-first wiki launcher"))
-                .map_err(|error| error.to_string())?;
-            // Index 0 of the exe's own icon, so the entry is recognisably Lithic
-            // in the Start Menu and on the taskbar once pinned.
-            shell_link
-                .SetIconLocation(&HSTRING::from(exe_text.as_str()), 0)
-                .map_err(|error| error.to_string())?;
-            let file: IPersistFile = shell_link.cast().map_err(|error| error.to_string())?;
-            // Save writes or overwrites; a stale link would keep pointing at a
-            // previous install location after the app is moved.
-            file.Save(&HSTRING::from(link.to_string_lossy().as_ref()), true)
-                .map_err(|error| error.to_string())
-        })();
-        if owned_apartment {
-            CoUninitialize();
-        }
-        written
-    }
-}
-
-/// The user's Start Menu entry for the installed copy.
-///
-/// Documents\Lithic is on nobody's Start Menu, so without this the app can only
-/// be launched by finding the exe. This is what makes it appear under Apps > All
-/// so it can be pinned to the taskbar like any other program.
-#[cfg(windows)]
-fn create_start_menu_shortcut(exe: &Path) -> Result<PathBuf, String> {
-    let programs = dirs::data_dir()
-        .map(|roaming| roaming.join("Microsoft").join("Windows").join("Start Menu").join("Programs"))
-        .ok_or_else(|| "Could not resolve the Start Menu folder".to_string())?;
-    fs::create_dir_all(&programs).map_err(|error| error.to_string())?;
-    let link = programs.join("Lithic.lnk");
-    write_shell_link(&link, exe)?;
-    Ok(link)
-}
+// The shell link, the Start Menu entry, the registry registration and the browser
+// hand-off used to live here. They now live in `platform`, one implementation per
+// operating system, so every step of installing is read side by side for all three
+// platforms instead of interleaved with the commands that call them. See the module
+// doc in `platform/mod.rs`.
 
 /// Install state for the launcher's PWA-style button: hidden once an
 /// installed copy exists and matches the running exe; shown as an update
@@ -354,10 +272,13 @@ struct InstallStatus {
 
 #[tauri::command]
 fn install_status() -> InstallStatus {
-    let target = install_target();
+    let target = platform::install_target();
     let installed = target.as_ref().map(|path| path.is_file()).unwrap_or(false);
-    let up_to_date = match (target.as_ref(), std::env::current_exe().ok()) {
-        (Some(target), Some(exe)) => match (fs::read(target), fs::read(&exe)) {
+    // Compared against the *running image* rather than `current_exe`, for the same reason
+    // the copy in `install_monolith` uses it: where the app is an AppImage, that is the
+    // file the user launched and the file an installed copy is a copy of.
+    let up_to_date = match (target.as_ref(), platform::running_image()) {
+        (Some(target), Some(running)) => match (fs::read(target), fs::read(&running)) {
             (Ok(installed_bytes), Ok(running_bytes)) => installed_bytes == running_bytes,
             _ => false,
         },
@@ -366,165 +287,104 @@ fn install_status() -> InstallStatus {
     InstallStatus {
         installed,
         up_to_date,
-        running_from_install: launched_from_install(),
+        running_from_install: platform::launched_from_install(),
         path: target
             .map(|path| path.to_string_lossy().into_owned())
             .unwrap_or_default(),
     }
 }
 
-/// Copy the running executable to a stable, *visible* per-user location so
-/// file associations ("Open with Lithic") survive updates and app moves, and
-/// register per-user Windows "Open with" entries for the editor file types.
-/// Registration is deliberately non-destructive: it adds Lithic to each
-/// extension's Open With list without stealing any default association.
+/// What this platform can do, for a launcher that ships to all of them at once.
+///
+/// The page asks rather than guesses: one bundle serves the Windows app, the AppImage and
+/// the Mac bundle, so "is there an Install to offer here, and what does installing
+/// create" is a question only the side that knows the platform can answer. The three
+/// webview flags are reported from their own implementations (see `platform`), so a
+/// capability this platform does not have is never offered.
+#[tauri::command]
+fn platform_capabilities() -> platform::Capabilities {
+    platform::capabilities()
+}
+
+/// Copy the running program to a stable, *visible* per-user location so file
+/// associations ("Open with Lithic") survive updates and app moves, then ask the
+/// platform to make it launchable and reachable from its own menu.
+///
+/// Registration is deliberately non-destructive on every platform: it adds Lithic to
+/// each file type's Open With list without stealing any default association. The
+/// platform-specific half of every step lives in `platform`.
 #[tauri::command]
 fn install_monolith() -> Result<InstallResult, String> {
-    let exe = std::env::current_exe().map_err(|error| error.to_string())?;
+    // The running *image* rather than `current_exe`: where the app is an AppImage, the
+    // executable in a temporary mount is what `current_exe` answers with, and copying
+    // that produces a file that is gone at the next reboot.
+    let source = platform::running_image()
+        .ok_or_else(|| "Could not find the program to install".to_string())?;
 
-    // Documents\Lithic\Lithic.exe: user-visible and statically reachable.
-    // (Copying a running exe is safe on Windows: the source is locked for
+    // `Documents\Lithic\Lithic.exe`, or `Documents/Lithic/Lithic.AppImage` where the app
+    // is an AppImage: user-visible and statically reachable, which is what lets a menu
+    // entry pointing at it survive the original being moved.
+    // (Copying a running executable is safe on Windows: the source is locked for
     // write/delete, not for read, so self-copy needs no external download.)
-    let target = install_target().ok_or_else(|| "Could not resolve a user program directory".to_string())?;
+    let target = platform::install_target()
+        .ok_or_else(|| "Could not resolve a user program directory".to_string())?;
     let target_dir = target
         .parent()
         .map(|parent| parent.to_path_buf())
         .ok_or_else(|| "Could not resolve a user program directory".to_string())?;
 
     // Copy only when different to keep timestamps stable across re-installs.
-    let needs_copy = match fs::read(&exe) {
+    let needs_copy = match fs::read(&source) {
         Ok(current) => fs::read(&target).map(|existing| existing != current).unwrap_or(true),
         Err(_) => true,
     };
     if needs_copy {
         fs::create_dir_all(&target_dir).map_err(|error| error.to_string())?;
-        fs::copy(&exe, &target).map_err(|error| error.to_string())?;
+        fs::copy(&source, &target).map_err(|error| error.to_string())?;
+        // A copy that will not run is not an install. A no-op where the file arrives
+        // runnable, and the executable bit on Linux, where a release download may not
+        // have one.
+        platform::make_launchable(&target)?;
     }
 
     // Tidy up a copy left by an earlier install that used the artifact's
     // own name (e.g. Lithic-Offline.exe) instead of the canonical target.
-    if let Some(legacy) = exe.file_name().map(|name| target_dir.join(name)) {
+    if let Some(legacy) = source.file_name().map(|name| target_dir.join(name)) {
         if legacy != target {
             let _ = fs::remove_file(&legacy);
         }
     }
 
-    // Associations point at the *copied* exe so they stay valid even if the
-    // original install location changes.
-    #[cfg(windows)]
-    if let Err(error) = register_open_with(&target.to_string_lossy()) {
-        // Best-effort: the copy already succeeded; surface for debugging.
-        eprintln!("Open With registration failed: {}", error);
-    }
-
-    // Best effort like the associations: the copy already succeeded, and a
-    // missing shortcut should not turn a working install into a failure.
-    #[cfg(windows)]
-    let start_menu = match create_start_menu_shortcut(&target) {
-        Ok(link) => Some(link.to_string_lossy().into_owned()),
+    // The menu entry and the associations both point at the *copied* file, so they stay
+    // valid even if the original install location changes. Both are best effort: the copy
+    // already succeeded, and a missing entry should not turn a working install into a
+    // failure the user is told about.
+    let entry = match platform::install_launch_entry(&target) {
+        Ok(entry) => entry,
         Err(error) => {
-            eprintln!("Start Menu shortcut failed: {}", error);
+            eprintln!("The launcher entry was not written: {}", error);
             None
         }
     };
-    #[cfg(not(windows))]
-    let start_menu: Option<String> = None;
+    if let Err(error) = platform::register_file_associations(&target) {
+        eprintln!("File association registration failed: {}", error);
+    }
 
-    // Reveal the installed exe in Explorer so the user sees where it went.
-    #[cfg(windows)]
-    let _ = std::process::Command::new("explorer")
-        .arg("/select,")
-        .arg(&target)
-        .spawn();
+    // Show the installed file so the user sees where it went. Best effort, and on Linux
+    // it opens the folder rather than selecting the file: the freedesktop file managers
+    // share no argument for "and this one".
+    let _ = platform::reveal(&target);
 
+    let entry = entry.map(|path| path.to_string_lossy().into_owned());
     Ok(InstallResult {
         path: target.to_string_lossy().into_owned(),
-        start_menu,
+        start_menu: entry.clone(),
+        entry,
     })
 }
 
-/// Extensions the desktop app opens, with their Open With descriptions.
-#[cfg(windows)]
-const ASSOCIATION_TYPES: &[(&str, &str)] = &[
-    ("lith", "Lithic Wiki"),
-    ("md", "Lithic Markdown"),
-    ("txt", "Lithic Text"),
-    ("tid", "Lithic Tiddler"),
-    ("json", "Lithic JSON"),
-    ("ipynb", "Lithic Notebook"),
-    ("html", "Lithic HTML"),
-];
-
-/// Per-user (HKCU) Open With registration: a ProgID per extension whose
-/// open command targets the installed exe, plus an entry appended to the
-/// extension's OpenWithProgids list. Never touches default associations.
-#[cfg(windows)]
-fn register_open_with(exe_path: &str) -> Result<(), String> {
-    use winreg::enums::{HKEY_CURRENT_USER, KEY_READ, KEY_WRITE};
-    use winreg::RegKey;
-
-    let hkcu = RegKey::predef(HKEY_CURRENT_USER);
-    let classes = hkcu
-        .open_subkey_with_flags("Software\\Classes", KEY_READ | KEY_WRITE)
-        .map_err(|error| error.to_string())?;
-
-    for (ext, description) in ASSOCIATION_TYPES {
-        let progid = format!("Lithic.{}", ext);
-        let (key, _) = classes
-            .create_subkey(&progid)
-            .map_err(|error| error.to_string())?;
-        key.set_value("", &format!("{} Document", description))
-            .map_err(|error| error.to_string())?;
-        let (cmd, _) = key
-            .create_subkey(r"shell\open\command")
-            .map_err(|error| error.to_string())?;
-        cmd.set_value("", &format!("\"{}\" \"%1\"", exe_path))
-            .map_err(|error| error.to_string())?;
-
-        // Append Lithic to the extension's Open With list via the
-        // OpenWithProgids subkey, where each *value name* is a ProgID.
-        // Existing entries are preserved; no default association changes.
-        let (ext_key, _) = classes
-            .create_subkey(format!(".{}", ext))
-            .map_err(|error| error.to_string())?;
-        let (open_with, _) = ext_key
-            .create_subkey("OpenWithProgids")
-            .map_err(|error| error.to_string())?;
-        open_with
-            .set_value(&progid, &String::new())
-            .map_err(|error| error.to_string())?;
-    }
-
-    // Generic application registration so "Open with" -> "Choose another
-    // app" lists Lithic for every supported type. Keyed by the installed
-    // binary's file name so it matches wherever the copy lands.
-    let installed_name = PathBuf::from(exe_path)
-        .file_name()
-        .map(|name| name.to_string_lossy().into_owned())
-        .unwrap_or_else(|| "lithic.exe".to_string());
-    let (app, _) = classes
-        .create_subkey(format!(r"Applications\{}", installed_name))
-        .map_err(|error| error.to_string())?;
-    app.set_value("FriendlyAppName", &"Lithic".to_string())
-        .map_err(|error| error.to_string())?;
-    let (cmd, _) = app
-        .create_subkey(r"shell\open\command")
-        .map_err(|error| error.to_string())?;
-    cmd.set_value("", &format!("\"{}\" \"%1\"", exe_path))
-        .map_err(|error| error.to_string())?;
-    // SupportedTypes is likewise a subkey whose value names are the
-    // extensions this application can open.
-    let (supported, _) = app
-        .create_subkey("SupportedTypes")
-        .map_err(|error| error.to_string())?;
-    for (ext, _) in ASSOCIATION_TYPES {
-        supported
-            .set_value(format!(".{}", ext), &String::new())
-            .map_err(|error| error.to_string())?;
-    }
-
-    Ok(())
-}
+// The Windows Open With registration moved to `platform/windows.rs`, where the other
+// two platforms' answers to the same question are read beside it.
 
 // Git for the GitHub sync is in-process via libgit2 — see `gitcore`. There is
 // no spawn left anywhere: nothing for the user to install, no PATH to get
@@ -1065,10 +925,9 @@ fn attached_root_for(dir: &Path) -> Option<PathBuf> {
     walk_up(dir).find(|candidate| is_attached(candidate))
 }
 
-/// The folder the app installs itself into — `Documents\Lithic`, or the fallback
-/// `install_target` names when Documents is not available.
+/// The folder the app installs itself into: `Documents` beside it on every platform.
 fn install_folder() -> Option<PathBuf> {
-    install_target().and_then(|target| target.parent().map(Path::to_path_buf))
+    platform::install_dir()
 }
 
 /// Where a Lithic library lives, best first.
@@ -2555,7 +2414,7 @@ fn sidecar_dismissed(dir: &Path) -> bool {
 
 #[tauri::command]
 fn install_offer_status() -> InstallOfferStatus {
-    let installed = install_target().map(|path| path.is_file()).unwrap_or(false);
+    let installed = platform::install_target().map(|path| path.is_file()).unwrap_or(false);
     let dismissed = exe_dir().map(|dir| sidecar_dismissed(&dir)).unwrap_or(false);
     InstallOfferStatus { installed, dismissed }
 }
@@ -2627,7 +2486,12 @@ impl InstallUpdate {
 /// cannot deliver. Nothing is cached, so the question is asked once per launch.
 #[tauri::command]
 async fn install_update_check() -> InstallUpdate {
-    if !launched_from_install() {
+    // One test covers both reasons a copy is never offered a newer release by hand: this is
+    // not the copy Lithic installed into its own folder. That is a portable copy, and it is
+    // also every copy a package manager placed, because a manager installs to its own
+    // locations and never to `Documents\Lithic`. So a managed copy is offered nothing here,
+    // which is what keeps `apt`, `winget` and `brew` the only updaters of their own installs.
+    if !platform::launched_from_install() {
         return InstallUpdate::none();
     }
     // A build the release workflow did not cut carries no tag: a local build is
@@ -2692,43 +2556,7 @@ fn open_external(url: String) -> Result<(), String> {
     if !(url.starts_with("https://") || url.starts_with("http://")) {
         return Err("Only http and https addresses can be opened".to_string());
     }
-    open_in_browser(&url)
-}
-
-#[cfg(windows)]
-fn open_in_browser(url: &str) -> Result<(), String> {
-    use windows::core::{HSTRING, PCWSTR};
-    use windows::Win32::UI::Shell::ShellExecuteW;
-    use windows::Win32::UI::WindowsAndMessaging::SW_SHOWNORMAL;
-
-    // SAFETY: the verb and the address are fresh HSTRINGs that outlive the call,
-    // and ShellExecuteW only reads its arguments.
-    let opened = unsafe {
-        ShellExecuteW(
-            None,
-            &HSTRING::from("open"),
-            &HSTRING::from(url),
-            PCWSTR::null(),
-            PCWSTR::null(),
-            SW_SHOWNORMAL,
-        )
-    };
-    // ShellExecuteW reports success as a value above 32; at or below it the
-    // number is an error code rather than a window.
-    if (opened.0 as isize) <= 32 {
-        return Err(format!("Could not open {}", url));
-    }
-    Ok(())
-}
-
-#[cfg(not(windows))]
-fn open_in_browser(url: &str) -> Result<(), String> {
-    let opener = if cfg!(target_os = "macos") { "open" } else { "xdg-open" };
-    std::process::Command::new(opener)
-        .arg(url)
-        .spawn()
-        .map_err(|error| error.to_string())?;
-    Ok(())
+    platform::open_in_browser(&url)
 }
 
 // --- Credential vault --------------------------------------------------------
@@ -3182,6 +3010,7 @@ pub fn run() {
             copy_lith_to_synced_dir,
             install_monolith,
             install_status,
+            platform_capabilities,
             install_offer_status,
             set_install_dismissed,
             install_update_check,
@@ -3789,7 +3618,7 @@ mod tests {
         write(&root, "Lithic.exe", "not really an executable");
 
         let link = root.join("Lithic.lnk");
-        write_shell_link(&link, &exe).expect("the shell link should be written");
+        platform::write_shell_link(&link, &exe).expect("the shell link should be written");
 
         let bytes = fs::read(&link).expect("the shortcut file should exist");
         // A shell link opens with a 76-byte header, little-endian, so a wrong
