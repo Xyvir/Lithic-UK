@@ -296,17 +296,6 @@ jobs:
           path: wiki/output/lith.html
           retention-days: 1
 
-      # The light wiki travels to the Tauri job the way the flagship does, so the light
-      # executable embeds the bytes this run just built rather than the older copy the
-      # previous release committed to variants/.
-      - name: Upload Built Light Wiki Artifact
-        if: ${{ env.CREATE_RELEASE == 'true' && env.BUILD_CONFIG == 'prod' }}
-        uses: actions/upload-artifact@v5
-        with:
-          name: built-wiki-light
-          path: wiki/output/lithic-light.html
-          retention-days: 1
-
       - name: Create Release
         if: ${{ env.CREATE_RELEASE == 'true' && env.BUILD_CONFIG == 'prod' }}
         uses: softprops/action-gh-release@v3
