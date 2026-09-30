@@ -184,6 +184,10 @@ ln -sf lithic.png "$appdir/.DirIcon"
 # Terminal=false: the shim opens a browser and keeps serving behind it, so a
 # desktop launcher should not leave a console window in front of the page. The
 # Exec name is the AppDir's own binary, which is what appimagetool validates.
+# StartupWMClass names the window class a Chromium app window advertises
+# (`--class=Lithic` in `shim/src/lib.rs`), so the dock shows Lithic's own icon and
+# groups that window with this entry rather than with the browser's. The shim opens
+# no window itself, so without it the page's window belongs to the browser entirely.
 cat > "$appdir/lithic.desktop" <<'DESKTOP'
 [Desktop Entry]
 Type=Application
@@ -194,6 +198,7 @@ Icon=lithic
 Terminal=false
 Categories=Utility;Office;
 Keywords=wiki;notes;tiddlywiki;
+StartupWMClass=Lithic
 DESKTOP
 
 if [ "$skip_appimage" = "1" ]; then

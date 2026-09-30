@@ -6,19 +6,25 @@
 //! web engine (about 43.5 MB of an 82 MB download) that every Linux desktop
 //! already has a browser for. This crate links nothing but the standard library:
 //! it answers HTTP on loopback for a handful of local files and hands the address
-//! to the system browser. That is the entire artifact, so it is the size of the
+//! to the system browser, in an app window of its own where the machine has a
+//! Chromium-family browser and in an ordinary tab otherwise. That is the entire
+//! artifact, so it is the size of the
 //! payload rather than the size of the engine.
 //!
 //! What makes that honest rather than a stripped-down webapp. A page opened from
 //! a local server has no File System Access API everywhere (Firefox and Safari
 //! have none), and no Tauri bridge, so the save path the launcher would normally
-//! take does not exist. The launcher already knows how to live without one: it
-//! declares `lithic-browser-only` in its own head and then keeps every mounted
-//! Lith in IndexedDB, page text and all. The declaration is read from the served
-//! document (`mode.ts`, `declaresBrowserOnly`), which is why the server is the one
-//! to add it: the launcher file cannot declare what it is, only its server can.
-//! So [`inject_browser_only_meta`] puts that meta tag into the launcher as it is
-//! served, and nothing on disk changes.
+//! take does not exist. The launcher already knows how to live without one, and
+//! which of the two answers the page gets is the platform's rather than the
+//! shim's: on Chromium the declaration changes nothing and a mounted Lith is a
+//! real file written in place, while a browser with no API keeps every mounted
+//! Lith in IndexedDB, page text and all. What the shim has to declare is the other
+//! thing the address cannot say: the served document is `lithic-browser-only`
+//! (`mode.ts`, `declaresBrowserOnly`), so a loopback origin resolves to `webapp`
+//! rather than to the instance the machine rules would read it as. That is why the
+//! server is the one to add it, since the launcher file cannot declare what it is,
+//! only its server can. So [`inject_browser_only_meta`] puts that meta tag into the
+//! launcher as it is served, and nothing on disk changes.
 //!
 //! Two consequences of browser storage are built into the serving model rather
 //! than left to chance, because both silently lose a person's wiki:
@@ -41,7 +47,8 @@ use std::path::{Component, Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::time::Duration;
 
-/// The meta tag the launcher reads to decide it has no file system behind it.
+/// The meta tag the launcher reads to decide it is a browser mount rather than an
+/// instance. It says nothing about where saves land: that is the platform's answer.
 /// The name is `BROWSER_ONLY_META` in `launcher-ui/src/mode.ts`, and the two have
 /// to agree, so a change there is a change here.
 pub const BROWSER_ONLY_META_NAME: &str = "lithic-browser-only";
@@ -61,6 +68,22 @@ pub const PORT_ENV: &str = "LITHIC_SHIM_PORT";
 pub const ROOT_ENV: &str = "LITHIC_SHIM_ROOT";
 /// Set by the AppImage runtime to the mount directory containing `usr/`.
 pub const APPDIR_ENV: &str = "APPDIR";
+
+/// The window class an app window advertises, which is what a desktop entry's
+/// `StartupWMClass` matches so the dock shows Lithic's own icon and groups the
+/// window with the launcher instead of with a generic browser. The entry the
+/// AppImage build writes names the same string, and a test holds the two
+/// together because they live in files that cannot see each other.
+pub const APP_WINDOW_CLASS: &str = "Lithic";
+
+/// Environment override naming the Chromium-family program to open the app
+/// window with, for a build under a name the list does not carry. Pointing it at
+/// a program that is not Chromium family is a mistake this cannot detect: the
+/// app-window flags go to whatever it names.
+pub const BROWSER_ENV: &str = "LITHIC_SHIM_BROWSER";
+
+/// Environment override for the private profile an app window uses.
+pub const PROFILE_ENV: &str = "LITHIC_SHIM_PROFILE";
 
 /// Every response carries this header, and the value is what a second launch
 /// proves before deciding that the port is already a shim of its own.
@@ -663,7 +686,129 @@ pub fn probe_existing_shim(port: u16) -> bool {
 }
 
 /// Hand the address to the browser the machine already has.
-pub fn open_in_browser(url: &str) -> bool {
+///
+/// Chromium family first, because it is the only family that can be asked for an
+/// app window: `--app` draws the page with no tab strip and no URL bar, and the
+/// window gets a profile of the shim's own so nothing else ever writes to this
+/// origin's storage. Firefox has no equivalent (`--kiosk` is fullscreen, which is
+/// a different thing), and stock Ubuntu ships Firefox alone, so that desktop gets
+/// an ordinary tab. `None` means nothing answered at all.
+pub fn open_in_browser(url: &str) -> Option<BrowserLaunch> {
+    #[cfg(target_os = "linux")]
+    if let Some(launch) = open_chromium_app_window(url) {
+        return Some(launch);
+    }
+    open_the_ordinary_way(url).then_some(BrowserLaunch::Tab)
+}
+
+/// What answered when the address was handed over.
+///
+/// `AppWindow` is the good rung, and it names the program that took it. `Tab` is
+/// what every other desktop gets: the address in an ordinary browser tab.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum BrowserLaunch {
+    AppWindow(String),
+    Tab,
+}
+
+/// Chromium-family programs, in the order a machine is likely to have one. The
+/// distribution's own packages come first, because the shim ships to Linux and
+/// `chromium` is what apt installs.
+#[cfg(any(target_os = "linux", test))]
+const CHROMIUM_PROGRAMS: &[&str] = &[
+    "chromium",
+    "chromium-browser",
+    "google-chrome",
+    "google-chrome-stable",
+    "brave-browser",
+    "microsoft-edge",
+    "microsoft-edge-stable",
+    "vivaldi",
+    "opera",
+];
+
+/// Whether a program name is on `PATH`.
+#[cfg(any(target_os = "linux", test))]
+fn program_on_path(name: &str) -> bool {
+    let Some(path) = std::env::var_os("PATH") else { return false };
+    std::env::split_paths(&path).any(|dir| dir.join(name).is_file())
+}
+
+/// The first Chromium-family program a lookup finds, or none.
+///
+/// The lookup is a parameter rather than a call to [`program_on_path`] so the
+/// order, which is the whole of the rule here, can be pinned without a PATH.
+#[cfg(any(target_os = "linux", test))]
+fn first_chromium(lookup: impl Fn(&str) -> bool) -> Option<&'static str> {
+    CHROMIUM_PROGRAMS.iter().copied().find(|&program| lookup(program))
+}
+
+/// The private profile an app window is given.
+///
+/// A directory of its own rather than the person's everyday profile, because
+/// browser storage is scoped to the profile as well as to the origin: this way
+/// nothing else ever writes to this origin's storage, and clearing a browsing
+/// session elsewhere cannot clear a Lith. Stable across launches for the same
+/// reason the port is.
+#[cfg(any(target_os = "linux", test))]
+fn app_profile_dir() -> Option<PathBuf> {
+    if let Some(explicit) = std::env::var_os(PROFILE_ENV) {
+        return Some(PathBuf::from(explicit));
+    }
+    let base = match std::env::var_os("XDG_DATA_HOME") {
+        Some(data_home) => PathBuf::from(data_home),
+        None => PathBuf::from(std::env::var_os("HOME")?).join(".local").join("share"),
+    };
+    Some(base.join("lithic").join("chrome"))
+}
+
+/// The flags that turn a Chromium launch into an app window.
+///
+/// `--app` removes the tab strip, the URL bar and the browser's own chrome.
+/// `--user-data-dir` is the private profile above, left off entirely when that
+/// directory cannot be created, so the window is still an app window with the
+/// browser's own profile rather than no window at all. `--class` is what a
+/// desktop entry's `StartupWMClass` matches. The two `no-` flags are for that
+/// profile's first launch, which would otherwise open a first-run page and a
+/// default-browser question on top of the launcher.
+#[cfg(any(target_os = "linux", test))]
+fn app_window_args(url: &str, profile: Option<&Path>) -> Vec<String> {
+    let mut args = vec![format!("--app={url}")];
+    if let Some(profile) = profile {
+        args.push(format!("--user-data-dir={}", profile.display()));
+    }
+    args.push(format!("--class={APP_WINDOW_CLASS}"));
+    args.push("--no-first-run".to_string());
+    args.push("--no-default-browser-check".to_string());
+    args
+}
+
+#[cfg(target_os = "linux")]
+fn open_chromium_app_window(url: &str) -> Option<BrowserLaunch> {
+    let program = match std::env::var(BROWSER_ENV) {
+        Ok(name) if !name.trim().is_empty() => name,
+        _ => first_chromium(program_on_path)?.to_string(),
+    };
+    // A profile that cannot be created is not passed, so the app window still
+    // opens with the browser's own profile. A confined browser (Chromium's snap
+    // cannot write a dot-directory under `$HOME`) would otherwise refuse to start,
+    // and losing the window is worse than losing the profile.
+    let profile = app_profile_dir().filter(|dir| fs::create_dir_all(dir).is_ok());
+    let args = app_window_args(url, profile.as_deref());
+    Command::new(&program)
+        .args(&args)
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()
+        .is_ok()
+        .then_some(BrowserLaunch::AppWindow(program))
+}
+
+/// The machine's own way of handing over an address: `xdg-open` and its
+/// equivalents elsewhere. A normal tab, which is what a desktop with no
+/// Chromium-family browser gets.
+fn open_the_ordinary_way(url: &str) -> bool {
     #[cfg(target_os = "linux")]
     let candidates: [(&str, &[&str]); 3] = [
         ("xdg-open", &[url]),
@@ -1034,5 +1179,75 @@ mod tests {
         assert_eq!(percent_decode("/a+b.html").as_deref(), Some("/a+b.html"));
         assert_eq!(percent_decode("/%zz").as_deref(), None);
         assert_eq!(percent_decode("/%00").as_deref(), None);
+    }
+
+    #[test]
+    fn the_chromium_search_prefers_the_distribution_packages() {
+        // The order is the rule: a machine with several Chromium builds opens the
+        // one the distribution installed, not whichever name a lookup happens to
+        // hand back first.
+        assert_eq!(
+            first_chromium(|name| name == "chromium" || name == "google-chrome"),
+            Some("chromium")
+        );
+        assert_eq!(first_chromium(|name| name == "opera"), Some("opera"));
+        assert_eq!(first_chromium(|_| true), Some("chromium"));
+        // A program the list does not carry is not a Chromium family answer, which
+        // is why the fallback tab exists rather than any browser being guessed at.
+        assert_eq!(first_chromium(|name| name == "chrome"), None);
+        assert_eq!(first_chromium(|_| false), None);
+    }
+
+    #[test]
+    fn a_program_that_is_not_installed_is_not_on_the_path() {
+        assert!(!program_on_path("lithic-shim-definitely-not-a-real-program"));
+    }
+
+    #[test]
+    fn the_app_profile_sits_under_the_data_home() {
+        // The environment is read rather than written, so the shape is what is
+        // pinned: the leaf names the browser, and the directory is absolute. A
+        // `LITHIC_SHIM_PROFILE` in the environment is a person overriding it on
+        // purpose, and the leaf assertion stands down there.
+        let Some(profile) = app_profile_dir() else {
+            // A machine with neither HOME nor XDG_DATA_HOME has no data home to
+            // derive one from, which is exactly why an app window omits the flag.
+            return;
+        };
+        assert!(profile.is_absolute(), "the profile has to be a real path: {}", profile.display());
+        if std::env::var_os(PROFILE_ENV).is_none() {
+            assert_eq!(profile.file_name().and_then(|name| name.to_str()), Some("chrome"));
+        }
+    }
+
+    #[test]
+    fn an_app_window_is_asked_for_by_name_and_class() {
+        let profile = Path::new("/home/a/.local/share/lithic/chrome");
+        let args = app_window_args("http://127.0.0.1:5484/", Some(profile));
+        assert!(args.contains(&"--app=http://127.0.0.1:5484/".to_string()));
+        assert!(args.contains(&format!("--user-data-dir={}", profile.display())));
+        assert!(args.contains(&format!("--class={APP_WINDOW_CLASS}")));
+        assert!(args.contains(&"--no-first-run".to_string()));
+        assert!(args.contains(&"--no-default-browser-check".to_string()));
+        // A profile that could not be created drops the flag and nothing else: the
+        // window is still an app window, which is the part worth keeping.
+        let without = app_window_args("http://127.0.0.1:5484/", None);
+        assert!(!without.iter().any(|arg| arg.starts_with("--user-data-dir")));
+        assert!(without.contains(&"--app=http://127.0.0.1:5484/".to_string()));
+        assert!(without.contains(&format!("--class={APP_WINDOW_CLASS}")));
+    }
+
+    #[test]
+    fn the_desktop_entry_groups_an_app_window_by_its_class() {
+        // The class a Chromium app window advertises and the `StartupWMClass` a
+        // desktop entry matches are the same string, or the dock draws a generic
+        // browser's icon beside a Lithic window. The two live in files that cannot
+        // see each other, so the agreement is pinned here.
+        let script = Path::new(env!("CARGO_MANIFEST_DIR")).join("../scripts/build-shim-appimage.sh");
+        let text = fs::read_to_string(&script).expect("the AppImage build script");
+        assert!(
+            text.contains(&format!("StartupWMClass={APP_WINDOW_CLASS}")),
+            "the desktop entry does not name the app window's class"
+        );
     }
 }

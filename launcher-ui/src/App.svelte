@@ -61,8 +61,7 @@
   const storageMode: StorageMode = resolveStorageMode(
     mode,
     typeof window === 'undefined' ? undefined : (window as unknown as { showSaveFilePicker?: unknown }),
-    typeof window === 'undefined' ? null : storageModeOverride(window.location.search),
-    browserOnly
+    typeof window === 'undefined' ? null : storageModeOverride(window.location.search)
   );
   /**
    * The index-db-only fallback: no Lith mounted here has a file behind it, so
@@ -267,10 +266,12 @@
    * offer, so there is never a first paint to take back. The dismissal outranks an ordinary
    * offer in every mode (a user who hid it wants it hidden wherever they are) with the one
    * exception of a pending Update Install, because that newer exe is already on this machine
-   * and the user is mid-update.
+   * and the user is mid-update. A page whose own server declared it browser-only draws no
+   * offer at all: the shim distribution has no copy to install and no browser prompt worth
+   * answering, so the declaration is this rule's first term.
    */
   $: installOffer =
-    installOfferReady && !(installDismissed && installState !== 'stale')
+    !browserOnly && installOfferReady && !(installDismissed && installState !== 'stale')
       ? mode === 'tauri'
         ? installState === 'current' || !platformInstallable
           ? null
@@ -4473,6 +4474,12 @@
           <img class="brand-icon" src={mstile150} alt={copy.app.brandAlt} />
         {/if}
       </button>
+    {:else if browserOnly}
+      <!-- The shim AppImage serves this page from a process with no window of its own:
+           the mark is the shipped icon and nothing else. The link the other browser pages
+           carry is the launcher's way out to the project, and this distribution is the
+           app, so it has no way out to draw. -->
+      <span class="brand-icon-wrap"><img class="brand-icon" src={mstile150} alt={copy.app.brandAlt} /></span>
     {:else}
       <!-- Everywhere else there is no instance icon to set, so the mark carries
            the project link instead of sitting inert. That is also what lets the
@@ -5569,12 +5576,14 @@
     The footer band is the one control this launcher keeps in the window's corner, and it
     is the browser-only half of the mark above: the launcher a deployment serves shows the
     link here, and the desktop app has never had it (it syncs from the header instead). On
-    a phone it goes, because the mark carries the same link.
+    a phone it goes, because the mark carries the same link. A page whose own server declared
+    it browser-only shows neither link: the shim distribution is the app, not a deployment of
+    the browser one, so it carries no way out to the project.
 
     The install offer waits here only when there is no panel foot row to hold it. The
     launcher with nothing listed yet. Everything else about it, including where it is
     drawn, is the offer's own business; the two sites are mutually exclusive, which is why
     the markup for it is written once, above.
   -->
-  <footer>{#if mode === 'webapp'}<a class="github-link" href={PROJECT_URL} target="_blank" rel="noreferrer">{copy.app.footerLink}</a>{/if}{#if installOffer && !recentPanelShown}{@render installOfferControl()}{/if}</footer>
+  <footer>{#if mode === 'webapp' && !browserOnly}<a class="github-link" href={PROJECT_URL} target="_blank" rel="noreferrer">{copy.app.footerLink}</a>{/if}{#if installOffer && !recentPanelShown}{@render installOfferControl()}{/if}</footer>
 </main>

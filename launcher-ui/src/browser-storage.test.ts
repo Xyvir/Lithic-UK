@@ -78,28 +78,25 @@ test('neither the mark nor the dialog note reaches for a dash to join two clause
   assert.match(BROWSER_ONLY_HISTORY_NOTE, /^Browser storage only\. This Lith has no file,/);
 });
 
-test('a declared browser mount never writes files, however capable the browser is', () => {
-  // A shim serves the launcher from loopback and promises one data model, so a save that
-  // landed in a Downloads folder would be the second copy of a Lith with no file.
-  assert.equal(resolveStorageMode('webapp', picker, null, true), 'index-db');
-  assert.equal(resolveStorageMode('webapp', {}, null, true), 'index-db');
+test('a declared browser mount still answers by the platform, not by its declaration', () => {
+  // The declaration (a shim's `lithic-browser-only`) is what makes a loopback origin resolve
+  // to `webapp` rather than to an instance; it has no say in where saves land. A capable
+  // browser on the shim therefore writes real files, and the fallback is for the browsers
+  // that have no API at all.
+  assert.equal(resolveStorageMode('webapp', picker), 'file');
+  assert.equal(resolveStorageMode('webapp', {}), 'index-db');
   // The query is still the escape hatch, being how the fallback is exercised by hand.
-  assert.equal(resolveStorageMode('webapp', picker, 'file', true), 'file');
-  assert.equal(resolveStorageMode('webapp', picker, 'index-db', true), 'index-db');
-  // Neither the app nor an instance is a browser mount, so neither is affected.
-  assert.equal(resolveStorageMode('tauri', picker, null, true), 'file');
-  assert.equal(resolveStorageMode('self-host', picker, null, true), 'file');
-  // And a page that declared nothing keeps the platform's own answer.
-  assert.equal(resolveStorageMode('webapp', picker, null, false), 'file');
+  assert.equal(resolveStorageMode('webapp', picker, 'file'), 'file');
+  assert.equal(resolveStorageMode('webapp', picker, 'index-db'), 'index-db');
 });
 
-test('a browser-only page never remembers a row built on a handle', () => {
-  // The rule that stops a Chromium shim claiming a file: its picker hands files over as
-  // handles, and every save in this mode goes to browser storage instead, so the row has to
-  // be the browser-only one whatever the picker returned.
+test('a storage-only mount never remembers a row built on a handle', () => {
+  // The rule that stops a mount whose saves go to browser storage from claiming a file: a
+  // picker can hand a handle over for the one read, but every save in this mode goes to the
+  // store instead, so the row has to be the browser-only one whatever the picker returned.
   assert.equal(rememberRowKind(true, true), 'browser-only');
   assert.equal(rememberRowKind(true, false), 'browser-only');
-  // Away from a browser-only page a handle is what makes the row reopenable, and a name
+  // Away from browser storage a handle is what makes the row reopenable, and a name
   // with no handle is a row that can only be read back from the store.
   assert.equal(rememberRowKind(false, true), 'handle');
   assert.equal(rememberRowKind(false, false), 'plain');

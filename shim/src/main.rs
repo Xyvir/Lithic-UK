@@ -10,7 +10,7 @@ use std::process::ExitCode;
 
 use lithic_shim::{
     bind, default_payload_root, open_in_browser, payload_problems, payload_warnings, probe_existing_shim,
-    serve, url_for, APPDIR_ENV, DEFAULT_PORT, PORT_ENV, REQUIRED_PAYLOAD, ROOT_ENV,
+    serve, url_for, BrowserLaunch, APPDIR_ENV, DEFAULT_PORT, PORT_ENV, REQUIRED_PAYLOAD, ROOT_ENV,
 };
 
 const USAGE: &str = "\
@@ -22,6 +22,13 @@ USAGE: lithic-shim [options]
   --no-open    do not hand the address to the browser
   --version    print the version
   --help       print this text
+
+A Chromium-family browser is opened as an app window, with a profile of its own
+under $XDG_DATA_HOME/lithic/chrome. Any other browser gets an ordinary tab.
+
+Environment:
+  LITHIC_SHIM_BROWSER  a Chromium-family program to use instead of the detected one
+  LITHIC_SHIM_PROFILE  the profile directory that app window uses
 
 The address is fixed rather than random because browser storage is scoped to it,
 so the same port has to be reachable again for the saved Liths to be there.";
@@ -87,8 +94,8 @@ fn main() -> ExitCode {
             if probe_existing_shim(options.port) {
                 let url = url_for(options.port);
                 println!("Lithic is already serving {url}");
-                if options.open && !open_in_browser(&url) {
-                    println!("Open {url} in your browser.");
+                if options.open {
+                    report_launch(&url);
                 }
                 return ExitCode::SUCCESS;
             }
@@ -107,14 +114,14 @@ fn main() -> ExitCode {
     println!("Lithic shim {}", env!("CARGO_PKG_VERSION"));
     println!("Serving {}", root.display());
     println!("{url}");
-    println!("The launcher opens in your browser. Saves stay in that browser's storage, under this address.");
+    println!("The launcher opens in your browser. A save goes back to the file you picked, or to that browser's storage under this address.");
     println!("Press Ctrl+C here to stop serving.");
     for missing in payload_warnings(&root) {
         println!("Optional file not in the payload: {missing}");
     }
 
-    if options.open && !open_in_browser(&url) {
-        println!("No browser command answered, so open {url} yourself.");
+    if options.open {
+        report_launch(&url);
     }
 
     match serve(listener, root, options.port) {
@@ -123,6 +130,23 @@ fn main() -> ExitCode {
             eprintln!("Lithic shim stopped: {error}");
             ExitCode::FAILURE
         }
+    }
+}
+
+/// Say how the address was handed over, or that nothing answered it.
+///
+/// The two rungs are worth telling apart: an app window is the shape the shim is
+/// going for, and a tab is the fallback a Firefox-only desktop takes, worth naming
+/// so the difference is not mistaken for a fault.
+fn report_launch(url: &str) {
+    match open_in_browser(url) {
+        Some(BrowserLaunch::AppWindow(program)) => {
+            println!("Opened {url} in {program}, in a window of its own.");
+        }
+        Some(BrowserLaunch::Tab) => {
+            println!("Opened {url} in a browser tab. A Chromium-family browser would open it as its own window.");
+        }
+        None => println!("No browser command answered, so open {url} yourself."),
     }
 }
 
