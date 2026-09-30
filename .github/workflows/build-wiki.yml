@@ -345,10 +345,10 @@ jobs:
             wiki/flatten-manifest.log
             wiki/tiddlywiki.log
 
-  build-tauri:
+  build-desktop:
     needs: build
     if: needs.build.outputs.release == 'true' && needs.build.outputs.config == 'prod'
-    uses: ./.github/workflows/windows-release.yaml
+    uses: ./.github/workflows/desktop-release.yaml
     with:
       tag_name: build-${{ needs.build.outputs.tag_name }}
     secrets: inherit
