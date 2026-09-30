@@ -67,6 +67,10 @@ import puppeteer from 'puppeteer';
 
 import { SECRET_SENTENCES } from './vault-copy.mjs';
 
+// The palette, straight from the module the sheet is generated from. Node strips the types,
+// so the deck reads the same tokens the launcher does rather than a copy of them.
+import { PALETTE, WASHES, paletteTokens, paletteValue, variableName } from '../launcher-ui/src/color-palette.ts';
+
 // The stand-in instance the `server` panes are shot through. Started in the entry
 // point below, because it has to be listening before the first pane is driven; the
 // panes reach it through `paneUrl` and through this handle.
@@ -2531,6 +2535,94 @@ function shotAt(date) {
   return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}`;
 }
 
+/**
+ * A short note on what each family is for, for whoever is reading the deck.
+ *
+ * The module carries these as doc comments; this is the deck's own wording, since a comment
+ * cannot be read at runtime. It is deliberately terse: the swatches are the point.
+ */
+const FAMILY_NOTES = {
+  surface: 'Backgrounds, from the app shell down to a raised control.',
+  line: 'Borders, outlines, strokes and the scrollbar thumb.',
+  ink: 'Text, and the tinted greys the chrome writes in.',
+  shadow: 'Blacks, for shadows and the dim behind a modal.',
+  accent: 'The install button blue, and the app\u2019s this is the thing colour.',
+  amber: 'The focus ring, and everything the sheet flags rather than refuses.',
+  ok: 'A thing that worked.',
+  danger: 'A thing that failed.',
+  sync: 'A sync in flight, which is neither a failure nor a success.'
+};
+
+/**
+ * The palette, as one page.
+ *
+ * Every swatch is drawn from `color-palette.ts` rather than written out here, so the deck
+ * cannot show a colour the launcher does not use: the tokens, their values and the wash
+ * compositing all come from the module. That is the only way to review all 53 at once,
+ * spread otherwise across the sheet's custom properties.
+ */
+function paletteDeck() {
+  const tokens = new Map(paletteTokens().map((token) => [token.name, token.value]));
+  const chip = (value) => `<span class="chip" style="background: ${value}"></span>`;
+  // A wash is translucent, so it needs a backdrop to be visible at all. Painted as a
+  // background image over the panel colour rather than a second `background` layer: a
+  // colour is only legal in the last layer of that shorthand, and this way it composites.
+  const washChip = (value) =>
+    `<span class="chip" style="background-color: ${paletteValue('surface.panel')}; background-image: linear-gradient(${value}, ${value})"></span>`;
+  const row = (name, value, swatch) => `        <li>\n          ${swatch}\n          <code>${name}</code>\n          <span class="value">${value}</span>\n        </li>`;
+  const families = Object.entries(PALETTE)
+    .map(([family, tones]) => {
+      const rows = Object.entries(tones)
+        .map(([tone, value]) => {
+          const [red, green, blue] = [1, 3, 5].map((at) => parseInt(value.slice(at, at + 2), 16));
+          return row(variableName(`${family}.${tone}`), `${value} · rgb(${red}, ${green}, ${blue})`, chip(value));
+        })
+        .join('\n');
+      return `      <h3>${family}<span>${FAMILY_NOTES[family] ?? ''}</span></h3>\n      <ul class="swatches">\n${rows}\n      </ul>`;
+    })
+    .join('\n');
+  // A wash is paint, not ink: it is drawn over the panel it usually sits on so the tint is
+  // visible at all. The chip stacks the wash on top of `surface.panel` in one background.
+  const washes = Object.entries(WASHES)
+    .map(([name, wash]) =>
+      row(`--lithic-${name}`, `${wash.of} at ${wash.alpha * 100}%`, washChip(tokens.get(`--lithic-${name}`)))
+    )
+    .join('\n');
+  const bg = (surface) => `background: ${surface}`;
+  const feed = tokens.get('--lithic-amber-wash-16');
+  const banner = `background-color: ${paletteValue('surface.panel')}; background-image: linear-gradient(${feed}, ${feed})`;
+  const pairings = [
+    ['Body ink on the app shell', bg(paletteValue('surface.app')), paletteValue('ink.base'), 'Body text'],
+    ['Secondary ink on a panel', bg(paletteValue('surface.panel')), paletteValue('ink.muted'), 'Secondary label'],
+    ['Hint ink on a card', bg(paletteValue('surface.card')), paletteValue('ink.faint'), 'Hint under a field'],
+    ['Accent ink on a filled accent control', bg(paletteValue('accent')), paletteValue('accent.ink'), 'Install'],
+    ['Inverse ink on a filled danger control', bg(paletteValue('danger.base')), paletteValue('ink.inverse'), 'Remove'],
+    ['Amber ink on an amber banner', banner, paletteValue('amber.soft'), 'A flagged banner'],
+    ['Danger status on a panel', bg(paletteValue('surface.panel')), paletteValue('danger.status'), 'Something failed'],
+    ['Sync ink on a panel', bg(paletteValue('surface.panel')), paletteValue('sync.deep'), 'Sync in flight'],
+    ['Saved ink on a panel', bg(paletteValue('surface.panel')), paletteValue('ok.pale'), 'Saved'],
+    ['A card the pointer can take', bg(paletteValue('surface.card')), paletteValue('ink.soft'), 'Hover a card']
+  ]
+    .map(
+      ([label, background, color, sample]) =>
+        `      <div class="pairing" style="${background}; color: ${color}">\n        <b>${sample}</b><small>${label}</small>\n      </div>`
+    )
+    .join('\n');
+  return `  <section class="palette">
+    <h2>Palette — every colour the launcher draws</h2>
+    <p class="artifact">${paletteTokens().length} tokens from <code>launcher-ui/src/color-palette.ts</code> — one ramp per job, and a wash is a colour and an alpha.</p>
+${families}
+      <h3>washes<span>Each shown over <code>surface.panel</code>.</span></h3>
+      <ul class="swatches">
+${washes}
+      </ul>
+      <h3>pairings<span>A few of the real combinations the launcher draws.</span></h3>
+      <div class="pairings">
+${pairings}
+      </div>
+  </section>`;
+}
+
 /** A page that shows every sheet, so a review is one tab rather than four files. */
 function contactPage(sheets, kept, results, artifact, coverage) {
   const dialogRows = coverage.entries
@@ -2575,11 +2667,23 @@ function contactPage(sheets, kept, results, artifact, coverage) {
       code { color: #8ab4f8; }
       .artifact { margin: -14px 0 32px; color: #8f8f8f; font-size: 0.86rem; }
       .kept { margin: 0 0 12px; color: #e6b95c; font-size: 0.86rem; }
+      .palette h3 { margin: 26px 0 10px; font-size: 0.95rem; color: #f0c674; }
+      .palette h3 span { margin-left: 10px; font-weight: 400; color: #8f8f8f; }
+      .swatches { list-style: none; margin: 0; padding: 0; display: grid;
+                  grid-template-columns: repeat(auto-fill, minmax(250px, 1fr)); gap: 8px 20px; }
+      .swatches li { display: flex; align-items: center; gap: 10px; font-size: 0.8rem; }
+      .chip { flex: 0 0 auto; width: 30px; height: 30px; border-radius: 5px; border: 1px solid #333; }
+      .swatches .value { margin-left: auto; color: #b9b3bd; font-size: 0.74rem; }
+      .pairings { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 12px; }
+      .pairing { border: 1px solid #333; border-radius: 6px; padding: 12px; font-size: 0.8rem; }
+      .pairing b { display: block; }
+      .pairing small { display: block; margin-top: 4px; opacity: 0.65; }
     </style>
   </head>
   <body>
     <h1>Lithic launcher — UI gallery</h1>
     <p class="artifact">Shooting <code>${artifact}</code> — the words are in <a href="copy-deck.md">copy-deck.md</a>, the dialog list in <a href="modal-coverage.md">modal-coverage.md</a></p>
+${paletteDeck()}
 ${kept.length > 0 ? `    <p class="kept">This run re-shot ${scope}. ${kept.length} sheet${kept.length === 1 ? '' : 's'} below kept the picture from the run before it.</p>\n` : ''}
   <section>
     <h2>Dialogs — every one the launcher declares, and the pane that draws it</h2>
