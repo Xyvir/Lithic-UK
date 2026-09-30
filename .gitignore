@@ -29,6 +29,9 @@ wiki/tiddlywiki.log
 
 # Tauri build output
 /src-tauri/target/
+# Shim build output. The shim is a crate of its own rather than a member of the
+# Tauri package, so its target directory is its own too.
+/shim/target/
 # Tauri 2 writes its config and capability schemas here on every build. They are
 # derived from `tauri.conf.json` and `capabilities/`, both of which are tracked,
 # so the generated copies are the build's business rather than the repo's.

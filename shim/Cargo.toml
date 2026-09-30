@@ -1,0 +1,23 @@
+[package]
+name = "lithic-shim"
+version = "0.1.0"
+description = "Serves the Lithic launcher and wiki engine to the browser already on the machine"
+authors = ["you"]
+edition = "2021"
+
+# No dependencies, and that is the whole point of this crate. `src-tauri` links
+# GTK and WebKitGTK through Tauri, which is why its AppImage is an 82 MB download:
+# the engine travels with the app. This binary carries none of that. It is an HTTP
+# server for six local files and a call to the system browser, so the standard
+# library is sufficient and the artifact stays the size of the payload it serves
+# (see agents.md, the release section).
+[dependencies]
+
+[profile.release]
+# The AppImage is the payload plus this binary, so the binary is worth shrinking:
+# most of its bytes would otherwise be unused formatting and symbol tables.
+opt-level = "z"
+lto = true
+codegen-units = 1
+strip = true
+panic = "abort"

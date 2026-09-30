@@ -16,6 +16,9 @@
  *   7. cargo check (Rust type/borrow check — catches the recent E07xx class
  *      of release-workflow failures)
  *   8. cargo clippy (Rust lint pass, warnings are failures)
+ *   9. the shim's own cargo check, clippy and unit tests (shim/Cargo.toml: a
+ *      crate of its own beside src-tauri, so nothing above compiles it, and it
+ *      is what the small Linux AppImage carries)
  *
  * Usage: npm run check:push   (or: node scripts/pre-push-check.mjs)
  * Exit 0 = safe to push; nonzero = fix before pushing.
@@ -258,11 +261,22 @@ if (checkCargoAvailable()) {
     // `cargo check --all-targets`, which does not run them, so they are
     // enforced here. Skipped when cargo is unavailable, like the steps above.
     { name: 'cargo test (rust units)', args: ['test', '--quiet'] },
+    // The shim, which no step above reaches: `shim/` is a package of its own
+    // rather than a member of the Tauri workspace, so `cargo check` in src-tauri
+    // never sees it. It is a small crate, but it is the whole small download, so
+    // it gets the same three gates as the app.
+    { name: 'cargo check (shim)', args: ['check', '--manifest-path', 'shim/Cargo.toml', '--quiet'], cwd: repoRoot },
+    {
+      name: 'cargo clippy (shim lints)',
+      args: ['clippy', '--manifest-path', 'shim/Cargo.toml', '--all-targets', '--quiet', '--', '-D', 'warnings'],
+      cwd: repoRoot,
+    },
+    { name: 'cargo test (shim units)', args: ['test', '--manifest-path', 'shim/Cargo.toml', '--quiet'], cwd: repoRoot },
   ];
   for (const step of rustSteps) {
     process.stdout.write(`> ${step.name.padEnd(28, ' ')}`);
     const res = spawnSync('cargo', step.args, {
-      cwd: path.join(repoRoot, 'src-tauri'),
+      cwd: step.cwd ?? path.join(repoRoot, 'src-tauri'),
       shell: process.platform === 'win32',
       stdio: ['ignore', 'pipe', 'pipe'],
       encoding: 'utf8',

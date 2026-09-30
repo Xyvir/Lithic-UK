@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * The launcher's copy gate: no em dash and no en dash anywhere in the launcher's sources.
+ * The copy gate: no em dash and no en dash anywhere in the launcher's sources, or the shim's.
  *
  * The rule is the third one at the top of `agents.md` — "No em dashes or en dashes. Use a
  * period, or rewrite." — and the reason it needs a gate rather than a reviewer is that the
@@ -8,8 +8,10 @@
  * `title` a screen reader reads. Every one of them was added mid-sentence by an agent,
  * because a dash is what English prose wants there.
  *
- * The scan is absolute: every file under `launcher-ui/src` and `launcher-ui/index.html`, no
- * exemption list, no build. An earlier version of this gate scanned the built artifact
+ * The scan is absolute: every file under `launcher-ui/src`, `launcher-ui/index.html` and
+ * `shim/src`, no exemption list, no build. The shim is in here because its copy is read in the
+ * same read-aloud places: a line printed when the port is taken, and the desktop entry the
+ * AppImage installs into a menu. An earlier version of this gate scanned the built artifact
  * instead, on the theory that the build strips JS and CSS comments, so any dash left in
  * `src/launcher.html` was shipped copy. That theory was wrong twice. The engine plumbing the
  * launcher inlines into a wiki is a string, so the comments inside it are shipped, and the
@@ -36,7 +38,7 @@ const DASHES = [
 
 const roots = process.argv.slice(2).length
   ? process.argv.slice(2)
-  : ['launcher-ui/src', 'launcher-ui/index.html'];
+  : ['launcher-ui/src', 'launcher-ui/index.html', 'shim/src'];
 
 const files = [];
 for (const root of roots) {
@@ -79,11 +81,11 @@ for (const file of files) {
 }
 
 if (findings.length === 0) {
-  console.log(`OK — ${files.length} launcher files carry no em dash and no en dash.`);
+  console.log(`OK — ${files.length} launcher and shim files carry no em dash and no en dash.`);
   process.exit(0);
 }
 
-console.error(`FAIL — ${findings.length} dash${findings.length === 1 ? '' : 'es'} in the launcher sources:`);
+console.error(`FAIL — ${findings.length} dash${findings.length === 1 ? '' : 'es'} in the launcher and shim sources:`);
 for (const finding of findings) {
   console.error(`  ${finding.name} at ${finding.where}`);
   console.error(`    ${finding.reads.replace(/\s+/g, ' ').trim()}`);

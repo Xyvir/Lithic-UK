@@ -1,16 +1,18 @@
 name: Desktop Manual Release
 
-# The desktop distributions: one Windows executable and one Linux AppImage,
-# the latter named `Lithic-webgtk_...` because it bundles its own web engine.
-# Both add a file to the release tag the caller passes in, which is the tag the
-# wiki build just created, so a build's download page carries every desktop
-# platform beside the wiki artifacts.
+# The desktop distributions: one Windows executable and two Linux AppImages.
+# `Lithic-webgtk_...` bundles its own web engine. `Lithic_...` is the shim, which
+# serves the same launcher and wiki engine to the browser the machine already has
+# (see `shim/`), so it is around 2 MB instead of 82 MB. Each job adds a file to
+# the release tag the caller passes in, which is the tag the wiki build just
+# created, so a build's download page carries every desktop platform beside the
+# wiki artifacts.
 #
-# The two jobs are independent on purpose. A Windows failure must not cost the
-# Linux artifact, and a Linux failure must not cost the Windows one: each is a
-# separate download on the same release, and neither is the release itself. Both
-# only ever ADD a file (the release already exists by the time this runs), so
-# neither can blank the other's work.
+# The three jobs are independent on purpose. A Windows failure must not cost the
+# Linux artifacts, and a Linux failure must not cost the Windows one: each is a
+# separate download on the same release, and none of them is the release itself.
+# Each only ever ADDS a file (the release already exists by the time this runs),
+# so none can blank another's work.
 on:
   workflow_dispatch:
   workflow_call:
@@ -353,3 +355,119 @@ jobs:
           prerelease: false
           files: |
             ${{ steps.tag.outputs.appimage }}
+
+  # The shim: the same launcher and wiki engine, served to the browser the
+  # machine already has (`shim/`, assembled by scripts/build-shim-appimage.sh).
+  #
+  # A third job rather than a step in the AppImage job, because the two artifacts
+  # disagree about every dependency a Tauri build needs. Nothing here installs
+  # GTK, WebKitGTK, appindicator, patchelf or FUSE: the shim links no toolkit, so
+  # its AppDir needs no linuxdeploy and bundles no libraries. That is the whole
+  # proposition of the artifact, and a job that installs a web engine in order to
+  # build the download that exists to avoid one would be arguing with itself.
+  build-shim-appimage:
+    # Same runner as the WebKit AppImage, for the same reason: an AppImage links
+    # the glibc of the machine that built it, and the shim's binary is built here
+    # too, so this is what keeps the two Linux downloads on one floor.
+    runs-on: ubuntu-22.04
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v5
+
+      - name: Download Built Wiki Artifact
+        if: ${{ inputs.tag_name != '' }}
+        uses: actions/download-artifact@v5
+        with:
+          name: built-wiki
+          path: src
+
+      - name: Rename Downloaded Wiki
+        if: ${{ inputs.tag_name != '' }}
+        run: mv src/lith.html src/lithic.html
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v5
+        with:
+          node-version: 22
+
+      - name: Cache NPM dependencies
+        uses: actions/cache@v5
+        with:
+          path: ~/.npm
+          key: ${{ runner.os }}-node-${{ hashFiles('package-lock.json', 'launcher-ui/package-lock.json') }}
+          restore-keys: |
+            ${{ runner.os }}-node-
+
+      # The shim is a crate of its own beside src-tauri, so its build cache is
+      # its own as well.
+      - name: Rust Cache
+        uses: swatinem/rust-cache@v2
+        with:
+          workspaces: 'shim -> target'
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      # No launcher-ui test run here. The AppImage job runs them from the same
+      # commit, and the launcher this job packages is the same build of the same
+      # forty odd files, so a second run would only be a second way to fail.
+      - name: Install Dependencies
+        run: |
+          npm ci
+          npm --prefix launcher-ui ci
+
+      - name: Build Launcher (Svelte Launcher Bundle)
+        run: node scripts/build-launcher.mjs
+
+      - name: Generate Date-Based Tag
+        id: tag
+        run: |
+          tag="${{ inputs.tag_name }}"
+          if [ -z "$tag" ]; then
+            tag="v$(date +'%Y.%m.%d-%H%M')"
+          fi
+          echo "date=$tag" >> "$GITHUB_OUTPUT"
+          # The plain `Lithic_...` name is the one the WebKitGTK build gave up when
+          # it took `Lithic-webgtk_...`: the name is the only thing a person sees
+          # before downloading, so it states whether the engine comes with the
+          # file. Same stamp rule as the exe beside it, so one release still reads
+          # as one set of downloads.
+          if [[ "$tag" =~ ([0-9]{4})\.([0-9]{2})\.([0-9]{2})-([0-9]{4}) ]]; then
+            shim="Lithic_${BASH_REMATCH[2]}.${BASH_REMATCH[3]}.${BASH_REMATCH[1]:2:2}-${BASH_REMATCH[4]}.AppImage"
+          else
+            shim="Lithic_$tag.AppImage"
+          fi
+          echo "shim=$shim" >> "$GITHUB_OUTPUT"
+
+      # The manifest and the offline service worker travel in this payload as the
+      # versions the checkout carries. That is the same source the AppImage job
+      # packages; only their cache version string is at stake, and build-server
+      # bumps those in its own commit.
+      - name: Build Shim AppImage
+        run: bash scripts/build-shim-appimage.sh --name "${{ steps.tag.outputs.shim }}" --output-dir dist
+
+      # The point of this artifact is the number in this table, so it is reported
+      # next to the size it exists to avoid rather than on its own.
+      - name: Report Artifact Sizes
+        run: |
+          echo "### Shim artifact" >> "$GITHUB_STEP_SUMMARY"
+          echo "| file | size |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| --- | --- |" >> "$GITHUB_STEP_SUMMARY"
+          for file in dist/*.AppImage; do
+            mb=$(awk -v bytes="$(stat -c%s "$file")" 'BEGIN { printf "%.2f", bytes / 1048576 }')
+            echo "$mb MB  $(basename "$file")"
+            echo "| $(basename "$file") | $mb MB |" >> "$GITHUB_STEP_SUMMARY"
+          done
+          echo "This download carries no web engine: the browser already on the machine is the engine. The WebKitGTK AppImage of the same release is about 82 MB." >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Add to Release
+        uses: softprops/action-gh-release@v3
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tag_name: ${{ steps.tag.outputs.date }}
+          draft: false
+          prerelease: false
+          files: |
+            dist/${{ steps.tag.outputs.shim }}
