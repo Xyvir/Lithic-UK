@@ -88,6 +88,11 @@ const EXTERNAL = [
     why: 'The same swarm bastion list, from its Pages mirror.'
   },
   {
+    prefix: 'https://api.github.com/repos/Xyvir/Lithic-UK/releases/latest',
+    kind: 'fetch',
+    why: 'The shim update notice, and the only read of this address anywhere: it answers with CORS open to any origin, so the page can ask whether a newer AppImage is published. Reached only when the server that sent the document served a release tag, which is a shim the release workflow cut and nothing else, so no other distribution asks and this file:// pass never does. A failure is no notice.'
+  },
+  {
     prefix: 'https://instance.example',
     kind: 'placeholder',
     why: "Placeholder text in the bookmark dialog's address field, as the released artifact still spells it. It disappears on the next rebuild."

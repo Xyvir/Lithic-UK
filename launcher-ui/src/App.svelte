@@ -7,6 +7,7 @@
   import { orphanPill, orphanDownloadNote, type OrphanDownloadState } from './orphan-download';
   import { isScratchFileName, isHtmlMonolithName, tracksUnsavedEdits, resolveMountName, resolveScratchKind, type ScratchKind } from './scratch-editor';
   import { pwaInstall, promptPwaInstall } from './pwa-install';
+  import { RELEASES_LATEST_PAGE, latestReleaseTag, readBuildTag, updateOffered } from './update-notice';
   import { bootLegacyWiki, bootLegacyHtml, writeHandoff, type RemoteTarget } from './legacy-launcher-runtime';
   import { EMOJI_LIST, uploadInstanceIcon, clearInstanceIcon, emojiFaviconUrl, applyFavicon, bustIconCache, readInstanceEmoji, readServerEmoji, saveInstanceEmoji, clearInstanceEmoji, instanceMarkUrl } from './instance-icon';
   import { getRecentFiles, addRecentFile, removeRecentFile, addBrowserOnlyRecent, removeBrowserOnlyRecent, clearAllRecentFiles, purgeOldestCachesIfNeeded, saveSearchCache, forgetWikiCache, cachedWikiNames, idb, getSearchCacheText, readFetchedLith, rememberFetchedLith, listWikiVersions, wikiHasHistory, downloadWikiVersion, getDirtyState, clearDirtyState, listDirtyRecoveries, isWikiDriftedFromHead, isInstallDismissed, setInstallDismissed, recentDiskPath, type RecentEntry } from './storage';
@@ -58,6 +59,17 @@
    * page lives.
    */
   const browserOnly = declaresBrowserOnly(typeof document === 'undefined' ? null : document);
+  /**
+   * The release tag the process that served this page was built from, or null.
+   *
+   * A released shim serves this one tag with its document, and having one is the whole
+   * declaration the update notice needs: a published deployment, an instance and the
+   * desktop app all serve no tag, so none of them reaches that notice. Read once for the
+   * same reason as the mode above, since what served the page cannot change while it lives.
+   */
+  const buildTag = readBuildTag(typeof document === 'undefined' ? null : document);
+  /** Whether this page came from a shim the release workflow cut, which is what its notice needs. */
+  const shimUpdateHost = buildTag !== null;
   const storageMode: StorageMode = resolveStorageMode(
     mode,
     typeof window === 'undefined' ? undefined : (window as unknown as { showSaveFilePicker?: unknown }),
@@ -163,7 +175,7 @@
    * Declared rather than left to inference, because the template and the action both read
    * it and a widened `string` would let a typo be a mode that never matches.
    */
-  let installOffer: 'desktop' | 'pwa' | null = null;
+  let installOffer: 'desktop' | 'pwa' | 'update' | null = null;
   /** Where the manual update offer sends the user. Rust's answer, never a literal here. */
   let updateUrl = '';
   // "Dismiss" on the install offer: hides the button until manually restored
@@ -188,6 +200,12 @@
       // A browser's install prompt is what the webapp offer waits on, and that
       // arrives when it arrives; this only stops the footer guessing in the meantime.
       installOfferReady = true;
+      // The shim's notice is the one browser-side offer that has to ask the network, and
+      // it asks here rather than above for the desktop branch's own reason: a user who
+      // dismissed the notice must not watch it arrive for as long as the answer takes.
+      if (shimUpdateHost && !installDismissed) {
+        await checkForInstallUpdate();
+      }
       return;
     }
     let launchedFromInstall = false;
@@ -241,6 +259,15 @@
    * Update Install, which is the same manual step a portable copy makes.
    */
   async function checkForInstallUpdate() {
+    if (shimUpdateHost) {
+      // The shim asks GitHub itself, because the API answers any origin and a notice is
+      // all this is: no backend behind the file, and no command to carry it.
+      const latest = await latestReleaseTag();
+      if (!updateOffered(buildTag, latest)) return;
+      updateUrl = RELEASES_LATEST_PAGE;
+      installState = 'update';
+      return;
+    }
     try {
       const update = await tauriInvoke<{ available: boolean; url: string }>('install_update_check');
       if (!update.available) return;
@@ -269,16 +296,26 @@
    * and the user is mid-update. A page whose own server declared it browser-only draws no
    * offer at all: the shim distribution has no copy to install and no browser prompt worth
    * answering, so the declaration is this rule's first term.
+   *
+   * The one browser page that does offer something is a shim, and the tag its server sent is
+   * what says so. That shape is 'update' and it is the only one a shim can reach: there is no
+   * copy to install and no prompt to answer, so neither 'desktop' nor 'pwa' can come out of a
+   * page this server sent. It is also why the first term is a disjunction now, since the
+   * browser-only declaration had been standing in for "not a shim" as well.
    */
   $: installOffer =
-    !browserOnly && installOfferReady && !(installDismissed && installState !== 'stale')
+    (!browserOnly || shimUpdateHost) && installOfferReady && !(installDismissed && installState !== 'stale')
       ? mode === 'tauri'
         ? installState === 'current' || !platformInstallable
           ? null
           : 'desktop'
-        : $pwaInstall.installable
-          ? 'pwa'
-          : null
+        : shimUpdateHost
+          ? installState === 'update'
+            ? 'update'
+            : null
+          : $pwaInstall.installable
+            ? 'pwa'
+            : null
       : null;
 
   /**
@@ -293,18 +330,22 @@
     ? copy.install.label.installing
     : installOffer === 'pwa'
       ? copy.install.label.install
-      : installState === 'update'
+      : installOffer === 'update'
         ? copy.install.label.updateAvailable
-        : installState === 'stale'
-          ? copy.install.label.updateInstall
-          : copy.install.label.plain;
+        : installState === 'update'
+          ? copy.install.label.updateAvailable
+          : installState === 'stale'
+            ? copy.install.label.updateInstall
+            : copy.install.label.plain;
   $: installOfferTitle =
     installStatus ||
     (installOffer === 'pwa'
       ? copy.install.offer.browser
-      : installState === 'update'
-        ? copy.install.offer.update
-        : copy.install.offer.desktop(platformEntry));
+      : installOffer === 'update'
+        ? copy.install.offer.notice
+        : installState === 'update'
+          ? copy.install.offer.update
+          : copy.install.offer.desktop(platformEntry));
 
   /**
    * The offer's primary action: prompt the browser, install, update the install, or open
@@ -314,6 +355,13 @@
   async function installOfferAction(): Promise<void> {
     if (installOffer === 'pwa') {
       await installPwa();
+      return;
+    }
+    // The shim's notice opens the releases page in the user's own browser and leaves this
+    // page where it is. That is `openExternally` rather than Rust's `open_external`, since
+    // there is no webview behind this page to hand the address to.
+    if (installOffer === 'update') {
+      openExternally(updateUrl);
       return;
     }
     if (installState === 'update') {

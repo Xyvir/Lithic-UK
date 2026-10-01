@@ -83,6 +83,12 @@ const en = {
     offer: {
       browser: 'Add the launcher to this device',
       update: 'Download the new version, then press Update Install',
+      /**
+       * The shim's notice, which has no step after it: this file cannot update itself, so
+       * the reader fetches the new AppImage and replaces the old one by hand. The sentence
+       * the desktop app uses cannot be borrowed here, since there is no Install to press.
+       */
+      notice: 'Get the newest version from the releases page',
       desktop: (entry: LaunchEntry | null): string =>
         entry === 'application-menu'
           ? 'Copy to Documents and add it to the application menu'
@@ -640,6 +646,7 @@ const es: Copy = {
     offer: {
       browser: 'Añade el lanzador a este dispositivo',
       update: 'Descarga la nueva versión y pulsa Instalar actualización',
+      notice: 'Consigue la versión más reciente en la página de versiones',
       desktop: (entry: LaunchEntry | null): string =>
         entry === 'application-menu'
           ? 'Copia a Documentos y añádelo al menú de aplicaciones'
@@ -1162,6 +1169,7 @@ const fr: Copy = {
     offer: {
       browser: 'Ajouter le lanceur à cet appareil',
       update: 'Téléchargez la nouvelle version, puis appuyez sur Installer la mise à jour',
+      notice: 'Récupérez la dernière version sur la page des versions',
       desktop: (entry: LaunchEntry | null): string =>
         entry === 'application-menu'
           ? 'Copier dans Documents et l’ajouter au menu des applications'
@@ -1681,6 +1689,7 @@ const de: Copy = {
     offer: {
       browser: 'Launcher zu diesem Gerät hinzufügen',
       update: 'Lade die neue Version herunter und tippe auf Update installieren',
+      notice: 'Hole die neueste Version von der Releases-Seite',
       desktop: (entry: LaunchEntry | null): string =>
         entry === 'application-menu'
           ? 'Nach Dokumente kopieren und dem Anwendungsmenü hinzufügen'
