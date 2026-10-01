@@ -9,6 +9,7 @@ import { TID_SERIALIZE_RUNTIME } from './tid-serialize-runtime.ts';
 import { IPYNB_SERIALIZE_RUNTIME } from './ipynb.ts';
 import { LINE_PATCH_RUNTIME } from './line-patch.ts';
 import { LITHIC_API_BASE, WEBDAV_BASE, WEBDAV_UTILS_JS } from './webdav.ts';
+import { SHIM_COMMAND_PATH, SHIM_TOKEN_HEADER } from './shim-command.ts';
 
 /** Scratch save behavior for the mounted engine's injected saver. */
 export type ScratchMode = 'off' | 'text' | 'tid' | 'json' | 'ipynb';
@@ -126,6 +127,12 @@ export type MountSaveOptions = {
   scratchMode?: ScratchMode;
   remote?: RemoteTarget | null;
   browserOnly?: boolean;
+  /**
+   * The per-launch secret of a shim that served the launcher, or null elsewhere. It is baked
+   * into the injected saver as a literal, because the mounted document replaces the one that
+   * carried the meta tag, and it is what lets a save write back through the shim's wire.
+   */
+  shimToken?: string | null;
 };
 
 function injectSaverBootstrap(
@@ -135,7 +142,8 @@ function injectSaverBootstrap(
   driftedFromHead = false,
   scratchMode: ScratchMode = 'off',
   remote: RemoteTarget | null = null,
-  browserOnly = false
+  browserOnly = false,
+  shimToken: string | null = null
 ): string {
   const pluginsJson = JSON.stringify(DEFAULT_PLUGINS);
   const jsonPatchRuntime = JSON_PATCH_RUNTIME;
@@ -156,6 +164,11 @@ function injectSaverBootstrap(
   const htmlModeLiteral = isHtmlMode ? 'true' : 'false';
   const driftedFromHeadLiteral = driftedFromHead ? 'true' : 'false';
   const browserOnlyLiteral = browserOnly ? 'true' : 'false';
+  // The shim's wire and its secret, baked in as literals: the saver runs inside the mounted
+  // document, which cannot read the launcher's meta tag because document.write replaced it.
+  const shimTokenLiteral = JSON.stringify(shimToken ?? null);
+  const shimCommandPathJson = JSON.stringify(SHIM_COMMAND_PATH);
+  const shimTokenHeaderJson = JSON.stringify(SHIM_TOKEN_HEADER);
   const scratchModeJson = JSON.stringify(scratchMode);
   // Self-host: the saver talks to the same-origin save API instead of a file
   // handle. Only the target identity is baked in here; the base text and digest
@@ -557,6 +570,15 @@ function injectSaverBootstrap(
     // save branches (lith and scratch) share one code shape.
     root.__LITHIC_WRITE_FILE__ = function(fileHandle) {
       var tauriPath = fileHandle && fileHandle.__lithicTauriPath__;
+      var shimPath = fileHandle && fileHandle.__lithicShimPath__;
+      // The shim first when it is the one that served this page, so a handle carrying both is
+      // written by the wire rather than by an invoke this distribution does not have.
+      if (shimToken && shimPath) {
+        return {
+          write: function(text) { return shimCommand('write', { path: shimPath, text: text }); },
+          close: function() { return Promise.resolve(); }
+        };
+      }
       if (!tauriInvoke || !tauriPath) return Promise.reject(new Error('No writable target'));
       return {
         write: function(text) { return tauriInvoke('write_text_path', { path: tauriPath, text: text }); },
@@ -565,6 +587,32 @@ function injectSaverBootstrap(
     };
     function tauriHandle(name, tauriPath) {
       return { name: name, __lithicTauriPath__: tauriPath };
+    }
+
+    // The shim's wire, resolved for itself the same way the app's invoke is, and for the
+    // same reason: this whole script runs in the document the mount wrote, so nothing can
+    // arrive through a closure and the secret is a literal the launcher read from the page
+    // it served. A shim handle names a real path, so a save lands in the file the person
+    // opened rather than behind a picker on every save.
+    var shimToken = ${shimTokenLiteral};
+    var shimCommand = function(command, args) {
+      if (!shimToken) return Promise.reject(new Error('No shim wire'));
+      var headers = { 'Content-Type': 'application/json' };
+      headers[${shimTokenHeaderJson}] = shimToken;
+      return fetch(${shimCommandPathJson}, {
+        method: 'POST',
+        headers: headers,
+        body: JSON.stringify({ command: command, args: args || {} })
+      }).then(function(response) {
+        if (!response.ok) throw new Error('The shim refused the command');
+        return response.json();
+      }).then(function(payload) {
+        if (!payload || payload.ok !== true) throw new Error((payload && payload.error) || 'The shim could not do that');
+        return payload.result;
+      });
+    };
+    function shimHandle(name, shimPath) {
+      return { name: name, __lithicShimPath__: shimPath };
     }
 
     // The index-db-only fallback's save target. There is no file and no picker
@@ -590,6 +638,13 @@ function injectSaverBootstrap(
         // file; save in place through the invoke bridge.
         if (tauriInvoke && handoff.path) {
           handle = tauriHandle(fileName, handoff.path);
+          root.__LITHIC_FILE_HANDLE__ = handle;
+          return Promise.resolve(handle);
+        }
+        // The shim: the handoff carries the absolute path the desktop's chooser named, and
+        // the wire writes that path back in place.
+        if (shimToken && handoff.path) {
+          handle = shimHandle(fileName, handoff.path);
           root.__LITHIC_FILE_HANDLE__ = handle;
           return Promise.resolve(handle);
         }
@@ -796,6 +851,18 @@ function injectSaverBootstrap(
                 var savedPath = saved && (saved.path || saved.name);
                 if (!savedPath) throw new Error('Save cancelled');
                 handle = tauriHandle((saved && saved.name) || ${suggestedNameJson}, savedPath);
+                root.__LITHIC_FILE_HANDLE__ = handle;
+                return handle;
+              });
+            }
+            if (shimToken) {
+              // No path on record (a new file): the desktop's own chooser names one and the
+              // normal writable write below lands there.
+              return shimCommand('pick', { mode: 'save', suggestedName: ${suggestedNameJson} }).then(function(result) {
+                var picked = result && result.paths && result.paths[0];
+                if (!picked) throw new Error('Save cancelled');
+                var pickedName = String(picked).split('/').pop() || ${suggestedNameJson};
+                handle = shimHandle(pickedName, picked);
                 root.__LITHIC_FILE_HANDLE__ = handle;
                 return handle;
               });
@@ -1125,7 +1192,8 @@ export function buildEngineHtml(
     options.driftedFromHead === true,
     options.scratchMode ?? 'off',
     options.remote ?? null,
-    options.browserOnly === true
+    options.browserOnly === true,
+    options.shimToken ?? null
   );
   if (options.remote && !options.remote.readOnly) {
     // The saver diffs the wiki against the exact text the launcher loaded, so
@@ -1180,7 +1248,13 @@ export async function bootLegacyWiki(
  * the launcher reads the monolith from, because tiddler JSON cannot rebuild a page
  * that carries its own scripts, plugins and styles.
  */
-export function bootLegacyHtml(html: string, suggestedFileName?: string, path?: string, browserOnly = false): void {
+export function bootLegacyHtml(
+  html: string,
+  suggestedFileName?: string,
+  path?: string,
+  browserOnly = false,
+  shimToken: string | null = null
+): void {
   // HTML monoliths keep their own tiddler store and are served as-is, but a
   // raw-HTML saver is injected so saves write the engine's serialized page back
   // to a .html file instead of falling through to TiddlyWiki's built-in
@@ -1188,7 +1262,7 @@ export function bootLegacyHtml(html: string, suggestedFileName?: string, path?: 
   // bootstrap goes in with it, because this rewrite of the launcher document is
   // exactly where an external link in the mounted page dies the same way.
   const withSaver = injectMountedLinkBootstrap(
-    suggestedFileName ? injectSaverBootstrap(html, suggestedFileName, true, false, 'off', null, browserOnly) : html
+    suggestedFileName ? injectSaverBootstrap(html, suggestedFileName, true, false, 'off', null, browserOnly, shimToken) : html
   );
   if (suggestedFileName) {
     // Record which file this is, exactly as the engine mount does. The injected

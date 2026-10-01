@@ -221,7 +221,8 @@ export type RecentRow =
  * rather than `path`. Opening a row has always understood every one of those
  * shapes; anything else that needs the row's folder has to ask the same
  * question the same way, or it concludes no file is open for a Lith that was
- * just saved. Browser file handles have no path, so those return null.
+ * just saved. A plain browser file handle has no path, so that returns null; the shim writes a
+ * path onto its own handle (`__lithicShimPath__`) the same way the app writes `__lithicTauriPath__`.
  */
 export function recentDiskPath(entry: RecentRow): string | null {
   const rawHandle = (entry as any)?.handle;
@@ -229,7 +230,9 @@ export function recentDiskPath(entry: RecentRow): string | null {
     (entry as any)?.tauriPath ??
     (entry as any)?.path ??
     rawHandle?.__lithicTauriPath__ ??
-    rawHandle?.handle?.__lithicTauriPath__;
+    rawHandle?.__lithicShimPath__ ??
+    rawHandle?.handle?.__lithicTauriPath__ ??
+    rawHandle?.handle?.__lithicShimPath__;
   return typeof path === 'string' && path ? path : null;
 }
 

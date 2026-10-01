@@ -9,6 +9,7 @@
   import { pwaInstall, promptPwaInstall } from './pwa-install';
   import { RELEASES_LATEST_PAGE, latestReleaseTag, readBuildTag, updateOffered } from './update-notice';
   import { readShimToken, shimCommand } from './shim-command';
+  import { shimRead, shimStartupPath } from './shim-files';
   import { bootLegacyWiki, bootLegacyHtml, writeHandoff, type RemoteTarget } from './legacy-launcher-runtime';
   import { EMOJI_LIST, uploadInstanceIcon, clearInstanceIcon, emojiFaviconUrl, applyFavicon, bustIconCache, readInstanceEmoji, readServerEmoji, saveInstanceEmoji, clearInstanceEmoji, instanceMarkUrl } from './instance-icon';
   import { getRecentFiles, addRecentFile, removeRecentFile, addBrowserOnlyRecent, removeBrowserOnlyRecent, clearAllRecentFiles, purgeOldestCachesIfNeeded, saveSearchCache, forgetWikiCache, cachedWikiNames, idb, getSearchCacheText, readFetchedLith, rememberFetchedLith, listWikiVersions, wikiHasHistory, downloadWikiVersion, getDirtyState, clearDirtyState, listDirtyRecoveries, isWikiDriftedFromHead, isInstallDismissed, setInstallDismissed, recentDiskPath, type RecentEntry } from './storage';
@@ -90,11 +91,19 @@
    * wire reads it here instead of asking again.
    */
   let shimBackendUp = false;
-  const storageMode: StorageMode = resolveStorageMode(
-    mode,
-    typeof window === 'undefined' ? undefined : (window as unknown as { showSaveFilePicker?: unknown }),
-    typeof window === 'undefined' ? null : storageModeOverride(window.location.search)
-  );
+  /**
+   * A shim that served this page answers `file` on every browser, because the shim itself
+   * writes the path the desktop's chooser named: on Firefox the platform has no File System
+   * Access API, yet this page does have a process that can write a real file. Everywhere else
+   * the platform still decides. `shimToken` is read above and cannot change while the page lives.
+   */
+  const storageMode: StorageMode = shimToken
+    ? 'file'
+    : resolveStorageMode(
+        mode,
+        typeof window === 'undefined' ? undefined : (window as unknown as { showSaveFilePicker?: unknown }),
+        typeof window === 'undefined' ? null : storageModeOverride(window.location.search)
+      );
   /**
    * The index-db-only fallback: no Lith mounted here has a file behind it, so
    * its cached copy in this browser *is* the document.
@@ -428,6 +437,19 @@
    */
   async function probeShimBackend(): Promise<void> {
     shimBackendUp = (await shimCommand('ping', {}, { token: shimToken })).ok;
+  }
+
+  /**
+   * Open the `.lith` this shim was started with, if a file manager handed one over. A served
+   * page cannot see its own process, so the shim is asked; nothing opens when it answers null,
+   * which is every launch that was not an Open With or a command line naming a file.
+   */
+  async function openShimStartup(): Promise<void> {
+    const answer = await shimStartupPath({ token: shimToken });
+    if (!answer.ok) return;
+    const path = answer.value.path;
+    if (!path) return;
+    await mountDiskPath(path);
   }
 
   /**
@@ -2289,9 +2311,14 @@
         return;
       }
     }
+    // A shim has no browser handle to offer, only a path, so it hands the saver a handle of
+    // its own that carries the path: that is what makes a save write back where the file came
+    // from instead of opening a picker on every save.
+    const shimHandle = !handle && path && shimToken ? { name: safeName, path, __lithicShimPath__: path } : undefined;
     if (typeof window !== 'undefined') {
-      if (handle) {
-        (window as any).__LITHIC_FILE_HANDLE__ = handle;
+      const target = handle ?? shimHandle;
+      if (target) {
+        (window as any).__LITHIC_FILE_HANDLE__ = target;
       } else {
         delete (window as any).__LITHIC_FILE_HANDLE__;
       }
@@ -2303,7 +2330,7 @@
       // actually opened, not a handoff left behind by an earlier mount.
       // In the browser-storage fallback there is no file to write back to, so the
       // serialized page goes into the monolith's own recents row instead.
-      await bootLegacyHtml(contents, safeName, path, indexDbOnly);
+      await bootLegacyHtml(contents, safeName, path, indexDbOnly, shimToken);
       return;
     }
     const handoff = { name: safeName, path, text: contents };
@@ -2322,7 +2349,7 @@
     await bootLegacyWiki(handoff, [...pendingImports, ...ephemeralIntegrationTiddlers(), ...extraTiddlers], {
       __EPHEMERAL_MODE__: mode === 'self-host' ? 'self-host' : 'paper-light',
       __LITHIC_LAUNCHER_MODE__: mode
-    }, { driftedFromHead, scratchMode, remote, browserOnly: indexDbOnly });
+    }, { driftedFromHead, scratchMode, remote, browserOnly: indexDbOnly, shimToken });
     pendingImports = [];
   }
 
@@ -2508,17 +2535,23 @@
         status = copy.status.mounted(name);
         return;
       }
-      if (mode === 'tauri') {
-        if (tauriPath) {
-          await mountTauriPath(tauriPath);
-          return;
-        }
+      // A row with a disk path is read through whichever process can: the app's Rust bridge
+      // under Tauri, the shim's wire when a shim served this page. A shim handle carries a
+      // path and no `getFile`, so it belongs here rather than in the browser-handle block.
+      if ((mode === 'tauri' || shimToken !== null) && tauriPath) {
+        await mountDiskPath(tauriPath);
+        return;
+      }
+      if (mode === 'tauri' && !rawHandle?.getFile) {
         // A handle-less or pseudo-handle row with no path can't be opened:
         // browser handles don't exist in this WebView.
-        if (!rawHandle?.getFile) {
-          status = copy.status.noPath;
-          return;
-        }
+        status = copy.status.noPath;
+        return;
+      }
+      // The same dead end on a shim: a handle with no resolvable path has nothing to read.
+      if (shimToken !== null && rawHandle && !rawHandle.getFile) {
+        status = copy.status.noPath;
+        return;
       }
       const handle = rawHandle;
       if (handle) {
@@ -2544,7 +2577,7 @@
         // Tauri recents opened through the save dialog carry only a disk
         // path (no cached text). Read fresh from disk so in-place edits
         // made outside the app are picked up.
-        await mountTauriPath(recentDiskPath(recent) as string);
+        await mountDiskPath(recentDiskPath(recent) as string);
         return;
       } else {
         // Nothing left to open it from: the row has no path this build can read and
@@ -2571,16 +2604,27 @@
     busy = true;
     status = copy.status.opening;
     try {
-      await mountTauriPath(path);
+      await mountDiskPath(path);
     } finally {
       busy = false;
     }
   }
 
-  /** Shared body of openTauriPath; callable while a mount is already in flight. */
-  async function mountTauriPath(path: string) {
+  /**
+   * Read a path through whichever process can, then mount it. The app reads through its Rust
+   * bridge; a shim reads through its own wire, which is the same shape of answer: a name, the
+   * path and the text. Callable while a mount is already in flight.
+   */
+  async function mountDiskPath(path: string) {
     try {
-      const result = await tauriInvoke<{ name: string; path: string; text: string }>('read_lith_path', { path });
+      const result =
+        mode === 'tauri'
+          ? await tauriInvoke<{ name: string; path: string; text: string }>('read_lith_path', { path })
+          : await (async () => {
+              const read = await shimRead(path, { token: shimToken });
+              if (!read.ok) throw new Error(read.error);
+              return read.value;
+            })();
       lithText = result.text;
       fileName = result.name;
       filePath = result.path;
@@ -3679,7 +3723,10 @@
   onMount(() => {
     // The wire's liveness, asked once and never awaited by anything: no render waits on
     // it, and a backend that does not answer leaves the flag false rather than an error.
-    if (shimToken) void probeShimBackend();
+    if (shimToken) {
+      void probeShimBackend();
+      void openShimStartup();
+    }
     // A window handed over *by* a search starts searching. This launcher is the one an
     // instance serves as well as the one this device runs, so the same code answers
     // both: the query rode in on the handoff (see `handoffQuery`), and it is taken back

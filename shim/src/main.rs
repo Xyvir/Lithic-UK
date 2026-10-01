@@ -16,12 +16,18 @@ use lithic_shim::{
 const USAGE: &str = "\
 USAGE: lithic-shim [options]
 
+  lithic-shim [options] [FILE.lith]
+
   --port N     serve on this loopback port (default: 5484, or LITHIC_SHIM_PORT)
   --root DIR   serve this payload directory instead of the one found beside the binary
   --check      find the payload, report it and exit without serving
   --no-open    do not hand the address to the browser
   --version    print the version
   --help       print this text
+
+A FILE named on the command line is offered to the launcher, which opens it once it
+boots. That is what a file manager passes for an Open With association, so opening a
+Lith is one double click like any other document.
 
 A Chromium-family browser is opened as an app window, with a profile of its own
 under $XDG_DATA_HOME/lithic/chrome. Any other browser gets an ordinary tab.
@@ -38,6 +44,7 @@ struct Options {
     root: Option<PathBuf>,
     open: bool,
     check: bool,
+    startup: Option<PathBuf>,
 }
 
 fn main() -> ExitCode {
@@ -124,7 +131,11 @@ fn main() -> ExitCode {
         report_launch(&url);
     }
 
-    match serve(listener, root, options.port) {
+    if let Some(startup) = &options.startup {
+        println!("Opens it in the launcher: {}", startup.display());
+    }
+
+    match serve(listener, root, options.port, options.startup.clone()) {
         Ok(()) => ExitCode::SUCCESS,
         Err(error) => {
             eprintln!("Lithic shim stopped: {error}");
@@ -157,6 +168,7 @@ fn parse_args(mut args: impl Iterator<Item = String>) -> Result<Option<Options>,
         root: None,
         open: true,
         check: false,
+        startup: None,
     };
     while let Some(argument) = args.next() {
         match argument.as_str() {
@@ -176,6 +188,11 @@ fn parse_args(mut args: impl Iterator<Item = String>) -> Result<Option<Options>,
             "--help" | "-h" => {
                 println!("{USAGE}");
                 return Ok(None);
+            }
+            // Anything else is the file a file manager handed over. The first one is
+            // the document to open; a second would only be a Lith nobody asked for.
+            other if options.startup.is_none() && !other.starts_with('-') => {
+                options.startup = Some(PathBuf::from(other));
             }
             other => return Err(format!("unrecognised argument: {other}")),
         }

@@ -10,6 +10,7 @@
  * nobody has opened, and each one is a whole wiki.
  */
 import { copy } from './copy.ts';
+import { basename, hasShimBackend, shimPick, shimRead, shimWrite } from './shim-files.ts';
 
 export interface PickedLith {
   name: string;
@@ -134,6 +135,20 @@ export async function saveTextVerifiably(fileName: string, text: string): Promis
     } catch (error) {
       if (error instanceof Error && /cancel/i.test(error.message)) return 'cancelled';
       throw error;
+    }
+  }
+
+  // On a shim the desktop's own chooser names the path and the shim writes it, so the write
+  // is confirmed exactly as the app's is. A chooser the desktop does not have (`no-picker`)
+  // or a wire that did not answer falls through to the browser's picker below, which is the
+  // same rung the shim itself falls back to.
+  if (hasShimBackend()) {
+    const picked = await shimPick('save', { suggestedName: fileName });
+    if (picked.ok) {
+      const target = picked.value.paths[0];
+      if (!target) return 'cancelled';
+      const written = await shimWrite(target, text);
+      if (written.ok) return 'saved';
     }
   }
 
@@ -274,9 +289,55 @@ function browserBridge(): FileBridge {
   };
 }
 
+/**
+ * The shim's file bridge: real paths, chosen by the desktop's own dialog.
+ *
+ * The shape matches the app's bridge rather than the browser's, because the shim has what the
+ * browser lacks: a path. An open returns paths and reads on demand; a save writes back to the
+ * path a row carries, and only falls back to a chooser for a file that has none. Every rung
+ * that fails for want of a wire or a dialog hands over to `browserBridge`, so a shim on a
+ * desktop with no `zenity` or `kdialog` behaves exactly like the plain page it used to be.
+ */
+function shimBridge(): FileBridge {
+  const fallback = browserBridge();
+  return {
+    loadUrl: fetchText,
+    async openMany() {
+      const picked = await shimPick('open', { multiple: true });
+      // A cancellation (`paths` empty) is a real answer: the person closed the dialog, and
+      // the browser's picker must not open on top of that.
+      if (picked.ok) return picked.value.paths.map((path) => ({ name: basename(path), path, text: '' }));
+      return fallback.openMany();
+    },
+    async readText(pick) {
+      if (pick.text) return pick.text;
+      if (pick.path) {
+        const read = await shimRead(pick.path);
+        if (read.ok) return read.value.text;
+      }
+      return fallback.readText(pick);
+    },
+    async save(text, suggestedName, path) {
+      if (path) {
+        const written = await shimWrite(path, text);
+        if (written.ok) return { name: written.value.name, path: written.value.path };
+      }
+      const picked = await shimPick('save', { suggestedName });
+      if (picked.ok) {
+        const target = picked.value.paths[0];
+        // No path is a cancelled save: nothing is written and the caller keeps the name.
+        if (!target) return { name: suggestedName };
+        const written = await shimWrite(target, text);
+        if (written.ok) return { name: written.value.name, path: written.value.path };
+      }
+      return fallback.save(text, suggestedName, path);
+    }
+  };
+}
+
 export function createFileBridge(): FileBridge {
   const invoke = tauriApi()?.invoke;
-  if (!invoke) return browserBridge();
+  if (!invoke) return hasShimBackend() ? shimBridge() : browserBridge();
   return {
     loadUrl: fetchText,
     async save(text, suggestedName, path) {

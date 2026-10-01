@@ -79,6 +79,8 @@ use std::path::{Component, Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::time::Duration;
 
+mod command;
+
 /// The meta tag the launcher reads to decide it is a browser mount rather than an
 /// instance. It says nothing about where saves land: that is the platform's answer.
 /// The name is `BROWSER_ONLY_META` in `launcher-ui/src/mode.ts`, and the two have
@@ -158,9 +160,13 @@ pub const TOKEN_HEADER: &str = "x-lithic-token";
 /// How many bytes of entropy the token is minted from. 32 is the conventional
 /// answer and hex doubles it into a 64-character attribute.
 const TOKEN_BYTES: usize = 32;
-/// The largest command body worth reading. A launcher's request is a small JSON
-/// object; anything larger is not one, and is refused before it is buffered.
-const MAX_BODY_BYTES: usize = 64 * 1024;
+/// The largest command body worth reading.
+///
+/// It has to carry a Lith, because `write` is one of the commands now: a document the
+/// launcher can mount is the unit of work here, not a liveness probe. Still a cap, and one
+/// the transport applies before it buffers anything, so a client that declares more than
+/// this is refused rather than read.
+pub(crate) const MAX_BODY_BYTES: usize = 64 * 1024 * 1024;
 
 /// Files without which the payload is not a launcher. Checked before the port is
 /// bound so a broken layout fails with a list rather than with half a page.
@@ -580,7 +586,7 @@ pub struct Response {
 }
 
 impl Response {
-    fn plain(status: u16, reason: &'static str, message: &str, cache: &str) -> Self {
+    pub(crate) fn plain(status: u16, reason: &'static str, message: &str, cache: &str) -> Self {
         Response {
             status,
             reason,
@@ -662,7 +668,14 @@ fn read_body(reader: &mut impl Read, length: usize) -> std::io::Result<Vec<u8>> 
 /// paths rather than a string comparison of what the client sent. `token` is this
 /// launch's command-wire secret, minted by [`serve`] and injected into the launcher
 /// document it serves.
-pub fn handle(request: &Request, root: &Path, root_canonical: &Path, port: u16, token: &str) -> Response {
+pub fn handle(
+    request: &Request,
+    root: &Path,
+    root_canonical: &Path,
+    port: u16,
+    token: &str,
+    startup: Option<&Path>,
+) -> Response {
     let raw_target = request.target.as_str();
     let raw_path = raw_target.split(['?', '#']).next().unwrap_or(raw_target);
     let Some(path) = percent_decode(raw_path) else {
@@ -672,7 +685,7 @@ pub fn handle(request: &Request, root: &Path, root_canonical: &Path, port: u16, 
     // The one path that is not a file, and the one that is method specific, so it
     // is dispatched before the payload's own two rules.
     if path == COMMAND_PATH {
-        return handle_command(request, port, token);
+        return command::handle(request, port, token, startup);
     }
 
     if request.method != "GET" && request.method != "HEAD" {
@@ -761,7 +774,7 @@ impl Response {
     }
 
     /// Add an `allow` header, for the command wire's method refusal.
-    fn allowing(mut self, methods: &str) -> Self {
+    pub(crate) fn allowing(mut self, methods: &str) -> Self {
         self.headers.push(("allow".to_string(), methods.to_string()));
         self
     }
@@ -771,12 +784,12 @@ impl Response {
 /// wire accepts. `localhost` is deliberately not here: the shim redirects that
 /// spelling to this one before any page loads, so a request carrying it is a request
 /// from somewhere that did not come through this shim.
-fn shim_origin(port: u16) -> String {
+pub(crate) fn shim_origin(port: u16) -> String {
     format!("http://{LOOPBACK_HOST}:{port}")
 }
 
 /// The same address as it appears in a `Host` header.
-fn shim_authority(port: u16) -> String {
+pub(crate) fn shim_authority(port: u16) -> String {
     format!("{LOOPBACK_HOST}:{port}")
 }
 
@@ -785,7 +798,7 @@ fn shim_authority(port: u16) -> String {
 /// One message for every failed check on purpose: a client that could tell "wrong
 /// origin" apart from "wrong token" would be a client that could probe the wire,
 /// and a real launcher page never sees this at all.
-fn refused() -> Response {
+pub(crate) fn refused() -> Response {
     Response::plain(
         403,
         "Forbidden",
@@ -795,7 +808,7 @@ fn refused() -> Response {
 }
 
 /// A JSON response, which is the whole shape of the command wire.
-fn json_response(status: u16, reason: &'static str, body: serde_json::Value) -> Response {
+pub(crate) fn json_response(status: u16, reason: &'static str, body: serde_json::Value) -> Response {
     Response {
         status,
         reason,
@@ -813,7 +826,7 @@ fn json_response(status: u16, reason: &'static str, body: serde_json::Value) -> 
 /// The comparison is over every byte rather than up to the first difference, so the
 /// time a wrong token takes says nothing about how much of it was right. The length
 /// check leaks only the length, which is fixed by [`new_token`] and public anyway.
-fn token_matches(expected: &str, presented: &str) -> bool {
+pub(crate) fn token_matches(expected: &str, presented: &str) -> bool {
     if expected.len() != presented.len() {
         return false;
     }
@@ -822,95 +835,6 @@ fn token_matches(expected: &str, presented: &str) -> bool {
         .zip(presented.bytes())
         .fold(0u8, |difference, (a, b)| difference | (a ^ b))
         == 0
-}
-
-/// The command wire: `POST /__lithic/command`.
-///
-/// Nothing is implemented behind this yet and that is the point of the pass. What is
-/// here is the gate that has to exist before anything is: a later file write, git run
-/// or credential read is only as safe as these checks, and they are much harder to
-/// retrofit onto a wire that is already carrying commands.
-///
-/// Each check is something a page this shim served passes and a page anywhere else
-/// cannot, and the order runs from the cheapest identity proof to the request itself:
-///
-///   * `POST` only. A state-changing `GET` is exactly the shape a hostile page can
-///     cause without a preflight, so the wire is not reachable by one.
-///   * `Origin` is this shim's own origin. A browser sends it on every POST, including
-///     a same-origin one, and a page at another origin cannot forge it.
-///   * `Host` is the address the shim opened. This is what a name that resolves to
-///     loopback (DNS rebinding) cannot present, because the browser still puts the
-///     attacker's name in the header.
-///   * `Sec-Fetch-Site` is `same-origin`. A browser states where a request came from;
-///     the launcher's own fetch says `same-origin` and a cross-site one does not.
-///   * The token matches. It is the one check a same-origin page of another product
-///     on another loopback port could not pass even if the address checks somehow did.
-///   * The content type is JSON and the body is a small object with a string
-///     `command`, which keeps a form-encoded cross-site request from reaching a parser
-///     it might confuse.
-///
-/// A valid request gets a JSON envelope and, for now, no command but the wire's own
-/// liveness answer.
-fn handle_command(request: &Request, port: u16, token: &str) -> Response {
-    if request.method != "POST" {
-        return Response::plain(
-            405,
-            "Method Not Allowed",
-            "The command wire answers POST only.\n",
-            "no-store",
-        )
-        .allowing("POST");
-    }
-    if request.header("origin") != Some(shim_origin(port).as_str()) {
-        return refused();
-    }
-    if request.host.as_deref() != Some(shim_authority(port).as_str()) {
-        return refused();
-    }
-    if request.header("sec-fetch-site") != Some("same-origin") {
-        return refused();
-    }
-    match request.header(TOKEN_HEADER) {
-        Some(presented) if token_matches(token, presented) => {}
-        _ => return refused(),
-    }
-    let is_json = request
-        .header("content-type")
-        .is_some_and(|value| value.trim_start().to_ascii_lowercase().starts_with("application/json"));
-    if !is_json {
-        return Response::plain(
-            415,
-            "Unsupported Media Type",
-            "The command wire reads application/json.\n",
-            "no-store",
-        );
-    }
-    if request.body.len() > MAX_BODY_BYTES {
-        return Response::plain(413, "Payload Too Large", "The command body is too large.\n", "no-store");
-    }
-    let Ok(payload) = serde_json::from_slice::<serde_json::Value>(&request.body) else {
-        return Response::plain(400, "Bad Request", "The command body is not JSON.\n", "no-store");
-    };
-    let Some(command) = payload.get("command").and_then(|value| value.as_str()) else {
-        return Response::plain(400, "Bad Request", "The command body names no command.\n", "no-store");
-    };
-
-    match command {
-        // The wire's own liveness, and nothing else: a launcher asks this to learn that
-        // a backend is here at all, which is the one fact every later command needs.
-        "ping" => json_response(
-            200,
-            "OK",
-            serde_json::json!({ "ok": true, "result": { "shim": true } }),
-        ),
-        // A command with nothing behind it yet is still an answer rather than a
-        // refusal: the wire worked, and what it was asked for it does not have.
-        other => json_response(
-            200,
-            "OK",
-            serde_json::json!({ "ok": false, "error": "unknown-command", "command": other }),
-        ),
-    }
 }
 
 fn not_found() -> Response {
@@ -1016,8 +940,9 @@ pub fn bind(port: u16) -> std::io::Result<TcpListener> {
 ///
 /// The command wire's secret is minted here, once per process, and then cloned into
 /// each connection's thread: every response a launch serves carries the same token,
-/// and the next launch has a different one.
-pub fn serve(listener: TcpListener, root: PathBuf, port: u16) -> std::io::Result<()> {
+/// and the next launch has a different one. `startup` is the `.lith` this process was
+/// started with, cloned the same way, so the launcher can ask for it once it boots.
+pub fn serve(listener: TcpListener, root: PathBuf, port: u16, startup: Option<PathBuf>) -> std::io::Result<()> {
     let root_canonical = root.canonicalize().unwrap_or_else(|_| root.clone());
     let token = new_token();
     for incoming in listener.incoming() {
@@ -1025,8 +950,9 @@ pub fn serve(listener: TcpListener, root: PathBuf, port: u16) -> std::io::Result
         let root = root.clone();
         let root_canonical = root_canonical.clone();
         let token = token.clone();
+        let startup = startup.clone();
         std::thread::spawn(move || {
-            if let Err(error) = handle_connection(stream, &root, &root_canonical, port, &token) {
+            if let Err(error) = handle_connection(stream, &root, &root_canonical, port, &token, startup.as_deref()) {
                 eprintln!("shim: a connection failed: {error}");
             }
         });
@@ -1040,6 +966,7 @@ fn handle_connection(
     root_canonical: &Path,
     port: u16,
     token: &str,
+    startup: Option<&Path>,
 ) -> std::io::Result<()> {
     // A client that connects and says nothing must not hold a thread open.
     stream.set_read_timeout(Some(Duration::from_secs(5)))?;
@@ -1059,7 +986,7 @@ fn handle_connection(
     // look at. A command is never dispatched on bytes still sitting in the socket, and a
     // body nobody declared is not a body.
     if let Some(length) = declared_length(&request) {
-        if length > MAX_BODY_BYTES {
+        if command::body_is_oversized(length) {
             let response = Response::plain(413, "Payload Too Large", "The command body is too large.\n", "no-store");
             let mut writer = stream;
             writer.write_all(&response.bytes(false))?;
@@ -1068,7 +995,7 @@ fn handle_connection(
         request.body = read_body(&mut reader, length)?;
     }
     let head_only = request.method == "HEAD";
-    let response = handle(&request, root, root_canonical, port, token);
+    let response = handle(&request, root, root_canonical, port, token, startup);
     let mut writer = stream;
     writer.write_all(&response.bytes(head_only))?;
     writer.flush()
@@ -1309,6 +1236,7 @@ mod tests {
                 &canonical,
                 DEFAULT_PORT,
                 TEST_TOKEN,
+                None,
             )
         }
     }
@@ -1550,7 +1478,7 @@ mod tests {
         for host in ["localhost", "localhost:5484", "LOCALHOST:5484", "[::1]:5484"] {
             let request = parse_request(&format!("GET /src/launcher.html?x=1 HTTP/1.1\r\nHost: {host}\r\n\r\n"))
                 .expect("parsed request");
-            let response = handle(&request, &payload.root, &canonical, DEFAULT_PORT, TEST_TOKEN);
+            let response = handle(&request, &payload.root, &canonical, DEFAULT_PORT, TEST_TOKEN, None);
             assert_eq!(response.status, 302, "{host} was served directly");
             let location = response
                 .headers
@@ -1568,9 +1496,9 @@ mod tests {
         let payload = Payload::new("methods");
         let canonical = payload.root.canonicalize().expect("canonical payload");
         let request = parse_request("DELETE /src/launcher.html HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n").expect("request");
-        assert_eq!(handle(&request, &payload.root, &canonical, DEFAULT_PORT, TEST_TOKEN).status, 405);
+        assert_eq!(handle(&request, &payload.root, &canonical, DEFAULT_PORT, TEST_TOKEN, None).status, 405);
         let head = parse_request("HEAD /src/launcher.html HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n").expect("request");
-        let response = handle(&head, &payload.root, &canonical, DEFAULT_PORT, TEST_TOKEN);
+        let response = handle(&head, &payload.root, &canonical, DEFAULT_PORT, TEST_TOKEN, None);
         assert_eq!(response.status, 200);
         let bytes = response.bytes(true);
         let text = String::from_utf8_lossy(&bytes);
@@ -1809,7 +1737,7 @@ mod tests {
     }
 
     fn command_response(request: &Request) -> Response {
-        handle_command(request, DEFAULT_PORT, TEST_TOKEN)
+        command::handle(request, DEFAULT_PORT, TEST_TOKEN, None)
     }
 
     #[test]
@@ -1902,13 +1830,6 @@ mod tests {
     }
 
     #[test]
-    fn an_oversized_command_body_is_refused_before_it_is_parsed() {
-        let big = format!("{{\"command\":\"ping\",\"pad\":\"{}\"}}", "x".repeat(MAX_BODY_BYTES));
-        let request = launcher_command(&big);
-        assert_eq!(command_response(&request).status, 413);
-    }
-
-    #[test]
     fn the_command_wire_is_not_reachable_by_a_get() {
         // The one shape a hostile page can cause with no preflight at all. It gets
         // the method refusal, and the payload path keeps its own method rule.
@@ -1916,7 +1837,7 @@ mod tests {
         let canonical = payload.root.canonicalize().expect("canonical payload");
         let request = parse_request(&format!("GET {COMMAND_PATH} HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n"))
             .expect("parsed request");
-        let response = handle(&request, &payload.root, &canonical, DEFAULT_PORT, TEST_TOKEN);
+        let response = handle(&request, &payload.root, &canonical, DEFAULT_PORT, TEST_TOKEN, None);
         assert_eq!(response.status, 405);
     }
 

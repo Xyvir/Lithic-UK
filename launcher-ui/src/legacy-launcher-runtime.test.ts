@@ -294,6 +294,27 @@ test('every injected bootstrap script parses for every launch shape', () => {
     buildEngineHtml(ENGINE_STUB, { name: 'my wiki.lith', text: '' }, [], {}, { remote: { ...REMOTE_TARGET, readOnly: true } }),
     'self-host remote read-only'
   );
+  assertInjectedScriptsParse(
+    buildEngineHtml(ENGINE_STUB, { name: 'x.lith', text: '' }, [], {}, { shimToken: 'deadbeef' }),
+    'shim backend'
+  );
+});
+
+test('a shim mount bakes the wire and its secret into the saver, and a plain one carries neither', () => {
+  // The secret is a literal because the mounted document cannot read the launcher's meta tag:
+  // document.write replaced the head that carried it. This pins that the literal is the one
+  // the launcher read, and that a mount with no shim leaves the branch inert.
+  const shim = buildEngineHtml(ENGINE_STUB, { name: 'x.lith', text: '' }, [], {}, { shimToken: 'deadbeef' });
+  const bodies = assertInjectedScriptsParse(shim, 'shim backend');
+  const saver = bodies.find((body) => body.includes('__LITHIC_WRITE_FILE__'));
+  assert.ok(saver, 'the saver is injected');
+  assert.ok(saver.includes('var shimToken = "deadbeef";'), 'the secret is not in the saver');
+  assert.ok(saver.includes('__lithicShimPath__'), 'the saver does not recognize a shim path');
+
+  const plain = buildEngineHtml(ENGINE_STUB, { name: 'x.lith', text: '' });
+  const plainSaver = inlineScriptBodies(plain).find((body) => body.includes('__LITHIC_WRITE_FILE__')) ?? '';
+  assert.ok(plainSaver.includes('var shimToken = null;'), 'a plain mount should carry no secret');
+  assert.ok(!plainSaver.includes('deadbeef'), 'a plain mount carried a secret it never had');
 });
 
 /**
