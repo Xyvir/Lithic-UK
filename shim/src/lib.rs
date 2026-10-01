@@ -4,12 +4,13 @@
 //! Why this binary exists next to `src-tauri` rather than inside it. The Tauri
 //! build links GTK and WebKitGTK, so the AppImage it produces carries a second
 //! web engine (about 43.5 MB of an 82 MB download) that every Linux desktop
-//! already has a browser for. This crate links nothing but the standard library:
-//! it answers HTTP on loopback for a handful of local files and hands the address
-//! to the system browser, in an app window of its own where the machine has a
-//! Chromium-family browser and in an ordinary tab otherwise. That is the entire
-//! artifact, so it is the size of the
-//! payload rather than the size of the engine.
+//! already has a browser for. This crate links no toolkit: `getrandom` for the
+//! command wire's per-launch secret and `serde_json` for the wire itself are the
+//! whole dependency list, and neither draws in a window. It answers HTTP on
+//! loopback for a handful of local files and hands the address to the system
+//! browser, in an app window of its own where the machine has a Chromium-family
+//! browser and in an ordinary tab otherwise. That is the entire artifact, so it is
+//! the size of the payload rather than the size of the engine.
 //!
 //! What makes that honest rather than a stripped-down webapp. A page opened from
 //! a local server has no File System Access API everywhere (Firefox and Safari
@@ -53,6 +54,23 @@
 //!     cache keyed by whole URLs, which is how a launcher an older build cached
 //!     came to be served in place of the one on disk. The launcher skips the
 //!     registration on a page this shim served; see `main.ts`.
+//!
+//! The one path that is not a file is the command wire. It exists because a browser
+//! cannot choose a path: it hands a page a file's *contents*, never where the file
+//! is, so anything the launcher does with a real path has to be done by the process
+//! serving the page. [`COMMAND_PATH`] is where that would happen, one JSON request
+//! at a time, and nothing is behind it yet. What is behind it is the gate.
+//!
+//! The gate is the hard part, because the alternative is a loopback endpoint that
+//! writes files, runs git and lends a stored credential to any page on the machine
+//! that asks for it. CORS does not help: it stops a hostile page from *reading* an
+//! answer, not from causing the effect. So the wire refuses everything a page this
+//! shim served would not send. [`TOKEN_META_NAME`] carries a secret minted per launch
+//! into the launcher document and into no other, the request has to present it, and
+//! `Origin`, `Host` and `Sec-Fetch-Site` all have to name this shim's own origin,
+//! which a page anywhere else cannot. The `x-lithic-shim` marker a second launch
+//! probes with is deliberately not part of that: it says a port is ours, not that a
+//! request is.
 
 use std::fs;
 use std::io::{BufRead, BufReader, Read, Write};
@@ -120,8 +138,29 @@ pub const SHIM_MARKER_HEADER: &str = "x-lithic-shim";
 pub const SHIM_MARKER_VALUE: &str = "1";
 /// The one path that is not a file. Used as the liveness probe.
 pub const PROBE_PATH: &str = "/__lithic";
+/// The command wire: the endpoint the launcher page of this shim posts to. It
+/// answers no request that did not come from the page this shim itself served.
+pub const COMMAND_PATH: &str = "/__lithic/command";
 /// The host the shim both binds and opens, never `localhost`. See [`loopback_alias`].
 pub const LOOPBACK_HOST: &str = "127.0.0.1";
+
+/// The meta tag carrying the per-launch secret the command wire requires.
+///
+/// It rides in the launcher document and nowhere else, so the only page on the
+/// machine that holds it is the one this shim served. The launch that mints it
+/// forgets it when the process ends, which is deliberate: a secret that outlived
+/// the server behind it would be a credential nothing could revoke.
+///
+/// The name is read by `readShimToken` in `launcher-ui/src/shim-command.ts`.
+pub const TOKEN_META_NAME: &str = "lithic-shim-token";
+/// The request header the launcher presents the token in.
+pub const TOKEN_HEADER: &str = "x-lithic-token";
+/// How many bytes of entropy the token is minted from. 32 is the conventional
+/// answer and hex doubles it into a 64-character attribute.
+const TOKEN_BYTES: usize = 32;
+/// The largest command body worth reading. A launcher's request is a small JSON
+/// object; anything larger is not one, and is refused before it is buffered.
+const MAX_BODY_BYTES: usize = 64 * 1024;
 
 /// Files without which the payload is not a launcher. Checked before the port is
 /// bound so a broken layout fails with a list rather than with half a page.
@@ -308,6 +347,74 @@ pub fn build_tag_meta_tag(tag: &str) -> String {
     format!("<meta name=\"{BUILD_TAG_META_NAME}\" content=\"{tag}\" />")
 }
 
+/// The command wire's secret, in a meta tag.
+pub fn token_meta_tag(token: &str) -> String {
+    format!("<meta name=\"{TOKEN_META_NAME}\" content=\"{token}\" />")
+}
+
+/// Mint a token for this launch.
+///
+/// The operating system's entropy source, never the clock or the process id: the
+/// point of the secret is that nothing outside this page can guess it, and a
+/// quantity a page can read for itself is not a secret. Panicking on failure is
+/// deliberate, since a shim that cannot mint one must not start a wire that would
+/// then accept a weaker one.
+pub fn new_token() -> String {
+    use std::fmt::Write as _;
+    let mut bytes = [0u8; TOKEN_BYTES];
+    getrandom::getrandom(&mut bytes).expect("the operating system entropy source");
+    let mut token = String::with_capacity(TOKEN_BYTES * 2);
+    for byte in bytes {
+        let _ = write!(token, "{byte:02x}");
+    }
+    token
+}
+
+/// Whether a token can go into an attribute exactly as it is.
+///
+/// The same guard [`is_tag_safe`] gives a build tag, and for the same reason: a
+/// token is written into the served document rather than escaped into it, and
+/// [`new_token`] produces hex so this only ever refuses something a caller made up.
+fn is_token_safe(token: &str) -> bool {
+    !token.is_empty()
+        && token.len() <= 128
+        && token.chars().all(|character| character.is_ascii_hexdigit())
+}
+
+/// Whether a document already carries a command-wire token. Takes the lowercased form.
+pub fn declares_token(lowercased_html: &str) -> bool {
+    let name = TOKEN_META_NAME;
+    lowercased_html.contains(&format!("name=\"{name}\""))
+        || lowercased_html.contains(&format!("name='{name}'"))
+        || lowercased_html.contains(&format!("name={name}"))
+}
+
+/// Inject the command wire's token into the launcher document.
+///
+/// A pass of its own rather than a third tag inside [`inject_server_meta`], so the
+/// proven browser-only and build-tag rules are not disturbed to carry something
+/// with a different lifetime. The two passes find the same insertion point (an
+/// injected meta tag neither opens a `<script>` nor closes the head), so the tags
+/// still go in beside each other.
+pub fn inject_token_meta(html: &str, token: Option<&str>) -> String {
+    let Some(token) = token.filter(|token| is_token_safe(token)) else {
+        return html.to_string();
+    };
+    let lower = html.to_ascii_lowercase();
+    if declares_token(&lower) {
+        return html.to_string();
+    }
+    let tag = token_meta_tag(token);
+    let Some(at) = injection_offset(&lower) else {
+        return html.to_string();
+    };
+    let mut out = String::with_capacity(html.len() + tag.len());
+    out.push_str(&html[..at]);
+    out.push_str(&tag);
+    out.push_str(&html[at..]);
+    out
+}
+
 /// The release tag this binary was built from, or `None` for a build the release
 /// workflow did not cut.
 ///
@@ -444,6 +551,24 @@ pub struct Request {
     pub method: String,
     pub target: String,
     pub host: Option<String>,
+    /// Every header, name lowercased and in the order they arrived. The command
+    /// wire reads several of them, and a lookup that was case sensitive would be a
+    /// gate a client could walk around by spelling `Origin` differently.
+    pub headers: Vec<(String, String)>,
+    /// The body, read separately once the head is parsed. Empty for every request
+    /// the shim answers out of the payload.
+    pub body: Vec<u8>,
+}
+
+impl Request {
+    /// The first value of a header, matched case insensitively on the name. The
+    /// names are already lowercased in [`parse_request`], so this is a plain scan.
+    pub fn header(&self, name: &str) -> Option<&str> {
+        self.headers
+            .iter()
+            .find(|(key, _)| key == name)
+            .map(|(_, value)| value.as_str())
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -487,8 +612,8 @@ impl Response {
     }
 }
 
-/// Parse a request head (the request line and the headers, ending at a blank
-/// line). Only the three fields the shim acts on are kept.
+/// Parse a request head (the request line and the headers, ending at a blank line).
+/// The body is read separately, by [`read_body`], once the length is known.
 pub fn parse_request(head: &str) -> Option<Request> {
     let mut lines = head.split("\r\n").flat_map(|line| line.split('\n'));
     let request_line = lines.next()?;
@@ -499,33 +624,60 @@ pub fn parse_request(head: &str) -> Option<Request> {
     if !version.starts_with("HTTP/") {
         return None;
     }
-    let mut host = None;
+    let mut headers = Vec::new();
     for line in lines {
         if line.is_empty() {
             break;
         }
         if let Some((name, value)) = line.split_once(':') {
-            if name.trim().eq_ignore_ascii_case("host") {
-                host = Some(value.trim().to_string());
-            }
+            headers.push((name.trim().to_ascii_lowercase(), value.trim().to_string()));
         }
     }
-    Some(Request { method, target, host })
+    let host = headers
+        .iter()
+        .find(|(name, _)| name == "host")
+        .map(|(_, value)| value.clone());
+    Some(Request { method, target, host, headers, body: Vec::new() })
+}
+
+/// How many body bytes the request declares, or `None` for no usable length.
+///
+/// A guessable length is worse than none: a truncated read would hand the command
+/// parser half a JSON object and a missing length is not a reason to buffer
+/// whatever the client keeps sending. No declaration, no body.
+fn declared_length(request: &Request) -> Option<usize> {
+    request.header("content-length")?.parse().ok()
+}
+
+/// Read a declared number of body bytes. A client that stops early is tolerated
+/// by handing the parser what it did send, which then fails on its own.
+fn read_body(reader: &mut impl Read, length: usize) -> std::io::Result<Vec<u8>> {
+    let mut body = Vec::with_capacity(length.min(MAX_BODY_BYTES));
+    reader.take(length as u64).read_to_end(&mut body)?;
+    Ok(body)
 }
 
 /// Turn a request into a response. `root_canonical` is the payload directory
 /// already resolved, so the traversal check below is a prefix test on resolved
-/// paths rather than a string comparison of what the client sent.
-pub fn handle(request: &Request, root: &Path, root_canonical: &Path, port: u16) -> Response {
-    if request.method != "GET" && request.method != "HEAD" {
-        return Response::plain(405, "Method Not Allowed", "The shim serves GET and HEAD.\n", "no-store");
-    }
-
+/// paths rather than a string comparison of what the client sent. `token` is this
+/// launch's command-wire secret, minted by [`serve`] and injected into the launcher
+/// document it serves.
+pub fn handle(request: &Request, root: &Path, root_canonical: &Path, port: u16, token: &str) -> Response {
     let raw_target = request.target.as_str();
     let raw_path = raw_target.split(['?', '#']).next().unwrap_or(raw_target);
     let Some(path) = percent_decode(raw_path) else {
         return Response::plain(400, "Bad Request", "The request target is not readable.\n", "no-store");
     };
+
+    // The one path that is not a file, and the one that is method specific, so it
+    // is dispatched before the payload's own two rules.
+    if path == COMMAND_PATH {
+        return handle_command(request, port, token);
+    }
+
+    if request.method != "GET" && request.method != "HEAD" {
+        return Response::plain(405, "Method Not Allowed", "The shim serves GET and HEAD.\n", "no-store");
+    }
 
     if path == PROBE_PATH {
         let body = format!(
@@ -580,7 +732,10 @@ pub fn handle(request: &Request, root: &Path, root_canonical: &Path, port: u16) 
     let is_launcher = file.file_name().and_then(|name| name.to_str()) == Some("launcher.html");
     if is_launcher {
         match String::from_utf8(body) {
-            Ok(text) => body = inject_server_meta(&text, build_tag()).into_bytes(),
+            Ok(text) => {
+                let declared = inject_server_meta(&text, build_tag());
+                body = inject_token_meta(&declared, Some(token)).into_bytes();
+            }
             Err(error) => body = error.into_bytes(),
         }
     }
@@ -603,6 +758,158 @@ impl Response {
     fn located(mut self, location: &str) -> Self {
         self.headers.push(("location".to_string(), location.to_string()));
         self
+    }
+
+    /// Add an `allow` header, for the command wire's method refusal.
+    fn allowing(mut self, methods: &str) -> Self {
+        self.headers.push(("allow".to_string(), methods.to_string()));
+        self
+    }
+}
+
+/// The origin a page this shim served is at, which is the only `Origin` the command
+/// wire accepts. `localhost` is deliberately not here: the shim redirects that
+/// spelling to this one before any page loads, so a request carrying it is a request
+/// from somewhere that did not come through this shim.
+fn shim_origin(port: u16) -> String {
+    format!("http://{LOOPBACK_HOST}:{port}")
+}
+
+/// The same address as it appears in a `Host` header.
+fn shim_authority(port: u16) -> String {
+    format!("{LOOPBACK_HOST}:{port}")
+}
+
+/// A refusal, which says only that this request was not one of ours.
+///
+/// One message for every failed check on purpose: a client that could tell "wrong
+/// origin" apart from "wrong token" would be a client that could probe the wire,
+/// and a real launcher page never sees this at all.
+fn refused() -> Response {
+    Response::plain(
+        403,
+        "Forbidden",
+        "This endpoint answers only the launcher page this shim served.\n",
+        "no-store",
+    )
+}
+
+/// A JSON response, which is the whole shape of the command wire.
+fn json_response(status: u16, reason: &'static str, body: serde_json::Value) -> Response {
+    Response {
+        status,
+        reason,
+        headers: vec![
+            ("content-type".to_string(), "application/json; charset=utf-8".to_string()),
+            ("cache-control".to_string(), "no-store".to_string()),
+            ("x-content-type-options".to_string(), "nosniff".to_string()),
+        ],
+        body: body.to_string().into_bytes(),
+    }
+}
+
+/// Compare two tokens without an early exit.
+///
+/// The comparison is over every byte rather than up to the first difference, so the
+/// time a wrong token takes says nothing about how much of it was right. The length
+/// check leaks only the length, which is fixed by [`new_token`] and public anyway.
+fn token_matches(expected: &str, presented: &str) -> bool {
+    if expected.len() != presented.len() {
+        return false;
+    }
+    expected
+        .bytes()
+        .zip(presented.bytes())
+        .fold(0u8, |difference, (a, b)| difference | (a ^ b))
+        == 0
+}
+
+/// The command wire: `POST /__lithic/command`.
+///
+/// Nothing is implemented behind this yet and that is the point of the pass. What is
+/// here is the gate that has to exist before anything is: a later file write, git run
+/// or credential read is only as safe as these checks, and they are much harder to
+/// retrofit onto a wire that is already carrying commands.
+///
+/// Each check is something a page this shim served passes and a page anywhere else
+/// cannot, and the order runs from the cheapest identity proof to the request itself:
+///
+///   * `POST` only. A state-changing `GET` is exactly the shape a hostile page can
+///     cause without a preflight, so the wire is not reachable by one.
+///   * `Origin` is this shim's own origin. A browser sends it on every POST, including
+///     a same-origin one, and a page at another origin cannot forge it.
+///   * `Host` is the address the shim opened. This is what a name that resolves to
+///     loopback (DNS rebinding) cannot present, because the browser still puts the
+///     attacker's name in the header.
+///   * `Sec-Fetch-Site` is `same-origin`. A browser states where a request came from;
+///     the launcher's own fetch says `same-origin` and a cross-site one does not.
+///   * The token matches. It is the one check a same-origin page of another product
+///     on another loopback port could not pass even if the address checks somehow did.
+///   * The content type is JSON and the body is a small object with a string
+///     `command`, which keeps a form-encoded cross-site request from reaching a parser
+///     it might confuse.
+///
+/// A valid request gets a JSON envelope and, for now, no command but the wire's own
+/// liveness answer.
+fn handle_command(request: &Request, port: u16, token: &str) -> Response {
+    if request.method != "POST" {
+        return Response::plain(
+            405,
+            "Method Not Allowed",
+            "The command wire answers POST only.\n",
+            "no-store",
+        )
+        .allowing("POST");
+    }
+    if request.header("origin") != Some(shim_origin(port).as_str()) {
+        return refused();
+    }
+    if request.host.as_deref() != Some(shim_authority(port).as_str()) {
+        return refused();
+    }
+    if request.header("sec-fetch-site") != Some("same-origin") {
+        return refused();
+    }
+    match request.header(TOKEN_HEADER) {
+        Some(presented) if token_matches(token, presented) => {}
+        _ => return refused(),
+    }
+    let is_json = request
+        .header("content-type")
+        .is_some_and(|value| value.trim_start().to_ascii_lowercase().starts_with("application/json"));
+    if !is_json {
+        return Response::plain(
+            415,
+            "Unsupported Media Type",
+            "The command wire reads application/json.\n",
+            "no-store",
+        );
+    }
+    if request.body.len() > MAX_BODY_BYTES {
+        return Response::plain(413, "Payload Too Large", "The command body is too large.\n", "no-store");
+    }
+    let Ok(payload) = serde_json::from_slice::<serde_json::Value>(&request.body) else {
+        return Response::plain(400, "Bad Request", "The command body is not JSON.\n", "no-store");
+    };
+    let Some(command) = payload.get("command").and_then(|value| value.as_str()) else {
+        return Response::plain(400, "Bad Request", "The command body names no command.\n", "no-store");
+    };
+
+    match command {
+        // The wire's own liveness, and nothing else: a launcher asks this to learn that
+        // a backend is here at all, which is the one fact every later command needs.
+        "ping" => json_response(
+            200,
+            "OK",
+            serde_json::json!({ "ok": true, "result": { "shim": true } }),
+        ),
+        // A command with nothing behind it yet is still an answer rather than a
+        // refusal: the wire worked, and what it was asked for it does not have.
+        other => json_response(
+            200,
+            "OK",
+            serde_json::json!({ "ok": false, "error": "unknown-command", "command": other }),
+        ),
     }
 }
 
@@ -706,14 +1013,20 @@ pub fn bind(port: u16) -> std::io::Result<TcpListener> {
 }
 
 /// Accept connections forever, one thread each.
+///
+/// The command wire's secret is minted here, once per process, and then cloned into
+/// each connection's thread: every response a launch serves carries the same token,
+/// and the next launch has a different one.
 pub fn serve(listener: TcpListener, root: PathBuf, port: u16) -> std::io::Result<()> {
     let root_canonical = root.canonicalize().unwrap_or_else(|_| root.clone());
+    let token = new_token();
     for incoming in listener.incoming() {
         let Ok(stream) = incoming else { continue };
         let root = root.clone();
         let root_canonical = root_canonical.clone();
+        let token = token.clone();
         std::thread::spawn(move || {
-            if let Err(error) = handle_connection(stream, &root, &root_canonical, port) {
+            if let Err(error) = handle_connection(stream, &root, &root_canonical, port, &token) {
                 eprintln!("shim: a connection failed: {error}");
             }
         });
@@ -721,18 +1034,41 @@ pub fn serve(listener: TcpListener, root: PathBuf, port: u16) -> std::io::Result
     Ok(())
 }
 
-fn handle_connection(stream: TcpStream, root: &Path, root_canonical: &Path, port: u16) -> std::io::Result<()> {
+fn handle_connection(
+    stream: TcpStream,
+    root: &Path,
+    root_canonical: &Path,
+    port: u16,
+    token: &str,
+) -> std::io::Result<()> {
     // A client that connects and says nothing must not hold a thread open.
     stream.set_read_timeout(Some(Duration::from_secs(5)))?;
     stream.set_write_timeout(Some(Duration::from_secs(30)))?;
     let mut reader = BufReader::new(stream.try_clone()?);
     let head = read_head(&mut reader)?;
-    let request = parse_request(&head);
-    let response = match &request {
-        Some(request) => handle(request, root, root_canonical, port),
-        None => Response::plain(400, "Bad Request", "The request head is not readable.\n", "no-store"),
+    let mut request = match parse_request(&head) {
+        Some(request) => request,
+        None => {
+            let response = Response::plain(400, "Bad Request", "The request head is not readable.\n", "no-store");
+            let mut writer = stream;
+            writer.write_all(&response.bytes(false))?;
+            return writer.flush();
+        }
     };
-    let head_only = matches!(&request, Some(request) if request.method == "HEAD");
+    // A body is read only when one is declared, and only up to the size the wire will
+    // look at. A command is never dispatched on bytes still sitting in the socket, and a
+    // body nobody declared is not a body.
+    if let Some(length) = declared_length(&request) {
+        if length > MAX_BODY_BYTES {
+            let response = Response::plain(413, "Payload Too Large", "The command body is too large.\n", "no-store");
+            let mut writer = stream;
+            writer.write_all(&response.bytes(false))?;
+            return writer.flush();
+        }
+        request.body = read_body(&mut reader, length)?;
+    }
+    let head_only = request.method == "HEAD";
+    let response = handle(&request, root, root_canonical, port, token);
     let mut writer = stream;
     writer.write_all(&response.bytes(head_only))?;
     writer.flush()
@@ -936,6 +1272,10 @@ mod tests {
     ///
     /// The payload sits one level down from the directory the test owns, so the
     /// traversal tests have a real file above the payload root to fail to reach.
+    /// The token the test requests present. A real one is minted per launch; here it
+    /// only has to be the string both sides agree on.
+    const TEST_TOKEN: &str = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
+
     struct Payload {
         root: PathBuf,
         parent: PathBuf,
@@ -968,6 +1308,7 @@ mod tests {
                 &self.root,
                 &canonical,
                 DEFAULT_PORT,
+                TEST_TOKEN,
             )
         }
     }
@@ -1209,7 +1550,7 @@ mod tests {
         for host in ["localhost", "localhost:5484", "LOCALHOST:5484", "[::1]:5484"] {
             let request = parse_request(&format!("GET /src/launcher.html?x=1 HTTP/1.1\r\nHost: {host}\r\n\r\n"))
                 .expect("parsed request");
-            let response = handle(&request, &payload.root, &canonical, DEFAULT_PORT);
+            let response = handle(&request, &payload.root, &canonical, DEFAULT_PORT, TEST_TOKEN);
             assert_eq!(response.status, 302, "{host} was served directly");
             let location = response
                 .headers
@@ -1227,9 +1568,9 @@ mod tests {
         let payload = Payload::new("methods");
         let canonical = payload.root.canonicalize().expect("canonical payload");
         let request = parse_request("DELETE /src/launcher.html HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n").expect("request");
-        assert_eq!(handle(&request, &payload.root, &canonical, DEFAULT_PORT).status, 405);
+        assert_eq!(handle(&request, &payload.root, &canonical, DEFAULT_PORT, TEST_TOKEN).status, 405);
         let head = parse_request("HEAD /src/launcher.html HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n").expect("request");
-        let response = handle(&head, &payload.root, &canonical, DEFAULT_PORT);
+        let response = handle(&head, &payload.root, &canonical, DEFAULT_PORT, TEST_TOKEN);
         assert_eq!(response.status, 200);
         let bytes = response.bytes(true);
         let text = String::from_utf8_lossy(&bytes);
@@ -1434,6 +1775,219 @@ mod tests {
         assert!(
             text.contains(&format!("StartupWMClass={APP_WINDOW_CLASS}")),
             "the desktop entry does not name the app window's class"
+        );
+    }
+
+    // -----------------------------------------------------------------------
+    // The command wire
+    // -----------------------------------------------------------------------
+
+    /// A command request with every field explicit, so a test can bend exactly one.
+    fn command_request(method: &str, origin: &str, host: &str, fetch_site: &str, token: &str, content_type: &str, body: &str) -> Request {
+        let head = format!(
+            "{method} {COMMAND_PATH} HTTP/1.1\r\nHost: {host}\r\nOrigin: {origin}\r\n\
+             Sec-Fetch-Site: {fetch_site}\r\nContent-Type: {content_type}\r\n\
+             {TOKEN_HEADER}: {token}\r\nContent-Length: {}\r\n\r\n",
+            body.len()
+        );
+        let mut request = parse_request(&head).expect("parsed request");
+        request.body = body.as_bytes().to_vec();
+        request
+    }
+
+    /// The same request a real launcher page makes, as one value a test can mutate.
+    fn launcher_command(body: &str) -> Request {
+        command_request(
+            "POST",
+            &shim_origin(DEFAULT_PORT),
+            &shim_authority(DEFAULT_PORT),
+            "same-origin",
+            TEST_TOKEN,
+            "application/json",
+            body,
+        )
+    }
+
+    fn command_response(request: &Request) -> Response {
+        handle_command(request, DEFAULT_PORT, TEST_TOKEN)
+    }
+
+    #[test]
+    fn the_command_wire_answers_the_launcher_page() {
+        let response = command_response(&launcher_command("{\"command\":\"ping\"}"));
+        assert_eq!(response.status, 200);
+        assert_eq!(body_of(&response), "{\"ok\":true,\"result\":{\"shim\":true}}");
+        assert!(response
+            .headers
+            .iter()
+            .any(|(name, value)| name == "content-type" && value.starts_with("application/json")));
+
+        // A command with nothing behind it is still an answer: the wire worked and
+        // the thing asked for does not exist yet.
+        let unknown = command_response(&launcher_command("{\"command\":\"open-file\"}"));
+        assert_eq!(unknown.status, 200);
+        assert!(body_of(&unknown).contains("unknown-command"));
+    }
+
+    #[test]
+    fn the_command_wire_refuses_a_request_the_launcher_would_not_send() {
+        // Every request below is one mutation away from the launcher's own. Each has
+        // to be refused, or the endpoint is a loopback writer any page can reach.
+        let get = command_response(&command_request(
+            "GET",
+            &shim_origin(DEFAULT_PORT),
+            &shim_authority(DEFAULT_PORT),
+            "same-origin",
+            TEST_TOKEN,
+            "application/json",
+            "",
+        ));
+        assert_eq!(get.status, 405, "a state-changing GET was answered");
+        assert!(get.headers.iter().any(|(name, value)| name == "allow" && value == "POST"));
+
+        let refusals: [(&str, Request); 7] = [
+            // A page the shim did not serve: a real browser at another origin.
+            (
+                "another origin",
+                command_request("POST", "https://example.com", &shim_authority(DEFAULT_PORT), "cross-site", TEST_TOKEN, "application/json", "{\"command\":\"ping\"}"),
+            ),
+            // A name that resolves to loopback, so the browser sends the attacker's name.
+            (
+                "another host",
+                command_request("POST", &shim_origin(DEFAULT_PORT), "evil.example:5484", "same-origin", TEST_TOKEN, "application/json", "{\"command\":\"ping\"}"),
+            ),
+            // No fetch metadata at all, which a real browser request always carries.
+            (
+                "no fetch metadata",
+                command_request("POST", &shim_origin(DEFAULT_PORT), &shim_authority(DEFAULT_PORT), "", TEST_TOKEN, "application/json", "{\"command\":\"ping\"}"),
+            ),
+            // A cross-site fetch, which says so out loud.
+            (
+                "a cross-site fetch",
+                command_request("POST", &shim_origin(DEFAULT_PORT), &shim_authority(DEFAULT_PORT), "cross-site", TEST_TOKEN, "application/json", "{\"command\":\"ping\"}"),
+            ),
+            // Right origin, wrong secret.
+            (
+                "a wrong token",
+                command_request("POST", &shim_origin(DEFAULT_PORT), &shim_authority(DEFAULT_PORT), "same-origin", "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff", "application/json", "{\"command\":\"ping\"}"),
+            ),
+            // The shape a form can cause without a preflight.
+            (
+                "a form content type",
+                command_request("POST", &shim_origin(DEFAULT_PORT), &shim_authority(DEFAULT_PORT), "same-origin", TEST_TOKEN, "application/x-www-form-urlencoded", "command=ping"),
+            ),
+            // A JSON body that is not a command object.
+            (
+                "a body naming no command",
+                command_request("POST", &shim_origin(DEFAULT_PORT), &shim_authority(DEFAULT_PORT), "same-origin", TEST_TOKEN, "application/json", "{\"args\":{}}"),
+            ),
+        ];
+        for (label, request) in refusals {
+            let response = command_response(&request);
+            assert!(
+                response.status == 403 || response.status == 415 || response.status == 400,
+                "{label} was answered with {}",
+                response.status
+            );
+            // A refusal says nothing about which check failed, so it cannot be probed.
+            if response.status == 403 {
+                assert!(!body_of(&response).to_lowercase().contains("token"), "{label} named the check it failed");
+            }
+        }
+
+        // The path is not reachable without the token even by a same-origin page: a
+        // second product on another loopback port can send the same shape of request.
+        let no_token = command_request("POST", &shim_origin(DEFAULT_PORT), &shim_authority(DEFAULT_PORT), "same-origin", "", "application/json", "{\"command\":\"ping\"}");
+        assert_eq!(command_response(&no_token).status, 403);
+    }
+
+    #[test]
+    fn an_oversized_command_body_is_refused_before_it_is_parsed() {
+        let big = format!("{{\"command\":\"ping\",\"pad\":\"{}\"}}", "x".repeat(MAX_BODY_BYTES));
+        let request = launcher_command(&big);
+        assert_eq!(command_response(&request).status, 413);
+    }
+
+    #[test]
+    fn the_command_wire_is_not_reachable_by_a_get() {
+        // The one shape a hostile page can cause with no preflight at all. It gets
+        // the method refusal, and the payload path keeps its own method rule.
+        let payload = Payload::new("command-get");
+        let canonical = payload.root.canonicalize().expect("canonical payload");
+        let request = parse_request(&format!("GET {COMMAND_PATH} HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n"))
+            .expect("parsed request");
+        let response = handle(&request, &payload.root, &canonical, DEFAULT_PORT, TEST_TOKEN);
+        assert_eq!(response.status, 405);
+    }
+
+    #[test]
+    fn the_served_launcher_carries_the_launch_token_and_the_engine_does_not() {
+        let payload = Payload::new("token");
+        let launcher = body_of(&payload.request("/src/launcher.html"));
+        assert!(launcher.contains(&token_meta_tag(TEST_TOKEN)));
+        assert!(declares_token(&launcher.to_ascii_lowercase()));
+        let engine = body_of(&payload.request("/src/lithic.html"));
+        assert!(!engine.contains(TOKEN_META_NAME), "the engine carried the wire's secret");
+    }
+
+    #[test]
+    fn injecting_the_token_twice_changes_nothing() {
+        let html = "<html><head><title>t</title></head><body></body></html>";
+        let once = inject_token_meta(html, Some(TEST_TOKEN));
+        assert_eq!(inject_token_meta(&once, Some(TEST_TOKEN)), once);
+        assert_eq!(once.matches(TOKEN_META_NAME).count(), 1);
+        // No token is no tag, which is what an untagged local run serves.
+        assert_eq!(inject_token_meta(html, None), html);
+    }
+
+    #[test]
+    fn a_token_that_cannot_go_into_an_attribute_is_refused() {
+        assert!(is_token_safe(TEST_TOKEN));
+        assert!(is_token_safe("deadbeef"));
+        assert!(!is_token_safe(""));
+        assert!(!is_token_safe("not hex"));
+        assert!(!is_token_safe("\"><script>alert(1)</script>"));
+        assert!(!is_token_safe(&"a".repeat(129)));
+        let html = "<html><head></head><body></body></html>";
+        assert_eq!(inject_token_meta(html, Some("\"><script>x</script>")), html);
+    }
+
+    #[test]
+    fn a_minted_token_is_random_and_hex() {
+        let first = new_token();
+        let second = new_token();
+        assert_eq!(first.len(), TOKEN_BYTES * 2);
+        assert!(is_token_safe(&first));
+        assert_ne!(first, second, "two launches minted the same secret");
+        assert!(token_matches(&first, &first));
+        assert!(!token_matches(&first, &second));
+        // A prefix of the right token is not the right token.
+        assert!(!token_matches(&first, &first[..first.len() - 1]));
+    }
+
+    #[test]
+    fn the_three_tags_go_in_beside_each_other_before_the_head_closes() {
+        // The real artifact, where the browser-only and build-tag pair already run
+        // through one insertion rule; the token joins them and has to land with them
+        // rather than on the far side of a script.
+        let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("../src/launcher.html");
+        let Ok(html) = fs::read_to_string(&path) else {
+            panic!("src/launcher.html is missing, so this rule is untested");
+        };
+        let tag = "v2026.09.30-2116";
+        let declared = inject_server_meta(&html, Some(tag));
+        let injected = inject_token_meta(&declared, Some(TEST_TOKEN));
+        let pair = format!("{}{}", meta_tag(), build_tag_meta_tag(tag));
+        let all = format!("{pair}{}", token_meta_tag(TEST_TOKEN));
+        assert_eq!(injected.len(), html.len() + all.len());
+        assert_eq!(injected.replace(&all, ""), html, "the document changed beyond the insertion");
+        assert!(
+            injected[injected.find(&pair).expect("the pair was inserted")..].starts_with(&all),
+            "the token landed away from the declaration and the build tag"
+        );
+        assert!(
+            injected.contains(&format!("{all}</head>")),
+            "the tags are not immediately before the head's close"
         );
     }
 }
