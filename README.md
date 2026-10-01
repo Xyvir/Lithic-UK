@@ -53,6 +53,36 @@ Lithic always saves somewhere; the mode decides how much a mistake, a dead disk 
 * **The × on a bookmarked instance also drops the copy the app downloaded of it.** A bookmark is the launcher's own storage, but an instance's page, scripts and icons live under that instance's own origin, where only the app can reach them — which is why an instance that redeployed could go on serving its old launcher however many times the bookmark was removed and added back. Removing a bookmark now drops that one origin's cached copy as well, so the next open fetches what the instance is actually serving. An instance's cached wikis and its saved login are not part of a downloaded page and stay exactly where they are; forgetting a login stays the vault's own named action. This part is the desktop app's, on Windows for now — in a browser- or PWA-hosted launcher the bookmark is still the whole of what the × removes.
 * **Search reaches the bookmarked instances on the desktop app.** A wiki an instance cached belongs to that instance's own origin, which a page can only read for itself, so the app's Rust side reads it out of the same profile it already keeps for every origin the app has visited. What comes back is one hit per instance — that search is for orientation, and the instance's own launcher is where the rest of the matches are — and the panel beside the row opens that instance already searching for the same words. It covers what this device saved while inside that instance, on Windows for now, and it reads only storage the app itself wrote: no request leaves the machine and no instance is loaded to answer it.
 
+## Linux: One Download, and Building the WebKitGTK App Yourself
+
+A Linux release ships a single AppImage — `Lithic_<stamp>.AppImage`, the **shim**. It is around 3 MB, opens the launcher in the browser the machine already has, and is the supported Linux distribution. Press **Install** in the launcher and it copies itself to `~/Documents/Lithic/Lithic.AppImage` and registers the file types it edits (`.lith`, `.md`, `.txt`, `.tid`, `.json`, `.ipynb`, `.html`) with the desktop, so a `.lith` opens with a double click like any other document.
+
+The older **WebKitGTK build** — the Tauri app that bundles its own web engine, the ~82 MB AppImage that used to be published as `Lithic-webgtk_...` — is no longer built or published by CI. The source is still in this repository (`src-tauri/`), and you can build it yourself if you want a window that carries its own engine instead of borrowing the system browser.
+
+### Building the WebKitGTK AppImage yourself
+
+Build it on the oldest base system you need to support. An AppImage links the glibc of the machine that built it, so building on Ubuntu 24.04 raises the floor to glibc 2.39 and the result will not open on Ubuntu 22.04 or Debian 12. Ubuntu 22.04, or a 22.04 container, is the baseline. You need Rust (stable) and Node 22 or newer.
+
+Install the system dependencies:
+
+```bash
+sudo apt-get install -y \
+  libwebkit2gtk-4.1-dev libgtk-3-dev libayatana-appindicator3-dev \
+  librsvg2-dev libssl-dev libxdo-dev \
+  patchelf file wget build-essential libfuse2
+```
+
+Then, from the repository root:
+
+```bash
+npm ci
+npm --prefix launcher-ui ci
+node scripts/build-launcher.mjs
+LITHIC_BUILD_TAG=v2026.01.01-0000 npm run tauri build -- --bundles appimage
+```
+
+`LITHIC_BUILD_TAG` is the release stamp this build belongs to: it is compiled in and served to the launcher, which compares it against the newest release on GitHub to decide whether to offer an update. Leave it unset to build an app that offers no update notice, which is what a local build does. If the machine has no FUSE, prefix the build with `APPIMAGE_EXTRACT_AND_RUN=1`, which runs the bundler's own AppImage tooling without mounting it — that is how the release job built this artifact when it still published it. The finished file lands in `src-tauri/target/release/bundle/appimage/`.
+
 ## Companion Project: Ephemeral.exe
 
 If you are interested in running codeblocks from Lithic or any other text-based PKMS, check out [**Ephemeral.exe**](https://github.com/Xyvir/Ephemeral.exe). It is a lightweight, daemonless utility that instantly executes code snippets directly from your clipboard inside isolated Podman containers. This allows you to run dozens of programming languages seamlessly from your notes without polluting your host system with local installations or complex dependencies.

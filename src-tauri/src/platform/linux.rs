@@ -6,10 +6,12 @@
 //! The launch entry is the half worth explaining. Windows writes a shell link and a set
 //! of registry keys; the equivalent here is a single freedesktop desktop entry, and it
 //! is *also* what registers the file types, because a `.desktop` file declares the MIME
-//! types it opens in its own `MimeType=` line. So this module writes one file and the
-//! "associations" capability has nothing left to do: `register_file_associations` is
-//! here to say so rather than to be absent, so the capability table reads the same on
-//! every platform.
+//! types it opens in its own `MimeType=` line. The other half is that no desktop resolves
+//! this project's own `application/x-lith` without a `shared-mime-info` definition, because
+//! no distribution ships one: `register_file_associations` writes that definition under the
+//! user's data home and refreshes the MIME database, which is what makes a `.lith` a type a
+//! file manager can offer the entry for. The shim's own install writes the same file (see
+//! `shim/src/install.rs`), so the two distributions register the type identically.
 //!
 //! Where an entry points matters and is the reason `install_launch_entry` takes the
 //! *installed* program rather than the running one: an AppImage launched from
@@ -26,6 +28,26 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
+
+/// The `shared-mime-info` file for this project's own type, under `$XDG_DATA_HOME/mime/packages`.
+const MIME_FILE: &str = "lithic.xml";
+
+/// The `shared-mime-info` definition of `application/x-lith`, as text.
+///
+/// The glob is what maps the extension to the type; the comment is what a file manager shows.
+/// Kept pure so the definition can be read and asserted without installing anything, which is
+/// the only way to check it on a machine that is not running the desktop it describes.
+fn mime_xml() -> String {
+    String::from(
+        "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n\
+         <mime-info xmlns=\"http://www.freedesktop.org/standards/shared-mime-info\">\n\
+         \x20 <mime-type type=\"application/x-lith\">\n\
+         \x20   <comment>Lithic wiki</comment>\n\
+         \x20   <glob pattern=\"*.lith\"/>\n\
+         \x20 </mime-type>\n\
+         </mime-info>\n",
+    )
+}
 
 /// The file types this app edits, as the MIME types a Linux desktop understands.
 ///
@@ -96,12 +118,25 @@ pub fn install_launch_entry(program: &Path) -> Result<Option<PathBuf>, String> {
     Ok(Some(file))
 }
 
-/// The file types are declared in the entry that `install_launch_entry` writes.
+/// Write the `shared-mime-info` definition for this project's own type.
 ///
-/// Kept as a function that reports success rather than left out, because the same
-/// sequence of calls runs on every platform and a missing step is harder to read than a
-/// step that explains itself.
+/// The types themselves are declared in the entry `install_launch_entry` writes, so a
+/// standard one like `text/markdown` is associated by that line alone. `application/x-lith`
+/// is different: it is this project's own type, and a desktop only offers an entry for a
+/// file whose type it can resolve. Without this definition a `.lith` resolves to nothing and
+/// the entry, however it declares the type, is never offered for one. The write is the whole
+/// job; the database refresh behind it is best effort, like every other cache this module
+/// pokes, since a minimal system has no `update-mime-database` and is not a failed install.
 pub fn register_file_associations(_program: &Path) -> Result<(), String> {
+    let data = data_home().ok_or_else(|| "Could not resolve the data folder".to_string())?;
+    let packages = data.join("mime").join("packages");
+    fs::create_dir_all(&packages).map_err(|error| error.to_string())?;
+    fs::write(packages.join(MIME_FILE), mime_xml()).map_err(|error| error.to_string())?;
+    let _ = Command::new("update-mime-database")
+        .arg(data.join("mime"))
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .spawn();
     Ok(())
 }
 
@@ -264,6 +299,15 @@ mod tests {
         // `%F` rather than `%U`: these are files off a file manager, and the app reads a
         // path from its own arguments.
         assert!(entry.contains(" %F\n"), "the entry passes file paths, not URLs");
+    }
+
+    /// The MIME definition is what makes a `.lith` resolve to this app's own type.
+    #[test]
+    fn the_mime_definition_names_the_lith_type_and_its_extension() {
+        let xml = mime_xml();
+        assert!(xml.contains("<mime-type type=\"application/x-lith\">"), "{xml}");
+        assert!(xml.contains("<glob pattern=\"*.lith\"/>"), "{xml}");
+        assert!(xml.contains("shared-mime-info"), "{xml}");
     }
 
     /// An icon that could not be copied leaves the line out rather than naming a path

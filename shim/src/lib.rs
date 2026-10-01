@@ -43,8 +43,9 @@
 //!   * IndexedDB is scoped to an origin, which includes the port. A server on a
 //!     different port is a different storage bucket, so a random port per launch
 //!     would open a launcher with none of the saved Liths in it. Hence a fixed
-//!     [`DEFAULT_PORT`], a probe for a shim that is already running, and
-//!     [`loopback_alias`]: `localhost:5484` and `127.0.0.1:5484` are two origins
+//!     [`DEFAULT_PORT`], a probe that can replace a shim already serving a stale
+//!     build (see [`is_stale`]), and [`loopback_alias`]: `localhost:5484` and
+//!     `127.0.0.1:5484` are two origins
 //!     too, so the served page redirects the `localhost` spelling to the address
 //!     the shim opens.
 //!   * A page that is never installed is evictable storage, so the manifest ships
@@ -77,13 +78,22 @@ use std::io::{BufRead, BufReader, Read, Write};
 use std::net::{SocketAddr, TcpListener, TcpStream};
 use std::path::{Component, Path, PathBuf};
 use std::process::{Command, Stdio};
-use std::time::Duration;
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 mod command;
 mod git;
 mod github;
 mod gitwrite;
+mod install;
+mod pending;
 mod syncfolder;
+
+/// Hand a file to a shim that is already on the port (see `pending.rs`).
+///
+/// Exported for `main.rs`, which is the only caller: a launch that joins a running shim
+/// instead of replacing it leaves the file here for the running server's launcher to pick up,
+/// since a second process cannot reach that server's command wire (it holds no token).
+pub use pending::request_open;
 
 /// The meta tag the launcher reads to decide it is a browser mount rather than an
 /// instance. It says nothing about where saves land: that is the platform's answer.
@@ -138,8 +148,10 @@ pub const BROWSER_ENV: &str = "LITHIC_SHIM_BROWSER";
 /// Environment override for the private profile an app window uses.
 pub const PROFILE_ENV: &str = "LITHIC_SHIM_PROFILE";
 
-/// Every response carries this header, and the value is what a second launch
-/// proves before deciding that the port is already a shim of its own.
+/// Every response carries this header. It is the first proof a second launch has
+/// that the port is a shim of ours rather than some other program's: the value is
+/// fixed, so it says "ours" and nothing more. What the server is, and whether it
+/// is this launch's to keep, is the probe body's answer (see [`ServerIdentity`]).
 pub const SHIM_MARKER_HEADER: &str = "x-lithic-shim";
 pub const SHIM_MARKER_VALUE: &str = "1";
 /// The one path that is not a file. Used as the liveness probe.
@@ -671,15 +683,18 @@ fn read_body(reader: &mut impl Read, length: usize) -> std::io::Result<Vec<u8>> 
 /// already resolved, so the traversal check below is a prefix test on resolved
 /// paths rather than a string comparison of what the client sent. `token` is this
 /// launch's command-wire secret, minted by [`serve`] and injected into the launcher
-/// document it serves.
+/// document it serves. `identity` is what the probe endpoint answers with; it is
+/// also where the port comes from, so the one number the shim binds and the one it
+/// reports cannot drift apart.
 pub fn handle(
     request: &Request,
     root: &Path,
     root_canonical: &Path,
-    port: u16,
     token: &str,
     startup: Option<&Path>,
+    identity: &ServerIdentity,
 ) -> Response {
+    let port = identity.port;
     let raw_target = request.target.as_str();
     let raw_path = raw_target.split(['?', '#']).next().unwrap_or(raw_target);
     let Some(path) = percent_decode(raw_path) else {
@@ -697,10 +712,7 @@ pub fn handle(
     }
 
     if path == PROBE_PATH {
-        let body = format!(
-            "{{\"shim\":true,\"version\":\"{}\",\"port\":{port}}}",
-            env!("CARGO_PKG_VERSION")
-        );
+        let body = identity.to_json().to_string();
         return Response {
             status: 200,
             reason: "OK",
@@ -944,9 +956,11 @@ pub fn bind(port: u16) -> std::io::Result<TcpListener> {
 ///
 /// The command wire's secret is minted here, once per process, and then cloned into
 /// each connection's thread: every response a launch serves carries the same token,
-/// and the next launch has a different one. `startup` is the `.lith` this process was
-/// started with, cloned the same way, so the launcher can ask for it once it boots.
-pub fn serve(listener: TcpListener, root: PathBuf, port: u16, startup: Option<PathBuf>) -> std::io::Result<()> {
+/// and the next launch has a different one. `identity` is this launch's own name, and
+/// `startup` is the `.lith` this process was started with, both cloned the same way:
+/// the identity so the probe answers the same thing on every connection, and `startup`
+/// so the launcher can ask for it once it boots.
+pub fn serve(listener: TcpListener, root: PathBuf, startup: Option<PathBuf>, identity: ServerIdentity) -> std::io::Result<()> {
     let root_canonical = root.canonicalize().unwrap_or_else(|_| root.clone());
     let token = new_token();
     for incoming in listener.incoming() {
@@ -955,8 +969,9 @@ pub fn serve(listener: TcpListener, root: PathBuf, port: u16, startup: Option<Pa
         let root_canonical = root_canonical.clone();
         let token = token.clone();
         let startup = startup.clone();
+        let identity = identity.clone();
         std::thread::spawn(move || {
-            if let Err(error) = handle_connection(stream, &root, &root_canonical, port, &token, startup.as_deref()) {
+            if let Err(error) = handle_connection(stream, &root, &root_canonical, &token, startup.as_deref(), &identity) {
                 eprintln!("shim: a connection failed: {error}");
             }
         });
@@ -968,9 +983,9 @@ fn handle_connection(
     stream: TcpStream,
     root: &Path,
     root_canonical: &Path,
-    port: u16,
     token: &str,
     startup: Option<&Path>,
+    identity: &ServerIdentity,
 ) -> std::io::Result<()> {
     // A client that connects and says nothing must not hold a thread open.
     stream.set_read_timeout(Some(Duration::from_secs(5)))?;
@@ -999,7 +1014,7 @@ fn handle_connection(
         request.body = read_body(&mut reader, length)?;
     }
     let head_only = request.method == "HEAD";
-    let response = handle(&request, root, root_canonical, port, token, startup);
+    let response = handle(&request, root, root_canonical, token, startup, identity);
     let mut writer = stream;
     writer.write_all(&response.bytes(head_only))?;
     writer.flush()
@@ -1021,29 +1036,256 @@ fn read_head(reader: &mut impl BufRead) -> std::io::Result<String> {
     Ok(String::from_utf8_lossy(&head).into_owned())
 }
 
-/// Whether a shim of ours is already answering on the port.
+/// Who a running shim is, in enough detail for a later launch to tell whether it
+/// would serve the same thing.
 ///
-/// A second launch should not start a second server on another port (that would
-/// be a second storage origin), and it should not fail either: it opens the shim
-/// that is already running. The marker header is what makes that answer certain
-/// rather than a guess about some other program's port.
-pub fn probe_existing_shim(port: u16) -> bool {
+/// Nothing here is secret. This is what [`PROBE_PATH`] answers with, and that path
+/// is deliberately reachable without the command wire's token, so the identity
+/// carries no key material: the launch name below names a launch, and the token
+/// that authorizes work stays out of it. What the fields are for is the one
+/// decision a second launch has to make: join the server, or take the port. A shim
+/// that is an older build, or is serving a different payload, is the stale server
+/// that would otherwise answer a new launch's browser with old files, so the launch
+/// compares this against its own and replaces it (see [`is_stale`]).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ServerIdentity {
+    /// A random name for this launch, minted per process. Two launches of the same
+    /// binary still have different ones, which is what makes "has the server
+    /// restarted" a question with an answer.
+    pub launch_id: String,
+    /// The crate version this binary was built as.
+    pub version: String,
+    /// The release tag this binary was built from, or none for a local build.
+    pub build_tag: Option<String>,
+    /// The port this server answers on.
+    pub port: u16,
+    /// The process id, so a later launch can end it rather than wait for it.
+    pub pid: u32,
+    /// When this process started, in seconds since the Unix epoch.
+    pub started_at: u64,
+    /// The executable this process is running, as `current_exe` reported it.
+    pub exe_path: Option<String>,
+    /// That executable's modification time, read when this process started. A
+    /// rebuild moves the file on disk forward, so a later launch comparing its own
+    /// time against this one can tell an old process from the current binary.
+    pub exe_mtime: Option<u64>,
+    /// What this server is serving, named so the same payload keeps the same name
+    /// across launches: the AppImage file when the runtime set `APPIMAGE`, since
+    /// the mount directory is new every run, and the resolved payload directory
+    /// otherwise.
+    pub payload_id: String,
+}
+
+impl ServerIdentity {
+    /// This launch's own identity.
+    ///
+    /// `root` is the payload directory being served. The executable's modification
+    /// time is read here, once, so it records the binary as it was when this process
+    /// started rather than as it is whenever a comparison runs.
+    pub fn current(port: u16, root: &Path) -> Self {
+        let exe = std::env::current_exe().ok();
+        ServerIdentity {
+            launch_id: new_token(),
+            version: env!("CARGO_PKG_VERSION").to_string(),
+            build_tag: build_tag().map(str::to_string),
+            port,
+            pid: std::process::id(),
+            started_at: now_seconds(),
+            exe_path: exe.as_deref().map(exe_name),
+            exe_mtime: exe.as_deref().and_then(file_mtime),
+            payload_id: payload_id(root),
+        }
+    }
+
+    /// How the probe endpoint describes this server, and how a later launch reads
+    /// it. Not the command wire's shape: that one carries the token and is a request
+    /// from a page, where this is an answer to a probe that any local page can make.
+    fn to_json(&self) -> serde_json::Value {
+        serde_json::json!({
+            "shim": true,
+            "version": self.version,
+            "port": self.port,
+            "launch": self.launch_id,
+            "pid": self.pid,
+            "started": self.started_at,
+            "build": self.build_tag,
+            "exe": self.exe_path,
+            "exe_mtime": self.exe_mtime,
+            "payload": self.payload_id,
+        })
+    }
+
+    /// Read a probe answer. `None` when the body is not one of ours.
+    ///
+    /// Every field but `shim` is optional, because the first build to answer with
+    /// an identity is not the first build that ever answered the probe: a server
+    /// started by an older shim replies with a body that has only `shim`, `version`
+    /// and `port`, and this has to recognize it as a shim while still knowing
+    /// nothing about its launch.
+    pub fn from_probe(body: &str) -> Option<ServerIdentity> {
+        let value: serde_json::Value = serde_json::from_str(body.trim()).ok()?;
+        if value.get("shim").and_then(serde_json::Value::as_bool) != Some(true) {
+            return None;
+        }
+        Some(ServerIdentity {
+            launch_id: json_string(&value, "launch").unwrap_or_default(),
+            version: json_string(&value, "version").unwrap_or_default(),
+            build_tag: json_string(&value, "build"),
+            port: json_number(&value, "port").unwrap_or(0) as u16,
+            pid: json_number(&value, "pid").unwrap_or(0) as u32,
+            started_at: json_number(&value, "started").unwrap_or(0),
+            exe_path: json_string(&value, "exe"),
+            exe_mtime: json_number(&value, "exe_mtime"),
+            payload_id: json_string(&value, "payload").unwrap_or_default(),
+        })
+    }
+
+    /// A short line naming this server, for a launch that is about to join it.
+    pub fn describe(&self) -> String {
+        let mut parts = Vec::new();
+        match self.build_tag.as_deref() {
+            Some(tag) => parts.push(format!("build {tag}")),
+            None if !self.version.is_empty() => parts.push(format!("version {}", self.version)),
+            None => parts.push("an older build".to_string()),
+        }
+        if self.pid != 0 {
+            parts.push(format!("pid {}", self.pid));
+        }
+        if self.started_at != 0 {
+            parts.push(format!("up {}", human_age(self.started_at)));
+        }
+        parts.join(", ")
+    }
+}
+
+fn json_string(value: &serde_json::Value, key: &str) -> Option<String> {
+    value.get(key)?.as_str().map(str::to_string)
+}
+
+fn json_number(value: &serde_json::Value, key: &str) -> Option<u64> {
+    value.get(key)?.as_u64()
+}
+
+/// Seconds since the Unix epoch, or zero for a clock this cannot read.
+fn now_seconds() -> u64 {
+    SystemTime::now().duration_since(UNIX_EPOCH).map(|elapsed| elapsed.as_secs()).unwrap_or(0)
+}
+
+/// A file's modification time in seconds, or none when it cannot be read.
+fn file_mtime(path: &Path) -> Option<u64> {
+    fs::metadata(path).ok()?.modified().ok()?.duration_since(UNIX_EPOCH).ok().map(|elapsed| elapsed.as_secs())
+}
+
+/// A path as a person would have typed it: [`normalize`] and then some text.
+fn exe_name(path: &Path) -> String {
+    normalize(path).display().to_string()
+}
+
+/// The name of the payload a server is serving.
+///
+/// The AppImage runtime sets `APPIMAGE` to the file it was launched from and mounts
+/// it under a directory that is new every run, so that mount is not an identity. The
+/// `.AppImage` file is: the same download keeps the same name, and a different one
+/// does not. Extracted, or run from a checkout, there is no such variable and the
+/// resolved payload directory is the stable name.
+fn payload_id(root: &Path) -> String {
+    if let Some(appimage) = std::env::var_os("APPIMAGE").filter(|value| !value.is_empty()) {
+        return exe_name(Path::new(&appimage));
+    }
+    root.canonicalize().unwrap_or_else(|_| root.to_path_buf()).display().to_string()
+}
+
+/// An elapsed time in the coarsest unit that still says something.
+fn human_age(started_at: u64) -> String {
+    let seconds = now_seconds().saturating_sub(started_at);
+    if seconds < 60 {
+        format!("{seconds}s")
+    } else if seconds < 3600 {
+        format!("{}m", seconds / 60)
+    } else {
+        format!("{}h", seconds / 3600)
+    }
+}
+
+/// The shim already answering on the port, if one is.
+///
+/// A second launch has a choice: a server on another port would be a second storage
+/// origin, so it either joins the one that is running or replaces it. The marker
+/// header is still what makes "our port" certain rather than a guess about some
+/// other program; the body beside it is what turns that into a decision, by saying
+/// which build and which payload the server would put in front of a person. `None`
+/// when nothing shim-shaped answered, which leaves the port to whoever owns it.
+pub fn existing_shim(port: u16) -> Option<ServerIdentity> {
     let address = SocketAddr::from(([127, 0, 0, 1], port));
-    let Ok(mut stream) = TcpStream::connect_timeout(&address, Duration::from_millis(600)) else {
-        return false;
-    };
+    let mut stream = TcpStream::connect_timeout(&address, Duration::from_millis(600)).ok()?;
     let _ = stream.set_read_timeout(Some(Duration::from_millis(600)));
     let request = format!("GET {PROBE_PATH} HTTP/1.1\r\nhost: {LOOPBACK_HOST}\r\nconnection: close\r\n\r\n");
-    if stream.write_all(request.as_bytes()).is_err() {
-        return false;
-    }
+    stream.write_all(request.as_bytes()).ok()?;
     let mut answer = String::new();
-    if stream.take(8 * 1024).read_to_string(&mut answer).is_err() {
-        return false;
+    stream.take(8 * 1024).read_to_string(&mut answer).ok()?;
+    if !answer.to_ascii_lowercase().contains(&format!("{SHIM_MARKER_HEADER}: {SHIM_MARKER_VALUE}")) {
+        return None;
     }
-    answer
-        .to_ascii_lowercase()
-        .contains(&format!("{SHIM_MARKER_HEADER}: {SHIM_MARKER_VALUE}"))
+    let (_, body) = answer.split_once("\r\n\r\n")?;
+    ServerIdentity::from_probe(body)
+}
+
+/// Whether the shim already on the port would serve something other than this
+/// launch would.
+///
+/// The comparison is about what a person would see, not about which file is newer
+/// on disk: a different payload is a different set of pages, and a different build
+/// is different code, so either one means the browser is about to be shown a stale
+/// Lithic. The release tag settles the build question when both sides have one,
+/// which is every AppImage; with no tag on either side the executable's own path and
+/// start-up time stand in, which is what two runs from a checkout have. An identity
+/// that carries no payload name is an older build answering with a marker and little
+/// else, and nothing about it is claimed, so it is not called stale on that alone.
+pub fn is_stale(existing: &ServerIdentity, ours: &ServerIdentity) -> bool {
+    if !existing.payload_id.is_empty() && existing.payload_id != ours.payload_id {
+        return true;
+    }
+    match (&existing.build_tag, &ours.build_tag) {
+        (Some(running), Some(mine)) => running != mine,
+        (None, None) => {
+            if existing.exe_path != ours.exe_path {
+                return true;
+            }
+            match (existing.exe_mtime, ours.exe_mtime) {
+                (Some(running), Some(mine)) => mine > running,
+                _ => false,
+            }
+        }
+        // One side is a release build and the other is not, so they are not the
+        // same program however the file happens to be named.
+        _ => true,
+    }
+}
+
+/// End the shim that is already on the port, so this launch can take it.
+///
+/// Only ever called for a process that answered the probe as a shim of ours, and
+/// only after [`is_stale`] says it would serve something older. `SIGTERM` rather
+/// than `SIGKILL`: the server has nothing to flush, but a signal the process can
+/// still handle is the ordinary way to ask it to stop, and it is ours to end.
+pub fn terminate(pid: u32) -> bool {
+    #[cfg(target_os = "linux")]
+    {
+        extern "C" {
+            fn kill(pid: i32, signal: i32) -> i32;
+        }
+        const SIGTERM: i32 = 15;
+        // SAFETY: `kill` takes two integers and no pointer, so a bad argument has
+        // nothing to corrupt; a pid that no longer exists simply fails.
+        unsafe { kill(pid as i32, SIGTERM) == 0 }
+    }
+    // Nothing to end on a platform this shim does not ship to: it compiles so the
+    // tests run, and the takeover itself is Linux behavior.
+    #[cfg(not(target_os = "linux"))]
+    {
+        let _ = pid;
+        false
+    }
 }
 
 /// Hand the address to the browser the machine already has.
@@ -1117,11 +1359,28 @@ fn first_chromium(lookup: impl Fn(&str) -> bool) -> Option<&'static str> {
 /// written by a command that is dispatched on every platform, and the shim's own test run on a
 /// non-Linux machine has to compile it.
 pub(crate) fn app_data_dir() -> Option<PathBuf> {
-    let base = match std::env::var_os("XDG_DATA_HOME") {
-        Some(data_home) => PathBuf::from(data_home),
-        None => PathBuf::from(std::env::var_os("HOME")?).join(".local").join("share"),
-    };
-    Some(base.join("lithic"))
+    Some(data_home()?.join("lithic"))
+}
+
+/// The platform's data home: `$XDG_DATA_HOME`, or `~/.local/share` when it is not set.
+///
+/// One owner for the rule, because three callers need it: this module's own state directory,
+/// the folder pick `syncfolder.rs` records, and the desktop entry, icon and MIME file the
+/// install writes (`install.rs`). An empty variable is treated as unset, the way the XDG
+/// specification reads it, rather than resolved to a relative path.
+pub(crate) fn data_home() -> Option<PathBuf> {
+    match std::env::var_os("XDG_DATA_HOME") {
+        Some(data_home) if !data_home.is_empty() => Some(PathBuf::from(data_home)),
+        _ => Some(home_dir()?.join(".local").join("share")),
+    }
+}
+
+/// The person's home directory, by either of the two names a platform gives it.
+pub(crate) fn home_dir() -> Option<PathBuf> {
+    std::env::var_os("HOME")
+        .or_else(|| std::env::var_os("USERPROFILE"))
+        .map(PathBuf::from)
+        .filter(|home| !home.as_os_str().is_empty())
 }
 
 /// The private profile an app window is given.
@@ -1254,9 +1513,9 @@ mod tests {
                 &parse_request(&format!("GET {target} HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n")).expect("parsed request"),
                 &self.root,
                 &canonical,
-                DEFAULT_PORT,
                 TEST_TOKEN,
                 None,
+                &self_identity(&self.root),
             )
         }
     }
@@ -1264,6 +1523,32 @@ mod tests {
     impl Drop for Payload {
         fn drop(&mut self) {
             let _ = fs::remove_dir_all(&self.parent);
+        }
+    }
+
+    /// An identity for a test's payload, as this test process would report it.
+    fn self_identity(root: &Path) -> ServerIdentity {
+        ServerIdentity::current(DEFAULT_PORT, root)
+    }
+
+    /// An identity with every field set, for the comparison rules that are about two
+    /// servers rather than about this one process.
+    fn identity_with(
+        build_tag: Option<&str>,
+        exe_path: Option<&str>,
+        exe_mtime: Option<u64>,
+        payload: &str,
+    ) -> ServerIdentity {
+        ServerIdentity {
+            launch_id: "0".repeat(TOKEN_BYTES * 2),
+            version: "0.1.0".to_string(),
+            build_tag: build_tag.map(str::to_string),
+            port: DEFAULT_PORT,
+            pid: 4242,
+            started_at: 1_700_000_000,
+            exe_path: exe_path.map(str::to_string),
+            exe_mtime,
+            payload_id: payload.to_string(),
         }
     }
 
@@ -1498,7 +1783,7 @@ mod tests {
         for host in ["localhost", "localhost:5484", "LOCALHOST:5484", "[::1]:5484"] {
             let request = parse_request(&format!("GET /src/launcher.html?x=1 HTTP/1.1\r\nHost: {host}\r\n\r\n"))
                 .expect("parsed request");
-            let response = handle(&request, &payload.root, &canonical, DEFAULT_PORT, TEST_TOKEN, None);
+            let response = handle(&request, &payload.root, &canonical, TEST_TOKEN, None, &self_identity(&payload.root));
             assert_eq!(response.status, 302, "{host} was served directly");
             let location = response
                 .headers
@@ -1516,9 +1801,12 @@ mod tests {
         let payload = Payload::new("methods");
         let canonical = payload.root.canonicalize().expect("canonical payload");
         let request = parse_request("DELETE /src/launcher.html HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n").expect("request");
-        assert_eq!(handle(&request, &payload.root, &canonical, DEFAULT_PORT, TEST_TOKEN, None).status, 405);
+        assert_eq!(
+            handle(&request, &payload.root, &canonical, TEST_TOKEN, None, &self_identity(&payload.root)).status,
+            405
+        );
         let head = parse_request("HEAD /src/launcher.html HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n").expect("request");
-        let response = handle(&head, &payload.root, &canonical, DEFAULT_PORT, TEST_TOKEN, None);
+        let response = handle(&head, &payload.root, &canonical, TEST_TOKEN, None, &self_identity(&payload.root));
         assert_eq!(response.status, 200);
         let bytes = response.bytes(true);
         let text = String::from_utf8_lossy(&bytes);
@@ -1534,6 +1822,77 @@ mod tests {
         assert!(body_of(&response).contains("\"shim\":true"));
         let bytes = String::from_utf8_lossy(&response.bytes(false)).to_ascii_lowercase();
         assert!(bytes.contains(&format!("{SHIM_MARKER_HEADER}: {SHIM_MARKER_VALUE}")));
+    }
+
+    #[test]
+    fn the_probe_names_the_launch_and_carries_no_secret() {
+        let payload = Payload::new("identity");
+        let body = body_of(&payload.request(PROBE_PATH));
+        // The probe is reachable by any local page, so the wire's token must never
+        // ride in it, however much about this launch it does report.
+        assert!(!body.contains(TEST_TOKEN));
+        assert!(!body.contains(TOKEN_META_NAME));
+        let identity = ServerIdentity::from_probe(&body).expect("the probe body is an identity");
+        assert_eq!(identity.version, env!("CARGO_PKG_VERSION"));
+        assert_eq!(identity.port, DEFAULT_PORT);
+        assert_eq!(identity.pid, std::process::id());
+        assert_eq!(identity.launch_id.len(), TOKEN_BYTES * 2);
+        assert!(identity.started_at > 0);
+    }
+
+    #[test]
+    fn a_probe_body_from_an_older_build_is_still_recognized() {
+        // The body a build before this one answers with: a shim, but with no launch,
+        // no pid and no payload, which is what its caller has to live with.
+        let identity = ServerIdentity::from_probe("{\"shim\":true,\"version\":\"0.1.0\",\"port\":5484}")
+            .expect("an older build is still a shim");
+        assert_eq!(identity.pid, 0);
+        assert_eq!(identity.payload_id, "");
+        assert!(identity.build_tag.is_none());
+        assert_eq!(ServerIdentity::from_probe("{\"hello\":\"there\"}"), None);
+        assert_eq!(ServerIdentity::from_probe("not json"), None);
+    }
+
+    #[test]
+    fn two_launches_of_the_same_program_are_not_stale_to_each_other() {
+        let payload = Payload::new("same");
+        let first = self_identity(&payload.root);
+        let second = self_identity(&payload.root);
+        assert_ne!(first.launch_id, second.launch_id, "two launches share a name");
+        assert!(!is_stale(&first, &second));
+    }
+
+    #[test]
+    fn a_different_payload_or_release_is_stale() {
+        let ours = identity_with(None, Some("/a/lithic-shim"), Some(100), "/payload");
+        let same = identity_with(None, Some("/a/lithic-shim"), Some(100), "/payload");
+        assert!(!is_stale(&same, &ours));
+        // A different payload is a different set of pages.
+        let elsewhere = identity_with(None, Some("/a/lithic-shim"), Some(100), "/other");
+        assert!(is_stale(&elsewhere, &ours));
+        // Two release builds that differ are not the same program.
+        let released = identity_with(Some("v2"), Some("/a/lithic-shim"), Some(100), "/payload");
+        let older_release = identity_with(Some("v1"), Some("/a/lithic-shim"), Some(100), "/payload");
+        assert!(is_stale(&older_release, &released));
+        // ... and the tag settles it, so a different path does not matter there.
+        let same_release_elsewhere = identity_with(Some("v2"), Some("/b/other"), Some(1), "/payload");
+        assert!(!is_stale(&same_release_elsewhere, &released));
+        // A release build where ours is untagged, and the reverse, are not the same.
+        assert!(is_stale(&released, &ours));
+        assert!(is_stale(&ours, &released));
+    }
+
+    #[test]
+    fn an_untagged_rebuild_is_stale_but_the_same_binary_is_not() {
+        // Both untagged, as two runs from a checkout are: the executable's own path
+        // and start-up time stand in for the release tag.
+        let ours = identity_with(None, Some("/a/lithic-shim"), Some(100), "/payload");
+        let rebuilt = identity_with(None, Some("/a/lithic-shim"), Some(90), "/payload");
+        assert!(is_stale(&rebuilt, &ours), "a binary older than ours is stale");
+        let newer_than_us = identity_with(None, Some("/a/lithic-shim"), Some(110), "/payload");
+        assert!(!is_stale(&newer_than_us, &ours), "a running build newer than ours is kept");
+        let another_path = identity_with(None, Some("/b/lithic-shim"), Some(100), "/payload");
+        assert!(is_stale(&another_path, &ours), "a binary from another path is a different build");
     }
 
     #[test]
@@ -1857,7 +2216,7 @@ mod tests {
         let canonical = payload.root.canonicalize().expect("canonical payload");
         let request = parse_request(&format!("GET {COMMAND_PATH} HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n"))
             .expect("parsed request");
-        let response = handle(&request, &payload.root, &canonical, DEFAULT_PORT, TEST_TOKEN, None);
+        let response = handle(&request, &payload.root, &canonical, TEST_TOKEN, None, &self_identity(&payload.root));
         assert_eq!(response.status, 405);
     }
 

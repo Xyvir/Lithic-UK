@@ -190,16 +190,26 @@ ln -sf lithic.png "$appdir/.DirIcon"
 # (`--class=Lithic` in `shim/src/lib.rs`), so the dock shows Lithic's own icon and
 # groups that window with this entry rather than with the browser's. The shim opens
 # no window itself, so without it the page's window belongs to the browser entirely.
+#
+# `%f` and `MimeType=`: the file types this app edits, and the field code that
+# receives the file a file manager hands over. This entry is the file-association
+# registration on a freedesktop desktop (nothing else declares it), so a double
+# click on a `.lith`, `.md` or `.txt` reaches the shim, which opens it in the
+# launcher. The list is the same one `shim/src/install.rs` writes when the app
+# installs itself and the desktop app registers; the project's own
+# `application/x-lith` type needs the MIME definition the shim's own install
+# writes, since no distribution ships one.
 cat > "$appdir/lithic.desktop" <<'DESKTOP'
 [Desktop Entry]
 Type=Application
 Name=Lithic
 Comment=Open the Lithic launcher in your browser
-Exec=lithic-shim
+Exec=lithic-shim %f
 Icon=lithic
 Terminal=false
 Categories=Utility;Office;
 Keywords=wiki;notes;tiddlywiki;
+MimeType=application/x-lith;text/markdown;text/plain;text/vnd.tiddlywiki;application/json;application/x-ipynb+json;text/html;
 StartupWMClass=Lithic
 DESKTOP
 

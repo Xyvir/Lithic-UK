@@ -1,18 +1,20 @@
 name: Desktop Manual Release
 
-# The desktop distributions: one Windows executable and two Linux AppImages.
-# `Lithic-webgtk_...` bundles its own web engine. `Lithic_...` is the shim, which
-# serves the same launcher and wiki engine to the browser the machine already has
-# (see `shim/`), so it is around 2 MB instead of 82 MB. Each job adds a file to
-# the release tag the caller passes in, which is the tag the wiki build just
-# created, so a build's download page carries every desktop platform beside the
-# wiki artifacts.
+# The desktop distributions: a Windows executable and a Linux AppImage. The
+# AppImage is the shim, which serves the same launcher and wiki engine to the
+# browser the machine already has (see `shim/`), so it is around 3 MB rather than
+# the 82 MB a build that carried its own web engine would be. That WebKitGTK build
+# still lives in `src-tauri` and still builds from a checkout; it is simply no
+# longer published, and `README.md` is where a person is told how to make one.
+# Each job adds a file to the release tag the caller passes in, which is the tag
+# the wiki build just created, so a build's download page carries every desktop
+# platform beside the wiki artifacts.
 #
-# The three jobs are independent on purpose. A Windows failure must not cost the
-# Linux artifacts, and a Linux failure must not cost the Windows one: each is a
-# separate download on the same release, and none of them is the release itself.
+# The two jobs are independent on purpose. A Windows failure must not cost the
+# Linux artifact, and a Linux failure must not cost the Windows one: each is a
+# separate download on the same release, and neither is the release itself.
 # Each only ever ADDS a file (the release already exists by the time this runs),
-# so none can blank another's work.
+# so neither can blank the other's work.
 on:
   workflow_dispatch:
   workflow_call:
@@ -181,194 +183,23 @@ jobs:
           files: |
             ${{ steps.tag.outputs.exe }}
 
-  # The AppImage is built on the OLDEST base system worth supporting, and that is
-  # not a style preference: an AppImage links against the build machine's glibc,
-  # so building on 24.04 raises the floor to glibc 2.39 and the artifact stops
-  # opening on Ubuntu 22.04 and Debian 12 with a GLIBC_2.39 not found error.
-  # Tauri's own docs name 22.04 and Debian 12 as the baseline for exactly this
-  # reason. The 22.04 runner is deprecated (retirement 2027-04-17), so when it
-  # goes the replacement is a 22.04 CONTAINER on ubuntu-latest rather than a newer
-  # runner: raising the floor silently drops the users the floor exists for.
-  build-appimage:
-    runs-on: ubuntu-22.04
-
-    steps:
-      - name: Checkout Code
-        uses: actions/checkout@v5
-
-      - name: Download Built Wiki Artifact
-        if: ${{ inputs.tag_name != '' }}
-        uses: actions/download-artifact@v5
-        with:
-          name: built-wiki
-          path: src
-
-      - name: Rename Downloaded Wiki
-        if: ${{ inputs.tag_name != '' }}
-        run: mv src/lith.html src/lithic.html
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v5
-        with:
-          node-version: 22
-
-      - name: Cache NPM dependencies
-        uses: actions/cache@v5
-        with:
-          path: ~/.npm
-          key: ${{ runner.os }}-node-${{ hashFiles('package-lock.json', 'launcher-ui/package-lock.json') }}
-          restore-keys: |
-            ${{ runner.os }}-node-
-
-      - name: Rust Cache
-        uses: swatinem/rust-cache@v2
-        with:
-          workspaces: 'src-tauri -> target'
-
-      - name: Install Rust
-        uses: dtolnay/rust-toolchain@stable
-
-      # Everything a Linux Tauri build needs that the runner does not already
-      # carry. webkit2gtk-4.1 is the v2 webview (22.04 keeps it in the standard
-      # repositories, which is the other half of why this job is pinned here);
-      # appindicator and rsvg2 are linked by the tray and icon paths; patchelf is
-      # what linuxdeploy rewrites the bundled ELF headers with; file and wget are
-      # linuxdeploy's own dependencies; libxdo is the x11 input backend; libfuse2
-      # is the FUSE 2 library linuxdeploy's own AppImage mounts through, installed
-      # beside APPIMAGE_EXTRACT_AND_RUN below rather than instead of it.
-      - name: Install System Dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y \
-            libwebkit2gtk-4.1-dev \
-            libgtk-3-dev \
-            libayatana-appindicator3-dev \
-            librsvg2-dev \
-            libssl-dev \
-            libxdo-dev \
-            patchelf \
-            file \
-            wget \
-            build-essential \
-            libfuse2
-
-      - name: Install Dependencies
-        run: |
-          npm ci
-          npm --prefix launcher-ui ci
-
-      - name: Run Launcher UI Tests
-        run: npm --prefix launcher-ui test
-
-      - name: Build Launcher (Svelte Launcher Bundle)
-        run: node scripts/build-launcher.mjs
-
-      # Same rule as the Windows job: regenerate the icon set from the one source
-      # image so the AppImage's icon, the desktop entry and the taskbar icon are
-      # the same drawing as the executable's.
-      - name: Generate Icons
-        run: |
-          if [ -f src/app-icon.png ]; then
-            npm run tauri icon src/app-icon.png
-          else
-            echo "Icon file 'src/app-icon.png' not found, skipping icon generation."
-          fi
-
-      - name: Generate Date-Based Tag
-        id: tag
-        run: |
-          tag="${{ inputs.tag_name }}"
-          if [ -z "$tag" ]; then
-            tag="v$(date +'%Y.%m.%d-%H%M')"
-          fi
-          echo "date=$tag" >> "$GITHUB_OUTPUT"
-          # The AppImage says what it carries, because the name is the only thing
-          # a person sees before an 86 MB download: `Lithic-webgtk_...` is the build
-          # that bundles WebKitGTK and JavaScriptCore (about 43.5 MB of that size),
-          # and the plain `Lithic_...` name is reserved for the shim that uses the
-          # system browser instead. The stamp is the same rule as the exe beside it
-          # (see the Windows job), so the two downloads of one release still read as
-          # one pair rather than as two naming schemes. Anything unparseable falls
-          # back to the whole tag, so a build never fails here.
-          if [[ "$tag" =~ ([0-9]{4})\.([0-9]{2})\.([0-9]{2})-([0-9]{4}) ]]; then
-            appimage="Lithic-webgtk_${BASH_REMATCH[2]}.${BASH_REMATCH[3]}.${BASH_REMATCH[1]:2:2}-${BASH_REMATCH[4]}.AppImage"
-          else
-            appimage="Lithic-webgtk_$tag.AppImage"
-          fi
-          echo "appimage=$appimage" >> "$GITHUB_OUTPUT"
-          # Semver for the app's own version, patched through TAURI_CONFIG the
-          # way the Windows job does it, with leading zeros stripped (semver
-          # forbids them) and the config version as the fallback.
-          if [[ "$tag" =~ ([0-9]+)\.([0-9]+)\.([0-9]+) ]]; then
-            ver="${BASH_REMATCH[1]}.$((10#${BASH_REMATCH[2]})).$((10#${BASH_REMATCH[3]}))"
-          else
-            ver="0.2.0"
-          fi
-          echo "version=$ver" >> "$GITHUB_OUTPUT"
-          echo "tauri_config={\"version\":\"$ver\"}" >> "$GITHUB_OUTPUT"
-
-      # --bundles appimage, not the config's `targets: all`: all would also emit
-      # a .deb and an .rpm, which are a second and third packaging decision
-      # rather than a side effect of wanting an AppImage.
-      - name: Build AppImage
-        env:
-          TAURI_CONFIG: ${{ steps.tag.outputs.tauri_config }}
-          LITHIC_BUILD_TAG: ${{ steps.tag.outputs.date }}
-          # linuxdeploy is itself an AppImage and needs FUSE to mount itself; this
-          # extracts and runs it instead. It is the difference between a working
-          # bundle and "failed to run linuxdeploy" on a runner without FUSE (or
-          # without the libfuse2 the AppImage runtime would mount through).
-          APPIMAGE_EXTRACT_AND_RUN: '1'
-        run: npm run tauri build -- --bundles appimage
-
-      # Sizes in the run summary, the same way the Windows job reports them: the
-      # AppImage carries the whole app, so a stray file in src/ shows up here.
-      - name: Report Artifact Sizes
-        run: |
-          echo "### Artifact sizes" >> "$GITHUB_STEP_SUMMARY"
-          echo "| artifact | size |" >> "$GITHUB_STEP_SUMMARY"
-          echo "| --- | --- |" >> "$GITHUB_STEP_SUMMARY"
-          while IFS= read -r file; do
-            mb=$(awk -v bytes="$(stat -c%s "$file")" 'BEGIN { printf "%.2f", bytes / 1048576 }')
-            echo "$mb MB  $(basename "$file")"
-            echo "| $(basename "$file") | $mb MB |" >> "$GITHUB_STEP_SUMMARY"
-          done < <(find src-tauri/target/release/bundle -name '*.AppImage')
-
-      - name: Rename Artifact
-        run: |
-          appimage=$(find src-tauri/target/release/bundle -name '*.AppImage' | head -n 1)
-          if [ -z "$appimage" ]; then
-            echo "::error::Build failed: no .AppImage found under src-tauri/target/release/bundle."
-            exit 1
-          fi
-          cp "$appimage" "${{ steps.tag.outputs.appimage }}"
-          chmod +x "${{ steps.tag.outputs.appimage }}"
-          echo "Created ${{ steps.tag.outputs.appimage }}"
-
-      - name: Add to Release
-        uses: softprops/action-gh-release@v3
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        with:
-          tag_name: ${{ steps.tag.outputs.date }}
-          draft: false
-          prerelease: false
-          files: |
-            ${{ steps.tag.outputs.appimage }}
-
   # The shim: the same launcher and wiki engine, served to the browser the
   # machine already has (`shim/`, assembled by scripts/build-shim-appimage.sh).
   #
-  # A third job rather than a step in the AppImage job, because the two artifacts
+  # A job of its own, kept apart from the Windows one because the two artifacts
   # disagree about every dependency a Tauri build needs. Nothing here installs
   # GTK, WebKitGTK, appindicator, patchelf or FUSE: the shim links no toolkit, so
   # its AppDir needs no linuxdeploy and bundles no libraries. That is the whole
-  # proposition of the artifact, and a job that installs a web engine in order to
-  # build the download that exists to avoid one would be arguing with itself.
+  # proposition of the artifact, and a job that installed a web engine in order to
+  # build the download that exists to avoid one would be arguing with itself. This
+  # is now the only Linux artifact a release carries; the WebKitGTK build is still
+  # in the tree and still builds by hand (see `README.md`), it is just not
+  # published.
   build-shim-appimage:
-    # Same runner as the WebKit AppImage, for the same reason: an AppImage links
-    # the glibc of the machine that built it, and the shim's binary is built here
-    # too, so this is what keeps the two Linux downloads on one floor.
+    # ubuntu-22.04, because an AppImage links the glibc of the machine that built
+    # it: building on a newer runner raises the floor and the artifact stops
+    # opening on 22.04 and Debian 12 with a GLIBC_ not found error. The shim's
+    # binary is built here too, so this runner is what sets its floor.
     runs-on: ubuntu-22.04
 
     steps:
@@ -426,7 +257,7 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y libssl-dev pkg-config
 
-      # No launcher-ui test run here. The AppImage job runs them from the same
+      # No launcher-ui test run here. The Windows job runs them from the same
       # commit, and the launcher this job packages is the same build of the same
       # forty odd files, so a second run would only be a second way to fail.
       - name: Install Dependencies
@@ -445,11 +276,12 @@ jobs:
             tag="v$(date +'%Y.%m.%d-%H%M')"
           fi
           echo "date=$tag" >> "$GITHUB_OUTPUT"
-          # The plain `Lithic_...` name is the one the WebKitGTK build gave up when
-          # it took `Lithic-webgtk_...`: the name is the only thing a person sees
-          # before downloading, so it states whether the engine comes with the
-          # file. Same stamp rule as the exe beside it, so one release still reads
-          # as one set of downloads.
+          # The plain `Lithic_...` name, which the WebKitGTK build used to step
+          # aside from when it took `Lithic-webgtk_...`. That build is no longer
+          # published, so the name stays plain: this is now the ordinary Linux
+          # download and there is no engine choice left in it to state. Same stamp
+          # rule as the exe beside it, so one release still reads as one set of
+          # downloads.
           if [[ "$tag" =~ ([0-9]{4})\.([0-9]{2})\.([0-9]{2})-([0-9]{4}) ]]; then
             shim="Lithic_${BASH_REMATCH[2]}.${BASH_REMATCH[3]}.${BASH_REMATCH[1]:2:2}-${BASH_REMATCH[4]}.AppImage"
           else
@@ -458,7 +290,7 @@ jobs:
           echo "shim=$shim" >> "$GITHUB_OUTPUT"
 
       # The manifest and the offline service worker travel in this payload as the
-      # versions the checkout carries. That is the same source the AppImage job
+      # versions the checkout carries. That is the same source the Windows job
       # packages; only their cache version string is at stake, and build-server
       # bumps those in its own commit.
       - name: Build Shim AppImage
@@ -466,7 +298,7 @@ jobs:
           # The tag this build was cut from, compiled into the binary and served as a
           # meta tag beside the browser-only declaration, which is how the launcher
           # knows a newer release exists and can point at it. The same string the
-          # Tauri job bakes, so both Linux downloads of one release carry one tag; a
+          # Windows job bakes, so the downloads of one release carry one tag; a
           # build with it unset (a checkout, a debug build) serves no tag and offers
           # no update, which is the rule the desktop app already follows.
           LITHIC_BUILD_TAG: ${{ steps.tag.outputs.date }}
@@ -484,7 +316,7 @@ jobs:
             echo "$mb MB  $(basename "$file")"
             echo "| $(basename "$file") | $mb MB |" >> "$GITHUB_STEP_SUMMARY"
           done
-          echo "This download carries no web engine: the browser already on the machine is the engine. The WebKitGTK AppImage of the same release is about 82 MB." >> "$GITHUB_STEP_SUMMARY"
+          echo "This download carries no web engine: the browser already on the machine is the engine. A build that carried its own would be about 82 MB." >> "$GITHUB_STEP_SUMMARY"
 
       - name: Add to Release
         uses: softprops/action-gh-release@v3

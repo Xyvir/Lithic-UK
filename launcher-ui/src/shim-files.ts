@@ -119,3 +119,53 @@ export function shimList(path?: string, call: ShimCall = {}): Promise<ShimResult
 export function shimStartupPath(call: ShimCall = {}): Promise<ShimResult<{ path: string | null }>> {
   return shimCommand('startup', {}, call).then((answer) => result<{ path: string | null }>(answer));
 }
+
+/**
+ * The `.lith` a second launch handed to this shim, if one left a request.
+ *
+ * A launch that finds this shim already on the port joins it rather than replacing it, and a
+ * file named on that launch cannot reach the running shim's wire (a second process holds no
+ * token), so it is left in a file the shim reads once. This is the launcher asking for it, at
+ * boot and then on a timer, so the file opens whether the browser raised the window already
+ * open or opened a new one.
+ */
+export function shimTakeOpen(call: ShimCall = {}): Promise<ShimResult<{ path: string | null }>> {
+  return shimCommand('take-open', {}, call).then((answer) => result<{ path: string | null }>(answer));
+}
+
+/** What the shim says it can do, in the launcher's own vocabulary. */
+export interface ShimCapabilities {
+  os: string;
+  install: boolean;
+  launch_entry: 'start-menu' | 'application-menu' | null;
+  file_associations: boolean;
+}
+
+/**
+ * Ask whether this copy can install itself. A shim run from a checkout, or one that is not an
+ * AppImage, answers `install: false` and the launcher draws no Install offer.
+ */
+export function shimCapabilities(call: ShimCall = {}): Promise<ShimResult<ShimCapabilities>> {
+  return shimCommand('capabilities', {}, call).then((answer) => result<ShimCapabilities>(answer));
+}
+
+/** The three facts the install offer turns on, with the desktop app's own field names. */
+export interface ShimInstallStatus {
+  installed: boolean;
+  up_to_date: boolean;
+  running_from_install: boolean;
+  path: string;
+}
+
+export function shimInstallStatus(call: ShimCall = {}): Promise<ShimResult<ShimInstallStatus>> {
+  return shimCommand('install-status', {}, call).then((answer) => result<ShimInstallStatus>(answer));
+}
+
+/**
+ * Copy this AppImage where the desktop can find it and register its file types. Answers the
+ * copy's path and the desktop entry's name, which is what the launcher's confirmation line
+ * shows.
+ */
+export function shimInstall(call: ShimCall = {}): Promise<ShimResult<{ path: string; entry: string }>> {
+  return shimCommand('install', {}, call).then((answer) => result<{ path: string; entry: string }>(answer));
+}

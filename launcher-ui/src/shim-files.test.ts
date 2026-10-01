@@ -12,7 +12,20 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { SHIM_TOKEN_META } from './shim-command.ts';
-import { basename, dirname, hasShimBackend, shimList, shimPick, shimRead, shimStartupPath, shimWrite } from './shim-files.ts';
+import {
+  basename,
+  dirname,
+  hasShimBackend,
+  shimCapabilities,
+  shimInstall,
+  shimInstallStatus,
+  shimList,
+  shimPick,
+  shimRead,
+  shimStartupPath,
+  shimTakeOpen,
+  shimWrite
+} from './shim-files.ts';
 
 type Handler = (url: string, init: RequestInit | undefined) => Response | Promise<Response>;
 
@@ -89,6 +102,18 @@ test('read, write, list and startup each frame the command the shim answers', as
   assert.deepEqual(answerBody(seen[4].init), { command: 'startup', args: {} });
 });
 
+test('the install and handoff helpers each frame the command the shim answers', async () => {
+  const { fetcher, seen } = fakeFetch(() => json({ ok: true, result: {} }));
+  await shimCapabilities({ fetcher, token: 'deadbeef' });
+  await shimInstallStatus({ fetcher, token: 'deadbeef' });
+  await shimInstall({ fetcher, token: 'deadbeef' });
+  await shimTakeOpen({ fetcher, token: 'deadbeef' });
+  assert.deepEqual(answerBody(seen[0].init), { command: 'capabilities', args: {} });
+  assert.deepEqual(answerBody(seen[1].init), { command: 'install-status', args: {} });
+  assert.deepEqual(answerBody(seen[2].init), { command: 'install', args: {} });
+  assert.deepEqual(answerBody(seen[3].init), { command: 'take-open', args: {} });
+});
+
 test('every failure is a value rather than a throw, so a caller can fall back', async () => {
   const { fetcher } = fakeFetch(() => new Response('no', { status: 403 }));
   assert.deepEqual(await shimPick('open', {}, { fetcher, token: 'deadbeef' }), { ok: false, error: 'refused' });
@@ -103,7 +128,18 @@ test('the commands this module sends are the commands the shim dispatches', () =
   // own tests pin what each one does; this only holds the vocabulary in agreement.
   const here = fileURLToPath(new URL('.', import.meta.url));
   const shim = readFileSync(`${here}../../shim/src/command.rs`, 'utf8');
-  for (const command of ['ping', 'startup', 'pick', 'read', 'write', 'list']) {
+  for (const command of [
+    'ping',
+    'startup',
+    'take-open',
+    'capabilities',
+    'install-status',
+    'install',
+    'pick',
+    'read',
+    'write',
+    'list'
+  ]) {
     assert.match(shim, new RegExp(`"${command}" =>`), `the shim does not dispatch ${command}`);
   }
 });

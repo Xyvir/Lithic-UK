@@ -28,6 +28,11 @@
 //!     launcher can draw where no dialog exists.
 //!   * `startup` names the `.lith` the shim was started with, so double-clicking one in a file
 //!     manager opens it, which is the shape every desktop document program already has.
+//!   * `take-open` answers the `.lith` a second launch handed to a shim that was already on the
+//!     port, once, so a double click reaches the page in front of the person rather than being
+//!     dropped (see `pending.rs`).
+//!   * `capabilities`, `install-status` and `install` are the AppImage installing itself where
+//!     the desktop can find it and registering its file types (see `install.rs`).
 //!
 //! `ping` stays, because a launcher asks it to learn that a backend is here at all, which is
 //! the one fact every later command needs.
@@ -43,6 +48,8 @@ use serde_json::{json, Value};
 use crate::github;
 use crate::git;
 use crate::gitwrite;
+use crate::install;
+use crate::pending;
 use crate::syncfolder;
 use crate::{
     json_response, refused, shim_authority, shim_origin, token_matches, Request, Response,
@@ -120,6 +127,14 @@ pub fn handle(request: &Request, port: u16, token: &str, startup: Option<&Path>)
         // all, which is the one fact every later command needs.
         "ping" => ok(json!({ "shim": true })),
         "startup" => ok(json!({ "path": startup.map(path_text) })),
+        // The file a launch left for a shim that was already on the port (see `pending.rs`).
+        // Read and consumed here rather than returned as a field, so it opens exactly once.
+        "take-open" => ok(json!({ "path": pending::take_open(port).map(|path| path_text(&path)) })),
+        // Installing this AppImage where the desktop can reach it: what the copy can do, where
+        // it is, and the copy and registration itself (`install.rs`).
+        "capabilities" => install::capabilities(),
+        "install-status" => install::status(),
+        "install" => install::install(),
         "pick" => pick(&args),
         "read" => read(&args),
         "write" => write(&args),
@@ -561,11 +576,11 @@ pub(crate) fn path_arg(args: &Value) -> Option<PathBuf> {
 }
 
 /// The home directory, which is where a chooser with no start and a bare `list` both begin.
+///
+/// Delegates to the crate's one owner of the rule, so a chooser, a recents check and the
+/// install's folder resolution cannot disagree about where home is.
 fn home_dir() -> Option<PathBuf> {
-    std::env::var_os("HOME")
-        .or_else(|| std::env::var_os("USERPROFILE"))
-        .map(PathBuf::from)
-        .filter(|home| !home.as_os_str().is_empty())
+    crate::home_dir()
 }
 
 fn file_name(path: &Path) -> String {

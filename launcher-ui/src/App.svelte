@@ -9,7 +9,7 @@
   import { pwaInstall, promptPwaInstall } from './pwa-install';
   import { RELEASES_LATEST_PAGE, latestReleaseTag, readBuildTag, updateOffered } from './update-notice';
   import { readShimToken, shimCommand } from './shim-command';
-  import { shimRead, shimStartupPath } from './shim-files';
+  import { shimCapabilities, shimInstall, shimInstallStatus, shimRead, shimStartupPath, shimTakeOpen } from './shim-files';
   import { shimFolderLiths, shimGitCoverage, shimGitStatus } from './shim-git';
   import {
     awaitShimJob,
@@ -97,6 +97,15 @@
    * above, because what served the page cannot change while the page lives.
    */
   const shimToken = readShimToken(typeof document === 'undefined' ? null : document);
+  /**
+   * Whether a shim served this page, which is what makes its wire reachable at all.
+   *
+   * The secret's presence and nothing else: a published deployment, an instance and the
+   * desktop app all serve no tag, so this is the one fact that separates a page behind a shim
+   * from every other distribution. It is what lets the install offer, which the desktop app
+   * answers through Tauri, be answered here through the wire instead.
+   */
+  const shimBackend = shimToken !== null;
   /**
    * Whether the shim that served this page answered its command wire.
    *
@@ -258,13 +267,22 @@
   async function refreshInstallState() {
     if (mode !== 'tauri') {
       installDismissed = await isInstallDismissed();
+      // The shim answers the same question the desktop app answers through Tauri, through its
+      // wire: whether this copy can install itself, and the state of the copy already on disk.
+      // A page behind no shim has no copy to install, so this stays the browser's own offer.
+      if (shimBackend) {
+        await refreshShimInstallState();
+      }
       // A browser's install prompt is what the webapp offer waits on, and that
       // arrives when it arrives; this only stops the footer guessing in the meantime.
       installOfferReady = true;
       // The shim's notice is the one browser-side offer that has to ask the network, and
       // it asks here rather than above for the desktop branch's own reason: a user who
       // dismissed the notice must not watch it arrive for as long as the answer takes.
-      if (shimUpdateHost && !installDismissed) {
+      // Only an installed, current copy asks, matching the desktop app's gate: a copy that is
+      // not installed is offered Install instead, and an update notice beside it would be a
+      // weaker second offer for the same button.
+      if (shimUpdateHost && !installDismissed && installState === 'current') {
         await checkForInstallUpdate();
       }
       return;
@@ -308,6 +326,25 @@
     // the button back on screen for as long as the answer took.
     if (launchedFromInstall && !installDismissed) {
       await checkForInstallUpdate();
+    }
+  }
+
+  /**
+   * What the shim's own copy can do and what state it is in, asked through its wire.
+   *
+   * The same two facts the desktop app reads through Tauri, in the same shape, so the offer
+   * rule below reads one state in both modes. A wire that did not answer is not an install:
+   * the capability stays false and no offer is drawn, rather than a button that could not work.
+   */
+  async function refreshShimInstallState(): Promise<void> {
+    const capabilities = await shimCapabilities({ token: shimToken });
+    platformInstallable = capabilities.ok && capabilities.value.install === true;
+    platformEntry = capabilities.ok ? capabilities.value.launch_entry : null;
+    const status = await shimInstallStatus({ token: shimToken });
+    if (status.ok) {
+      installState = status.value.installed ? (status.value.up_to_date ? 'current' : 'stale') : 'uninstalled';
+    } else {
+      installState = 'uninstalled';
     }
   }
 
@@ -365,8 +402,8 @@
    * browser-only declaration had been standing in for "not a shim" as well.
    */
   $: installOffer =
-    (!browserOnly || shimUpdateHost) && installOfferReady && !(installDismissed && installState !== 'stale')
-      ? mode === 'tauri'
+    (!browserOnly || shimUpdateHost || shimBackend) && installOfferReady && !(installDismissed && installState !== 'stale')
+      ? mode === 'tauri' || shimBackend
         ? installState === 'current' || !platformInstallable
           ? null
           : 'desktop'
@@ -426,10 +463,16 @@
       return;
     }
     if (installState === 'update') {
-      try {
-        await tauriInvoke('open_external', { url: updateUrl });
-      } catch (error) {
-        status = copy.install.openFailed(error instanceof Error ? error.message : String(error));
+      // The desktop app hands the address to Rust; a page behind a shim has no webview to hand
+      // it to, so it opens a tab the way every other browser-side link here does.
+      if (mode === 'tauri') {
+        try {
+          await tauriInvoke('open_external', { url: updateUrl });
+        } catch (error) {
+          status = copy.install.openFailed(error instanceof Error ? error.message : String(error));
+        }
+      } else {
+        openExternally(updateUrl);
       }
       return;
     }
@@ -478,6 +521,23 @@
    */
   async function openShimStartup(): Promise<void> {
     const answer = await shimStartupPath({ token: shimToken });
+    if (!answer.ok) return;
+    const path = answer.value.path;
+    if (!path) return;
+    await mountDiskPath(path);
+  }
+
+  /**
+   * Open a Lith a second launch handed to this shim, if one left a request.
+   *
+   * A launch that finds this shim already on the port joins it rather than replacing it, and
+   * the file it named cannot reach this page's wire (that process holds no secret), so it waits
+   * in a file the shim reads once (`shimTakeOpen`). Asked at boot for the window a launch just
+   * opened, and answered on a timer for the window it merely raised: bringing an already-loaded
+   * window to the front runs no boot code at all, which is the one case a boot ask cannot cover.
+   */
+  async function openShimPending(): Promise<void> {
+    const answer = await shimTakeOpen({ token: shimToken });
     if (!answer.ok) return;
     const path = answer.value.path;
     if (!path) return;
@@ -1664,6 +1724,13 @@
   let gitSyncIconState: SyncIndicator = 'idle';
   let gitSyncIconTitle = copy.dialogs.gitSync.title;
   let gitSyncPollTimer: ReturnType<typeof setInterval> | null = null;
+  /**
+   * The timer that asks the shim for a file a second launch handed it (see `openShimPending`).
+   *
+   * Only a shim page starts one, and it exists because the interesting case is the window this
+   * page is already in being raised rather than reloaded, which no event on this page reports.
+   */
+  let shimPendingTimer: ReturnType<typeof setInterval> | null = null;
   let gitSyncSyncingUntil = 0;
   let gitSyncTick = 0;
 
@@ -1851,7 +1918,17 @@
     installBusy = true;
     installStatus = '';
     try {
-      const result = await tauriInvoke<{ path: string; entry: string | null }>('install_monolith');
+      // The same install on both backends: the desktop app answers through Tauri, a shim
+      // through its wire. The wire's failure is a code with an optional sentence, which is
+      // turned into a thrown Error so the one report below covers both.
+      let result: { path: string; entry: string | null };
+      if (shimBackend) {
+        const answer = await shimInstall({ token: shimToken });
+        if (!answer.ok) throw new Error(answer.detail ?? answer.error);
+        result = answer.value;
+      } else {
+        result = await tauriInvoke<{ path: string; entry: string | null }>('install_monolith');
+      }
       // The tooltip is where the file went. The line names the entry instead when there is
       // one, because that is the thing the user can click. Neither sentence is written
       // here: what installing does on this platform is said once, in the offer's own copy,
@@ -3969,6 +4046,11 @@
     if (shimToken) {
       void probeShimBackend();
       void openShimStartup();
+      void openShimPending();
+      // A file handed to a shim already serving arrives with no boot: the browser may only
+      // raise the window this page is in. Two seconds is imperceptible for a handoff and a
+      // local request that answers null the rest of the time.
+      shimPendingTimer = setInterval(() => { void openShimPending(); }, 2000);
     }
     // A window handed over *by* a search starts searching. This launcher is the one an
     // instance serves as well as the one this device runs, so the same code answers
@@ -4153,6 +4235,7 @@
       // wiki is not held for the full staleness window.
       stopLockHeartbeat();
       if (gitSyncPollTimer) clearInterval(gitSyncPollTimer);
+      if (shimPendingTimer) clearInterval(shimPendingTimer);
       if (gitSyncBackupTimer) clearInterval(gitSyncBackupTimer);
       stopGitSyncProgressEvents?.();
       stopGitSyncProgressTimer();

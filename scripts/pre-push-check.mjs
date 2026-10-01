@@ -58,8 +58,10 @@ function checkWorkflowYaml() {
  * would simply serve no tag, and a release would go out unable to say a newer one
  * exists. The two halves of that are in files that cannot see each other, so the
  * workflow side is pinned here: the shim job's build step sets LITHIC_BUILD_TAG from
- * the same tag step the Tauri job reads, which is also what makes the two Linux
- * downloads of one release carry one tag.
+ * the same tag step the Windows job reads, which is also what makes the downloads
+ * of one release carry one tag. The shim is the only Linux artifact the release
+ * publishes now; the WebKitGTK build still lives in `src-tauri` and builds by hand
+ * (see `README.md`), so its absence from the workflow is no longer an error.
  *
  * Returns null when the shim build is tagged, else a failure message.
  */
