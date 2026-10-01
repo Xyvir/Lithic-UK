@@ -23,8 +23,18 @@
 //! (`mode.ts`, `declaresBrowserOnly`), so a loopback origin resolves to `webapp`
 //! rather than to the instance the machine rules would read it as. That is why the
 //! server is the one to add it, since the launcher file cannot declare what it is,
-//! only its server can. So [`inject_browser_only_meta`] puts that meta tag into the
+//! only its server can. So [`inject_server_meta`] puts that meta tag into the
 //! launcher as it is served, and nothing on disk changes.
+//!
+//! The same insertion carries a second tag: the release tag this binary was built
+//! from, [`BUILD_TAG_META_NAME`], whenever the build has one. GitHub answers
+//! `releases/latest` with CORS open to any origin, so the launcher asks it directly
+//! and needs no backend behind the shim to know a newer AppImage exists; all the
+//! shim contributes is which build it is, which only the shim can know. A build
+//! whose tag was never baked in carries none, so a run from a checkout offers
+//! nothing, which is the rule the desktop app already follows. That is what makes a
+//! local build untagged without a second flag, so the shim job in the release
+//! workflow is the one thing that has to set [`BUILD_TAG_ENV`].
 //!
 //! Two consequences of browser storage are built into the serving model rather
 //! than left to chance, because both silently lose a person's wiki:
@@ -56,6 +66,21 @@ use std::time::Duration;
 /// The name is `BROWSER_ONLY_META` in `launcher-ui/src/mode.ts`, and the two have
 /// to agree, so a change there is a change here.
 pub const BROWSER_ONLY_META_NAME: &str = "lithic-browser-only";
+
+/// The meta tag carrying the release tag this binary was built from.
+///
+/// A build with one is a build the release workflow cut, and the tag is how the
+/// launcher tells two things at once: that this page came from a shim rather than
+/// from a static host or an instance, and which release it is, so it can compare
+/// itself against GitHub's newest. A build with no tag serves no tag.
+///
+/// The name is read by `readBuildTag` in `launcher-ui/src/update-notice.ts`, and the
+/// two have to agree, so a change there is a change here.
+pub const BUILD_TAG_META_NAME: &str = "lithic-build-tag";
+
+/// The compile-time variable the release workflow sets to the tag it cut a build
+/// from. It is read through [`build_tag`], and nothing sets it for a local build.
+pub const BUILD_TAG_ENV: &str = "LITHIC_BUILD_TAG";
 
 /// The port a shim listens on unless it is told otherwise.
 ///
@@ -238,16 +263,37 @@ pub fn payload_warnings(root: &Path) -> Vec<String> {
 /// byte-for-byte the same length as the original (only ASCII case changes), so an
 /// offset found in one is an offset in the other.
 pub fn inject_browser_only_meta(html: &str) -> String {
+    inject_server_meta(html, None)
+}
+
+/// Inject the tags this server is the only one able to add: the browser-only
+/// declaration, and the build tag when this binary carries one.
+///
+/// Both go in at one offset in one pass, so neither can land on the far side of a
+/// raw text element from the other. Either is skipped when the document already
+/// carries it, which is what makes a second pass a no-op rather than a second tag.
+/// `build_tag` is `None` for a build the release workflow did not cut, and the
+/// document then goes out with the declaration alone.
+pub fn inject_server_meta(html: &str, build_tag: Option<&str>) -> String {
     let lower = html.to_ascii_lowercase();
-    if declares_browser_only(&lower) {
+    let mut tags = String::new();
+    if !declares_browser_only(&lower) {
+        tags.push_str(&meta_tag());
+    }
+    if let Some(tag) = build_tag {
+        if !declares_build_tag(&lower) {
+            tags.push_str(&build_tag_meta_tag(tag));
+        }
+    }
+    if tags.is_empty() {
         return html.to_string();
     }
     let Some(at) = injection_offset(&lower) else {
         return html.to_string();
     };
-    let mut out = String::with_capacity(html.len() + 64);
+    let mut out = String::with_capacity(html.len() + tags.len());
     out.push_str(&html[..at]);
-    out.push_str(&meta_tag());
+    out.push_str(&tags);
     out.push_str(&html[at..]);
     out
 }
@@ -255,6 +301,46 @@ pub fn inject_browser_only_meta(html: &str) -> String {
 /// The tag itself, in the empty-element style the launcher's own head uses.
 pub fn meta_tag() -> String {
     format!("<meta name=\"{BROWSER_ONLY_META_NAME}\" content=\"1\" />")
+}
+
+/// The build tag's tag, the same shape as [`meta_tag`].
+pub fn build_tag_meta_tag(tag: &str) -> String {
+    format!("<meta name=\"{BUILD_TAG_META_NAME}\" content=\"{tag}\" />")
+}
+
+/// The release tag this binary was built from, or `None` for a build the release
+/// workflow did not cut.
+///
+/// Read at compile time, so it is a property of the binary rather than of the
+/// machine it runs on, and so a release build is the only kind that has one.
+pub fn build_tag() -> Option<&'static str> {
+    option_env!("LITHIC_BUILD_TAG").filter(|tag| is_tag_safe(tag))
+}
+
+/// Whether a tag can go into an attribute exactly as it is.
+///
+/// The release tags look like `v2026.09.30-2116`, so this is not a parser: it is
+/// the guard that keeps a tag somebody exported by hand out of the served
+/// document, where it would otherwise land in an attribute unescaped. A tag that
+/// fails it is treated as no tag at all.
+fn is_tag_safe(tag: &str) -> bool {
+    !tag.is_empty()
+        && tag.len() <= 64
+        && tag
+            .chars()
+            .all(|character| character.is_ascii_alphanumeric() || matches!(character, '.' | '-' | '_' | '+'))
+}
+
+/// Whether a document already carries a build tag. Takes the lowercased form.
+///
+/// Presence alone rather than the value: a document that already has one has been
+/// through this already, and a second would leave the launcher reading whichever
+/// the browser found first.
+pub fn declares_build_tag(lowercased_html: &str) -> bool {
+    let name = BUILD_TAG_META_NAME;
+    lowercased_html.contains(&format!("name=\"{name}\""))
+        || lowercased_html.contains(&format!("name='{name}'"))
+        || lowercased_html.contains(&format!("name={name}"))
 }
 
 /// Whether a document already declares browser-only. Takes the lowercased form.
@@ -494,7 +580,7 @@ pub fn handle(request: &Request, root: &Path, root_canonical: &Path, port: u16) 
     let is_launcher = file.file_name().and_then(|name| name.to_str()) == Some("launcher.html");
     if is_launcher {
         match String::from_utf8(body) {
-            Ok(text) => body = inject_browser_only_meta(&text).into_bytes(),
+            Ok(text) => body = inject_server_meta(&text, build_tag()).into_bytes(),
             Err(error) => body = error.into_bytes(),
         }
     }
@@ -1017,6 +1103,65 @@ mod tests {
         let engine = payload.request("/src/lithic.html");
         assert_eq!(engine.status, 200);
         assert!(!body_of(&engine).contains(BROWSER_ONLY_META_NAME));
+        // The wiki engine is not a shim's page either, so it carries neither tag.
+        assert!(!body_of(&engine).contains(BUILD_TAG_META_NAME));
+    }
+
+    #[test]
+    fn the_build_tag_rides_along_with_the_declaration() {
+        let html = "<!DOCTYPE html>\n<html><head><title>t</title></head><body>x</body></html>\n";
+        let tag = "v2026.09.30-2116";
+        let injected = inject_server_meta(html, Some(tag));
+        let both = format!("{}{}", meta_tag(), build_tag_meta_tag(tag));
+        assert_eq!(injected.replace(&both, ""), html, "the document changed beyond the insertion");
+        assert_eq!(injected.matches(BUILD_TAG_META_NAME).count(), 1);
+        let at = injected.find(&meta_tag()).expect("the declaration was inserted");
+        assert!(injected[at..].starts_with(&both), "the two tags are not together");
+        assert!(
+            injected[at + both.len()..].to_ascii_lowercase().starts_with("</head>"),
+            "the pair does not sit immediately before the head's close"
+        );
+        // The declaration's own position rule still holds with the tag beside it.
+        assert_inserted_at_the_top_of_the_head(html, &injected.replace(&build_tag_meta_tag(tag), ""));
+        assert!(declares_build_tag(&injected.to_ascii_lowercase()));
+    }
+
+    #[test]
+    fn a_build_with_no_tag_serves_no_tag() {
+        let html = "<html><head></head><body></body></html>";
+        let injected = inject_server_meta(html, None);
+        assert!(!declares_build_tag(&injected.to_ascii_lowercase()));
+        assert_eq!(
+            injected,
+            format!("<html><head>{}</head><body></body></html>", meta_tag())
+        );
+    }
+
+    #[test]
+    fn the_served_launcher_carries_a_tag_exactly_when_the_build_has_one() {
+        // The correspondence, rather than the environment: green both in a plain
+        // checkout (no tag, so none is served) and in a release build (the tag the
+        // workflow baked in, served beside the declaration), so it never asserts
+        // something about whoever happened to run it.
+        let payload = Payload::new("tag");
+        let served = body_of(&payload.request("/src/launcher.html"));
+        match build_tag() {
+            Some(tag) => assert!(served.contains(&build_tag_meta_tag(tag))),
+            None => assert!(!declares_build_tag(&served.to_ascii_lowercase())),
+        }
+    }
+
+    #[test]
+    fn a_tag_that_cannot_go_into_an_attribute_is_refused() {
+        // The guard on an environment variable a person can export by hand, since a
+        // tag is written into an attribute rather than escaped into one.
+        assert!(is_tag_safe("v2026.09.30-2116"));
+        assert!(is_tag_safe("0.0.282"));
+        assert!(is_tag_safe("v1.0.0+linux"));
+        assert!(!is_tag_safe(""));
+        assert!(!is_tag_safe("   "));
+        assert!(!is_tag_safe("v1\"><script>alert(1)</script>"));
+        assert!(!is_tag_safe(&"a".repeat(65)));
     }
 
     #[test]
@@ -1134,6 +1279,21 @@ mod tests {
     }
 
     #[test]
+    fn injecting_the_tags_twice_changes_nothing() {
+        let html = "<html><head><title>t</title></head><body></body></html>";
+        let tag = "v2026.09.30-2116";
+        let once = inject_server_meta(html, Some(tag));
+        assert_eq!(inject_server_meta(&once, Some(tag)), once);
+        // A document that already declares the mount but not the build, which is the
+        // state one pass leaves behind when it ran with no tag to add.
+        let declared = inject_server_meta(html, None);
+        let tagged = inject_server_meta(&declared, Some(tag));
+        assert!(tagged.contains(&build_tag_meta_tag(tag)));
+        assert_eq!(tagged.matches(BROWSER_ONLY_META_NAME).count(), 1);
+        assert_eq!(inject_server_meta(&tagged, Some(tag)), tagged);
+    }
+
+    #[test]
     fn a_document_without_a_head_still_gets_the_declaration() {
         let injected = inject_browser_only_meta("<html><body>fragment</body></html>");
         let at = injected.find(&meta_tag()).expect("the tag was inserted");
@@ -1159,6 +1319,15 @@ mod tests {
         let injected = inject_browser_only_meta(&html);
         assert_eq!(injected.len(), html.len() + meta_tag().len());
         assert_inserted_at_the_top_of_the_head(&html, &injected);
+        // The same rule has to survive the pair, since a release build serves both
+        // tags and the build tag is longer than the declaration.
+        let tag = "v2026.09.30-2116";
+        let tagged = inject_server_meta(&html, Some(tag));
+        assert_eq!(
+            tagged.len(),
+            html.len() + meta_tag().len() + build_tag_meta_tag(tag).len()
+        );
+        assert_inserted_at_the_top_of_the_head(&html, &tagged.replace(&build_tag_meta_tag(tag), ""));
         assert!(html.matches("</head>").count() > 1, "the artifact stopped exercising the script case");
         assert_ne!(
             html.find("</head>"),

@@ -445,6 +445,14 @@ jobs:
       # packages; only their cache version string is at stake, and build-server
       # bumps those in its own commit.
       - name: Build Shim AppImage
+        env:
+          # The tag this build was cut from, compiled into the binary and served as a
+          # meta tag beside the browser-only declaration, which is how the launcher
+          # knows a newer release exists and can point at it. The same string the
+          # Tauri job bakes, so both Linux downloads of one release carry one tag; a
+          # build with it unset (a checkout, a debug build) serves no tag and offers
+          # no update, which is the rule the desktop app already follows.
+          LITHIC_BUILD_TAG: ${{ steps.tag.outputs.date }}
         run: bash scripts/build-shim-appimage.sh --name "${{ steps.tag.outputs.shim }}" --output-dir dist
 
       # The point of this artifact is the number in this table, so it is reported

@@ -8,15 +8,18 @@
  *   3. lockfile sync (every dep in package.json is the spec the lock records,
  *      so `npm ci` cannot fail with EUSAGE in CI)
  *   4. workflow YAML sanity (js-yaml parse of every .github/workflows file)
- *   5. the release trigger (every path the release commits is excluded from the
+ *   5. the shim's build tag (the release workflow's shim job sets
+ *      LITHIC_BUILD_TAG, which is the only thing that can turn the shim's update
+ *      notice on: a build without it serves no tag and offers nothing)
+ *   6. the release trigger (every path the release commits is excluded from the
  *      push trigger that starts it — otherwise a run's own commit starts
  *      another run, forever)
- *   6. the light distribution guard (variants/lithic-light.html against
+ *   7. the light distribution guard (variants/lithic-light.html against
  *      src/lithic.html: same core, same plugin versions, still flash-sized)
- *   7. cargo check (Rust type/borrow check — catches the recent E07xx class
+ *   8. cargo check (Rust type/borrow check — catches the recent E07xx class
  *      of release-workflow failures)
- *   8. cargo clippy (Rust lint pass, warnings are failures)
- *   9. the shim's own cargo check, clippy and unit tests (shim/Cargo.toml: a
+ *   9. cargo clippy (Rust lint pass, warnings are failures)
+ *  10. the shim's own cargo check, clippy and unit tests (shim/Cargo.toml: a
  *      crate of its own beside src-tauri, so nothing above compiles it, and it
  *      is what the small Linux AppImage carries)
  *
@@ -47,6 +50,43 @@ function checkWorkflowYaml() {
     }
   }
   return problems.length === 0 ? null : problems.join('\n  ');
+}
+
+/**
+ * The shim's update notice is decided by a tag the release build compiles in, and
+ * nothing inside the shim can notice that the workflow stopped setting it: the binary
+ * would simply serve no tag, and a release would go out unable to say a newer one
+ * exists. The two halves of that are in files that cannot see each other, so the
+ * workflow side is pinned here: the shim job's build step sets LITHIC_BUILD_TAG from
+ * the same tag step the Tauri job reads, which is also what makes the two Linux
+ * downloads of one release carry one tag.
+ *
+ * Returns null when the shim build is tagged, else a failure message.
+ */
+function checkShimBuildTag() {
+  const file = '.github/workflows/desktop-release.yaml';
+  let doc;
+  try {
+    doc = loadYaml(fs.readFileSync(file, 'utf8'));
+  } catch (error) {
+    return `${file}: ${String(error.message).split(/\r?\n/)[0]}`;
+  }
+  const job = (doc.jobs || {})['build-shim-appimage'];
+  if (!job) {
+    return `${file}: the build-shim-appimage job is gone — point this check at whatever replaced it`;
+  }
+  const build = (job.steps || []).find((step) => /Build Shim AppImage/.test(step.name || ''));
+  if (!build) {
+    return `${file}: the shim job has no "Build Shim AppImage" step — point this check at whatever replaced it`;
+  }
+  const tag = (build.env || {}).LITHIC_BUILD_TAG;
+  if (!tag) {
+    return `${file}: the shim build does not set LITHIC_BUILD_TAG, so a released shim could never offer a newer one`;
+  }
+  if (!/steps\.tag\.outputs\.date/.test(String(tag))) {
+    return `${file}: the shim's LITHIC_BUILD_TAG is ${tag}, which is not the tag step's date output — the tag the launcher compares is that same output`;
+  }
+  return null;
 }
 
 /**
@@ -241,6 +281,16 @@ if (yamlProblems === null) {
   failed = true;
   console.log('FAILED');
   console.log('  ' + yamlProblems);
+}
+
+process.stdout.write('> shim build tag                 ');
+const tagProblem = checkShimBuildTag();
+if (tagProblem === null) {
+  console.log('OK');
+} else {
+  failed = true;
+  console.log('FAILED');
+  console.log('  ' + tagProblem);
 }
 
 process.stdout.write('> release trigger                ');
