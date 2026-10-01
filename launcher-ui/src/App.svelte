@@ -10,6 +10,22 @@
   import { RELEASES_LATEST_PAGE, latestReleaseTag, readBuildTag, updateOffered } from './update-notice';
   import { readShimToken, shimCommand } from './shim-command';
   import { shimRead, shimStartupPath } from './shim-files';
+  import { shimFolderLiths, shimGitCoverage, shimGitStatus } from './shim-git';
+  import {
+    awaitShimJob,
+    shimClearFolderPick,
+    shimCreateRepo,
+    shimDeviceCode,
+    shimDevicePoll,
+    shimGitCancel,
+    shimGitDisconnect,
+    shimGitFolder,
+    shimGitHeartbeat,
+    shimGitReauth,
+    shimGitSetup,
+    shimListRepos,
+    shimPickFolder
+  } from './shim-sync';
   import { bootLegacyWiki, bootLegacyHtml, writeHandoff, type RemoteTarget } from './legacy-launcher-runtime';
   import { EMOJI_LIST, uploadInstanceIcon, clearInstanceIcon, emojiFaviconUrl, applyFavicon, bustIconCache, readInstanceEmoji, readServerEmoji, saveInstanceEmoji, clearInstanceEmoji, instanceMarkUrl } from './instance-icon';
   import { getRecentFiles, addRecentFile, removeRecentFile, addBrowserOnlyRecent, removeBrowserOnlyRecent, clearAllRecentFiles, purgeOldestCachesIfNeeded, saveSearchCache, forgetWikiCache, cachedWikiNames, idb, getSearchCacheText, readFetchedLith, rememberFetchedLith, listWikiVersions, wikiHasHistory, downloadWikiVersion, getDirtyState, clearDirtyState, listDirtyRecoveries, isWikiDriftedFromHead, isInstallDismissed, setInstallDismissed, recentDiskPath, type RecentEntry } from './storage';
@@ -91,6 +107,22 @@
    * wire reads it here instead of asking again.
    */
   let shimBackendUp = false;
+  /**
+   * Whether this page can ask a process about a folder's backup at all.
+   *
+   * Two distributions can. The desktop app, whose Rust bridge owns the git repository, and a
+   * shim, whose wire answers the same questions out of `.git/config` (`shim/src/git.rs`). A
+   * published deployment and an instance cannot ask about *this machine's* folders, which is
+   * why the checks that used to read "is this the app" read this instead.
+   *
+   * Both halves now, reads and writes. What the shim cannot do is bounded by the *document* it
+   * serves rather than by this flag: it injects its per-launch secret into the launcher page
+   * alone, so the wiki page a saved Lith opens as has no wire to reach and the save-time commit
+   * rides on the desktop app's bridge (`legacy-launcher-runtime.ts`). Everything the launcher
+   * page itself does, this flag covers in both backends, and the calls that still name one
+   * backend say why at their call site.
+   */
+  $: hasLocalSync = mode === 'tauri' || shimToken !== null;
   /**
    * A shim that served this page answers `file` on every browser, because the shim itself
    * writes the path the desktop's chooser named: on Firefox the platform has no File System
@@ -592,6 +624,18 @@
    */
   interface GitSyncStatus { connected: boolean; repo: string; in_flight?: boolean }
 
+  /**
+   * What `git_sync_heartbeat` returns, in either backend's shape. `last_commit_error` is the
+   * last save that failed to reach GitHub, which is the only way a push that died inside the
+   * engine document is ever visible.
+   */
+  interface GitSyncHealth {
+    state: HealthState;
+    repo: string;
+    detail: string;
+    last_commit_error?: string | null;
+  }
+
   // Connect is a few long blocking git calls inside Rust (fetch, rescue writes,
   // commit, push). The stage it reports plus a live seconds counter is what
   // keeps a slow first sync from looking like a hung app.
@@ -759,13 +803,13 @@
   async function resolveSyncFolder(derived: string | null): Promise<void> {
     const token = ++gitSyncResolveToken;
     gitSyncResolvedFor = derived;
-    if (mode !== 'tauri') {
+    if (!hasLocalSync) {
       gitSyncPreferredFolder = null;
       return;
     }
     let answer: { folder: string | null; overridden: boolean } | null = null;
     try {
-      answer = await tauriInvoke<{ folder: string | null; overridden: boolean } | null>('git_sync_folder', { derived });
+      answer = await readGitFolder(derived);
     } catch {
       answer = null;
     }
@@ -800,7 +844,7 @@
    * pick from the empty line gives the dialog something to act on. Which is the one route
    * out of this state that exists.
    */
-  $: gitSyncNoTarget = mode === 'tauri' && !(gitSyncPreferredFolder ?? gitSyncSubject);
+  $: gitSyncNoTarget = hasLocalSync && !(gitSyncPreferredFolder ?? gitSyncSubject);
 
   /**
    * Whether the folder line is the control or the answer.
@@ -811,9 +855,9 @@
    * dialog names the folder instead. Variables rather than conditions asked in the markup,
    * for the usual reason: Svelte only re-runs a block when a variable it *names* changes.
    */
-  $: gitSyncFolderEditable = mode === 'tauri' && gitSyncView !== 'connected';
+  $: gitSyncFolderEditable = hasLocalSync && gitSyncView !== 'connected';
   /** The other half of that line: connected, so the folder is named rather than offered. */
-  $: gitSyncFolderLive = mode === 'tauri' && gitSyncView === 'connected';
+  $: gitSyncFolderLive = hasLocalSync && gitSyncView === 'connected';
 
   /**
    * Ask the OS for the folder to back up, instead of the one Lithic worked out.
@@ -824,14 +868,15 @@
    *
    * Rust keeps the choice in the recents sidecar beside the exe, spelled relative to the
    * bundle when it lives under it, so a thumb drive keeps backing up its own folder on a
-   * machine that gives the drive another letter.
+   * machine that gives the drive another letter. A shim has no sidecar, so its half keeps the
+   * same one line in its own data directory ('git-folder' in `shim/src/syncfolder.rs`).
    */
   async function chooseSyncFolder(): Promise<void> {
     if (gitSyncPicking || gitSyncBusy) return;
     gitSyncPicking = true;
     gitSyncFolderError = '';
     try {
-      const picked = await tauriInvoke<string | null>('pick_sync_folder', { current: gitSyncFolder || null });
+      const picked = await pickSyncFolder();
       if (picked) {
         // Re-read rather than trust the path we were handed: Rust is the one that spells
         // the folder portably, and the read is also what moves the override flag.
@@ -847,12 +892,32 @@
     }
   }
 
+  /**
+   * Ask the OS for the folder to back up, in whichever backend keeps the choice.
+   *
+   * `null` is a cancelled pick and is not an error; a `no-picker` code from a shim is, because
+   * that machine has no chooser to show and the line under the folder is where that is said.
+   */
+  async function pickSyncFolder(): Promise<string | null> {
+    if (mode === 'tauri') {
+      return tauriInvoke<string | null>('pick_sync_folder', { current: gitSyncFolder || null });
+    }
+    const answer = await shimPickFolder(gitSyncFolder || null, { token: shimToken });
+    if (!answer.ok) throw new Error(answer.detail ?? answer.error);
+    return answer.value.folder;
+  }
+
   /** Put the folder Lithic works out back, dropping the recorded choice. */
   async function clearSyncFolderOverride(): Promise<void> {
     if (gitSyncBusy) return;
     gitSyncFolderError = '';
     try {
-      await tauriInvoke('clear_sync_folder_override');
+      if (mode === 'tauri') {
+        await tauriInvoke('clear_sync_folder_override');
+      } else {
+        const answer = await shimClearFolderPick({ token: shimToken });
+        if (!answer.ok) throw new Error(answer.detail ?? answer.error);
+      }
       await resolveSyncFolder(gitSyncSubject);
       await refreshGitSyncStatus(true);
     } catch (error) {
@@ -869,7 +934,15 @@
     if (gitSyncCancelling) return;
     gitSyncCancelling = true;
     try {
-      await tauriInvoke('git_sync_cancel');
+      if (mode === 'tauri') {
+        await tauriInvoke('git_sync_cancel');
+      } else if (gitSyncJobId !== null) {
+        // A shim stops one job rather than "the current one", because its commands are
+        // stateless and several could in principle be running. Nothing to name means the run
+        // this would have stopped has already ended.
+        const answer = await shimGitCancel(gitSyncJobId, { token: shimToken });
+        if (!answer.ok) gitSyncCancelling = false;
+      }
     } catch {
       gitSyncCancelling = false;
     }
@@ -887,24 +960,171 @@
    * than reported as un-backup-up because only the root holds the `.git`.
    */
   async function refreshBackupCoverage(): Promise<void> {
-    if (mode !== 'tauri') return;
+    if (!hasLocalSync) return;
     const paths = recentRows().map((row) => row.path).filter((path): path is string => Boolean(path));
     if (paths.length === 0) {
       backupRoots = {};
       return;
     }
     try {
-      backupRoots = await tauriInvoke<Record<string, string>>('git_sync_coverage', { paths });
+      backupRoots = await readGitCoverage(paths);
     } catch {
       backupRoots = {};
     }
+  }
+
+  /**
+   * Which of these paths sit in a backed-up folder, through whichever process can answer.
+   *
+   * The desktop app asks its Rust bridge; a shim asks its own wire, which answers the same
+   * shape from the marker in `.git/config`. One function because three callers want it (the
+   * boot read, the index pass and the rebuild) and a mode branch at each of them is a branch
+   * that drifts.
+   */
+  async function readGitCoverage(paths: string[]): Promise<Record<string, string>> {
+    if (mode === 'tauri') return tauriInvoke<Record<string, string>>('git_sync_coverage', { paths });
+    const answer = await shimGitCoverage(paths, { token: shimToken });
+    if (!answer.ok) throw new Error(answer.error);
+    return answer.value;
+  }
+
+  /**
+   * The rest of the sync surface, through whichever process can answer it.
+   *
+   * Every read and write below is written once and branches on `mode` inside, rather than
+   * leaving a `mode === 'tauri'` ternary at each of the dozen call sites that want it: an
+   * answer's *shape* has to agree between the two backends (the launcher's decoding is shared),
+   * and a branch per call site is a branch that drifts. The shim's half is `shim-sync.ts`, and
+   * the one place its answers differ is the job model, which `runShimSyncJob` folds back into
+   * the shape the desktop app's blocking commands return.
+   */
+  async function readGitFolder(derived: string | null): Promise<{ folder: string | null; overridden: boolean }> {
+    if (mode === 'tauri') {
+      return (
+        (await tauriInvoke<{ folder: string | null; overridden: boolean } | null>('git_sync_folder', { derived })) ?? {
+          folder: null,
+          overridden: false
+        }
+      );
+    }
+    const answer = await shimGitFolder(derived, { token: shimToken });
+    if (!answer.ok) throw new Error(answer.detail ?? answer.error);
+    return answer.value;
+  }
+
+  /** Whether the folder behind a path is a repository Lithic backs up. */
+  async function readGitStatus(path: string): Promise<GitSyncStatus | null> {
+    if (mode === 'tauri') return tauriInvoke<GitSyncStatus | null>('git_sync_status', { path });
+    const answer = await shimGitStatus(path, { token: shimToken });
+    if (!answer.ok) throw new Error(answer.error);
+    return answer.value;
+  }
+
+  /** Whether that backup still works: a revoked token, a deleted repo, a read-only one. */
+  async function readGitHeartbeat(path: string): Promise<GitSyncHealth | null> {
+    if (mode === 'tauri') return tauriInvoke<GitSyncHealth | null>('git_sync_heartbeat', { path });
+    const answer = await shimGitHeartbeat(path, { token: shimToken });
+    if (!answer.ok) throw new Error(answer.error);
+    return answer.value;
+  }
+
+  /**
+   * Run a shim sync job to its end and hand back the desktop app's own answer shape.
+   *
+   * A shim answers a long connect with a job id rather than with the work done, because a first
+   * fetch, rescue, commit and push can outlive the wire's write timeout. This is where that id
+   * becomes the answer the flow already expects, reporting each stage into the dialog's progress
+   * line as it moves. The id is kept in `gitSyncJobId` for the whole run so the modal's Stop can
+   * reach it. A job a person stopped is not a fault: it answers with the one line that says so.
+   */
+  async function runShimSyncJob<T>(handle: { job: number }): Promise<T> {
+    gitSyncJobId = handle.job;
+    try {
+      const job = await awaitShimJob<T>(handle.job, {
+        call: { token: shimToken },
+        onStage: (stage) => {
+          gitSyncStage = stage;
+        }
+      });
+      if (!job.ok) throw new Error(job.error === 'cancelled' ? copy.dialogs.gitSync.cancelled : job.error);
+      return job.value;
+    } finally {
+      gitSyncJobId = null;
+    }
+  }
+
+  /** A shim sync job's id while it runs, so the modal's Stop has something to cancel. */
+  let gitSyncJobId: number | null = null;
+
+  /**
+   * The four GitHub calls the device flow makes, through whichever side can reach GitHub.
+   *
+   * The shim makes all four rather than leaving the two REST ones to the page: doing them there
+   * means one token path and one place the credential is handled, which is worth more than the
+   * two cross-origin reads it saves. `detail` is what a refusal from GitHub says about itself,
+   * so it is what is raised when there is one.
+   */
+  async function githubDeviceCode(): Promise<unknown> {
+    if (mode === 'tauri') return tauriInvoke<unknown>('github_device_code');
+    const answer = await shimDeviceCode({ token: shimToken });
+    if (!answer.ok) throw new Error(answer.detail ?? answer.error);
+    return answer.value;
+  }
+
+  async function githubDevicePoll(deviceCode: string): Promise<unknown> {
+    if (mode === 'tauri') return tauriInvoke<unknown>('github_device_poll', { deviceCode });
+    const answer = await shimDevicePoll(deviceCode, { token: shimToken });
+    if (!answer.ok) throw new Error(answer.detail ?? answer.error);
+    return answer.value;
+  }
+
+  async function githubListRepos(token: string): Promise<Array<{ full_name: string }>> {
+    if (mode === 'tauri') return tauriInvoke<Array<{ full_name: string }>>('github_list_repos', { token });
+    const answer = await shimListRepos(token, { token: shimToken });
+    if (!answer.ok) throw new Error(answer.detail ?? answer.error);
+    return answer.value;
+  }
+
+  async function githubCreateRepo(token: string, name: string): Promise<{ full_name: string }> {
+    if (mode === 'tauri') return tauriInvoke<{ full_name: string }>('github_create_repo', { token, name });
+    const answer = await shimCreateRepo(token, name, { token: shimToken });
+    if (!answer.ok) throw new Error(answer.detail ?? answer.error);
+    return answer.value;
+  }
+
+  /** A first connect: clone or adopt the folder, commit it, push, and answer the folder's wikis. */
+  async function gitSetup(path: string, repo: string, token: string): Promise<GitSyncSetupResult> {
+    if (mode === 'tauri') return tauriInvoke<GitSyncSetupResult>('git_sync_setup', { path, repo, token });
+    const started = await shimGitSetup(path, repo, token, { token: shimToken });
+    if (!started.ok) throw new Error(started.detail ?? started.error);
+    return runShimSyncJob<GitSyncSetupResult>(started.value);
+  }
+
+  /** Land a fresh token on the remote the folder already has. */
+  async function gitReauth(path: string, repo: string, token: string): Promise<void> {
+    if (mode === 'tauri') {
+      await tauriInvoke('git_sync_reauth', { path, repo, token });
+      return;
+    }
+    const answer = await shimGitReauth(path, repo, token, { token: shimToken });
+    if (!answer.ok) throw new Error(answer.detail ?? answer.error);
+  }
+
+  /** Drop the managed origin, so saves in that folder stop being pushed. */
+  async function gitDisconnect(path: string): Promise<void> {
+    if (mode === 'tauri') {
+      await tauriInvoke('git_sync_disconnect', { path });
+      return;
+    }
+    const answer = await shimGitDisconnect(path, { token: shimToken });
+    if (!answer.ok) throw new Error(answer.detail ?? answer.error);
   }
 
   $: backupCoverage = computeBackupCoverage(recentRows(), backupRoots);
   $: localOnlyPaths = new Set(backupCoverage.localOnlyPaths);
   // Coverage only means something once something is backed up: with nothing,
   // every row is un-backed-up and the marks would say nothing about any of them.
-  $: showBackupStatus = mode === 'tauri' && hasBackedUpRepo(backupRoots);
+  $: showBackupStatus = hasLocalSync && hasBackedUpRepo(backupRoots);
   // Where the list is derived rather than authored (the desktop app's synced folders,
   // and self-host's server) rebuilding beats clearing. The desktop app only learns its
   // own list is a view rather than a catalogue once a folder is backed up; on an instance
@@ -1044,7 +1264,7 @@
       return;
     }
     try {
-      const status = await tauriInvoke<GitSyncStatus | null>('git_sync_status', { path: target });
+      const status = await readGitStatus(target);
       // An answer asked for before the last decision about this dialog describes a folder
       // that decision has left, and is discarded rather than folded in. The same rule the
       // instance's own read follows, and the reason for it is the same one (see
@@ -1093,7 +1313,7 @@
       try {
         const decision = isSelfHost()
           ? await pollServerDeviceToken(deviceCode)
-          : parseDevicePoll(await tauriInvoke<unknown>('github_device_poll', { deviceCode }));
+          : parseDevicePoll(await githubDevicePoll(deviceCode));
         if (decision.kind === 'authorized') {
           gitAuthActive = false;
           gitDeviceToken = decision.token;
@@ -1128,7 +1348,7 @@
     try {
       const partitioned = isSelfHost()
         ? await listServerRepos(gitDeviceToken ?? '')
-        : partitionRepos(await tauriInvoke<Array<{ full_name: string }>>('github_list_repos', { token: gitDeviceToken }));
+        : partitionRepos(await githubListRepos(gitDeviceToken ?? ''));
       if ('ok' in partitioned) throw new Error(partitioned.message);
       gitManagedRepos = partitioned.managed;
       gitOtherRepos = partitioned.other;
@@ -1167,11 +1387,11 @@
     startGitSyncProgress();
     try {
       if (gitRepoChoice === '__create__') {
-        const created = await tauriInvoke<{ full_name: string }>('github_create_repo', { token: gitDeviceToken, name: repo });
+        const created = await githubCreateRepo(gitDeviceToken, repo);
         targetRepo = created.full_name;
         gitSyncMessage = copy.dialogs.gitSync.created(created.full_name);
       }
-      const result = await tauriInvoke<GitSyncSetupResult>('git_sync_setup', { path: target, repo: targetRepo, token: gitDeviceToken });
+      const result = await gitSetup(target, targetRepo, gitDeviceToken);
       gitSyncMessage += result?.summary || copy.dialogs.gitSync.synced;
       gitDeviceToken = null;
       setGitSyncView('connected');
@@ -1200,7 +1420,7 @@
     gitSyncMessage = '';
     startGitSyncProgress();
     try {
-      const result = await tauriInvoke<GitSyncSetupResult>('git_sync_setup', { path: target, repo: gitRepoInput, token: gitTokenInput });
+      const result = await gitSetup(target, gitRepoInput, gitTokenInput);
       gitSyncMessage = result?.summary || copy.dialogs.gitSync.synced;
       gitTokenInput = '';
       setGitSyncView('connected');
@@ -1248,7 +1468,7 @@
     if (!confirmed) return;
     gitSyncBusy = true;
     try {
-      await tauriInvoke('git_sync_disconnect', { path: target });
+      await gitDisconnect(target);
       gitSyncConnectedRepo = '';
       setGitSyncView('disconnected');
       void refreshBackupCoverage();
@@ -1400,7 +1620,7 @@
       if ('ok' in code) throw new Error(code.message);
       return code;
     }
-    const parsed = parseDeviceCode(await tauriInvoke<unknown>('github_device_code'));
+    const parsed = parseDeviceCode(await githubDeviceCode());
     if (!parsed) throw new Error(copy.dialogs.gitSync.noDeviceCode);
     return parsed;
   }
@@ -1420,7 +1640,7 @@
     gitSyncError = '';
     startGitSyncProgress();
     try {
-      await tauriInvoke('git_sync_reauth', { path: target, repo, token });
+      await gitReauth(target, repo, token);
       gitDeviceToken = null;
       gitSyncMessage = copy.dialogs.gitSync.reconnected(repo);
       setGitSyncView('connected');
@@ -1543,7 +1763,7 @@
    * never while the window is hidden: nobody can see the answer.
    */
   async function runGitSyncHeartbeat(force = false): Promise<void> {
-    if (mode !== 'tauri') return;
+    if (!hasLocalSync) return;
     const target = gitSyncActivePath();
     syncHealthTarget(target);
     if (!target || gitSyncHeartbeatInFlight) return;
@@ -1560,7 +1780,7 @@
     gitSyncHeartbeatInFlight = true;
     gitSyncHeartbeatAttemptAt = now;
     try {
-      const health = await tauriInvoke<{ state: HealthState; repo: string; detail: string; last_commit_error?: string | null }>('git_sync_heartbeat', { path: target });
+      const health = await readGitHeartbeat(target);
       if (!health || health.state === 'unmanaged') {
         // The marker is gone: there is no verdict left to hold, and keeping the
         // old one would paint a failure over a folder that is simply not synced.
@@ -1607,7 +1827,7 @@
   }
 
   function refreshGitSyncIcon() {
-    if (mode !== 'tauri') return;
+    if (!hasLocalSync) return;
     const target = gitSyncActivePath();
     syncHealthTarget(target);
     if (!target) {
@@ -1618,7 +1838,7 @@
     // nobody can see the icon, so skip the work until it is shown again
     // (visibilitychange triggers an immediate refresh below).
     if (typeof document !== 'undefined' && document.hidden) return;
-    tauriInvoke<GitSyncStatus | null>('git_sync_status', { path: target })
+    readGitStatus(target)
       .then((status) => foldGitSyncStatus(status))
       .catch((error) => {
         foldGitSyncStatus(null, true);
@@ -3370,10 +3590,29 @@
     void refreshBackupCoverage();
   }
 
-  /** The on-disk text of one wiki, read through Rust. */
+  /**
+   * The on-disk text of one wiki, read through whichever process can read a path.
+   *
+   * The app reads through its Rust bridge; a shim reads through its own wire, which answers
+   * the same shape of value. This is the read the re-index pass runs for every Lith it lists,
+   * so on a shim it is what makes a rebuilt folder searchable on this device rather than only
+   * listed.
+   */
   async function readDiskWikiText(path: string): Promise<string> {
+    if (mode !== 'tauri') {
+      const read = await shimRead(path, { token: shimToken });
+      if (!read.ok) throw new Error(read.error);
+      return read.value.text;
+    }
     const result = await tauriInvoke<{ name: string; path: string; text: string }>('read_lith_path', { path });
     return result?.text ?? '';
+  }
+
+  /** Every Lith in one folder, newest first, through whichever process can list it. */
+  async function readFolderLiths(path: string): Promise<string[]> {
+    if (mode === 'tauri') return tauriInvoke<string[]>('list_folder_liths', { path });
+    const answer = await shimFolderLiths(path, { token: shimToken });
+    return answer.ok ? answer.value : [];
   }
 
   /** One wiki's text from the self-host server, patch API or plain WebDAV. */
@@ -3415,10 +3654,14 @@
         const remote = !entry.path && mode === 'self-host' && patchApiAvailable
           ? await fetchRemoteWiki(entry.name)
           : null;
+        // `readDiskWikiText` already knows which process can read a path (the app's bridge or a
+        // shim's wire), so asking it is the whole of this branch. An earlier form kept a
+        // `mode === 'tauri'` check in front of it, which quietly made a shim's rebuild index
+        // nothing from disk: the helper was renderable for a shim and unreachable from here.
         const text = remote
           ? remote.text
           : entry.path
-            ? mode === 'tauri' ? await readDiskWikiText(entry.path) : ''
+            ? await readDiskWikiText(entry.path)
             : mode === 'self-host' ? await readRemoteWikiText(entry.name) : '';
         if (text) {
           await saveSearchCache(entry.name, JSON.stringify(parseLithToJSON(text)));
@@ -3493,7 +3736,7 @@
       // what lets one button do the job: the recent list is a *view* of what
       // is really there, so a stale row is removed by rebuilding instead of by
       // a separate destructive control.
-      const folders = mode === 'tauri' ? reindexFolders(recentRows(), backupRoots) : [];
+      const folders = hasLocalSync ? reindexFolders(recentRows(), backupRoots) : [];
       const discovered: Array<{ name: string; path?: string }> = [];
       let orphans: RebuildOrphan[] = [];
 
@@ -3517,11 +3760,11 @@
           new Set(),
           serverNames
         );
-      } else if (mode === 'tauri') {
+      } else if (hasLocalSync) {
         // Backed-up roots first, then each known row's own folder, so a Lith
         // that isn't backed up yet still finds its siblings.
         for (const folder of folders) {
-          const found = await tauriInvoke<string[]>('list_folder_liths', { path: folder }).catch(() => [] as string[]);
+          const found = await readFolderLiths(folder).catch(() => [] as string[]);
           for (const path of found) discovered.push({ name: path.split(/[\\/]/).pop() || path, path });
         }
 
@@ -4652,7 +4895,7 @@
       `error` with the reason in its tooltip), so an offline instance is told apart from
       a server that cannot do this at all instead of the control silently not existing.
     -->
-    {#if mode === 'webapp'}<button class="help-button" aria-label={copy.app.viewIntro} title={copy.app.viewIntro} on:click={openIntro}>{introBusy ? '…' : '?'}</button>{:else if mode === 'tauri' || isSelfHost()}<button class="sync-button {headingSyncState}" aria-label={copy.dialogs.gitSync.title} title={headingSyncTitle} on:click={openGitSyncModal}><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 17.6A5 5 0 0 0 18 8h-1.3A8 8 0 1 0 4 16.3"/><path d="M12 12v9"/><path d="m8.5 15.5 3.5-3.5 3.5 3.5"/></svg>{#if headingSyncState === 'checking'}<span class="sync-glyph ring" aria-hidden="true"></span>{:else if headingSyncState === 'error'}<span class="sync-glyph alert" aria-hidden="true">!</span>{:else if headingSyncState === 'connected'}<span class="sync-glyph dot" aria-hidden="true"></span>{/if}</button>{/if}
+    {#if mode === 'webapp'}<button class="help-button" aria-label={copy.app.viewIntro} title={copy.app.viewIntro} on:click={openIntro}>{introBusy ? '…' : '?'}</button>{:else if hasLocalSync || isSelfHost()}<button class="sync-button {headingSyncState}" aria-label={copy.dialogs.gitSync.title} title={headingSyncTitle} on:click={openGitSyncModal}><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 17.6A5 5 0 0 0 18 8h-1.3A8 8 0 1 0 4 16.3"/><path d="M12 12v9"/><path d="m8.5 15.5 3.5-3.5 3.5 3.5"/></svg>{#if headingSyncState === 'checking'}<span class="sync-glyph ring" aria-hidden="true"></span>{:else if headingSyncState === 'error'}<span class="sync-glyph alert" aria-hidden="true">!</span>{:else if headingSyncState === 'connected'}<span class="sync-glyph dot" aria-hidden="true"></span>{/if}</button>{/if}
     </div>
   </header>
   <!--
@@ -4761,13 +5004,13 @@
             <p>{copy.dialogs.gitSync.folderIntro}</p>
           {/if}
           {#if gitSyncError}<p class="status-line error" role="alert">{gitSyncError}</p>{/if}
-          {#if gitSyncBusy}<p class="sync-progress" role="status"><span class="sync-spinner" aria-hidden="true"></span><span>{gitSyncStage || copy.dialogs.gitSync.working}</span><span class="sync-elapsed">{gitSyncElapsed}s</span>{#if !gitAuthActive && mode === 'tauri'}<button type="button" class="sync-cancel" on:click={cancelGitSync}>{gitSyncCancelling ? copy.dialogs.gitSync.stopping : copy.dialogs.gitSync.stopSyncing}</button>{/if}</p>{/if}
+          {#if gitSyncBusy}<p class="sync-progress" role="status"><span class="sync-spinner" aria-hidden="true"></span><span>{gitSyncStage || copy.dialogs.gitSync.working}</span><span class="sync-elapsed">{gitSyncElapsed}s</span>{#if !gitAuthActive && hasLocalSync}<button type="button" class="sync-cancel" on:click={cancelGitSync}>{gitSyncCancelling ? copy.dialogs.gitSync.stopping : copy.dialogs.gitSync.stopSyncing}</button>{/if}</p>{/if}
           <div class="modal-actions"><button class="modal-action" disabled={gitSyncBusy} on:click={startDeviceAuth}>{gitSyncBusy ? '…' : copy.dialogs.gitSync.connect}</button></div>
           <details class="git-sync-advanced">
             <summary>{copy.dialogs.gitSync.tokenSummary}</summary>
             <input bind:value={gitRepoInput} aria-label={copy.dialogs.gitSync.repoAria} placeholder={copy.dialogs.gitSync.repoPlaceholder} on:keydown={(event) => event.key === 'Enter' && connectGitSync()} />
             <input bind:value={gitTokenInput} type="password" aria-label={copy.dialogs.gitSync.tokenAria} placeholder={copy.dialogs.gitSync.tokenPlaceholder} on:keydown={(event) => event.key === 'Enter' && connectGitSync()} />
-            {#if gitSyncBusy}<p class="sync-progress" role="status"><span class="sync-spinner" aria-hidden="true"></span><span>{gitSyncStage || copy.dialogs.gitSync.working}</span><span class="sync-elapsed">{gitSyncElapsed}s</span>{#if !gitAuthActive && mode === 'tauri'}<button type="button" class="sync-cancel" on:click={cancelGitSync}>{gitSyncCancelling ? copy.dialogs.gitSync.stopping : copy.dialogs.gitSync.stopSyncing}</button>{/if}</p>{/if}
+            {#if gitSyncBusy}<p class="sync-progress" role="status"><span class="sync-spinner" aria-hidden="true"></span><span>{gitSyncStage || copy.dialogs.gitSync.working}</span><span class="sync-elapsed">{gitSyncElapsed}s</span>{#if !gitAuthActive && hasLocalSync}<button type="button" class="sync-cancel" on:click={cancelGitSync}>{gitSyncCancelling ? copy.dialogs.gitSync.stopping : copy.dialogs.gitSync.stopSyncing}</button>{/if}</p>{/if}
             <div class="modal-actions"><button class="modal-action" disabled={!gitRepoInput || !gitTokenInput || gitSyncBusy} on:click={connectGitSync}>{gitSyncBusy ? copy.dialogs.gitSync.connecting : copy.dialogs.gitSync.connectPush}</button></div>
           </details>
         {:else if gitSyncView === 'connecting'}
@@ -4825,7 +5068,7 @@
           </details>
           {#if gitSyncError}<p class="status-line error" role="alert">{gitSyncError}</p>{/if}
           {#if gitSyncMessage}<p class="status-line" role="status">{gitSyncMessage}</p>{/if}
-          {#if gitSyncBusy}<p class="sync-progress" role="status"><span class="sync-spinner" aria-hidden="true"></span><span>{gitSyncStage || copy.dialogs.gitSync.working}</span><span class="sync-elapsed">{gitSyncElapsed}s</span>{#if !gitAuthActive && mode === 'tauri'}<button type="button" class="sync-cancel" on:click={cancelGitSync}>{gitSyncCancelling ? copy.dialogs.gitSync.stopping : copy.dialogs.gitSync.stopSyncing}</button>{/if}</p>{/if}
+          {#if gitSyncBusy}<p class="sync-progress" role="status"><span class="sync-spinner" aria-hidden="true"></span><span>{gitSyncStage || copy.dialogs.gitSync.working}</span><span class="sync-elapsed">{gitSyncElapsed}s</span>{#if !gitAuthActive && hasLocalSync}<button type="button" class="sync-cancel" on:click={cancelGitSync}>{gitSyncCancelling ? copy.dialogs.gitSync.stopping : copy.dialogs.gitSync.stopSyncing}</button>{/if}</p>{/if}
           <div class="modal-actions">
             <button class="modal-action" disabled={gitSyncBusy || !gitRepoSelection()} on:click={finalizeGitSync}>{gitSyncBusy ? copy.dialogs.gitSync.syncing : copy.dialogs.gitSync.startSync}</button>
             <button class="modal-action secondary" on:click={resetGitSyncFlow}>{copy.common.back}</button>
@@ -4846,7 +5089,7 @@
           {/if}
           {#if gitSyncError}<p class="status-line error" role="alert">{gitSyncError}</p>{/if}
           {#if gitSyncMessage}<p class="status-line" role="status">{gitSyncMessage}</p>{/if}
-          {#if gitSyncBusy}<p class="sync-progress" role="status"><span class="sync-spinner" aria-hidden="true"></span><span>{gitSyncStage || copy.dialogs.gitSync.working}</span><span class="sync-elapsed">{gitSyncElapsed}s</span>{#if !gitAuthActive && mode === 'tauri'}<button type="button" class="sync-cancel" on:click={cancelGitSync}>{gitSyncCancelling ? copy.dialogs.gitSync.stopping : copy.dialogs.gitSync.stopSyncing}</button>{/if}</p>{/if}
+          {#if gitSyncBusy}<p class="sync-progress" role="status"><span class="sync-spinner" aria-hidden="true"></span><span>{gitSyncStage || copy.dialogs.gitSync.working}</span><span class="sync-elapsed">{gitSyncElapsed}s</span>{#if !gitAuthActive && hasLocalSync}<button type="button" class="sync-cancel" on:click={cancelGitSync}>{gitSyncCancelling ? copy.dialogs.gitSync.stopping : copy.dialogs.gitSync.stopSyncing}</button>{/if}</p>{/if}
           <div class="modal-actions">
             <!--
               One action, because there is one thing left to want: stopping. Pointing the
@@ -5242,7 +5485,13 @@
           opens onto the same answer whether the Lith is unsaved, browser-only,
           or simply not where the backup is.
         -->
-        {#if historyLocalOnlyPath && historySyncedFolder}
+        <!--
+          The app only. The offer's one action is `copy_lith_to_synced_dir`, and both the copy
+          and the commit that would follow it are the desktop app's: a shim reads a folder's
+          backup state today but cannot write to it yet, so offering the copy there would hand
+          the user a button that cannot answer.
+        -->
+        {#if mode === 'tauri' && historyLocalOnlyPath && historySyncedFolder}
           <div class="history-backup-offer" role="group" aria-label={copy.dialogs.history.backupGroupAria}>
             <p title={historySyncedFolder}>{copy.dialogs.history.localOnly(historySyncedFolder)}</p>
             <button class="modal-action" on:click={() => offerCopyToSyncedDir(historyName, historyLocalOnlyPath)}>{copy.dialogs.history.copy}</button>

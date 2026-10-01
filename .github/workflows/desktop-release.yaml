@@ -409,6 +409,23 @@ jobs:
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
 
+      # The one system package this job needs, and it is a deliberate posture
+      # rather than an oversight: the shim links the SYSTEM OpenSSL, for libgit2's
+      # HTTPS transport and for `native-tls` in the device flow. `libssl` is on any
+      # Linux that has `ssh` or a package manager, so using the machine's costs the
+      # AppImage nothing, where a vendored one would be a second copy of a library
+      # the machine already patches. These are the build-time headers for that.
+      #
+      # `git` itself is the opposite call and stays packaged in: `vendored-libgit2`
+      # compiles libgit2 on this runner and links it statically, so nothing here
+      # looks for a system libgit2. 22.04 links OpenSSL 3.0, the lowest ABI any
+      # current distribution ships, which is what keeps the artifact runnable on
+      # everything newer.
+      - name: Install System Dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libssl-dev pkg-config
+
       # No launcher-ui test run here. The AppImage job runs them from the same
       # commit, and the launcher this job packages is the same build of the same
       # forty odd files, so a second run would only be a second way to fail.

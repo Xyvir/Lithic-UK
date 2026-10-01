@@ -42,10 +42,17 @@ export function readShimToken(doc: Pick<Document, 'querySelector'> | null): stri
   return content ? content : null;
 }
 
-/** What a command answered, or why it did not. */
+/**
+ * What a command answered, or why it did not.
+ *
+ * `detail` is the sentence a failure can carry beside its code: a call that reached GitHub is
+ * refused by GitHub and the shim passes its own wording through, because that text is what the
+ * user is shown (the same split the desktop app's commands make). A failure that came from the
+ * wire itself has no detail, so the code is all there is.
+ */
 export type ShimAnswer =
   | { ok: true; result: unknown }
-  | { ok: false; error: string; status?: number };
+  | { ok: false; error: string; detail?: string; status?: number };
 
 /** Where the call reads its secret and its transport from, for tests and for boot. */
 export interface ShimCall {
@@ -81,11 +88,16 @@ export async function shimCommand(
     });
     if (!response.ok) return { ok: false, error: 'refused', status: response.status };
     const payload = (await response.json().catch(() => null)) as
-      | { ok?: unknown; result?: unknown; error?: unknown }
+      | { ok?: unknown; result?: unknown; error?: unknown; detail?: unknown }
       | null;
     if (!payload || typeof payload !== 'object') return { ok: false, error: 'unreadable' };
     if (payload.ok === true) return { ok: true, result: payload.result };
-    return { ok: false, error: typeof payload.error === 'string' && payload.error ? payload.error : 'refused' };
+    const detail = typeof payload.detail === 'string' && payload.detail ? payload.detail : undefined;
+    return {
+      ok: false,
+      error: typeof payload.error === 'string' && payload.error ? payload.error : 'refused',
+      ...(detail ? { detail } : {})
+    };
   } catch {
     return { ok: false, error: 'unreachable' };
   }

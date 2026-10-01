@@ -80,6 +80,10 @@ use std::process::{Command, Stdio};
 use std::time::Duration;
 
 mod command;
+mod git;
+mod github;
+mod gitwrite;
+mod syncfolder;
 
 /// The meta tag the launcher reads to decide it is a browser mount rather than an
 /// instance. It says nothing about where saves land: that is the platform's answer.
@@ -1100,6 +1104,26 @@ fn first_chromium(lookup: impl Fn(&str) -> bool) -> Option<&'static str> {
     CHROMIUM_PROGRAMS.iter().copied().find(|&program| lookup(program))
 }
 
+/// The directory this shim keeps its own state in, under the platform's data home.
+///
+/// It is the shim's alone. The browser profile lives below it, and so does the one-line file
+/// that records a folder pick (`syncfolder.rs`), which is the Linux analogue of the recents
+/// sidecar the desktop app keeps beside its executable. A separate function from the profile
+/// below rather than the same one under another name, because the environment override applies
+/// to the browser profile only: pointing the browser somewhere else must not move the app's
+/// own record of which folder the user chose.
+///
+/// Not Linux-gated, unlike the profile and the launcher below it: the pick file is read and
+/// written by a command that is dispatched on every platform, and the shim's own test run on a
+/// non-Linux machine has to compile it.
+pub(crate) fn app_data_dir() -> Option<PathBuf> {
+    let base = match std::env::var_os("XDG_DATA_HOME") {
+        Some(data_home) => PathBuf::from(data_home),
+        None => PathBuf::from(std::env::var_os("HOME")?).join(".local").join("share"),
+    };
+    Some(base.join("lithic"))
+}
+
 /// The private profile an app window is given.
 ///
 /// A directory of its own rather than the person's everyday profile, because
@@ -1112,11 +1136,7 @@ fn app_profile_dir() -> Option<PathBuf> {
     if let Some(explicit) = std::env::var_os(PROFILE_ENV) {
         return Some(PathBuf::from(explicit));
     }
-    let base = match std::env::var_os("XDG_DATA_HOME") {
-        Some(data_home) => PathBuf::from(data_home),
-        None => PathBuf::from(std::env::var_os("HOME")?).join(".local").join("share"),
-    };
-    Some(base.join("lithic").join("chrome"))
+    Some(app_data_dir()?.join("chrome"))
 }
 
 /// The flags that turn a Chromium launch into an app window.

@@ -40,6 +40,10 @@ use std::sync::atomic::{AtomicU64, Ordering};
 
 use serde_json::{json, Value};
 
+use crate::github;
+use crate::git;
+use crate::gitwrite;
+use crate::syncfolder;
 use crate::{
     json_response, refused, shim_authority, shim_origin, token_matches, Request, Response,
     MAX_BODY_BYTES, TOKEN_HEADER,
@@ -120,6 +124,38 @@ pub fn handle(request: &Request, port: u16, token: &str, startup: Option<&Path>)
         "read" => read(&args),
         "write" => write(&args),
         "list" => list(&args),
+        // The git sync reads. They live in `git.rs` because they answer a different question
+        // from the four above (whether a folder is a repository Lithic manages, rather than
+        // what is in a file), and because the writes that follow them will need a dependency
+        // the reads do not. Dispatched from this one match so the command vocabulary stays in
+        // one place, which is what the launcher's own cross-language test reads.
+        "git-status" => git::status(&args),
+        "git-coverage" => git::coverage(&args),
+        "list-folder-liths" => git::list_folder_liths(&args),
+        // The folder the backup acts on, and the pick that overrides it. It is a whole
+        // command of its own rather than a field on the setup: the dialog names the folder
+        // before anything is connected, so the question is asked and answered on its own.
+        "git-folder" => syncfolder::folder(&args),
+        "pick-folder" => syncfolder::pick(&args),
+        "clear-folder-pick" => syncfolder::clear(),
+        // The writes. The two that can outlive the connection's write timeout answer with a
+        // job id rather than with the work done, so the page polls `git-job` and can
+        // `git-cancel`; the three that only touch a config file answer directly.
+        "git-setup" => gitwrite::setup(&args),
+        "git-commit" => gitwrite::commit(&args),
+        "git-reauth" => gitwrite::reauth(&args),
+        "git-disconnect" => gitwrite::disconnect(&args),
+        "git-job" => gitwrite::job(&args),
+        "git-cancel" => gitwrite::cancel(&args),
+        // The heartbeat is a REST probe rather than a git operation, so it lives with the
+        // GitHub calls and answers directly: one request, well inside the write timeout.
+        "git-heartbeat" => github::git_heartbeat(&args),
+        // The GitHub half of the sync. Four commands the page cannot make for itself, because
+        // the device endpoints answer with no `Access-Control-Allow-Origin` at all.
+        "github-device-code" => github::device_code(),
+        "github-device-poll" => github::device_poll(&args),
+        "github-list-repos" => github::list_repos(&args),
+        "github-create-repo" => github::create_repo(&args),
         // A command with nothing behind it is still an answer rather than a refusal: the wire
         // worked, and what it was asked for it does not have.
         other => json_response(
@@ -135,19 +171,29 @@ pub fn handle(request: &Request, port: u16, token: &str, startup: Option<&Path>)
 // ---------------------------------------------------------------------------
 
 /// A command that worked.
-fn ok(result: Value) -> Response {
+pub(crate) fn ok(result: Value) -> Response {
     json_response(200, "OK", json!({ "ok": true, "result": result }))
 }
 
 /// A command that could not, named by a code rather than by a paragraph the launcher would
 /// have to translate. The launcher turns the code into its own line.
-fn failed(code: &str) -> Response {
+pub(crate) fn failed(code: &str) -> Response {
     json_response(200, "OK", json!({ "ok": false, "error": code }))
 }
 
 /// A missing or unusable argument.
-fn bad_args() -> Response {
+pub(crate) fn bad_args() -> Response {
     failed("bad-args")
+}
+
+/// A command that could not work, named by a code and carrying the detail beside it.
+///
+/// The split matters for the calls that reach a service: GitHub's own sentence about a refusal
+/// is what the user is shown, exactly as it is on the desktop app, but the code stays a code so
+/// the launcher can still tell a refusal that came from GitHub from one that came from the wire
+/// itself. The launcher reads `detail` when it is there and falls back to the code when not.
+pub(crate) fn failed_with(code: &str, detail: String) -> Response {
+    json_response(200, "OK", json!({ "ok": false, "error": code, "detail": detail }))
 }
 
 // ---------------------------------------------------------------------------
@@ -430,6 +476,62 @@ fn pick_output(stdout: &str, multiple: bool) -> Vec<String> {
     paths
 }
 
+/// The arguments that put a chooser into folder-selection mode.
+///
+/// A separate function from [`picker_args`] because no chooser has a switch that turns a file
+/// dialog into a directory one: `zenity` gets `--directory` and `kdialog` gets a different
+/// verb outright. Sharing the function would mean branching on every argument anyway.
+#[cfg(any(target_os = "linux", test))]
+fn folder_picker_args(dialect: Picker, start: Option<&str>) -> Vec<String> {
+    let directory = start.map(|value| value.trim_end_matches(['/', '\\']).to_string());
+    let mut args: Vec<String> = vec!["--title".to_string(), "Lithic".to_string()];
+    match dialect {
+        Picker::Zenity => {
+            args.push("--file-selection".to_string());
+            args.push("--directory".to_string());
+            // A trailing separator is how zenity opens *inside* a directory rather than
+            // showing it as the selected row.
+            if let Some(dir) = directory {
+                args.push(format!("--filename={dir}/"));
+            }
+        }
+        Picker::Kdialog => {
+            args.push("--getexistingdirectory".to_string());
+            // KDE's own word for the current directory is `:`.
+            args.push(directory.unwrap_or_else(|| ":".to_string()));
+        }
+    }
+    args
+}
+
+/// Ask the desktop's own chooser for a directory, for `pick-folder`.
+///
+/// The same three programs and the same order as the file chooser above. `Ok(None)` is a
+/// cancelled pick; `Err` is a code from the wire's own vocabulary (`no-picker` when the
+/// desktop has no chooser, `pick-failed` when one was there and did not answer).
+#[cfg(target_os = "linux")]
+pub(crate) fn choose_folder(start: Option<&str>) -> Result<Option<String>, &'static str> {
+    let Some((program, dialect)) = first_picker(program_on_path) else {
+        return Err("no-picker");
+    };
+    let arguments = folder_picker_args(dialect, start);
+    match run_picker(program, &arguments) {
+        Ok(Some(stdout)) => Ok(pick_output(&stdout, false).into_iter().next()),
+        Ok(None) => Ok(None),
+        Err(error) => {
+            eprintln!("shim: the folder chooser {program} failed: {error}");
+            Err("pick-failed")
+        }
+    }
+}
+
+/// Everywhere but Linux the shim has no chooser to reach, which is an answer rather than a
+/// fault: the launcher is left to say the desktop cannot pick a folder.
+#[cfg(not(target_os = "linux"))]
+pub(crate) fn choose_folder(_start: Option<&str>) -> Result<Option<String>, &'static str> {
+    Err("no-picker")
+}
+
 /// Run a chooser and read what it printed. `Ok(None)` means it exited without an answer, which
 /// is a cancellation rather than a failure.
 #[cfg(target_os = "linux")]
@@ -450,7 +552,7 @@ fn run_picker(program: &str, args: &[String]) -> std::io::Result<Option<String>>
 // ---------------------------------------------------------------------------
 
 /// A path argument, trimmed and refused when empty.
-fn path_arg(args: &Value) -> Option<PathBuf> {
+pub(crate) fn path_arg(args: &Value) -> Option<PathBuf> {
     let raw = args.get("path").and_then(Value::as_str)?.trim();
     if raw.is_empty() {
         return None;
@@ -472,7 +574,7 @@ fn file_name(path: &Path) -> String {
         .unwrap_or_else(|| path_text(path))
 }
 
-fn path_text(path: &Path) -> String {
+pub(crate) fn path_text(path: &Path) -> String {
     path.to_string_lossy().into_owned()
 }
 
@@ -701,6 +803,23 @@ mod tests {
         assert!(open.contains(&"--getopenfilename".to_string()));
         // With no start directory, `:` is KDE's own word for the current one.
         assert!(open.contains(&":".to_string()));
+    }
+
+    #[test]
+    fn a_folder_pick_asks_each_chooser_in_its_own_dialect() {
+        let zenity = folder_picker_args(Picker::Zenity, Some("/home/a"));
+        assert!(zenity.contains(&"--directory".to_string()));
+        assert!(zenity.contains(&"--filename=/home/a/".to_string()));
+        assert!(!zenity.contains(&"--save".to_string()));
+        // With no start there is nothing to preselect, and zenity still opens home.
+        let no_start = folder_picker_args(Picker::Zenity, None);
+        assert!(!no_start.iter().any(|arg| arg.starts_with("--filename=")));
+
+        let kdialog = folder_picker_args(Picker::Kdialog, Some("/home/a/"));
+        assert!(kdialog.contains(&"--getexistingdirectory".to_string()));
+        assert!(kdialog.contains(&"/home/a".to_string()));
+        // KDE's own word for the current directory stands in when there is no start.
+        assert!(folder_picker_args(Picker::Kdialog, None).contains(&":".to_string()));
     }
 
     #[test]

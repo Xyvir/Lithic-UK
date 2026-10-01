@@ -194,6 +194,8 @@ const en = {
       created: (repo: string) => `Created ${repo}. `,
       /** What a setup reports when the app itself has nothing more to say. */
       synced: 'Synced',
+      /** The one stage a person can produce by pressing Stop, on the shim's job model. */
+      cancelled: 'Sync stopped.',
       reconnected: (repo: string) => `Reconnected github.com/${repo}`,
       lastSaveFailed: (detail: string) => `Last save did not upload: ${detail}`,
       instanceNoDisconnect: 'The instance did not confirm the disconnect.',
@@ -745,6 +747,7 @@ const es: Copy = {
       backingUp: (repo: string) => `Respaldando github.com/${repo}.`,
       created: (repo: string) => `Creado ${repo}. `,
       synced: 'Sincronizado',
+      cancelled: 'Sincronización detenida.',
       reconnected: (repo: string) => `Reconectado github.com/${repo}`,
       lastSaveFailed: (detail: string) => `El último guardado no se subió: ${detail}`,
       instanceNoDisconnect: 'La instancia no confirmó la desconexión.',
@@ -1268,6 +1271,7 @@ const fr: Copy = {
       backingUp: (repo: string) => `Sauvegarde de github.com/${repo}.`,
       created: (repo: string) => `${repo} créé. `,
       synced: 'Synchronisé',
+      cancelled: 'Synchronisation arrêtée.',
       reconnected: (repo: string) => `github.com/${repo} reconnecté`,
       lastSaveFailed: (detail: string) => `Le dernier enregistrement n’a pas été envoyé : ${detail}`,
       instanceNoDisconnect: 'L’instance n’a pas confirmé la déconnexion.',
@@ -1788,6 +1792,7 @@ const de: Copy = {
       backingUp: (repo: string) => `Sichere github.com/${repo}.`,
       created: (repo: string) => `${repo} erstellt. `,
       synced: 'Synchronisiert',
+      cancelled: 'Synchronisierung gestoppt.',
       reconnected: (repo: string) => `github.com/${repo} neu verbunden`,
       lastSaveFailed: (detail: string) => `Die letzte Speicherung wurde nicht hochgeladen: ${detail}`,
       instanceNoDisconnect: 'Die Instanz hat das Trennen nicht bestätigt.',

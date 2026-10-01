@@ -19,9 +19,53 @@ edition = "2021"
 # launcher asks with a JSON object and parses a JSON answer, and a hand-written
 # reader for a format with escapes and nesting is a liability rather than a saving.
 # Neither links anything, so the binary still needs no toolkit to start.
+#
+# The git sync is the one thing that needs more than the standard library, and the set is
+# chosen for size first because that is the crate's whole proposition. The reads
+# (`shim/src/git.rs`) need nothing: a repository Lithic manages is marked by an origin URL in
+# `.git/config`, which is text. Everything else, the device flow (`shim/src/github.rs`) and
+# next the writes, needs TLS, and the decision recorded in `agents.md` is that the TLS is the
+# system's rather than ours. `libssl` is already on any Linux that has `ssh` or a package
+# manager, so a dynamically linked one costs this artifact nothing, where a vendored one would
+# be a second copy of a library the machine is already patching.
+#
+# `git` itself is the opposite call and stays packaged in. `vendored-libgit2` compiles
+# libgit2's C sources (with its bundled llhttp, xdiff and PCRE2) and links them statically, so
+# the shim carries its own git rather than shelling out to whatever `git` the machine happens
+# to have: a program whose version and configuration the launcher cannot control, and whose
+# absence would be one more thing a person has to install.
+#
+# What that asks of the two builds. Linux needs `libssl-dev` at build time and `libssl` at run
+# time, and the release job installs the headers for exactly this reason (see
+# `.github/workflows/desktop-release.yaml`); the shim is built on `ubuntu-22.04`, so the linked
+# ABI is OpenSSL 3.0, which is the lowest any current distribution ships. Windows and macOS
+# are untouched: `git2`'s `https` means WinHTTP and SecureTransport there, `openssl-sys` is not
+# a dependency of this crate at all on Windows, and `native-tls` is SChannel and Security, so a
+# Windows checkout needs no OpenSSL to compile or run any of this.
 [dependencies]
 getrandom = "0.2"
 serde_json = "1"
+# The GitHub device flow and REST calls (`shim/src/github.rs`). Blocking on purpose: the shim
+# is one thread per connection, so there is no reactor to feed and no async runtime to pay
+# for. `default-features = false` drops ureq's own rustls default, which is the whole point:
+# the TLS here is `native-tls`, which is the platform stack (OpenSSL on Linux, SChannel on
+# Windows, Security on macOS), and rustls beside it would be a second implementation of a
+# thing the machine already has. `vendored` is deliberately not asked for, for the same reason
+# the manifest does not ask `git2` for `vendored-openssl` above.
+#
+# Known and measured, not overlooked: ureq's stable `native-tls` feature also pulls
+# `webpki-root-certs`, a bundled copy of the Mozilla root program, while the path this uses
+# verifies against the platform trust store and never reads it. ureq's `native-tls-no-default`
+# is the feature that drops it, and it is on ureq's unstable list, so it is not worth a build
+# this repository depends on for a data blob the linker is likely to drop anyway. Worth one
+# word the day it leaves that list.
+ureq = { version = "3", default-features = false, features = ["native-tls"] }
+# The writes (`git-setup`, `git-commit`, `git-heartbeat`, `git-reauth`, `git-disconnect`) are
+# why this is here. `https` is what gives libgit2 a transport at all: on Linux that pulls
+# `openssl-sys`, which links the system `libssl`; the platform stacks need no crate. And
+# `vendored-libgit2` is the call that keeps git ours, compiling libgit2's C and linking it
+# statically rather than looking for a system `libgit2` that may be absent or the wrong version.
+git2 = { version = "0.21", default-features = false, features = ["https", "vendored-libgit2"] }
 
 [profile.release]
 # The AppImage is the payload plus this binary, so the binary is worth shrinking:

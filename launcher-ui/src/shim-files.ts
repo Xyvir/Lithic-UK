@@ -58,11 +58,19 @@ function defaultDocument(): Pick<Document, 'querySelector'> | null {
   return typeof document === 'undefined' ? null : document;
 }
 
-/** What a backend call answered, success or failure, never a throw. */
-export type ShimResult<T> = { ok: true; value: T } | { ok: false; error: string };
+/**
+ * What a backend call answered, success or failure, never a throw.
+ *
+ * `detail` rides beside a failure's code when the backend carried a sentence with it (a refusal
+ * from GitHub, whose own wording is what the user is shown). A caller reads it when it is there
+ * and falls back to the code when it is not.
+ */
+export type ShimResult<T> =
+  | { ok: true; value: T }
+  | { ok: false; error: string; detail?: string };
 
 function result<T>(answer: Awaited<ReturnType<typeof shimCommand>>): ShimResult<T> {
-  if (!answer.ok) return { ok: false, error: answer.error };
+  if (!answer.ok) return { ok: false, error: answer.error, ...(answer.detail ? { detail: answer.detail } : {}) };
   return { ok: true, value: answer.result as T };
 }
 
