@@ -8,6 +8,7 @@
   import { isScratchFileName, isHtmlMonolithName, tracksUnsavedEdits, resolveMountName, resolveScratchKind, type ScratchKind } from './scratch-editor';
   import { pwaInstall, promptPwaInstall } from './pwa-install';
   import { RELEASES_LATEST_PAGE, latestReleaseTag, readBuildTag, updateOffered } from './update-notice';
+  import { readShimToken, shimCommand } from './shim-command';
   import { bootLegacyWiki, bootLegacyHtml, writeHandoff, type RemoteTarget } from './legacy-launcher-runtime';
   import { EMOJI_LIST, uploadInstanceIcon, clearInstanceIcon, emojiFaviconUrl, applyFavicon, bustIconCache, readInstanceEmoji, readServerEmoji, saveInstanceEmoji, clearInstanceEmoji, instanceMarkUrl } from './instance-icon';
   import { getRecentFiles, addRecentFile, removeRecentFile, addBrowserOnlyRecent, removeBrowserOnlyRecent, clearAllRecentFiles, purgeOldestCachesIfNeeded, saveSearchCache, forgetWikiCache, cachedWikiNames, idb, getSearchCacheText, readFetchedLith, rememberFetchedLith, listWikiVersions, wikiHasHistory, downloadWikiVersion, getDirtyState, clearDirtyState, listDirtyRecoveries, isWikiDriftedFromHead, isInstallDismissed, setInstallDismissed, recentDiskPath, type RecentEntry } from './storage';
@@ -70,6 +71,25 @@
   const buildTag = readBuildTag(typeof document === 'undefined' ? null : document);
   /** Whether this page came from a shim the release workflow cut, which is what its notice needs. */
   const shimUpdateHost = buildTag !== null;
+  /**
+   * The command wire's per-launch secret, or null on a page no shim served.
+   *
+   * Its presence is what makes this page able to reach the shim's own backend: the desktop
+   * app, a published deployment and an instance all serve no secret, so none of them can
+   * post to a wire that only exists behind this shim. Read once, like the mode and the tag
+   * above, because what served the page cannot change while the page lives.
+   */
+  const shimToken = readShimToken(typeof document === 'undefined' ? null : document);
+  /**
+   * Whether the shim that served this page answered its command wire.
+   *
+   * A shim with no backend behind it is indistinguishable from one with: the secret says a
+   * wire exists, not that anything answers on it. The probe is the difference, and it is
+   * recorded on the root element rather than acted on, because nothing in this build sends
+   * a command yet. The phase that puts file access, git and the credential vault behind the
+   * wire reads it here instead of asking again.
+   */
+  let shimBackendUp = false;
   const storageMode: StorageMode = resolveStorageMode(
     mode,
     typeof window === 'undefined' ? undefined : (window as unknown as { showSaveFilePicker?: unknown }),
@@ -397,6 +417,17 @@
     // A refused open is not worth a dialog of its own: the address is also in the `href`, and
     // the browser-side path is what every other mode takes.
     void tauriInvoke('open_external', { url }).catch(() => {});
+  }
+
+  /**
+   * Ask the wire whether there is a backend on the other end, once, at boot.
+   *
+   * Reachability is not something the secret can state: a shim serves the secret and its
+   * wire together, but only an answer proves the two are connected. This is the whole
+   * liveness proof, and it stays a boolean on the page rather than a rendered state.
+   */
+  async function probeShimBackend(): Promise<void> {
+    shimBackendUp = (await shimCommand('ping', {}, { token: shimToken })).ok;
   }
 
   /**
@@ -3646,6 +3677,9 @@
   }
 
   onMount(() => {
+    // The wire's liveness, asked once and never awaited by anything: no render waits on
+    // it, and a backend that does not answer leaves the flag false rather than an error.
+    if (shimToken) void probeShimBackend();
     // A window handed over *by* a search starts searching. This launcher is the one an
     // instance serves as well as the one this device runs, so the same code answers
     // both: the query rode in on the handoff (see `handoffQuery`), and it is taken back
@@ -4468,7 +4502,7 @@
 
 <svelte:head><title>{copy.app.title}</title></svelte:head>
 
-<main class="container" data-mode={mode}>
+<main class="container" data-mode={mode} data-shim-backend={shimBackendUp}>
   <!--
     The install offer, written once because it has two homes and never both at once: the
     panel's foot row (where a phone wants it, beside the rebuild control) and the footer

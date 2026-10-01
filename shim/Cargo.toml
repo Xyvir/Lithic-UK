@@ -5,13 +5,23 @@ description = "Serves the Lithic launcher and wiki engine to the browser already
 authors = ["you"]
 edition = "2021"
 
-# No dependencies, and that is the whole point of this crate. `src-tauri` links
-# GTK and WebKitGTK through Tauri, which is why its AppImage is an 82 MB download:
-# the engine travels with the app. This binary carries none of that. It is an HTTP
-# server for six local files and a call to the system browser, so the standard
-# library is sufficient and the artifact stays the size of the payload it serves
-# (see agents.md, the release section).
+# No toolkit, and that is the whole point of this crate. `src-tauri` links GTK and
+# WebKitGTK through Tauri, which is why its AppImage is an 82 MB download: the engine
+# travels with the app. This binary carries none of that, so the artifact stays the
+# size of the payload it serves rather than the size of an engine (see agents.md,
+# the release section).
+#
+# Two dependencies, and each one is here because the alternative was worse than the
+# crate. `getrandom` is the operating system's entropy source, which a per-launch
+# secret cannot be hand-rolled from: the standard library has no CSPRNG, and a token
+# built from the clock and the process id is guessable by exactly the kind of page
+# it exists to keep out. `serde_json` is the command wire, in both directions: the
+# launcher asks with a JSON object and parses a JSON answer, and a hand-written
+# reader for a format with escapes and nesting is a liability rather than a saving.
+# Neither links anything, so the binary still needs no toolkit to start.
 [dependencies]
+getrandom = "0.2"
+serde_json = "1"
 
 [profile.release]
 # The AppImage is the payload plus this binary, so the binary is worth shrinking:
