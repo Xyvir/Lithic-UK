@@ -100,40 +100,161 @@ export const INSTALL_DISMISS_KEY = 'lithic-install-dismissed';
 /** The shared history store used by the launcher UI and versioned saves. */
 const historyStore = new KeyvalWikiHistory(idb);
 
-export async function addRecentFile(fileHandle: FileSystemFileHandle, tauriPath: string | null = null): Promise<RecentEntry[]> {
+/** How many rows the launcher's list holds, and therefore how many the store keeps. */
+export const RECENT_LIMIT = 20;
+
+/**
+ * Write the whole recent list, and answer with what was written.
+ *
+ * The list is one list, and this is the write half of that rule: whoever has decided what the
+ * list is hands it over whole. The read half is the bug this closes. Adding a row used to work
+ * by asking *a store* what it held and adopting that answer as the new list, and the two stores
+ * did not hold the same rows: a Lith adopted from a synced folder arrives as a path row and was
+ * written to localStorage only, so its answer to "what do I hold" was "nothing of mine".
+ * Saving one new blank Lith over a connected backup therefore emptied the list of every synced
+ * Lith, and the row that replaced them was a handle row with no path, which is also what turned
+ * the panel's foot from `Rebuild Recents` into `Reset Recents`: coverage is computed from the
+ * paths those rows carried, and it had none left to compute from.
+ *
+ * Every kind of row goes in the one store, which is the rule a browser-only row already stated
+ * for itself and this states for all of them: a row parked in the mirror is the one part of the
+ * list a relaunch cannot see. Rows are spelled for the store on the way in, because the
+ * launcher's own shape is not the stored one (a path row is `{ name, path }` out there and
+ * `{ handle: null, name, tauriPath }` in here, which is what `normalizeRecentEntry` reads).
+ *
+ * A write that fails keeps the caller's list rather than emptying it. The store is the durable
+ * copy, not the authoritative one, and an IndexedDB that refuses a write is not a reason to
+ * take every row off the screen.
+ */
+export async function setRecentRows(rows: readonly RecentRow[], store: CacheStore = idb): Promise<RecentEntry[]> {
+  const stored = rows.filter((row) => !isAnonymousRow(row)).slice(0, RECENT_LIMIT).map(storedRow);
   try {
-    const raw = (await idb.get<any[]>('recentFiles')) || [];
-    let recentFiles: RecentEntry[] = raw.map(normalizeRecentEntry);
-
-    if (!fileHandle || !fileHandle.isSameEntry) return recentFiles;
-
-    const inList = await Promise.all(
-      recentFiles.map(async (f) => {
-        try {
-          return f.handle && (await fileHandle.isSameEntry(f.handle));
-        } catch {
-          return false;
-        }
-      })
-    );
-    const existingIndex = inList.findIndex((val) => val);
-    const newEntry: RecentEntry = { handle: fileHandle, tauriPath };
-
-    if (existingIndex !== -1) {
-      if (tauriPath) recentFiles[existingIndex].tauriPath = tauriPath;
-      const [moved] = recentFiles.splice(existingIndex, 1);
-      recentFiles.unshift(moved);
-    } else {
-      recentFiles.unshift(newEntry);
-    }
-
-    if (recentFiles.length > 20) recentFiles = recentFiles.slice(0, 20);
-    await idb.set('recentFiles', recentFiles);
-    return recentFiles;
+    await store.set('recentFiles', stored);
   } catch (err) {
-    console.error('Failed to add recent file to IndexedDB:', err);
-    return [];
+    console.error('Failed to write the recent list to IndexedDB:', err);
   }
+  return stored;
+}
+
+/** One row in the shape the store keeps, which is what `normalizeRecentEntry` reads back. */
+function storedRow(row: RecentRow): RecentEntry {
+  const raw = row as any;
+  const handle = raw?.handle ?? null;
+  const diskPath = recentDiskPath(row);
+  // A path row has no handle to carry its path, so the path has to survive in the field the
+  // store reads. With a handle, the handle's own stash is what `recentDiskPath` falls back to,
+  // and `tauriPath` is only ever what a caller passed explicitly.
+  const tauriPath = raw?.tauriPath ?? (handle ? null : diskPath);
+  const hasSource = Boolean(handle) || Boolean(diskPath);
+  return {
+    handle,
+    name: recentRowName(row) || undefined,
+    tauriPath: tauriPath ?? null,
+    ...(raw?.browserOnly === true ? { browserOnly: true } : {}),
+    // A row's own text rides along only where it is the row's last copy, the rule the
+    // localStorage mirror already follows: a row with a path is re-read from disk, and a
+    // Lith's content is in the search cache its own saver writes. It matters more here than
+    // there, because this is the store a body can actually bloat.
+    ...(!hasSource && typeof raw?.text === 'string' && raw.text ? { text: raw.text } : {})
+  } as RecentEntry;
+}
+
+/**
+ * The list with `row` in front of it, and any row for the same Lith dropped.
+ *
+ * Comparing against the *list* rather than against a store is the whole point: a store is
+ * where the rows it happens to hold are, the list is what the user sees, and a save has to
+ * add to the second without consulting the first.
+ */
+export async function mergeRecentRow(current: readonly RecentRow[], row: RecentRow): Promise<RecentEntry[]> {
+  const rest: RecentEntry[] = [];
+  for (const existing of current) {
+    if (await sameRecentRow(existing, row)) continue;
+    rest.push(existing as RecentEntry);
+  }
+  return [row as RecentEntry, ...rest].slice(0, RECENT_LIMIT);
+}
+
+/**
+ * The store's rows and the mirror's, as one list.
+ *
+ * The two are copies of the same list, so they are read as one. Reading the store alone when it
+ * happens to be non-empty is how they drifted apart in the first place: a list of synced Liths
+ * in the mirror beside one saved row in the store reads as the one row, and a rebuild over that
+ * list has no folder left to crawl. The store's order wins, because it is the copy a save
+ * writes last, and what only the mirror holds follows it: those rows are older by construction.
+ *
+ * Keyed the way `mergeRecentsSidecar` keys its own merge, by the path where there is one and by
+ * the name otherwise, so the three copies of this list agree about what is the same row.
+ */
+export function mergeRecentLists(primary: readonly RecentRow[], mirror: readonly RecentRow[]): RecentEntry[] {
+  const keyOf = (row: RecentRow) => (recentDiskPath(row) ?? recentRowName(row)).toLowerCase();
+  const seen = new Set<string>();
+  const merged: RecentEntry[] = [];
+  for (const row of [...primary, ...mirror]) {
+    if (isAnonymousRow(row)) continue;
+    const key = keyOf(row);
+    if (!key || seen.has(key)) continue;
+    seen.add(key);
+    merged.push(row as RecentEntry);
+  }
+  return merged.slice(0, RECENT_LIMIT);
+}
+
+/**
+ * A row that names a Lith without saying where it is and without keeping a copy of it: no path,
+ * no handle, not the browser's own copy, and no text of its own.
+ *
+ * There is nothing such a row can be opened from, nothing it can be backed up to, and no folder
+ * for a rebuild to find it in again, which is what makes it not a row rather than merely an
+ * unhelpful one. The one mount that produced them was a blank Lith: created with nowhere to save
+ * it yet, so the launcher could only remember its name, and the save that followed wrote the
+ * real row through the engine's own saver. The placeholder was then a duplicate waiting to
+ * happen, sitting beside a row that can be opened and backed up. `remember` no longer writes
+ * one; this is the read that drops the ones already stored, so the rule holds for a list written
+ * by an older build too.
+ *
+ * The two flags are each a location a row can have instead of a path, which is why neither is
+ * one of these. A browser-only row says its Lith is in this browser's storage and nowhere else;
+ * a row carrying `text` holds the document itself, which the launcher can mount read-only
+ * (an HTML monolith written before the flag, or a row the mount that made it could not do
+ * better than).
+ */
+export function isAnonymousRow(row: RecentRow): boolean {
+  const raw = row as any;
+  const holdsItsOwnCopy = typeof raw?.text === 'string' && raw.text !== '';
+  return !raw?.handle && !recentDiskPath(row) && raw?.browserOnly !== true && !holdsItsOwnCopy;
+}
+
+/**
+ * Whether two rows are the same Lith.
+ *
+ * Three answers, in order, and each of them is a kind of row the launcher writes. A path either
+ * row knows is the strongest identity there is: the same path is the same file whatever is
+ * holding it. Two comparable handles answer through `isSameEntry`, which is how picking one
+ * file twice moves its row instead of adding a second. Anything else is a name, which is all a
+ * path row or a browser-only row has, and is the comparison those two already made between
+ * themselves.
+ *
+ * Handles that cannot be compared are not a name match. Two files called `notes.lith` in two
+ * folders are two of the user's Liths, and collapsing them would hide one of them.
+ */
+export async function sameRecentRow(a: RecentRow, b: RecentRow): Promise<boolean> {
+  const aPath = recentDiskPath(a);
+  const bPath = recentDiskPath(b);
+  if (aPath && bPath) return aPath === bPath;
+  const aHandle = (a as any)?.handle;
+  const bHandle = (b as any)?.handle;
+  if (aHandle && bHandle) {
+    if (typeof aHandle.isSameEntry !== 'function') return false;
+    try {
+      return Boolean(await aHandle.isSameEntry(bHandle));
+    } catch {
+      return false;
+    }
+  }
+  const aName = recentRowName(a);
+  return Boolean(aName) && aName === recentRowName(b);
 }
 
 /** Normalize a stored recents row into RecentEntry shape. */
@@ -158,50 +279,6 @@ function normalizeRecentEntry(f: any): RecentEntry {
 export function recentRowName(entry: RecentRow): string {
   const raw = entry as any;
   return raw?.handle?.name ?? raw?.name ?? '';
-}
-
-/**
- * Remember a Lith that has no file behind it: the index-db-only fallback's row.
- *
- * It goes in the same store the handle rows do, and deliberately so. This
- * mode's whole claim is "your Lith is in this browser's storage", and a row
- * parked in localStorage would be the one part of it that is not. Quietly
- * surviving the site-data clear the user performs to erase everything.
- *
- * `text` is for the mounts whose content is not in the search cache: an HTML
- * monolith is a whole page with no tiddler store, so the row is the only place
- * its text can live.
- */
-export async function addBrowserOnlyRecent(name: string, text = '', store: CacheStore = idb): Promise<RecentEntry[]> {
-  try {
-    const raw = (await store.get<any[]>('recentFiles')) || [];
-    const rest = raw.map(normalizeRecentEntry).filter((row) => recentRowName(row) !== name);
-    const row = { handle: null, tauriPath: null, name, browserOnly: true, ...(text ? { text } : {}) };
-    const next = [row, ...rest].slice(0, 20) as unknown as RecentEntry[];
-    await store.set('recentFiles', next);
-    return next;
-  } catch (err) {
-    console.error('Failed to add a browser-only recent file to IndexedDB:', err);
-    return [];
-  }
-}
-
-/**
- * Drop one browser-only row. Matched by name, because it has no handle to
- * compare against. There is nothing on disk for it to be the same *as*.
- */
-export async function removeBrowserOnlyRecent(name: string, store: CacheStore = idb): Promise<RecentEntry[]> {
-  try {
-    const raw = (await store.get<any[]>('recentFiles')) || [];
-    const next = raw
-      .map(normalizeRecentEntry)
-      .filter((row) => !(row.browserOnly === true && recentRowName(row) === name));
-    await store.set('recentFiles', next);
-    return next;
-  } catch (err) {
-    console.error('Failed to remove a browser-only recent file from IndexedDB:', err);
-    return [];
-  }
 }
 
 /**
@@ -268,39 +345,6 @@ export async function setInstallDismissed(dismissed: boolean): Promise<void> {
     }
   } catch {
     /* best effort */
-  }
-}
-
-export async function removeRecentFile(
-  fileHandleToRemove: FileSystemFileHandle,
-  store: CacheStore = idb
-): Promise<RecentEntry[]> {
-  try {
-    const raw = (await store.get<any[]>('recentFiles')) || [];
-    const recentFiles: RecentEntry[] = raw.map(normalizeRecentEntry);
-    const newRecentFiles: RecentEntry[] = [];
-
-    for (const f of recentFiles) {
-      // A row with no comparable handle (a browser-only row, or a Tauri row
-      // that records its path instead) cannot be the row being removed, so it
-      // stays. Dropping these turned any removal into a collision: the row the
-      // user did *not* point at was the one that disappeared.
-      if (!f.handle?.isSameEntry) {
-        newRecentFiles.push(f);
-        continue;
-      }
-      try {
-        if (!(await f.handle.isSameEntry(fileHandleToRemove))) newRecentFiles.push(f);
-      } catch {
-        newRecentFiles.push(f);
-      }
-    }
-
-    await store.set('recentFiles', newRecentFiles);
-    return newRecentFiles;
-  } catch (err) {
-    console.error('Failed to remove recent file from IndexedDB:', err);
-    return [];
   }
 }
 

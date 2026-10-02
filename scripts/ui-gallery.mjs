@@ -1736,12 +1736,12 @@ const SHEETS = [
         expect: '.sync-folder-reset'
       },
       {
-        // The fresh download: no recents, no open Lith, and nothing for Rust to propose
-        // either — a portable bundle with no install folder and no Lith beside the program.
-        // The folder line is drawn empty rather than hidden, because this is the one state
-        // where the picker is the only way to give the dialog something to back up. A pane
-        // of its own for that reason: it is the state the two above cannot show, and the one
-        // a new install starts in.
+        // The machine Rust can name no folder for: no recents, no open Lith, and no folder
+        // to propose either (no Documents folder, no data home, no home). A fresh download is
+        // normally offered `Documents/Lithic` now, which is the pane above; this is the rarer
+        // case, and the folder line is drawn empty rather than hidden there because the picker
+        // is the only way to give the dialog something to back up. A pane of its own for that
+        // reason.
         name: '772-github-sync-no-folder',
         view: 'dialog',
         modal: 'gitsync-title',

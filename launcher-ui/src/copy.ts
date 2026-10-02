@@ -168,6 +168,11 @@ const en = {
       /** The two steps of the device flow. The address between them is a link, not copy. */
       stepOne: '1. Open',
       stepTwo: '2. Enter this code (installs Lithic Sync on first use):',
+      /** The code is a button: pressing it copies, which is what the hint and the label say. */
+      codeCopyTitle: 'Copy the code to the clipboard',
+      codeCopyAria: (code: string) => `Copy the code ${code} to the clipboard`,
+      codeCopied: 'Code copied to the clipboard.',
+      codeCopyFailed: 'Could not copy the code. Select it and copy it yourself.',
       waiting: 'Waiting for authorization…',
       requesting: 'Requesting a code from GitHub…',
       stopWaiting: 'Stop waiting',
@@ -180,6 +185,9 @@ const en = {
       startSync: 'Start Sync',
       connectedRepo: 'Connected repository',
       notRecorded: 'Not recorded',
+      /** The repository name is a link to the repository on github.com. */
+      openRepoTitle: (repo: string) => `Open github.com/${repo} in your browser`,
+      openRepoAria: (repo: string) => `Open the repository github.com/${repo} in your browser`,
       lastSynced: (age: string) => `Last synced ${age} ago.`,
       noSyncYet: 'No sync yet.',
       savesHere: 'Saves in this folder push to GitHub automatically.',
@@ -723,6 +731,11 @@ const es: Copy = {
       connectPush: 'Conectar y subir',
       stepOne: '1. Abre',
       stepTwo: '2. Introduce este código (instala Lithic Sync la primera vez):',
+      /** The code is a button: pressing it copies, which is what the hint and the label say. */
+      codeCopyTitle: 'Copiar el código al portapapeles',
+      codeCopyAria: (code: string) => `Copiar el código ${code} al portapapeles`,
+      codeCopied: 'Código copiado al portapapeles.',
+      codeCopyFailed: 'No se pudo copiar el código. Selecciónalo y cópialo tú.',
       waiting: 'Esperando la autorización…',
       requesting: 'Pidiendo un código a GitHub…',
       stopWaiting: 'Dejar de esperar',
@@ -735,6 +748,9 @@ const es: Copy = {
       startSync: 'Empezar a sincronizar',
       connectedRepo: 'Repositorio conectado',
       notRecorded: 'Sin registrar',
+      /** The repository name is a link to the repository on github.com. */
+      openRepoTitle: (repo: string) => `Abrir github.com/${repo} en el navegador`,
+      openRepoAria: (repo: string) => `Abrir el repositorio github.com/${repo} en el navegador`,
       lastSynced: (age: string) => `Última sincronización hace ${age}.`,
       noSyncYet: 'Todavía sin sincronizar.',
       savesHere: 'Los guardados de esta carpeta se suben a GitHub solos.',
@@ -1247,6 +1263,11 @@ const fr: Copy = {
       connectPush: 'Connecter et envoyer',
       stepOne: '1. Ouvrez',
       stepTwo: '2. Saisissez ce code (installe Lithic Sync à la première utilisation) :',
+      /** The code is a button: pressing it copies, which is what the hint and the label say. */
+      codeCopyTitle: 'Copier le code dans le presse-papiers',
+      codeCopyAria: (code: string) => `Copier le code ${code} dans le presse-papiers`,
+      codeCopied: 'Code copié dans le presse-papiers.',
+      codeCopyFailed: 'Impossible de copier le code. Sélectionnez-le et copiez-le vous-même.',
       waiting: 'En attente de l’autorisation…',
       requesting: 'Demande d’un code à GitHub…',
       stopWaiting: 'Arrêter d’attendre',
@@ -1259,6 +1280,9 @@ const fr: Copy = {
       startSync: 'Démarrer la synchronisation',
       connectedRepo: 'Dépôt connecté',
       notRecorded: 'Non enregistré',
+      /** The repository name is a link to the repository on github.com. */
+      openRepoTitle: (repo: string) => `Ouvrir github.com/${repo} dans votre navigateur`,
+      openRepoAria: (repo: string) => `Ouvrir le dépôt github.com/${repo} dans votre navigateur`,
       lastSynced: (age: string) => `Dernière synchronisation il y a ${age}.`,
       noSyncYet: 'Pas encore de synchronisation.',
       savesHere: 'Les enregistrements de ce dossier sont envoyés à GitHub automatiquement.',
@@ -1768,6 +1792,11 @@ const de: Copy = {
       connectPush: 'Verbinden und hochladen',
       stepOne: '1. Öffne',
       stepTwo: '2. Diesen Code eingeben (installiert Lithic Sync bei der ersten Verwendung):',
+      /** The code is a button: pressing it copies, which is what the hint and the label say. */
+      codeCopyTitle: 'Den Code in die Zwischenablage kopieren',
+      codeCopyAria: (code: string) => `Den Code ${code} in die Zwischenablage kopieren`,
+      codeCopied: 'Code in die Zwischenablage kopiert.',
+      codeCopyFailed: 'Der Code konnte nicht kopiert werden. Markieren Sie ihn und kopieren Sie ihn selbst.',
       waiting: 'Warte auf die Autorisierung…',
       requesting: 'Fordere einen Code von GitHub an…',
       stopWaiting: 'Nicht mehr warten',
@@ -1780,6 +1809,9 @@ const de: Copy = {
       startSync: 'Synchronisierung starten',
       connectedRepo: 'Verbundenes Repository',
       notRecorded: 'Nicht erfasst',
+      /** The repository name is a link to the repository on github.com. */
+      openRepoTitle: (repo: string) => `github.com/${repo} im Browser öffnen`,
+      openRepoAria: (repo: string) => `Das Repository github.com/${repo} im Browser öffnen`,
       lastSynced: (age: string) => `Zuletzt synchronisiert vor ${age}.`,
       noSyncYet: 'Noch nicht synchronisiert.',
       savesHere: 'Speicherungen in diesem Ordner werden automatisch zu GitHub hochgeladen.',

@@ -780,6 +780,9 @@ try {
       lines: [...modal.querySelectorAll('p')].map((line) => line.textContent.trim()),
       actions: [...modal.querySelectorAll('.modal-action')].map((action) => action.textContent.trim()),
       userCode: modal.querySelector('.user-code-display')?.textContent?.trim() ?? null,
+      // The code is a control on either backend's version of this step, because one dialog
+      // draws it both ways; the tag is read here so each leg can say so for itself.
+      codeTag: modal.querySelector('.user-code-display')?.tagName ?? null,
       note: modal.querySelector('.git-sync-note')?.textContent?.trim() ?? null,
       repoCards: [...modal.querySelectorAll('.repo-card')].map((card) => card.textContent.trim()),
       selected: [...modal.querySelectorAll('.repo-card.selected')].map((card) => card.textContent.trim()),
@@ -872,6 +875,11 @@ try {
   await livePage.waitForSelector('.git-sync-modal .user-code-display');
   const waiting = await readSyncDialog(livePage);
   assert.equal(waiting.userCode, 'WXYZ-9876', 'Live self-host: the code the instance issued is grouped the way GitHub shows it');
+  assert.equal(
+    waiting.codeTag,
+    'BUTTON',
+    'Live self-host: and it is the same control it is on the desktop, since one dialog draws both'
+  );
   assert.equal(waiting.note, 'Waiting for authorization…', 'Live self-host: and the dialog says what it is doing with the code');
   assert.ok(
     waiting.lines.includes('1. Open github.com/login/device'),
@@ -4524,11 +4532,13 @@ try {
   await vaultPage.click('.git-sync-modal .modal-close');
   await vaultPage.waitForFunction(() => document.querySelector('.git-sync-modal') === null);
 
-  // --- A fresh download, where Lithic has nothing of its own to go on -----------
-  // No open Lith, no recents on this machine and nothing to propose: Rust answers with no
-  // folder at all, which is the state a new install starts in. The folder line used to be
-  // absent here and the dialog's whole body was one sentence telling the user to save a Lith
-  // first, with no way to answer it. The empty line is that way out.
+  // --- A machine Rust can name no folder for at all ------------------------------
+  // No open Lith, no recents, and nothing to propose either. A fresh download is normally
+  // offered `Documents/Lithic` (`proposed_sync_folder`), and the default fixture above models
+  // exactly that, so what is left here is the rarer machine with no Documents folder, no data
+  // home and no home to join. The folder line used to be absent here and the dialog's whole
+  // body was one sentence telling the user to save a Lith first, with no way to answer it. The
+  // empty line is that way out.
   //
   // Reloaded first, because that is what makes this a fresh install rather than a stale
   // dialog: the app asks Rust as it mounts, and opening the dialog again would have kept
@@ -4674,6 +4684,94 @@ try {
   );
   assert.deepEqual(codeStep.actions, ['Stop waiting'], 'The only action left is abandoning the wait');
 
+  // The code is a control on this step, and copying it is the one thing the page can do to
+  // help: the code has to be typed into a window the dialog cannot reach. The clipboard is
+  // stubbed rather than read, so what is asserted is what the page asked to copy, which is
+  // the half the app decides, and not what the browser then did with it.
+  const codeShape = await vaultPage.evaluate(() => {
+    const pill = document.querySelector('.git-sync-modal .user-code-display');
+    return {
+      tag: pill?.tagName ?? null,
+      type: pill?.getAttribute('type') ?? null,
+      title: pill?.getAttribute('title') ?? null,
+      aria: pill?.getAttribute('aria-label') ?? null,
+      glyphs: pill?.querySelectorAll('svg').length ?? 0,
+      claim: document.querySelector('.git-sync-modal .copy-status')?.textContent?.trim() ?? null
+    };
+  });
+  assert.equal(codeShape.tag, 'BUTTON', 'The device code is a control, not a label');
+  assert.equal(codeShape.type, 'button', '...a plain button: this step has no form to submit');
+  assert.equal(codeShape.glyphs, 1, '...marked as pressable by a glyph drawn inside it');
+  assert.ok(
+    codeShape.title?.toLowerCase().includes('cop'),
+    `...whose tooltip says what pressing it does: ${codeShape.title}`
+  );
+  assert.ok(
+    codeShape.aria?.includes('WXYZ-2345'),
+    `...and whose label names the code it copies, for a screen reader: ${codeShape.aria}`
+  );
+  assert.equal(codeShape.claim, null, 'Nothing is claimed about a copy until one has been made');
+
+  await vaultPage.evaluate(() => {
+    window.__lithicCopies = [];
+    Object.defineProperty(navigator, 'clipboard', {
+      configurable: true,
+      value: {
+        writeText: (text) => {
+          window.__lithicCopies.push(text);
+          return Promise.resolve();
+        }
+      }
+    });
+  });
+  await vaultPage.click('.git-sync-modal .user-code-display');
+  await vaultPage.waitForFunction(
+    () => document.querySelector('.git-sync-modal .copy-status')?.textContent?.trim() === 'Code copied to the clipboard.'
+  );
+  const copied = await vaultPage.evaluate(() => ({
+    copies: window.__lithicCopies,
+    claim: document.querySelector('.git-sync-modal .copy-status')?.textContent?.trim() ?? null,
+    code: document.querySelector('.git-sync-modal .user-code-display')?.textContent.trim() ?? null,
+    note: document.querySelector('.git-sync-modal .git-sync-note')?.textContent.trim() ?? null
+  }));
+  assert.deepEqual(
+    copied.copies,
+    ['WXYZ-2345'],
+    'Pressing the code copies the code as it is shown, grouping and all'
+  );
+  assert.equal(copied.claim, 'Code copied to the clipboard.', '...and the dialog says so');
+  assert.equal(copied.code, 'WXYZ-2345', '...without the pill stopping being the code');
+  assert.equal(copied.note, 'Waiting for authorization…', '...and the standing line is still the wait');
+
+  // A copy that cannot happen is said rather than swallowed: the clipboard refuses and the
+  // selection fallback is taken away, which is what a page with neither route looks like.
+  await vaultPage.evaluate(() => {
+    window.__lithicExecCommand = document.execCommand;
+    Object.defineProperty(navigator, 'clipboard', {
+      configurable: true,
+      value: { writeText: () => Promise.reject(new Error('NotAllowedError')) }
+    });
+    document.execCommand = () => false;
+  });
+  await vaultPage.click('.git-sync-modal .user-code-display');
+  await vaultPage.waitForFunction(() =>
+    (document.querySelector('.git-sync-modal .copy-status')?.textContent ?? '').includes('Could not copy')
+  );
+  const refusedCopy = await vaultPage.evaluate(() => {
+    const line = document.querySelector('.git-sync-modal .copy-status');
+    document.execCommand = window.__lithicExecCommand;
+    return { claim: line?.textContent?.trim() ?? null, classes: line?.className ?? null };
+  });
+  assert.equal(
+    refusedCopy.claim,
+    'Could not copy the code. Select it and copy it yourself.',
+    'A refused copy is said out loud, rather than looking like a click that did nothing'
+  );
+  assert.ok(
+    refusedCopy.classes.includes('error'),
+    `...in the colour this dialog uses for a refusal: ${refusedCopy.classes}`
+  );
+
   // The other address the app draws, on the step whose whole first instruction is to visit it.
   // Same route, so a dialog's link and the panel's link cannot end up behaving differently.
   await vaultPage.click('.git-sync-modal a[href="https://github.com/login/device"]');
@@ -4740,6 +4838,9 @@ try {
       hint: Boolean(row?.querySelector('.sync-folder-change')),
       reset: document.querySelector('.git-sync-modal .sync-folder-reset') === null,
       repo: document.querySelector('.git-sync-modal .user-code-display')?.textContent.trim() ?? '',
+      repoTag: document.querySelector('.git-sync-modal .user-code-display')?.tagName ?? null,
+      repoHref: document.querySelector('.git-sync-modal .user-code-display')?.getAttribute('href') ?? null,
+      repoGlyphs: document.querySelector('.git-sync-modal .user-code-display')?.querySelectorAll('svg').length ?? 0,
       actions: [...document.querySelectorAll('.git-sync-modal .modal-action')].map((node) => node.textContent.trim())
     };
   });
@@ -4755,6 +4856,24 @@ try {
     'Nothing to give back either: the Disconnect before a new setup is what forgets a pick'
   );
   assert.equal(connectedFolder.repo, 'fixture/repo', 'The repository it is connected to is named under it');
+  // The name is a link to the repository, which is the one thing this dialog is about that
+  // lives somewhere else. An anchor, so the browser's own link handling is untouched, and the
+  // desktop app hands the click to the machine because its webview has no second window.
+  assert.equal(connectedFolder.repoTag, 'A', 'The repository name is a link, not a label');
+  assert.equal(
+    connectedFolder.repoHref,
+    'https://github.com/fixture/repo',
+    `...pointing at the repository it names: ${connectedFolder.repoHref}`
+  );
+  assert.equal(connectedFolder.repoGlyphs, 1, '...with a glyph inside it saying it goes elsewhere');
+  await vaultPage.click('.git-sync-modal .user-code-display');
+  await waitForCall(call => call.command === 'open_external' && call.args.url === 'https://github.com/fixture/repo');
+  const openedRepo = vaultCalls.filter(call => call.command === 'open_external').at(-1);
+  assert.equal(
+    openedRepo.args.url,
+    'https://github.com/fixture/repo',
+    `The repository page is handed to the machine in the app, where a new tab would land nowhere: ${JSON.stringify(openedRepo)}`
+  );
   assert.deepEqual(connectedFolder.actions, ['Disconnect'], 'Disconnect is the way back to the setup screens');
   await assertNoExtraDismiss('.git-sync-modal', 'The connected sync dialog');
   await vaultPage.click('.git-sync-modal .modal-close');

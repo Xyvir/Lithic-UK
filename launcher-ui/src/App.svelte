@@ -28,7 +28,7 @@
   } from './shim-sync';
   import { bootLegacyWiki, bootLegacyHtml, writeHandoff, type RemoteTarget } from './legacy-launcher-runtime';
   import { EMOJI_LIST, uploadInstanceIcon, clearInstanceIcon, emojiFaviconUrl, applyFavicon, bustIconCache, readInstanceEmoji, readServerEmoji, saveInstanceEmoji, clearInstanceEmoji, instanceMarkUrl } from './instance-icon';
-  import { getRecentFiles, addRecentFile, removeRecentFile, addBrowserOnlyRecent, removeBrowserOnlyRecent, clearAllRecentFiles, purgeOldestCachesIfNeeded, saveSearchCache, forgetWikiCache, cachedWikiNames, idb, getSearchCacheText, readFetchedLith, rememberFetchedLith, listWikiVersions, wikiHasHistory, downloadWikiVersion, getDirtyState, clearDirtyState, listDirtyRecoveries, isWikiDriftedFromHead, isInstallDismissed, setInstallDismissed, recentDiskPath, type RecentEntry } from './storage';
+  import { getRecentFiles, setRecentRows, mergeRecentRow, mergeRecentLists, isAnonymousRow, clearAllRecentFiles, purgeOldestCachesIfNeeded, saveSearchCache, forgetWikiCache, cachedWikiNames, idb, getSearchCacheText, readFetchedLith, rememberFetchedLith, listWikiVersions, wikiHasHistory, downloadWikiVersion, getDirtyState, clearDirtyState, listDirtyRecoveries, isWikiDriftedFromHead, isInstallDismissed, setInstallDismissed, recentDiskPath, type RecentEntry } from './storage';
   import { rememberRowKind, resolveStorageMode, storageModeOverride, browserOnlyMarkTitle, type StorageMode } from './browser-storage';
   import { readBookmarkEntries, saveBookmark, removeBookmark, setBookmarkIcon, refreshBookmarkIcon, verifyInstanceUrl, normalizeInstanceUrl, instanceLabel, type BookmarkEntry, type InstanceVerification } from './bookmarks';
   import { LOGIN_CHECK_LABELS, askInstanceAboutLogin, loginVerdict, loginVerdictFromError, typedLoginCheck, type LoginCheckState, type LoginVerdict } from './login-check';
@@ -42,6 +42,7 @@
   import { topHits, type InstanceCacheRead, type InstanceReads } from './instance-search';
   import { computeBackupCoverage, folderOf, hasBackedUpRepo, orphanedEntries, reindexFolders, syncedDirFor, type CoverageRow, type RebuildOrphan } from './backup-coverage';
   import { parseDeviceCode, parseDevicePoll, pollDelayMs, formatUserCode, generateRepoName, partitionRepos } from './github-device';
+  import { copyText } from './clipboard';
   import { syncIndicator, shouldHeartbeat, healthFailure, verifiedAge, SYNC_PULSE_MS, type SyncIndicator, type HealthState } from './git-sync-health';
   import { gapCount, versionGap } from './history-gap';
   import { createServerRepo, disconnectServerSync, fetchServerSyncStatus, listServerRepos, pollServerDeviceToken, requestServerDeviceCode, serverSyncIndicator, setupServerSync, type ServerSyncStatus } from './server-git-sync';
@@ -612,6 +613,9 @@
   let gitSyncError = '';
   let gitAuthActive = false;
   let gitUserCode = '';
+  /** What the code button last answered: a copy it made, a copy it could not, or nothing. */
+  let gitCodeCopy: '' | 'copied' | 'failed' = '';
+  let gitCodeCopyTimer: ReturnType<typeof setTimeout> | undefined;
   let gitPollAborted = false;
   let gitDeviceToken: string | null = null;
   let gitManagedRepos: string[] = [];
@@ -759,6 +763,7 @@
       gitAuthActive = false;
       setGitSyncView('disconnected');
       gitUserCode = '';
+      gitCodeCopy = '';
     }
     showGitSyncModal = true;
     gitSyncHealthApplies = healthAppliesToActive();
@@ -782,6 +787,7 @@
     gitReconnectMode = false;
     gitDeviceToken = null;
     gitUserCode = '';
+    gitCodeCopy = '';
     setGitSyncView('disconnected');
     gitSyncError = '';
     gitSyncMessage = '';
@@ -1034,6 +1040,36 @@
   }
 
   /**
+   * The synced repository's folder, when the backend says a managed one is there.
+   *
+   * A rebuild recrawls the folders its own rows point into, which covers every folder a row is
+   * backed up in and is enough while the list still holds a row from the repository. It is
+   * exactly what a list that has lost those rows cannot do: with no path left pointing into the
+   * synced folder, the crawl has nowhere to go, and the one control that could regrow the list
+   * from the repository it is backed up in would rebuild it out of nothing.
+   *
+   * So the folder the dialog already resolves is asked about as its own question, and the
+   * backend's answer is what makes it a folder to crawl. Asked rather than trusted, because the
+   * folder is resolved by inference as often as by a pick: it is the proposal on a machine whose
+   * launcher names nothing, and a proposal is not a promise that a repository was ever connected
+   * there. Only a `connected` answer, which is the backend recognising the marker Lithic itself
+   * wrote, turns it into a subject.
+   */
+  async function connectedSyncFolder(): Promise<string | null> {
+    if (!hasLocalSync) return null;
+    const folder = gitSyncPreferredFolder;
+    if (!folder) return null;
+    try {
+      const status = await readGitStatus(folder);
+      return status && status.connected ? folder : null;
+    } catch {
+      // A backend that cannot answer is not a folder to crawl. Nothing is discovered, and the
+      // rebuild keeps the list it has rather than replacing it with the failure.
+      return null;
+    }
+  }
+
+  /**
    * Which of these paths sit in a backed-up folder, through whichever process can answer.
    *
    * The desktop app asks its Rust bridge; a shim asks its own wire, which answers the same
@@ -1189,7 +1225,16 @@
   // and self-host's server) rebuilding beats clearing. The desktop app only learns its
   // own list is a view rather than a catalogue once a folder is backed up; on an instance
   // there was never any doubt, the server is the only list there is.
-  $: showRebuildControl = showBackupStatus || isSelfHost();
+  //
+  // A connected repository counts as derivation on its own, ahead of any coverage answer, and
+  // that is the difference between a recoverable state and the one this was. Coverage is
+  // computed from the paths the rows carry, so a list that has lost them reports nothing
+  // covered, however connected the folder behind it is: measured as a launcher whose every
+  // synced Lith had been replaced by one saved row, reading `Reset Recents` with no way back,
+  // because clearing was the only control left and it does exactly what it says. The folder
+  // the dialog names is evidence of its own (`connectedSyncFolder`), and while it answers, the
+  // rebuild is the honest operation and stays.
+  $: showRebuildControl = showBackupStatus || Boolean(gitSyncConnectedRepo) || isSelfHost();
   // Whether the recent panel is on screen at all. Named because two places now ask: the
   // panel itself, and the install offer, which waits in a launcher with no panel to hold
   // it rather than in one that does (see the offer's two homes in the markup).
@@ -1343,6 +1388,24 @@
 
   let gitSyncConnectedRepo = '';
 
+  /**
+   * Copy the device code, because this step is a code that has to be typed into a window the
+   * page cannot reach. Transcribing eight characters by hand is where a device flow is usually
+   * lost, and the pill is already the thing on screen that means "this is the code".
+   *
+   * The answer is said out loud rather than assumed: a copy can be refused (the clipboard API
+   * needs a secure context or a permission, and the legacy launcher is opened over `file://`),
+   * and a button that silently does nothing is worse than one that says it could not.
+   */
+  async function copyUserCode(): Promise<void> {
+    if (!gitUserCode) return;
+    const copied = await copyText(formatUserCode(gitUserCode));
+    gitCodeCopy = copied ? 'copied' : 'failed';
+    clearTimeout(gitCodeCopyTimer);
+    // Gone by the time GitHub is usually answered, which is the point of this step.
+    gitCodeCopyTimer = setTimeout(() => (gitCodeCopy = ''), 4000);
+  }
+
   /** Legacy flow, step 1: device code + user code display, then poll. */
   async function startDeviceAuth() {
     if (gitSyncBusy || gitAuthActive) return;
@@ -1354,6 +1417,7 @@
     try {
       const parsed = await requestDeviceCode();
       gitUserCode = parsed.user_code;
+      gitCodeCopy = '';
       void pollDeviceToken(parsed.device_code, parsed.interval);
     } catch (error) {
       gitSyncError = error instanceof Error ? error.message : String(error);
@@ -1785,6 +1849,33 @@
     : gitSyncLastPushError
       ? copy.dialogs.gitSync.lastSaveFailed(gitSyncLastPushError)
       : gitSyncHealthDetail;
+
+  /**
+   * Whether that line would be the dialog saying the same thing twice.
+   *
+   * A setup that has just finished sets a message reporting what it did ("Backed up to
+   * github.com/owner/name", plus whatever it pulled or kept), and the health line answers with
+   * the same sentence about the same repository: measured right after a first sync, two lines
+   * under the pill reading "Backed up to github.com/owner/name" and "Backed up to
+   * github.com/owner/name.". The report is the one that carries the detail and the one that
+   * goes away on its own, so the standing line steps aside while it is on screen. A *failed*
+   * push is not the same sentence and is never suppressed, because that line is the whole
+   * reason the Reconnect button beside it is offered.
+   */
+  $: gitSyncHealthEchoed = Boolean(gitSyncMessage) && !gitSyncHealthBroken;
+
+  /**
+   * The connected repository's page on github.com, or nothing when what the dialog holds is not
+   * a repository name.
+   *
+   * The name is read back out of settings rather than remembered from the setup that wrote it,
+   * so it can be whatever a hand-edited sidecar or a server's own status line says, and a link
+   * built out of that has to be one this page would have made itself: `owner/name` and nothing
+   * else, so a stray value cannot become a link to somewhere else entirely.
+   */
+  $: gitSyncRepoUrl = /^[\w.-]+\/[\w.-]+$/.test(gitSyncConnectedRepo)
+    ? `https://github.com/${gitSyncConnectedRepo}`
+    : '';
 
   /**
    * Void a verdict that belongs to a different folder, because a stale green
@@ -2363,21 +2454,33 @@
   ]);
 
   async function loadRecent() {
+    // The store and the mirror are two copies of one list, so they are read as one. Taking the
+    // store's answer whenever it is non-empty is how the copies drifted apart: a list of synced
+    // Liths in the mirror beside one saved row in the store read as the one row, and the
+    // rebuild over that list had no backed-up folder left to crawl. A mirror that cannot be
+    // parsed is not allowed to cost the store's rows either, which is the same rule.
+    let stored: any[] = [];
     try {
-      const idbList = await getRecentFiles();
-      if (idbList && idbList.length > 0) {
-        recentFiles = idbList;
-      } else {
-        const ls = JSON.parse(localStorage.getItem(RECENT_KEY) ?? '[]');
-        recentFiles = ls;
-      }
+      stored = await getRecentFiles();
     } catch {
-      recentFiles = [];
+      stored = [];
     }
-    if (mode === 'tauri') {
-      await mergeRecentsSidecar();
-      await refreshBackupCoverage();
+    let mirrored: any[] = [];
+    try {
+      const parsed = JSON.parse(localStorage.getItem(RECENT_KEY) ?? '[]');
+      mirrored = Array.isArray(parsed) ? parsed : [];
+    } catch {
+      mirrored = [];
     }
+    recentFiles = mergeRecentLists(stored, mirrored);
+    // The sidecar is the desktop app's own file beside its executable, so only it can read one.
+    // The coverage question is not: a shim answers it out of the folder's `.git/config`, and
+    // asking only the desktop app left every shim boot with no coverage at all. Which is the
+    // whole reason the panel's foot read `Reset Recents` on a folder that was backed up: with
+    // no roots there was no backup to rebuild from, so the one control that can regrow the list
+    // offered to throw it away instead.
+    if (mode === 'tauri') await mergeRecentsSidecar();
+    if (hasLocalSync) await refreshBackupCoverage();
     // Dirty-state rows are keyed off the recent list (plus caches), so refresh
     // the unsaved-edit indicator once recents are known. A blank lith edited
     // but never saved has no cache, so the cache path alone never sees it.
@@ -2467,26 +2570,40 @@
     // every save in this mode leaves exactly as it was. The handle is still how the pick's
     // bytes were read, once, before it gets here.
     const kind = rememberRowKind(indexDbOnly, Boolean(file.handle));
-    if (kind === 'browser-only') {
-      // Nothing here has a file to remember and nothing can, so the row says so,
-      // and is stored in the store the Lith's content is stored in. An HTML
-      // monolith has no tiddler snapshot to read its page back from, so its
-      // text travels in the row; a Lith's is already in the search cache the
-      // mount's own saver writes.
-      recentFiles = await addBrowserOnlyRecent(
-        file.name,
-        isHtmlMonolithName(file.name) ? file.text ?? '' : ''
-      );
-      persistRecentsSidecar();
-    } else if (kind === 'handle') {
-      recentFiles = await addRecentFile(file.handle, file.path ?? null);
-      persistRecentsSidecar();
-    } else {
-      const name = file.name;
-      recentFiles = [file, ...recentFiles.filter((item) => getEntryName(item) !== name)].slice(0, 20);
-      persistRecentRows();
-      persistRecentsSidecar();
-    }
+    const row =
+      kind === 'browser-only'
+        ? {
+            // Nothing here has a file to remember and nothing can, so the row says so, and it
+            // is stored in the store the Lith's content is stored in. An HTML monolith has no
+            // tiddler snapshot to read its page back from, so its text travels in the row; a
+            // Lith's is already in the search cache the mount's own saver writes.
+            handle: null,
+            tauriPath: null,
+            name: file.name,
+            browserOnly: true,
+            ...(isHtmlMonolithName(file.name) && file.text ? { text: file.text } : {})
+          }
+        : kind === 'handle'
+          ? { handle: file.handle, tauriPath: file.path ?? null, name: file.name }
+          : { name: file.name, path: file.path, ...(file.text ? { text: file.text } : {}) };
+    // A row that names no file is not a row, and a blank Lith is the one mount that would make
+    // one: it is created with nowhere to save it yet, so there is nothing here to remember, and
+    // the save that follows records its own row through the engine's saver, which is the only
+    // writer that knows the path the chooser named. Writing the placeholder anyway put a second
+    // row in the list beside the real one, a row that cannot be opened or backed up beside one
+    // that can, and it is what turned a list of the backup's own Liths into that one row on a
+    // relaunch. So nothing is remembered, and the list stays a list of Liths.
+    if (isAnonymousRow(row)) return;
+    // One list, and a save adds to it: the row goes in front of what is already listed, and the
+    // result is written through to both stores rather than a store being asked what it holds.
+    // The difference is the whole of a reported bug. With a backup connected, the synced Liths
+    // in the list are path rows that only ever reached the localStorage mirror, so a save whose
+    // new list was an adopted store answer deleted every one of them, and what replaced them
+    // was a single handle row with no path, which is also why the panel's foot turned from
+    // `Rebuild Recents` into `Reset Recents`: coverage had no paths left to compute from.
+    recentFiles = await setRecentRows(await mergeRecentRow(recentFiles, row));
+    persistRecentRows();
+    persistRecentsSidecar();
     // A save can land in a folder never seen before, which is the moment its
     // coverage answer changes. Fire-and-forget so a batch of remember() calls
     // (adopting a whole folder) does not serialize behind it.
@@ -3814,6 +3931,11 @@
       // is really there, so a stale row is removed by rebuilding instead of by
       // a separate destructive control.
       const folders = hasLocalSync ? reindexFolders(recentRows(), backupRoots) : [];
+      // The connected folder joins them last, and it is the only one not derived from a row.
+      // Last because the rows come first: what they point into is what the user was working
+      // in, and the repository answers after it, for the rows that have gone.
+      const connectedFolder = hasLocalSync ? await connectedSyncFolder() : null;
+      if (connectedFolder) folders.push(connectedFolder);
       const discovered: Array<{ name: string; path?: string }> = [];
       let orphans: RebuildOrphan[] = [];
 
@@ -3839,10 +3961,22 @@
         );
       } else if (hasLocalSync) {
         // Backed-up roots first, then each known row's own folder, so a Lith
-        // that isn't backed up yet still finds its siblings.
+        // that isn't backed up yet still finds its siblings, then the connected
+        // repository itself (see `connectedSyncFolder`).
+        //
+        // Deduped by path, because the list this replaces is the list it just built: the
+        // connected folder and a row's own folder can be one folder spelled two ways (a root
+        // arrives with no separator on the end, a row's folder keeps one), and the same Lith
+        // listed twice would become two rows.
+        const seenPaths = new Set<string>();
         for (const folder of folders) {
           const found = await readFolderLiths(folder).catch(() => [] as string[]);
-          for (const path of found) discovered.push({ name: path.split(/[\\/]/).pop() || path, path });
+          for (const path of found) {
+            const key = path.replace(/[\\/]+$/, '');
+            if (seenPaths.has(key)) continue;
+            seenPaths.add(key);
+            discovered.push({ name: path.split(/[\\/]/).pop() || path, path });
+          }
         }
 
         // Rows the fresh list will not contain. Detection is by listing rather
@@ -3874,9 +4008,17 @@
       dirtyEntries = dirtyEntries;
       historyAvailable = historyAvailable;
 
-      if (mode === 'tauri') {
-        recentFiles = discovered;
-        localStorage.setItem(RECENT_KEY, JSON.stringify(discovered.map(({ name, path }) => ({ name, path }))));
+      if (hasLocalSync) {
+        // The one place the list is *replaced* on purpose, so it is the one place a write to
+        // both stores is not optional: telling the mirror alone left the store holding the
+        // list the rebuild had just replaced, and the next launch read that instead.
+        //
+        // `hasLocalSync` rather than `mode === 'tauri'`, which is the bug this was. A shim is
+        // the other backend with a folder on disk, and its rebuild crawled the folder and then
+        // threw the answer away: the list was left as it was, so the pass below indexed the
+        // rows that were already there and the button read as one that re-lists one Lith.
+        recentFiles = await setRecentRows(discovered);
+        persistRecentRows();
         persistRecentsSidecar();
       }
 
@@ -4019,16 +4161,14 @@
    */
   async function removeRecent(file: RecentEntry | { name?: string; handle?: any }) {
     const name = getEntryName(file);
-    if ((file as any).browserOnly === true) {
-      // No handle to compare against, and no localStorage copy either: this row
-      // is one of the fallback's own, in the store the handle rows live in.
-      recentFiles = await removeBrowserOnlyRecent(name);
-    } else if ((file as any).handle) {
-      recentFiles = await removeRecentFile((file as any).handle);
-    } else {
-      recentFiles = recentFiles.filter((item) => item !== file);
-      persistRecentRows();
-    }
+    // The list is one list, so the row leaves the list and both stores are then told what is
+    // left. Taking the row out of one store instead is how the copies drifted apart: a handle
+    // row was dropped from the store while the mirror kept it, so a relaunch brought it back
+    // and the x read as a button that did nothing. Matching by the row itself rather than by
+    // handle or by name is also what keeps two Liths sharing a name from taking the wrong one
+    // with them, and it is the row the click came from either way.
+    recentFiles = await setRecentRows(recentFiles.filter((item) => item !== file));
+    persistRecentRows();
     await forgetWikiCache(name);
     delete cachedEntries[name];
     delete cacheSearchMatches[name];
@@ -4978,14 +5118,16 @@
       `error` with the reason in its tooltip), so an offline instance is told apart from
       a server that cannot do this at all instead of the control silently not existing.
     -->
-    {#if mode === 'webapp'}<button class="help-button" aria-label={copy.app.viewIntro} title={copy.app.viewIntro} on:click={openIntro}>{introBusy ? '…' : '?'}</button>{/if}
+    {#if mode === 'webapp' && !browserOnly}<button class="help-button" aria-label={copy.app.viewIntro} title={copy.app.viewIntro} on:click={openIntro}>{introBusy ? '…' : '?'}</button>{/if}
     <!--
-      Two independent controls, not alternatives. Crossed as one condition, a shim matched
-      the intro first: it declares itself browser-only, so it is `webapp`, and that branch is
-      tested before the sync button. Which left the one machine whose sync the button exists
-      for with no way to reach it. The intro belongs to every browser-only launcher (a shim
-      ships `intro.lith` and is the launcher standing on its own), and the sync button to
-      anything that can reach a local repository, so each answers its own question.
+      The round control is one button with one job per page, never both at once. The intro
+      belongs to the published PWA, whose server serves `intro.lith` beside it, and the sync
+      button to anything that can reach a local repository; on an instance and in the app the
+      mode alone separates them. A shim is the one page where it cannot: declaring itself
+      browser-only is exactly what makes it resolve to `webapp`, the same as the PWA, so the
+      declaration is what tells the two apart. A browser-only page therefore draws the sync
+      button alone, matching the desktop app it is the Linux half of, and its header carries
+      no way into the intro even though the shim still ships the payload for it.
     -->
     {#if hasLocalSync || isSelfHost()}<button class="sync-button {headingSyncState}" aria-label={copy.dialogs.gitSync.title} title={headingSyncTitle} on:click={openGitSyncModal}><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 17.6A5 5 0 0 0 18 8h-1.3A8 8 0 1 0 4 16.3"/><path d="M12 12v9"/><path d="m8.5 15.5 3.5-3.5 3.5 3.5"/></svg>{#if headingSyncState === 'checking'}<span class="sync-glyph ring" aria-hidden="true"></span>{:else if headingSyncState === 'error'}<span class="sync-glyph alert" aria-hidden="true">!</span>{:else if headingSyncState === 'connected'}<span class="sync-glyph dot" aria-hidden="true"></span>{/if}</button>{/if}
     </div>
@@ -5109,8 +5251,32 @@
           <p>{copy.dialogs.gitSync.stepOne} <a href="https://github.com/login/device" target="_blank" rel="noreferrer" on:click={(event) => openExternalLink(event, 'https://github.com/login/device')}>github.com/login/device</a></p>
           <p>{copy.dialogs.gitSync.stepTwo}</p>
           {#if gitUserCode}
-            <div class="user-code-display">{formatUserCode(gitUserCode)}</div>
+            <!--
+              The code is a button, because this step is a code to be typed into a window
+              the page cannot reach and copying it is the one thing the page can do to help.
+              The glyph is drawn inside the pill rather than a word so that what the pill
+              still *says* is only the code, which is what a person reads it for.
+            -->
+            <button
+              class="user-code-display"
+              type="button"
+              title={copy.dialogs.gitSync.codeCopyTitle}
+              aria-label={copy.dialogs.gitSync.codeCopyAria(formatUserCode(gitUserCode))}
+              on:click={copyUserCode}
+            >
+              {formatUserCode(gitUserCode)}
+              <svg class="pill-glyph" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V5a1 1 0 0 1 1-1h10"/></svg>
+            </button>
             <p class="git-sync-note">{copy.dialogs.gitSync.waiting}</p>
+            <!--
+              Under the standing line rather than over it, so the first `.git-sync-note` in
+              the dialog is still the one that says what the step is waiting for.
+            -->
+            {#if gitCodeCopy}
+              <p class="git-sync-note copy-status" class:error={gitCodeCopy === 'failed'} role="status">
+                {gitCodeCopy === 'copied' ? copy.dialogs.gitSync.codeCopied : copy.dialogs.gitSync.codeCopyFailed}
+              </p>
+            {/if}
           {:else}
             <p class="git-sync-note">{copy.dialogs.gitSync.requesting}</p>
           {/if}
@@ -5167,14 +5333,41 @@
           </div>
         {:else}
           <p>{copy.dialogs.gitSync.connectedRepo}</p>
-          <p class="user-code-display" style="font-size:1.05rem; letter-spacing:0.02em;">{gitSyncConnectedRepo || copy.dialogs.gitSync.notRecorded}</p>
+          {#if gitSyncRepoUrl}
+            <!--
+              The repository name is a link to the repository, which is the one thing this
+              dialog is about that lives somewhere else. An anchor rather than a button on
+              purpose: the browser's own handling is what right click, copy-link and the
+              modifier keys depend on, the address stays in the `href` so the control is still
+              a link if this script never runs, and `openExternalLink` is what hands the click
+              to the machine in the desktop app, where a `target="_blank"` click has no second
+              window to land in. The glyph sits inside the pill for the reason the device
+              code's does: what the pill says is the name.
+            -->
+            <a
+              class="user-code-display repo-link"
+              href={gitSyncRepoUrl}
+              target="_blank"
+              rel="noreferrer"
+              title={copy.dialogs.gitSync.openRepoTitle(gitSyncConnectedRepo)}
+              aria-label={copy.dialogs.gitSync.openRepoAria(gitSyncConnectedRepo)}
+              on:click={(event) => openExternalLink(event, gitSyncRepoUrl)}
+            >
+              {gitSyncConnectedRepo}
+              <svg class="pill-glyph" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 4h6v6"/><path d="M20 4 11 13"/><path d="M18 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h5"/></svg>
+            </a>
+          {:else}
+            <!-- Nothing to point at, so this stays the statement it was: no `href` to promise
+                 a click, and the pointer says the same thing. -->
+            <p class="user-code-display repo-link">{copy.dialogs.gitSync.notRecorded}</p>
+          {/if}
           {#if isSelfHost()}
             <!--
               The server's own clock, not this device's opinion of it: the sync happens
               there, and the only thing the page knows is when the server said it last did.
             -->
             <p class="git-sync-note">{serverSyncAge ? copy.dialogs.gitSync.lastSynced(serverSyncAge) : copy.dialogs.gitSync.noSyncYet}</p>
-          {:else if gitSyncHealthNote}
+          {:else if gitSyncHealthNote && !gitSyncHealthEchoed}
             <p class="status-line {gitSyncHealthBroken ? 'error' : ''}" role={gitSyncHealthBroken ? 'alert' : 'status'}>{gitSyncHealthNote}</p>
           {:else}
             <p class="git-sync-note">{copy.dialogs.gitSync.savesHere}</p>

@@ -350,19 +350,53 @@ h1 { flex: none; min-width: 0; margin: 0; color: var(--lithic-ink-strong); font-
 .sync-glyph.dot { background: var(--lithic-ok); }
 .sync-glyph.alert { background: var(--lithic-danger-deep); color: var(--lithic-ink-inverse); font-size: 10px; font-weight: 700; line-height: 1; }
 
-/* Device-flow connect view (github.com/login/device + user code). */
+/* Device-flow connect view (github.com/login/device + user code). The code is a control,
+ * not a label: this step is a code that has to be typed into another window, so pressing
+ * it copies. It is a `button` now, which means everything the browser gives one has to be
+ * said out loud here - the font, the colour and the width - or the pill changes shape.
+ * `user-select: all` stays, because a drag and Ctrl+C is still a way to take the code. */
 .user-code-display {
+  display: block;
+  box-sizing: border-box;
+  width: 100%;
   margin: 14px auto;
   padding: 12px 18px;
   border: 1px dashed var(--border-color, var(--lithic-line));
   border-radius: 8px;
   background: var(--lithic-sheen-wash-7);
+  color: inherit;
+  font-family: inherit;
   font-size: 1.6rem;
   font-weight: 700;
   letter-spacing: 0.12em;
   text-align: center;
+  cursor: pointer;
   user-select: all;
 }
+.user-code-display:hover { border-color: var(--lithic-ink-faint); }
+.user-code-display:focus-visible { outline: 2px solid var(--lithic-amber-progress); outline-offset: 2px; }
+/* The mark that says a pill is pressable, drawn small and inside it: what a pill *says* has
+ * to stay the thing it is about (the code, the repository name), since that is what a person
+ * reads it for, and the sentence a click can be explained in is the title above it. */
+.pill-glyph {
+  width: 0.6em;
+  height: 0.6em;
+  margin-left: 10px;
+  vertical-align: -0.02em;
+  opacity: 0.45;
+}
+.user-code-display:hover .pill-glyph { opacity: 0.85; }
+/* The connected view's pill: the same shape as the device code, because it is the same kind
+ * of fact (a string this dialog is about), at the size a repository name reads at. It is a
+ * link, so the pointer only promises a click where there is one: the placeholder state has
+ * no `href` and says so. */
+.user-code-display.repo-link {
+  font-size: 1.05rem;
+  letter-spacing: 0.02em;
+  text-decoration: none;
+}
+.user-code-display.repo-link:not([href]) { cursor: default; }
+.git-sync-note.error { color: var(--lithic-danger-status); }
 .repo-cards { margin: 8px 0 0; padding: 0; list-style: none; }
 .repo-card {
   display: flex;

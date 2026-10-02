@@ -15,18 +15,31 @@
 //! meant disconnecting first. A recorded pick is that answer, and no `derived` path can outrank
 //! it.
 //!
-//! The resolution order is the desktop app's, minus the two rules that need an installation to
-//! know about:
+//! The resolution order is the desktop app's:
 //!
 //!   1. the recorded pick, when it is still a directory on this machine;
 //!   2. the folder behind the `derived` path, when a repository Lithic manages already covers
 //!      it (the Lith the person is looking at is the one they mean);
 //!   3. the folder the `derived` path names, which is where the open Lith lives and therefore
-//!      the one a first connect should act on.
+//!      the one a first connect should act on;
+//!   4. `Documents/Lithic`, when the launcher named nothing that is on this machine.
 //!
-//! What is missing on purpose: the desktop app's library folders and its proposal when the
-//! launcher names nothing. Both are questions about where an *installed* app keeps its liths,
-//! and a shim served to a browser has no installation of its own to ask.
+//! Rule four is the desktop app's proposal (`proposed_sync_folder`), and it is the same folder
+//! for the same reason: `Documents/Lithic` is where this program puts itself (`install.rs`) and
+//! where its liths are meant to live, so a machine that has never synced is told where its
+//! backup is about to land instead of being asked to invent a folder. It is a proposal and not
+//! a promise, which is why the folder usually does not exist yet and why `connect_dir` makes it
+//! at the connect rather than the dialog doing it for being opened: nothing is written until
+//! the person asks for a repository. It also answers for a derived path that is not here at
+//! all - a recents row naming a Lith that has since been deleted, or one on a drive that is not
+//! plugged in - because rules two and three read a filesystem that has nothing there, and a row
+//! is not a subject: naming the derived folder would put something the person cannot act on in
+//! front of them, which is the state rule four exists to end.
+//!
+//! What is missing on purpose: the desktop app's *library folders*, the folders a previous
+//! attachment left a repository in. A shim has no recents list beside an executable and no
+//! installation whose neighbours it can read, so the derived path is the only evidence of where
+//! the person works and rule four is the only thing the shim can add to it.
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -35,6 +48,7 @@ use serde_json::{json, Value};
 
 use crate::command::{choose_folder, failed, ok, path_text};
 use crate::git::{managed_root_for, sync_dir_of};
+use crate::install::install_dir;
 use crate::{app_data_dir, Response};
 
 /// The file, under the shim's data directory, whose single line is the picked folder.
@@ -87,18 +101,61 @@ fn record(picked: Option<&Path>) -> Result<(), String> {
     }
 }
 
+/// The folder the shim proposes when the launcher has nothing of its own: `Documents/Lithic`,
+/// the same folder the app installs itself into (see the module note).
+///
+/// `None` on a machine with no Documents folder, no data home and no home directory to join,
+/// which is the only case where the dialog asks rather than proposing. The desktop app's
+/// `proposed_sync_folder` answers the same way and for the same reason.
+pub(crate) fn proposed() -> Option<PathBuf> {
+    install_dir()
+}
+
+/// The folder a connect acts on: the path the launcher named, made first when it is the
+/// folder the shim proposed and it is not on disk yet.
+///
+/// `sync_dir_of` must not be asked about that folder, which is the whole reason this function
+/// exists: it answers the folder *holding* a path that is not a directory, so a
+/// `Documents/Lithic` this machine has never made would resolve to `Documents` and a first
+/// connect would commit the person's entire documents folder. The desktop app's `connect_dir`
+/// is the same function for the same reason. Nothing is made for any other missing path: a
+/// recents row naming a folder that is gone must not turn that name into a new folder.
+pub(crate) fn connect_dir(given: &Path, proposal: Option<&Path>) -> Option<PathBuf> {
+    if given.is_dir() {
+        return Some(given.to_path_buf());
+    }
+    if proposal.is_some_and(|dir| dir == given) {
+        return fs::create_dir_all(given).ok().map(|()| given.to_path_buf());
+    }
+    sync_dir_of(given).filter(|dir| dir.is_dir())
+}
+
 /// `git-folder { derived? }`
 ///
 /// The folder the backup acts on, and whether that folder is the person's own pick. Two fields
 /// rather than one for the desktop app's reason: the dialog names the folder it is about to act
 /// on, and it also has to know whether offering to go back to the automatic one makes sense, and
 /// the only case where it does is a recorded pick.
+///
+/// The proposal is drawn where the launcher had nothing of its own: no `derived` at all, or one
+/// naming a path that is not on this machine. A Lith the person is actually working in still
+/// decides the folder on its own, which is the point of the condition, and it is the same rule
+/// the desktop app makes in `answer_folder`.
+///
+/// The existence test is what separates a subject from a row. A `derived` path is the open Lith
+/// or the newest recents row, and only the first of those is guaranteed to be here; a row
+/// outlives the file it names, and a folder is not evidence that the Lith inside it still is.
+/// Answering with such a path would leave the dialog naming a folder nothing can act on and the
+/// connect failing on `sync_dir_of` after the fact, so the proposal answers instead.
 pub(crate) fn folder(args: &Value) -> Response {
     let derived = derived_arg(args);
     let chosen = recorded();
     let folder = match &chosen {
         Some(dir) => Some(dir.clone()),
-        None => derived.as_deref().and_then(cover_or_folder),
+        None => match derived.as_deref().filter(|path| path.exists()) {
+            Some(derived) => cover_or_folder(derived).or_else(proposed),
+            None => proposed(),
+        },
     };
     ok(json!({
         "folder": folder.map(|dir| path_text(&dir)),
@@ -249,6 +306,15 @@ mod tests {
             dir
         }
 
+        /// A Lith inside a folder, which is what the launcher's derived path names. The file
+        /// is the point: a derived path is the open Lith or the newest recents row, and only
+        /// one that is on this machine counts as the launcher having a subject at all.
+        fn lith(&self, dir: &Path, name: &str) -> PathBuf {
+            let file = dir.join(name);
+            fs::write(&file, "notes\n").expect("lith");
+            file
+        }
+
         /// Make `dir` a repository Lithic manages, which is the whole of what rule two reads.
         fn manage(&self, dir: &Path) {
             let git = dir.join(".git");
@@ -275,9 +341,10 @@ mod tests {
     fn with_nothing_recorded_the_derived_folder_is_the_answer() {
         let scratch = Scratch::new("derived");
         let dir = scratch.folder("liths");
+        let lith = scratch.lith(&dir, "notes.lith");
         let answer = ask(&format!(
             "{{\"command\":\"git-folder\",\"args\":{{\"derived\":{}}}}}",
-            json!(path_text(&dir.join("notes.lith")))
+            json!(path_text(&lith))
         ));
         assert_eq!(answer["ok"], json!(true));
         assert_eq!(answer["result"]["folder"], json!(path_text(&dir)));
@@ -291,9 +358,10 @@ mod tests {
         scratch.manage(&root);
         let nested = root.join("projects");
         fs::create_dir_all(&nested).expect("nested");
+        let lith = scratch.lith(&nested, "notes.lith");
         let answer = ask(&format!(
             "{{\"command\":\"git-folder\",\"args\":{{\"derived\":{}}}}}",
-            json!(path_text(&nested.join("notes.lith")))
+            json!(path_text(&lith))
         ));
         assert_eq!(answer["result"]["folder"], json!(path_text(&root)));
     }
@@ -320,6 +388,7 @@ mod tests {
     fn a_recorded_pick_that_is_not_on_this_machine_falls_back() {
         let scratch = Scratch::new("stale");
         let derived = scratch.folder("liths");
+        let lith = scratch.lith(&derived, "notes.lith");
         fs::create_dir_all(scratch.data.join("lithic")).expect("data dir");
         fs::write(
             scratch.data.join("lithic").join(PICK_FILE),
@@ -328,7 +397,7 @@ mod tests {
         .expect("pick file");
         let answer = ask(&format!(
             "{{\"command\":\"git-folder\",\"args\":{{\"derived\":{}}}}}",
-            json!(path_text(&derived.join("notes.lith")))
+            json!(path_text(&lith))
         ));
         assert_eq!(answer["result"]["folder"], json!(path_text(&derived)));
         // Nothing recorded is in force, so the dialog has no override to offer to undo,
@@ -336,16 +405,66 @@ mod tests {
         assert_eq!(answer["result"]["overridden"], json!(false));
     }
 
+    /// The proposal is the folder the app installs into, and that rule has one owner
+    /// (`install.rs`). What this pins is that the folder the dialog is offered is that one,
+    /// rather than a second folder invented here that would drift from it.
     #[test]
-    fn with_nothing_to_name_the_answer_is_an_empty_folder() {
-        let scratch = Scratch::new("empty");
-        let _ = &scratch;
+    fn the_proposal_is_the_folder_the_shim_installs_into() {
+        assert_eq!(proposed(), install_dir());
+    }
+
+    #[test]
+    fn with_nothing_to_name_the_answer_is_the_proposed_folder() {
+        let _scratch = Scratch::new("proposed");
         let answer = ask("{\"command\":\"git-folder\",\"args\":{}}");
-        assert_eq!(answer["result"]["folder"], json!(null));
-        assert_eq!(answer["result"]["overridden"], json!(false));
+        assert_eq!(answer["ok"], json!(true));
+        assert_eq!(
+            answer["result"]["folder"],
+            json!(proposed().map(|dir| path_text(&dir))),
+            "a machine that has never synced is offered where its backup will land"
+        );
+        assert_eq!(answer["result"]["overridden"], json!(false), "a proposal is not a pick");
         // An empty string is a launcher with nothing to name, not a folder called nothing.
         let blank = ask("{\"command\":\"git-folder\",\"args\":{\"derived\":\"  \"}}");
-        assert_eq!(blank["result"]["folder"], json!(null));
+        assert_eq!(blank["result"]["folder"], json!(proposed().map(|dir| path_text(&dir))));
+    }
+
+    /// The proposal fills the empty case and no case with a Lith in it: the folder the person
+    /// is working in still decides on its own, which is the desktop app's own rule.
+    #[test]
+    fn a_derived_folder_outranks_the_proposal() {
+        let scratch = Scratch::new("proposal-derived");
+        let dir = scratch.folder("liths");
+        let lith = scratch.lith(&dir, "notes.lith");
+        let answer = ask(&format!(
+            "{{\"command\":\"git-folder\",\"args\":{{\"derived\":{}}}}}",
+            json!(path_text(&lith))
+        ));
+        assert_eq!(answer["result"]["folder"], json!(path_text(&dir)));
+    }
+
+    /// The one folder a connect makes for itself, and the folder it must never silently
+    /// become: `sync_dir_of` alone answers the folder *holding* a path that is not a
+    /// directory, and for the proposal that is the whole of `Documents`.
+    #[test]
+    fn a_connect_makes_the_proposed_folder_and_never_the_folder_holding_it() {
+        let scratch = Scratch::new("connect");
+        let proposal = scratch.root.join("Documents/Lithic");
+        assert!(!proposal.is_dir(), "the machine has never made it");
+
+        // The proposal, named and missing: made, and the answer is the folder itself.
+        assert_eq!(connect_dir(&proposal, Some(&proposal)), Some(proposal.clone()));
+        assert!(proposal.is_dir(), "the proposal was made");
+
+        // A folder the launcher derived that is not there keeps the old rule: nothing is made,
+        // and the folder holding it is the answer.
+        let holder = scratch.folder("liths");
+        let stray = holder.join("gone.lith");
+        assert_eq!(connect_dir(&stray, Some(&proposal)), Some(holder));
+        assert!(!stray.exists(), "a stale row does not become a folder of its own");
+
+        // A path with no folder to hold it is refused rather than guessed at.
+        assert_eq!(connect_dir(&scratch.root.join("nowhere/gone.lith"), Some(&proposal)), None);
     }
 
     #[test]
@@ -368,15 +487,33 @@ mod tests {
         assert_eq!(answer["result"]["overridden"], json!(false));
     }
 
+    /// A row is not a subject. A recents row outlives the Lith it names, and a folder is no
+    /// evidence that the Lith inside it still is, so answering with one of those would leave
+    /// the dialog naming a folder nothing can act on and the connect failing on `sync_dir_of`
+    /// after the fact. The proposal answers instead, which is what a machine with no recents
+    /// at all is offered.
     #[test]
-    fn a_folder_that_is_gone_is_not_named() {
+    fn a_derived_path_that_is_not_on_this_machine_falls_through_to_the_proposal() {
         let scratch = Scratch::new("gone");
-        let missing = scratch.root.join("nowhere");
-        let answer = ask(&format!(
-            "{{\"command\":\"git-folder\",\"args\":{{\"derived\":{}}}}}",
-            json!(path_text(&missing.join("notes.lith")))
-        ));
-        assert_eq!(answer["result"]["folder"], json!(null));
+        // A row naming a folder that is gone from this machine entirely, and one naming a Lith
+        // deleted out of a folder that is still here: the second is the likelier of the two,
+        // because deleting a Lith is easier than deleting the folder it was in.
+        let gone_folder = scratch.root.join("nowhere/notes.lith");
+        let dir = scratch.folder("liths");
+        let gone_lith = dir.join("notes.lith");
+        for path in [gone_folder, gone_lith] {
+            let answer = ask(&format!(
+                "{{\"command\":\"git-folder\",\"args\":{{\"derived\":{}}}}}",
+                json!(path_text(&path))
+            ));
+            assert_eq!(
+                answer["result"]["folder"],
+                json!(proposed().map(|dir| path_text(&dir))),
+                "{} is not on this machine, so it is a row rather than a folder to act on",
+                path_text(&path)
+            );
+            assert_eq!(answer["result"]["overridden"], json!(false), "a proposal is not a pick");
+        }
     }
 
     #[test]
@@ -397,13 +534,14 @@ mod tests {
     }
 
     #[test]
-    fn a_missing_derived_is_an_ordinary_empty_answer() {
+    fn a_missing_derived_is_an_ordinary_answer_rather_than_a_refusal() {
         // `bad-args` is for a `path`-shaped command; `git-folder` may be asked with nothing,
-        // so an absent derived is an answer rather than a refusal.
+        // so an absent derived is an answer rather than a refusal, and the answer is the
+        // folder the shim proposes.
         let _scratch = Scratch::new("null-derived");
         let answer = ask("{\"command\":\"git-folder\",\"args\":{\"derived\":null}}");
         assert_eq!(answer["ok"], json!(true));
-        assert_eq!(answer["result"]["folder"], json!(null));
+        assert_eq!(answer["result"]["folder"], json!(proposed().map(|dir| path_text(&dir))));
     }
 
     #[test]

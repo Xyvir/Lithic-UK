@@ -707,9 +707,10 @@ async fn git_sync_setup(
     token: String,
     window: tauri::WebviewWindow,
 ) -> Result<GitSyncSetup, String> {
-    let dir = sync_dir_of(Path::new(&path))
-        .filter(|dir| dir.is_dir())
-        .ok_or_else(|| format!("Cannot resolve a folder for {}", path))?;
+    // The folder the dialog named, made when it is the one Lithic itself proposed: a fresh
+    // machine has no `Documents\Lithic`, and the first connect is what creates it.
+    let proposal = proposed_sync_folder(exe_dir().as_deref(), install_folder().as_deref());
+    let dir = connect_dir(&path, proposal.as_deref())?;
     let repo = repo.trim().trim_end_matches(".git").trim().to_string();
     if repo.is_empty() || token.trim().is_empty() {
         return Err("Both repository (owner/name) and token are required".to_string());
@@ -1005,26 +1006,68 @@ fn holds_a_lith(dir: &Path) -> bool {
 /// is not free, because the first connect commits what it finds and a repository that
 /// exists is what every rule above it prefers from then on — the measured version of
 /// that mistake being a first connect aimed at a Downloads folder of 3,910 files.
-/// Failing both, the folder the app installs into, when it is on disk; failing that,
-/// nothing, and the dialog asks instead of guessing.
+/// Failing both, the folder the app installs into (`Documents\Lithic`), whether or not it
+/// is there yet: a machine that has never synced has never made it, and `connect_dir`
+/// makes it when the first connect runs. Pre-filling it is the whole point, because the
+/// alternative is asking somebody setting up a new device to invent the folder their own
+/// backup already lives in. Only a machine with no Documents folder to name at all has
+/// nothing to propose, and the dialog asks instead of guessing.
 fn proposed_sync_folder(exe: Option<&Path>, install: Option<&Path>) -> Option<PathBuf> {
     if let Some(dir) = exe {
         if install == Some(dir) || holds_a_lith(dir) {
             return Some(dir.to_path_buf());
         }
     }
-    install.filter(|dir| dir.is_dir()).map(Path::to_path_buf)
+    install.map(Path::to_path_buf)
+}
+
+/// The folder a connect acts on: the path the launcher named, made first when it is the
+/// folder Lithic proposed and it is not on disk yet.
+///
+/// `sync_dir_of` must not be asked about that folder, which is the whole reason this
+/// function exists: it answers the folder *holding* a path that is not a directory, so a
+/// `Documents\Lithic` the machine has never made would resolve to `Documents` and the
+/// first connect would commit the user's entire documents folder — the same measured
+/// failure the proposal rules exist to prevent, one folder up. So the proposal is
+/// recognised by name and made, and every other path keeps the rule it had.
+///
+/// Nothing is ever made for a path the launcher derived: a stale recents row naming a
+/// folder that is gone must not turn that name into a new folder, because the answer to
+/// where a backup goes has to come from the user rather than from an old row.
+fn connect_dir(path: &str, proposal: Option<&Path>) -> Result<PathBuf, String> {
+    let given = Path::new(path);
+    if given.is_dir() {
+        return Ok(given.to_path_buf());
+    }
+    if proposal.is_some_and(|dir| dir == given) {
+        fs::create_dir_all(given).map_err(|error| error.to_string())?;
+        return Ok(given.to_path_buf());
+    }
+    sync_dir_of(given)
+        .filter(|dir| dir.is_dir())
+        .ok_or_else(|| format!("Cannot resolve a folder for {}", path))
 }
 
 /// The folder the backup acts on, in the order the answers outrank each other: the pick
-/// recorded in the sidecar, then Lithic's inference, then — only when the launcher had no
-/// subject of its own — the proposed folder.
+/// recorded in the sidecar, then Lithic's inference, then — only when the launcher named
+/// nothing that is on this machine — the proposed folder.
 ///
 /// The proposal is last and conditional, which is the whole reason it is here rather than
-/// another rule inside `preferred_sync_folder`: a derived path is the launcher saying which
-/// Lith the user is looking at, and the folder that path implies beats a proposal about the
-/// program's own folder. A proposal that outranked it would aim the backup at the folder
-/// the app happens to sit in while the user was working somewhere else entirely.
+/// another rule inside `preferred_sync_folder`: a derived path that names a Lith on this
+/// machine is the launcher saying which Lith the user is looking at, and the folder that path
+/// implies beats a proposal about the program's own folder. A proposal that outranked it would
+/// aim the backup at the folder the app happens to sit in while the user was working somewhere
+/// else entirely, and `None` is the same answer it always was for that case: the launcher keeps
+/// the folder it worked out.
+///
+/// A derived path that is *not* here has no such claim to make, and this is the case the rule
+/// exists for as much as an empty launcher is. A recents row outlives the Lith it names, and a
+/// folder is no evidence that the Lith inside it still is — deleting a Lith is easier than
+/// deleting the folder it was in. `None` there would hand the launcher back a path nothing can
+/// act on: measured as a dialog naming a folder that is gone, with no advice line under it
+/// (the "save a Lith first" line is about the launcher having nothing, and it does have a row),
+/// and a Connect that answers `Cannot resolve a folder for …` after the fact. The proposal
+/// answers instead, which is the folder a machine with no recents at all is offered.
 fn answer_folder(
     chosen: Option<&Path>,
     derived: Option<&Path>,
@@ -1034,7 +1077,7 @@ fn answer_folder(
     if let Some(dir) = resolved_sync_folder(chosen, derived, libraries) {
         return Some(dir);
     }
-    if derived.is_some() {
+    if derived.is_some_and(Path::exists) {
         return None;
     }
     proposal.map(Path::to_path_buf)
@@ -3821,19 +3864,61 @@ mod tests {
             Some(install.clone())
         );
 
-        // Neither on disk: nothing to propose, and the dialog asks rather than naming a path
-        // that is not there.
-        assert_eq!(proposed_sync_folder(Some(&downloads), Some(&root.join("gone"))), None);
+        // The install folder is proposed whether or not it is there: a machine that has
+        // never synced has never made it, and pre-filling it is the point of the rule. The
+        // connect is what creates it (`connect_dir` below).
+        assert_eq!(
+            proposed_sync_folder(Some(&downloads), Some(&root.join("gone"))),
+            Some(root.join("gone"))
+        );
+
+        // A machine with no Documents folder to name at all: nothing to propose, and the
+        // dialog asks rather than naming a path that is not there.
+        assert_eq!(proposed_sync_folder(Some(&downloads), None), None);
         assert_eq!(proposed_sync_folder(None, None), None);
 
         let _ = fs::remove_dir_all(&root);
     }
 
-    /// The proposal fills the case where the launcher had nothing of its own, and no case
-    /// where it had something: the derived folder is the one the user is working in, and a
-    /// proposal about the program's own folder must not outrank it.
+    /// The one folder a connect makes for itself, and the folder it must never silently
+    /// become.
     #[test]
-    fn the_proposal_only_fills_the_empty_case() {
+    fn a_connect_makes_the_proposed_folder_and_never_the_folder_holding_it() {
+        let root = scratch("connect-dir");
+        let install = root.join("Documents/Lithic");
+        assert!(!install.is_dir(), "the fixture starts with no install folder");
+
+        // The proposal, named and missing: the first connect makes it and acts on it, not on
+        // `Documents` above it. Asserted through the answer, because the folder an answer
+        // names is the whole of what the caller has to go on.
+        assert_eq!(
+            connect_dir(&install.to_string_lossy(), Some(&install)),
+            Ok(install.clone())
+        );
+        assert!(install.is_dir(), "the proposal was made");
+
+        // A folder the user derived that is not there keeps the old rule: nothing is made
+        // for it, and the folder holding it is the answer.
+        let downloads = root.join("Downloads");
+        fs::create_dir_all(&downloads).unwrap();
+        let stray = downloads.join("gone.lith");
+        assert_eq!(
+            connect_dir(&stray.to_string_lossy(), Some(&install)),
+            Ok(downloads.clone())
+        );
+        assert!(!stray.exists(), "a stale row does not become a folder of its own");
+
+        // And a path with no folder to hold it is refused rather than guessed at.
+        assert!(connect_dir(&root.join("nowhere/gone.lith").to_string_lossy(), Some(&install)).is_err());
+
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    /// The proposal fills the case where the launcher named nothing that is on this machine,
+    /// and no case where it named something that is: a derived Lith is the one the user is
+    /// working in, and a proposal about the program's own folder must not outrank it.
+    #[test]
+    fn the_proposal_fills_only_the_case_where_nothing_was_named_here() {
         let root = scratch("propose-fill");
         let app = root.join("Lithic");
         fs::create_dir_all(&app).unwrap();
@@ -3848,6 +3933,18 @@ mod tests {
         assert_eq!(
             answer_folder(None, Some(&downloads.join("tiddlers.lith")), &[], Some(&app)),
             None
+        );
+        // A derived path that is not on this machine is a row rather than a subject, and the
+        // proposal is what replaces it: the Lith was deleted, or the drive it was on is not
+        // plugged in. The second shape is the likelier one, because the folder it was in is
+        // still there — which is why the test for it is not the folder being gone.
+        assert_eq!(
+            answer_folder(None, Some(&root.join("unplugged/notes.lith")), &[], Some(&app)),
+            Some(app.clone())
+        );
+        assert_eq!(
+            answer_folder(None, Some(&downloads.join("gone.lith")), &[], Some(&app)),
+            Some(app.clone())
         );
         // And a pick outranks the proposal, which is the one thing that must not be true of
         // a folder nobody chose.

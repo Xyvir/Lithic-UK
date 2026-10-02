@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { KeyvalStore, addRecentFile, getRecentFiles, removeRecentFile, addBrowserOnlyRecent, removeBrowserOnlyRecent, recentRowName, clearAllRecentFiles, forgetWikiCache, saveSearchCache, purgeOldestCachesIfNeeded, isWikiDriftedFromHead, recentDiskPath, isFlatCacheKey, cachedWikiNames, type CacheStore } from './storage.ts';
+import { KeyvalStore, setRecentRows, mergeRecentRow, mergeRecentLists, sameRecentRow, isAnonymousRow, getRecentFiles, recentRowName, clearAllRecentFiles, forgetWikiCache, saveSearchCache, purgeOldestCachesIfNeeded, isWikiDriftedFromHead, recentDiskPath, isFlatCacheKey, cachedWikiNames, type CacheStore } from './storage.ts';
 import { KeyvalWikiHistory } from './wiki-history.ts';
 
 // In Node environment without native indexedDB, we mock indexedDB or test logic
@@ -253,7 +253,7 @@ test('recentDiskPath finds the path in every row shape the recents store holds',
 
 test('a browser-only row lands in the same store the file rows live in', async () => {
   const store = new MemoryIdb();
-  await addBrowserOnlyRecent('notes.lith', '', store);
+  await setRecentRows([{ handle: null, tauriPath: null, name: 'notes.lith', browserOnly: true }], store);
   const rows = (await store.get<any[]>('recentFiles'))!;
   assert.equal(rows.length, 1);
   assert.equal(rows[0].name, 'notes.lith');
@@ -263,45 +263,159 @@ test('a browser-only row lands in the same store the file rows live in', async (
 
 test('re-saving a browser-only Lith moves its row rather than duplicating it', async () => {
   const store = new MemoryIdb();
-  await addBrowserOnlyRecent('notes.lith', '', store);
-  await addBrowserOnlyRecent('other.lith', '', store);
-  await addBrowserOnlyRecent('notes.lith', '', store);
-  const rows = (await store.get<any[]>('recentFiles'))!;
-  assert.deepEqual(rows.map((row) => row.name), ['notes.lith', 'other.lith']);
+  let list = await mergeRecentRow([], { handle: null, name: 'notes.lith', browserOnly: true });
+  list = await mergeRecentRow(list, { handle: null, name: 'other.lith', browserOnly: true });
+  list = await mergeRecentRow(list, { handle: null, name: 'notes.lith', browserOnly: true });
+  const rows = await setRecentRows(list, store);
+  assert.deepEqual(rows.map((row) => recentRowName(row)), ['notes.lith', 'other.lith']);
 });
 
 test('a browser-only row supersedes the file row of the same name', async () => {
   // The same Lith cannot be both: whatever this mode mounts is remembered as
   // living in browser storage, so the older file-row shape must not linger
   // beside it and offer to open a file nobody can write to.
-  const store = new MemoryIdb([['recentFiles', [{ handle: { name: 'notes.lith' }, tauriPath: null }]]]);
-  await addBrowserOnlyRecent('notes.lith', '', store);
-  const rows = (await store.get<any[]>('recentFiles'))!;
-  assert.equal(rows.length, 1);
-  assert.equal(rows[0].browserOnly, true);
+  const current = [{ handle: { name: 'notes.lith' }, tauriPath: null }];
+  const next = await mergeRecentRow(current, { handle: null, name: 'notes.lith', browserOnly: true });
+  assert.equal(next.length, 1);
+  assert.equal((next[0] as any).browserOnly, true);
 });
 
-test('removing a browser-only row takes that row and leaves the rest', async () => {
+test('removing a row writes the list that is left, and nothing else', async () => {
   const store = new MemoryIdb();
-  await addBrowserOnlyRecent('notes.lith', '', store);
-  await addBrowserOnlyRecent('other.lith', '', store);
-  const next = await removeBrowserOnlyRecent('notes.lith', store);
-  assert.deepEqual(next.map((row) => row.name), ['other.lith']);
-  assert.deepEqual(((await store.get<any[]>('recentFiles'))!).map((row) => row.name), ['other.lith']);
+  const list = await setRecentRows(
+    [
+      { handle: null, name: 'notes.lith', browserOnly: true },
+      { handle: null, name: 'other.lith', browserOnly: true }
+    ],
+    store
+  );
+  const next = await setRecentRows(list.filter((row) => recentRowName(row) !== 'notes.lith'), store);
+  assert.deepEqual(next.map((row) => recentRowName(row)), ['other.lith']);
+  assert.deepEqual(((await store.get<any[]>('recentFiles'))!).map((row) => recentRowName(row)), ['other.lith']);
 });
 
-test('a row with no comparable handle survives removing some other file', async () => {
-  // Regression: removal used to keep only rows whose handle answered
-  // isSameEntry, so pointing at one file quietly deleted every handle-less row
-  // beside it. Which is every row the fallback mode makes.
-  const store = new MemoryIdb([[
-    'recentFiles',
+test('a save adds to the list rather than adopting one store answer', async () => {
+  // Regression, measured in the shim. With a backup connected the list *is* the synced Liths,
+  // which arrive as path rows, and a save used to answer with whatever IndexedDB held, which
+  // was nothing of theirs: the new row replaced every one of them. Coverage then had no paths
+  // to compute from, which is what turned the panel's foot into `Reset Recents`.
+  const store = new MemoryIdb();
+  const synced = [
+    { handle: null, name: 'notes.lith', tauriPath: '/home/u/Documents/Lithic/notes.lith' },
+    { handle: null, name: 'recipes.lith', tauriPath: '/home/u/Documents/Lithic/recipes.lith' }
+  ];
+  await setRecentRows(synced, store);
+  const saved = { handle: { name: 'new.lith' }, tauriPath: null, name: 'new.lith' };
+  const next = await setRecentRows(await mergeRecentRow(synced, saved), store);
+  assert.deepEqual(
+    next.map((row) => recentRowName(row)),
+    ['new.lith', 'notes.lith', 'recipes.lith'],
+    'the new row goes in front of what was listed, and nothing leaves'
+  );
+  const stored = (await store.get<any[]>('recentFiles'))!;
+  assert.deepEqual(
+    stored.map((row) => recentRowName(row)),
+    ['new.lith', 'notes.lith', 'recipes.lith'],
+    'and the store holds the same list, so a relaunch reads it rather than a one-row answer'
+  );
+  assert.deepEqual(
+    stored.map((row) => recentDiskPath(row)),
+    [null, '/home/u/Documents/Lithic/notes.lith', '/home/u/Documents/Lithic/recipes.lith'],
+    'the paths survive the round trip: coverage and the rebuild both read them back'
+  );
+});
+
+test('the store and the mirror are read as one list', () => {
+  // Regression, and the reason the two copies are merged rather than chosen between: the store
+  // held the one row a save had written and the mirror held the synced Liths, so reading the
+  // store alone showed the one row and hid the backup's own list.
+  const stored = [{ handle: { name: 'saved.lith' }, tauriPath: null }];
+  const mirrored = [
+    { name: 'notes.lith', path: '/home/u/Documents/Lithic/notes.lith' },
+    { handle: { name: 'saved.lith' } }
+  ];
+  const merged = mergeRecentLists(stored, mirrored);
+  assert.deepEqual(merged.map((row) => recentRowName(row)), ['saved.lith', 'notes.lith']);
+  assert.equal((merged[0] as any).handle.name, 'saved.lith', 'the store order leads');
+  assert.equal(
+    recentDiskPath(merged[1]),
+    '/home/u/Documents/Lithic/notes.lith',
+    'and a row only the mirror holds comes back with its path'
+  );
+});
+
+test('a body rides only in a row that has nowhere else to keep it', async () => {
+  // The same rule the localStorage mirror follows, and it matters more here: this store is the
+  // one a body can bloat, and a copy nothing keeps in step is not worth the space.
+  const store = new MemoryIdb();
+  const rows = await setRecentRows(
     [
-      { handle: null, name: 'browser-only.lith', browserOnly: true },
-      { handle: { name: 'target.lith', isSameEntry: async (other: any) => other === 'target' }, tauriPath: null },
-      { handle: null, name: 'path-only.lith', tauriPath: 'C:/Lithic/path-only.lith' }
-    ]
-  ]]);
-  const next = await removeRecentFile('target' as any, store);
-  assert.deepEqual(next.map((row) => recentRowName(row)), ['browser-only.lith', 'path-only.lith']);
+      { handle: null, name: 'monolith.html', text: '<html>a whole page</html>' },
+      { handle: null, name: 'notes.lith', path: '/Lithic/notes.lith', text: 'a body with a file behind it' }
+    ],
+    store
+  );
+  assert.equal((rows[0] as any).text, '<html>a whole page</html>');
+  assert.equal((rows[1] as any).text, undefined);
+});
+
+test('two rows are the same Lith by path, by handle, or by name', async () => {
+  const notes = { handle: null, name: 'notes.lith', tauriPath: '/Lithic/notes.lith' };
+  const other = { handle: null, name: 'notes.lith', tauriPath: '/Elsewhere/notes.lith' };
+  assert.equal(await sameRecentRow(notes, { ...notes }), true, 'the same path is the same file');
+  assert.equal(await sameRecentRow(notes, other), false, 'and a different path is not, however alike the names');
+
+  const handle = { name: 'a.lith', isSameEntry: async (candidate: any) => candidate === 'same' };
+  assert.equal(await sameRecentRow({ handle }, { handle: 'same' as any }), true, 'a comparable handle answers for itself');
+  assert.equal(await sameRecentRow({ handle }, { handle: 'other' as any }), false);
+
+  // Two files called `notes.lith` in two folders are two of the user's Liths. A handle that
+  // cannot be compared is not a name match, or one of them would be hidden.
+  assert.equal(
+    await sameRecentRow(
+      { handle: { name: 'notes.lith' }, tauriPath: null },
+      { handle: { name: 'notes.lith' }, tauriPath: null }
+    ),
+    false
+  );
+  // With no handle on either side a name is all there is, which is what a path row and a
+  // browser-only row already compared by.
+  assert.equal(
+    await sameRecentRow(
+      { handle: null, name: 'notes.lith', browserOnly: true },
+      { handle: null, name: 'notes.lith', browserOnly: true }
+    ),
+    true
+  );
+});
+
+test('a row that names no file is not a row', () => {
+  assert.equal(isAnonymousRow({ name: 'new.lith' }), true, 'a name alone says nothing to open');
+  assert.equal(isAnonymousRow({ name: 'new.lith', path: '' }), true, 'and an empty path is no path');
+  assert.equal(isAnonymousRow({ name: 'notes.lith', path: '/Lithic/notes.lith' }), false);
+  assert.equal(isAnonymousRow({ handle: { name: 'notes.lith' } }), false);
+  // The two ways a row can have somewhere to be instead of a path: the browser's storage, and
+  // the document itself. Both can be opened, which is what separates them from a name alone.
+  assert.equal(isAnonymousRow({ handle: null, name: 'notes.lith', browserOnly: true }), false);
+  assert.equal(isAnonymousRow({ handle: null, name: 'monolith.html', text: '<html>a page</html>' }), false);
+});
+
+test('the placeholder a blank Lith left behind loses to the row its save wrote', () => {
+  // The exact duplicate the merge used to produce: the mount remembered a name with nowhere to
+  // save it, the engine's saver then recorded the file the chooser named, and reading the store
+  // and the mirror as one list showed both. One of them cannot be opened.
+  const stored = [
+    { handle: { name: 'test.lith', __lithicShimPath__: '/home/u/Documents/Lithic/test.lith' }, tauriPath: null }
+  ];
+  const mirrored = [{ name: 'test.lith' }];
+  const merged = mergeRecentLists(stored, mirrored);
+  assert.deepEqual(merged.map((row) => recentRowName(row)), ['test.lith'], 'one Lith, one row');
+  assert.equal(recentDiskPath(merged[0]), '/home/u/Documents/Lithic/test.lith', 'and it is the openable one');
+});
+
+test('nothing writes a placeholder row, so a relaunch cannot resurrect one', async () => {
+  const store = new MemoryIdb();
+  const rows = await setRecentRows([{ name: 'new.lith' }, { name: 'notes.lith', path: '/Lithic/notes.lith' }], store);
+  assert.deepEqual(rows.map((row) => recentRowName(row)), ['notes.lith']);
+  assert.deepEqual(((await store.get<any[]>('recentFiles'))!).map((row) => recentRowName(row)), ['notes.lith']);
 });

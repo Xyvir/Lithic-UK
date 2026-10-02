@@ -47,18 +47,31 @@ getrandom = "0.2"
 serde_json = "1"
 # The GitHub device flow and REST calls (`shim/src/github.rs`). Blocking on purpose: the shim
 # is one thread per connection, so there is no reactor to feed and no async runtime to pay
-# for. `default-features = false` drops ureq's own rustls default, which is the whole point:
+# for. `default-features = false` drops ureq's own rustls default:
 # the TLS here is `native-tls`, which is the platform stack (OpenSSL on Linux, SChannel on
 # Windows, Security on macOS), and rustls beside it would be a second implementation of a
 # thing the machine already has. `vendored` is deliberately not asked for, for the same reason
 # the manifest does not ask `git2` for `vendored-openssl` above.
 #
+# **Dropping the feature is not what selects the provider, and this line was once read as if it
+# were.** ureq's `TlsProvider` defaults to Rustls whatever the features say, and its own
+# documentation calls the `native-tls` setting one that "is never picked up automatically"; a
+# request to an https URI then panics in the transport ("uri scheme is https, provider is
+# Rustls but feature is not enabled: rustls") rather than failing. Since the release profile is
+# `panic = "abort"`, that panic ended the shim process, and the launcher's fetch (a fetch to
+# *this same server*) answered nothing, which is the `unreachable` the dialog showed. The
+# provider and the trust store are both named explicitly in `agent()`; ureq 3.4.2, measured
+# against the released `Lithic_10.01.26-2129.AppImage`.
+#
 # Known and measured, not overlooked: ureq's stable `native-tls` feature also pulls
-# `webpki-root-certs`, a bundled copy of the Mozilla root program, while the path this uses
-# verifies against the platform trust store and never reads it. ureq's `native-tls-no-default`
-# is the feature that drops it, and it is on ureq's unstable list, so it is not worth a build
-# this repository depends on for a data blob the linker is likely to drop anyway. Worth one
-# word the day it leaves that list.
+# `webpki-root-certs`, a bundled copy of the Mozilla root program. The path this uses does not
+# read it, but only because `agent()` names `RootCerts::PlatformVerifier`: that feature also
+# makes `RootCerts::WebPki` *available*, and WebPki is the default, so a default agent on the
+# native path calls `disable_built_in_roots(true)` and verifies against the bundled set rather
+# than the machine's trust store. ureq's `native-tls-no-default` is the feature that drops the
+# blob outright, and it is on ureq's unstable list, so it is not worth a build this repository
+# depends on for a data blob the linker may drop anyway. Worth one word the day it leaves that
+# list.
 ureq = { version = "3", default-features = false, features = ["native-tls"] }
 # The writes (`git-setup`, `git-commit`, `git-heartbeat`, `git-reauth`, `git-disconnect`) are
 # why this is here. `https` is what gives libgit2 a transport at all: on Linux that pulls

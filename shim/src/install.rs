@@ -272,7 +272,12 @@ fn refresh_caches(applications: &Path, mime: &Path) {
 // ---------------------------------------------------------------------------
 
 /// The folder the copy is installed into, by the desktop app's rule.
-fn install_dir() -> Option<PathBuf> {
+///
+/// The same folder `syncfolder::proposed` offers a first backup, and deliberately not a second
+/// rule: `Documents/Lithic` is where the app puts itself *and* where its liths are meant to
+/// live, which is why the desktop app answers both questions with one function
+/// (`install_folder`).
+pub(crate) fn install_dir() -> Option<PathBuf> {
     install_dir_on(documents_dir(), data_home(), home_dir())
 }
 

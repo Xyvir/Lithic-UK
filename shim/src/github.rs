@@ -19,7 +19,10 @@
 //! connection, so a blocking client is the shape that fits, and on Linux `native-tls` is the
 //! same `openssl-sys` that libgit2's transport uses, which is what keeps one TLS stack in the
 //! artifact instead of two (see `agents.md`). On Windows and macOS it is the platform stack,
-//! which needs no OpenSSL at all.
+//! which needs no OpenSSL at all. **The feature alone does not choose it**: ureq's provider
+//! defaults to rustls whatever the features are, so [`agent`] names `native-tls` and the
+//! platform trust store explicitly. Left at the defaults, an `https` request panics instead of
+//! failing, and a panic in a connection thread takes the whole shim with it.
 //!
 //! What is deliberately not here: no token is held between commands. The launcher keeps the
 //! token for the length of a setup and hands it back on each call, exactly as it does with the
@@ -30,6 +33,7 @@ use std::sync::OnceLock;
 use std::time::Duration;
 
 use serde_json::{json, Value};
+use ureq::tls::{RootCerts, TlsConfig, TlsProvider};
 
 use crate::command::{bad_args, failed_with, ok, path_arg};
 use crate::git::{managed_remote_url, parse_managed_remote, sync_dir_of};
@@ -313,12 +317,40 @@ fn text(value: &Value, key: &str) -> Option<String> {
 /// which, and the poller has to see that rather than a bare status. And the 30 second cap is
 /// the shim's own patience: a request that outlives it would outlive the connection thread
 /// that is waiting on it, since the write timeout there is the same 30 seconds.
+///
+/// The two TLS settings are the third and fourth, and they are named for the "load bearing"
+/// sentence above rather than for taste, because **both of them are a panic at ureq's defaults
+/// on this build rather than a wrong answer**, and a panic in a connection thread is not a
+/// failed command: `panic = "abort"` is set for the release profile, so it ends the process
+/// (measured: exit code 134 on the first `github-device-code`, and the page's fetch then fails
+/// with no answer at all, which the launcher renders as `unreachable`).
+///
+///   * `provider(TlsProvider::NativeTls)`: ureq's default provider is Rustls *whatever the
+///     features are*, and `default-features = false` dropped rustls, so an `https` URI reaches
+///     the transport with a provider this binary does not have. ureq panics with "uri scheme is
+///     https, provider is Rustls but feature is not enabled: rustls". Enabling the `native-tls`
+///     feature is not the same thing as selecting it; the crate's own documentation says the
+///     setting "is never picked up automatically".
+///   * `root_certs(RootCerts::PlatformVerifier)`: the default is `RootCerts::WebPki`, whose
+///     native-tls arm calls `disable_built_in_roots(true)` and verifies against a *bundled*
+///     copy of the Mozilla root program instead of the machine's trust store. That is the
+///     opposite of the decision recorded for this crate (the TLS is the system's), and it is
+///     also the one thing a person behind a corporate proxy would hit. On the rustls path the
+///     same default is a panic without `native-tls-webpki-roots`, which this build does have;
+///     naming the platform verifier makes the answer the machine's roots on both paths rather
+///     than an accident of which feature pulled which blob.
 fn agent() -> &'static ureq::Agent {
     static AGENT: OnceLock<ureq::Agent> = OnceLock::new();
     AGENT.get_or_init(|| {
         ureq::Agent::config_builder()
             .http_status_as_error(false)
             .timeout_global(Some(Duration::from_secs(30)))
+            .tls_config(
+                TlsConfig::builder()
+                    .provider(TlsProvider::NativeTls)
+                    .root_certs(RootCerts::PlatformVerifier)
+                    .build(),
+            )
             .build()
             .new_agent()
     })
@@ -536,6 +568,21 @@ mod tests {
         assert_eq!(unmanaged()["repo"], json!(""));
         assert_eq!(malformed()["state"], json!("malformed"));
         assert_eq!(offline("o/n")["repo"], json!("o/n"));
+    }
+
+    #[test]
+    fn the_outbound_agent_names_the_platform_tls_stack_and_the_platform_trust_store() {
+        // Both values are a panic at ureq's defaults on this build rather than a wrong
+        // answer, and a panic here ends the process rather than failing one command, so they
+        // are pinned rather than assumed. First measured against the released
+        // `Lithic_10.01.26-2129.AppImage`: `github-device-code` aborted the shim with
+        // "uri scheme is https, provider is Rustls but feature is not enabled: rustls", and
+        // the launcher's own result was a fetch that answered nothing.
+        let tls = agent().config().tls_config();
+        assert!(matches!(tls.provider(), TlsProvider::NativeTls));
+        assert!(matches!(tls.root_certs(), RootCerts::PlatformVerifier));
+        // And the one thing that is never allowed to move, whatever else is configured here.
+        assert!(!tls.disable_verification());
     }
 
     #[test]

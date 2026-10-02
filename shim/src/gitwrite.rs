@@ -38,6 +38,7 @@ use serde_json::{json, Value};
 
 use crate::command::{bad_args, failed_with, ok, path_arg, path_text};
 use crate::git::{liths_in, managed_remote_url, sync_dir_of};
+use crate::syncfolder::{connect_dir, proposed};
 use crate::Response;
 
 /// The error code every one of these answers with, with the reason in `detail`.
@@ -49,6 +50,11 @@ const FAILED: &str = "git";
 /// from a recent file, so a Lith saved into `Downloads` aims the connect at the whole folder.
 /// Thousands of unrelated files, hours of hashing, and a repository nobody asked for becomes
 /// one sentence instead.
+///
+/// Applied **before the fetch**, which is where the desktop app applies it, and that placement
+/// was a bug here until it was measured: a connect aimed at a personal `~/Documents` spent
+/// minutes downloading the repository it was pointed at, wrote the remote's files into that
+/// folder, and only then counted the folder and refused it (see [`undo_first_connect`]).
 const FIRST_SYNC_FILE_CAP: usize = 2000;
 
 /// The branch the sync publishes, on both sides.
@@ -440,21 +446,7 @@ struct StageReport {
 /// callback was wanted for: an exact count *before* anything is hashed, so an oversized folder
 /// is refused in milliseconds with the index untouched, and a cancel that lands per file.
 fn stage_working_tree(repo: &Repository, progress: &Progress) -> Result<StageReport, String> {
-    let mut options = StatusOptions::new();
-    options
-        .include_untracked(true)
-        .recurse_untracked_dirs(true)
-        .include_ignored(false);
-    let statuses = repo.statuses(Some(&mut options)).map_err(fail)?;
-    // Owned paths, because the entries borrow the status list and the walk below needs the
-    // index, which is not shareable with it.
-    let mut work: Vec<(PathBuf, bool)> = Vec::new();
-    for entry in statuses.iter() {
-        // A non-UTF-8 path cannot be addressed by the index API here; skipping it is the same
-        // thing `add_all` does with one.
-        let Ok(path) = entry.path() else { continue };
-        work.push((PathBuf::from(path), entry.status().is_wt_deleted()));
-    }
+    let work = pending_paths(repo)?;
     let total = work.len();
     if total > FIRST_SYNC_FILE_CAP {
         return Ok(StageReport { files: total, over_cap: true, cancelled: false });
@@ -478,6 +470,69 @@ fn stage_working_tree(repo: &Repository, progress: &Progress) -> Result<StageRep
     }
     index.write().map_err(fail)?;
     Ok(StageReport { files: total, over_cap: false, cancelled: false })
+}
+
+/// How many files a first connect would have to stage, counted and nothing more.
+///
+/// The same walk as [`stage_working_tree`] with none of its effects: nothing hashed, no index
+/// written, no commit. It exists so the cap can be answered before the fetch, which is the
+/// difference between declining a folder in one walk and declining it after minutes of
+/// transfer, with the remote's files already written into somebody's home folder.
+fn count_working_tree(repo: &Repository) -> Result<usize, String> {
+    Ok(pending_paths(repo)?.len())
+}
+
+/// The paths a walk of the working tree would stage, each with whether it is gone from disk.
+///
+/// Owned rather than borrowed from the status list, because the callers need the index, which
+/// is not shareable with the list the entries borrow.
+fn pending_paths(repo: &Repository) -> Result<Vec<(PathBuf, bool)>, String> {
+    let mut options = StatusOptions::new();
+    options
+        .include_untracked(true)
+        .recurse_untracked_dirs(true)
+        .include_ignored(false);
+    let statuses = repo.statuses(Some(&mut options)).map_err(fail)?;
+    let mut work: Vec<(PathBuf, bool)> = Vec::new();
+    for entry in statuses.iter() {
+        // A non-UTF-8 path cannot be addressed by the index API here; skipping it is the same
+        // thing `add_all` does with one.
+        let Ok(path) = entry.path() else { continue };
+        // A trailing separator is libgit2's own mark for a directory it did not descend into,
+        // and the one that puts itself there is a nested repository: a checkout of something
+        // else sitting inside the folder being backed up. The walk reports it as a single
+        // entry, `GitHub/Lithic-UK/`, because recursing into it would mean treating somebody
+        // else's history as this folder's content. `index.add_path` refuses that entry
+        // outright, and it was measured doing it: `invalid path: 'GitHub/Lithic-UK/';
+        // class=Index (10)`, which reached the dialog as the whole of what went wrong with a
+        // first connect. Recording it as a gitlink instead would be worse than refusing it,
+        // because the commit a gitlink names lives in a repository Lithic has no objects for,
+        // so the backup would carry a pointer nobody could resolve. Skipping is also what a
+        // person means by backing up a folder rather than everything that happens to sit in
+        // it, and it is what makes the count above and the staging below agree about the same
+        // set.
+        if path.ends_with('/') {
+            continue;
+        }
+        work.push((PathBuf::from(path), entry.status().is_wt_deleted()));
+    }
+    Ok(work)
+}
+
+/// Leave a folder as it was found when a first connect is declined or cancelled.
+///
+/// The desktop app's rule, and it is about the same folder: `git_sync_setup` there removes the
+/// origin Lithic added and deletes a repository Lithic created, because "a declined or
+/// cancelled first connect must not leave a `.git` sitting in somebody's Downloads folder".
+/// The shim did neither, so a connect aimed at the wrong folder left a `.git` and a whole pack
+/// behind it, in a folder whose owner had just been told nothing was backed up. Takes the
+/// repository by value because the directory cannot be removed while it is open on Windows.
+fn undo_first_connect(repo: Repository, dir: &Path, existed: bool) {
+    let _ = repo.remote_delete("origin");
+    drop(repo);
+    if !existed {
+        let _ = std::fs::remove_dir_all(dir.join(".git"));
+    }
 }
 
 /// Commit the staged tree, returning the new id, or `None` when the tree is identical to the
@@ -572,6 +627,12 @@ fn is_empty_dir(dir: &Path) -> bool {
 ///     rescue ran first);
 ///   * a folder that already is a repository is re-pointed at the remote, committed and
 ///     pushed without force, so a remote that has moved on is refused rather than overwritten.
+///
+/// One of those folders may not be there at all: the folder the shim proposes
+/// (`Documents/Lithic`, `syncfolder::proposed`) is what a machine that has never synced is
+/// offered, and this is the command that makes it. That is what lets a new device connect to
+/// an existing backup in one press, because a folder made here is empty and the clone above is
+/// what then runs.
 pub(crate) fn setup(args: &Value) -> Response {
     let Some(path) = path_arg(args) else { return bad_args() };
     let Some(repo) = args.get("repo").and_then(Value::as_str).map(str::to_string) else {
@@ -583,7 +644,9 @@ pub(crate) fn setup(args: &Value) -> Response {
     if repo.trim().is_empty() || token.trim().is_empty() {
         return bad_args();
     }
-    let Some(dir) = sync_dir_of(&path).filter(|dir| dir.is_dir()) else {
+    // The folder the dialog named, made when it is the one the shim itself proposed: a machine
+    // that has never synced has no `Documents/Lithic`, and the first connect is what creates it.
+    let Some(dir) = connect_dir(&path, proposed().as_deref()) else {
         return failed_with(FAILED, format!("Cannot resolve a folder for {}", path_text(&path)));
     };
     let url = managed_url(&repo, &token);
@@ -606,6 +669,25 @@ fn connect(dir: &Path, url: &str, repo: &str, progress: &Progress) -> Result<Val
         ensure_identity(&opened);
         set_remote(&opened, url)?;
         clear_detached(&opened);
+        // The cap is a fact about the folder, so it is answered before the folder is used for
+        // anything: no fetch, no rescue, no write. The desktop app reaches the same place by
+        // staging and committing the folder first and merging with the remote second, and
+        // measured the other way round this was minutes of download followed by the same
+        // refusal, with the remote's files already written into the folder.
+        if !already || opened.head().is_err() {
+            let would_stage = count_working_tree(&opened)?;
+            if would_stage > FIRST_SYNC_FILE_CAP {
+                let message = format!(
+                    "This folder holds {would_stage} files. Back up the folder your liths live in."
+                );
+                undo_first_connect(opened, dir, already);
+                return Err(message);
+            }
+        }
+        if progress.cancelled() {
+            undo_first_connect(opened, dir, already);
+            return Err(CANCELLED.to_string());
+        }
         progress.say("Reading the repository");
         let had_main = fetch_main(&opened, url, &cancel);
         if had_main {
@@ -613,18 +695,22 @@ fn connect(dir: &Path, url: &str, repo: &str, progress: &Progress) -> Result<Val
             rescued = rescue_missing(&opened, dir, progress);
         }
         if progress.cancelled() {
+            undo_first_connect(opened, dir, already);
             return Err(CANCELLED.to_string());
         }
         progress.say("Committing the folder's files");
         let staged = stage_working_tree(&opened, progress)?;
         if staged.cancelled {
+            undo_first_connect(opened, dir, already);
             return Err(CANCELLED.to_string());
         }
         if staged.over_cap {
-            return Err(format!(
+            let message = format!(
                 "This folder holds {} files. Back up the folder your liths live in.",
                 staged.files
-            ));
+            );
+            undo_first_connect(opened, dir, already);
+            return Err(message);
         }
         files = staged.files;
         commit_staged(&opened, "Lithic backup", true)?;
@@ -918,6 +1004,53 @@ mod tests {
         assert_eq!(report.files, FIRST_SYNC_FILE_CAP + 1);
         // Nothing was hashed into the index, which is the point of counting first.
         assert!(repo.index().expect("index").is_empty());
+    }
+
+    #[test]
+    fn a_nested_repository_is_skipped_rather_than_refused_by_the_index() {
+        let scratch = Scratch::new("nested");
+        let work = scratch.dir("home");
+        std::fs::write(work.join("notes.lith"), "text").expect("a Lith");
+        // A checkout of something else, which is what a real backup folder has in it: the
+        // reported first connect was aimed at a `~/Documents` holding a clone of this very
+        // project. libgit2 reports it as one entry with a trailing separator, and that entry
+        // is the one `index.add_path` answers with `invalid path ... class=Index (10)`.
+        let nested = work.join("GitHub").join("Lithic-UK");
+        std::fs::create_dir_all(&nested).expect("nested folder");
+        init(&nested).expect("nested repository");
+        std::fs::write(nested.join("README.md"), "not this repository's business").expect("a file");
+
+        let repo = init(&work).expect("init");
+        let report = stage_working_tree(&repo, &detached_progress()).expect("the nested repository is not an error");
+        assert_eq!(report.files, 1, "only the Lith is this folder's own content");
+        assert!(!report.over_cap && !report.cancelled);
+        let staged = repo.index().expect("index");
+        assert!(staged.get_path(Path::new("notes.lith"), 0).is_some(), "the Lith was staged");
+        assert_eq!(staged.len(), 1, "the nested repository was not staged, as a gitlink or otherwise");
+    }
+
+    #[test]
+    fn a_folder_over_the_cap_is_refused_before_the_network_and_leaves_no_repository() {
+        let scratch = Scratch::new("connect-cap");
+        let folder = scratch.dir("home");
+        for index in 0..(FIRST_SYNC_FILE_CAP + 1) {
+            std::fs::write(folder.join(format!("file-{index}.txt")), "x").expect("a file");
+        }
+        // The remote is unreachable on purpose. A connect that reached the network first would
+        // answer with a git error from the fetch or the push, so the cap's own sentence is the
+        // proof that the folder was judged before anything was downloaded, written or pushed.
+        let error = connect(
+            &folder,
+            "https://oauth2:token@example.invalid/owner/name.git",
+            "owner/name",
+            &detached_progress(),
+        )
+        .expect_err("refused");
+        assert!(error.contains("Back up the folder your liths live in"), "{error}");
+        assert!(error.contains(&(FIRST_SYNC_FILE_CAP + 1).to_string()), "{error}");
+        // And the folder is left as it was found, which is the desktop app's rule: nothing
+        // staged, nothing committed, and the repository this connect created removed again.
+        assert!(!folder.join(".git").exists(), "a declined connect left a .git behind");
     }
 
     #[test]
