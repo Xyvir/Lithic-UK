@@ -53,15 +53,17 @@ Lithic always saves somewhere; the mode decides how much a mistake, a dead disk 
 * **The × on a bookmarked instance also drops the copy the app downloaded of it.** A bookmark is the launcher's own storage, but an instance's page, scripts and icons live under that instance's own origin, where only the app can reach them — which is why an instance that redeployed could go on serving its old launcher however many times the bookmark was removed and added back. Removing a bookmark now drops that one origin's cached copy as well, so the next open fetches what the instance is actually serving. An instance's cached wikis and its saved login are not part of a downloaded page and stay exactly where they are; forgetting a login stays the vault's own named action. This part is the desktop app's, on Windows for now — in a browser- or PWA-hosted launcher the bookmark is still the whole of what the × removes.
 * **Search reaches the bookmarked instances on the desktop app.** A wiki an instance cached belongs to that instance's own origin, which a page can only read for itself, so the app's Rust side reads it out of the same profile it already keeps for every origin the app has visited. What comes back is one hit per instance — that search is for orientation, and the instance's own launcher is where the rest of the matches are — and the panel beside the row opens that instance already searching for the same words. It covers what this device saved while inside that instance, on Windows for now, and it reads only storage the app itself wrote: no request leaves the machine and no instance is loaded to answer it.
 
-## Linux: One Download, and Building the WebKitGTK App Yourself
+## Linux: Two AppImages, and Which One You Want
 
-A Linux release ships a single AppImage — `Lithic_<stamp>.AppImage`, the **shim**. It is around 3 MB, opens the launcher in the browser the machine already has, and is the supported Linux distribution. Press **Install** in the launcher and it copies itself to `~/Documents/Lithic/Lithic.AppImage` and registers the file types it edits (`.lith`, `.md`, `.txt`, `.tid`, `.json`, `.ipynb`, `.html`) with the desktop, so a `.lith` opens with a double click like any other document.
+A Linux release carries two AppImages, and each name says what is inside it.
 
-The older **WebKitGTK build** — the Tauri app that bundles its own web engine, the ~82 MB AppImage that used to be published as `Lithic-webgtk_...` — is no longer built or published by CI. The source is still in this repository (`src-tauri/`), and you can build it yourself if you want a window that carries its own engine instead of borrowing the system browser.
+**`Lithic_<stamp>.AppImage`, about 3 MB, is the shim**, and it is the supported Linux distribution. It carries no web engine: it serves the launcher and the wiki to the browser the machine already has. Press **Install** in the launcher and it copies itself to `~/Documents/Lithic/Lithic.AppImage` and registers the file types it edits (`.lith`, `.md`, `.txt`, `.tid`, `.json`, `.ipynb`, `.html`) with the desktop, so a `.lith` opens with a double click like any other document.
+
+**`Lithic-webgtk_<stamp>.AppImage`, about 82 MB, brings its own engine.** It is the Tauri app, bundling WebKitGTK and JavaScriptCore — about 43.5 MB of that size — so it opens a window of its own and needs no browser. Take it if the machine has no Chromium-family browser, or if you would rather have an app window than a tab. It is also the build the [AppImage catalogue](https://appimage.github.io/) can carry: that catalogue opens one AppImage from a repository's newest release and needs it to draw its own window, which the shim deliberately does not do.
 
 ### Building the WebKitGTK AppImage yourself
 
-Build it on the oldest base system you need to support. An AppImage links the glibc of the machine that built it, so building on Ubuntu 24.04 raises the floor to glibc 2.39 and the result will not open on Ubuntu 22.04 or Debian 12. Ubuntu 22.04, or a 22.04 container, is the baseline. You need Rust (stable) and Node 22 or newer.
+The release publishes this build, so most people never need to. Build one by hand if you want a build of your own, or one from a commit with no release yet. Build it on the oldest base system you need to support. An AppImage links the glibc of the machine that built it, so building on Ubuntu 24.04 raises the floor to glibc 2.39 and the result will not open on Ubuntu 22.04 or Debian 12. Ubuntu 22.04, or a 22.04 container, is the baseline. You need Rust (stable) and Node 22 or newer.
 
 Install the system dependencies:
 
@@ -81,7 +83,7 @@ node scripts/build-launcher.mjs
 LITHIC_BUILD_TAG=v2026.01.01-0000 npm run tauri build -- --bundles appimage
 ```
 
-`LITHIC_BUILD_TAG` is the release stamp this build belongs to: it is compiled in and served to the launcher, which compares it against the newest release on GitHub to decide whether to offer an update. Leave it unset to build an app that offers no update notice, which is what a local build does. If the machine has no FUSE, prefix the build with `APPIMAGE_EXTRACT_AND_RUN=1`, which runs the bundler's own AppImage tooling without mounting it — that is how the release job built this artifact when it still published it. The finished file lands in `src-tauri/target/release/bundle/appimage/`.
+`LITHIC_BUILD_TAG` is the release stamp this build belongs to: it is compiled in and served to the launcher, which compares it against the newest release on GitHub to decide whether to offer an update. Leave it unset to build an app that offers no update notice, which is what a local build does. If the machine has no FUSE, prefix the build with `APPIMAGE_EXTRACT_AND_RUN=1`, which runs the bundler's own AppImage tooling without mounting it, and that is how the release job builds this artifact. The finished file lands in `src-tauri/target/release/bundle/appimage/`.
 
 ## Companion Project: Ephemeral.exe
 
