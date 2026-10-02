@@ -327,6 +327,18 @@ export async function getRecentFiles(): Promise<RecentEntry[]> {
  * install button (e.g. using the launcher as a plain bookmark). Cleared by
  * clearing site data. IndexedDB is the deliberate persistence choice so
  * "clear cache" is the manual restore path.
+ *
+ * Per device, and deliberately lasting. A shim's storage is scoped to a fixed origin by
+ * construction (a fixed port, and `localhost` redirected to `127.0.0.1`), so this one flag
+ * covers every copy that machine will run, including a build downloaded tomorrow: somebody who
+ * has hidden the offer has said they do not want the app installed here, and a new download is
+ * not a new question. Restoring it is a deliberate trip through "clear site data" for the same
+ * reason, which is the only path there is on a browser page; the desktop app records the same
+ * answer beside its exe in `recents.txt`, and deleting that file is its restore.
+ *
+ * Do not scope this to the build it was made on. It looks tempting, because a new AppImage
+ * would then ask again, but it is the opposite of what the control means: dismissing is how
+ * somebody says they are happy running the AppImage they have.
  */
 export async function isInstallDismissed(): Promise<boolean> {
   try {

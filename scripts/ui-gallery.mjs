@@ -397,6 +397,12 @@ const installRust = (page, config) =>
           // Nothing is open to close: this only drops the grant a load left behind.
           state.granted = false;
           return { ...state, count: entries.length };
+        case 'platform_capabilities':
+          // What the platform can install. Asked before the offer may exist at all, and a
+          // read that fails is no install: with this silent the install-offer panes had no
+          // offer to photograph, however uninstalled the fixture was. Answered as a platform
+          // that has an install does, which is the one these panes are about.
+          return { install: true, launch_entry: 'application-menu' };
         case 'install_status':
           // The footer's own question: is there a copy on disk, and is it this build's?
           // `cfg.install` is the answer, and its default is the state every other tauri

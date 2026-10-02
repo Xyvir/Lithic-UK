@@ -361,11 +361,11 @@ fn pick(args: &Value) -> Response {
         let mode = args.get("mode").and_then(Value::as_str).unwrap_or("open");
         let multiple = mode == "open" && args.get("multiple").and_then(Value::as_bool).unwrap_or(false);
         let suggested = args.get("suggestedName").and_then(Value::as_str);
-        let start = args.get("startDir").and_then(Value::as_str);
+        let start = pick_start_dir(args.get("startDir").and_then(Value::as_str), default_start_dir);
         let Some((program, dialect)) = first_picker(program_on_path) else {
             return failed("no-picker");
         };
-        let arguments = picker_args(dialect, program, mode, multiple, suggested, start);
+        let arguments = picker_args(dialect, program, mode, multiple, suggested, start.as_deref());
         return match run_picker(program, &arguments) {
             Ok(Some(stdout)) => ok(json!({ "paths": pick_output(&stdout, multiple) })),
             // A chooser that answered nothing is a cancelled pick, which is an ordinary
@@ -382,6 +382,37 @@ fn pick(args: &Value) -> Response {
         let _ = args;
         failed("no-picker")
     }
+}
+
+/// The directory a chooser opens in: what the page named, else the machine's own answer.
+///
+/// The page's answer wins, because it is the side that knows what the person was doing. An
+/// empty answer is no answer: handed to a chooser as an empty path it is how a pick ends up in
+/// whatever directory the process happens to be sitting in.
+#[cfg(any(target_os = "linux", test))]
+fn pick_start_dir(start: Option<&str>, fallback: impl FnOnce() -> Option<String>) -> Option<String> {
+    match start.map(str::trim).filter(|value| !value.is_empty()) {
+        Some(value) => Some(value.to_string()),
+        None => fallback(),
+    }
+}
+
+/// Where a pick opens when the page names nowhere.
+///
+/// The desktop app's own rule, from `dialog_start_dir` in `src-tauri/src/lib.rs`, written out
+/// here for the same reason [`crate::install::install_dir`] is: the two distributions have to
+/// agree and the shim does not link the desktop app. It answers the folder the app installs
+/// into, which is also where a first backup proposes a folder, so a Lith saved from the picker
+/// lands beside the ones the backup already covers. A copy that has never been installed has no
+/// such folder, and the chooser then keeps its own default rather than being aimed at a path
+/// that is not there. The desktop rule's other term - the folder the executable sits in - has no
+/// shim equivalent, because a shim runs from a temporary mount.
+#[cfg(any(target_os = "linux", test))]
+#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
+fn default_start_dir() -> Option<String> {
+    install::install_dir()
+        .filter(|dir| dir.is_dir())
+        .map(|dir| dir.to_string_lossy().into_owned())
 }
 
 /// The first chooser a lookup finds, with the dialect it speaks.
@@ -785,6 +816,20 @@ mod tests {
         assert_eq!(first_picker(|name| name == "kdialog"), Some(("kdialog", Picker::Kdialog)));
         assert_eq!(first_picker(|name| name == "yad"), Some(("yad", Picker::Zenity)));
         assert_eq!(first_picker(|_| false), None);
+    }
+
+    /// A picker the page aimed somewhere keeps that place; one it aimed nowhere is aimed at the
+    /// app's own folder, and an empty answer counts as nowhere rather than as a path.
+    #[test]
+    fn a_pick_opens_where_the_page_asked_and_else_where_the_app_lives() {
+        let app_dir = || Some("/docs/Lithic".to_string());
+        assert_eq!(pick_start_dir(Some("/tmp/liths"), app_dir), Some("/tmp/liths".to_string()));
+        assert_eq!(pick_start_dir(Some("  "), app_dir), Some("/docs/Lithic".to_string()));
+        assert_eq!(pick_start_dir(Some(""), app_dir), Some("/docs/Lithic".to_string()));
+        assert_eq!(pick_start_dir(None, app_dir), Some("/docs/Lithic".to_string()));
+        // A copy that has never been installed has no folder to be aimed at, so the chooser
+        // keeps its own default.
+        assert_eq!(pick_start_dir(None, || None), None);
     }
 
     #[test]

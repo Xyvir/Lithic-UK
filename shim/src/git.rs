@@ -19,7 +19,8 @@
 //! fetching and pushing are not things to reimplement over the wire. Those commands
 //! (`git-setup`, `git-commit`, `git-heartbeat`, `git-reauth`, `git-disconnect`, and the GitHub
 //! device flow beside them) are not here yet, and the dependency set they need is chosen and
-//! written up in `agents.md` rather than pulled in ahead of the code that uses it. Until they
+//! written up in the round log (`docs/rounds/`) rather than pulled in ahead of the code that uses
+//! it. Until they
 //! land, a request for one is the wire's ordinary `unknown-command` answer, which is honest:
 //! the wire worked, and what it was asked for it does not have.
 //!

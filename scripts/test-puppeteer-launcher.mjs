@@ -30,6 +30,21 @@ const artifactHtml = await readFile(artifact, 'utf8');
 const missingIconHost = 'no-icon.example.com';
 
 /**
+ * A recent row this suite seeds by hand.
+ *
+ * It has to be a row the launcher will keep, and one a browser could really have made. A bare
+ * name is exactly the placeholder the recents rule drops (`isAnonymousRow`: a name with nothing
+ * to open, no path, no body, no handle and no browser-only flag), so a fixture spelled that way
+ * leaves the store empty and the section waiting on a rendered row times out before it asserts
+ * anything. A browser *handle* is the honest answer for this page: it is what the browser's own
+ * picker hands over, it is a row the launcher keeps, and it is a row with no path on disk —
+ * which is what the tooltip leg below is about (a location hover belongs to a row that has a
+ * location). A path would invent one, and the browser-only flag would dress the row in the
+ * local-only mark, which the plain-row legs assert is absent.
+ */
+const fixtureRow = (name) => ({ name, handle: { name } });
+
+/**
  * What the Mount a Lith section's picker comes back with, in the order it lists them.
  *
  * All three only ever become Recents rows — a multi-file pick opens nothing — so their
@@ -130,8 +145,8 @@ try {
   // before asserting its search and icon controls. The history affordance only
   // renders for a wiki with recorded versions, so the fixture gets one: the
   // version store keys its per-wiki record off `search_cache_meta_<name>`.
-  await page.evaluate(async () => {
-    localStorage.setItem('lithic-recent-liths', JSON.stringify([{ name: 'fixture.lith', text: '' }]));
+  await page.evaluate(async (row) => {
+    localStorage.setItem('lithic-recent-liths', JSON.stringify([row]));
     const request = indexedDB.open('keyval-store', 1);
     await new Promise((resolve, reject) => {
       request.onerror = () => reject(request.error);
@@ -148,7 +163,7 @@ try {
       tx.onerror = () => reject(tx.error);
     });
     db.close();
-  });
+  }, fixtureRow('fixture.lith'));
   await page.reload({ waitUntil: 'domcontentloaded' });
   await page.waitForSelector('input[aria-label="Search recent Liths"]');
   await new Promise(resolve => setTimeout(resolve, 250));
@@ -156,11 +171,11 @@ try {
   // Enough entries to overflow the list, so the scrollbar the panel's padding
   // makes room for is actually part of the layout being asserted below.
   const seedScrollingRecents = async () => {
-    await page.evaluate(() => {
-      const rows = [{ name: 'fixture.lith', text: '' }];
-      for (let index = 0; index < 19; index += 1) rows.push({ name: `overflow-${index}.lith`, text: '' });
-      localStorage.setItem('lithic-recent-liths', JSON.stringify(rows));
-    });
+    const rows = [fixtureRow('fixture.lith')];
+    for (let index = 0; index < 19; index += 1) rows.push(fixtureRow(`overflow-${index}.lith`));
+    await page.evaluate((seeded) => {
+      localStorage.setItem('lithic-recent-liths', JSON.stringify(seeded));
+    }, rows);
     await page.reload({ waitUntil: 'domcontentloaded' });
     await page.waitForSelector('input[aria-label="Search recent Liths"]');
     await new Promise(resolve => setTimeout(resolve, 250));
@@ -567,8 +582,8 @@ try {
   // would be a fetch this test then has to explain.
   await selfHostPage.goto(`file://${artifact}`, { waitUntil: 'domcontentloaded' });
   await selfHostPage.waitForSelector('main.container');
-  await selfHostPage.evaluate(async () => {
-    localStorage.setItem('lithic-recent-liths', JSON.stringify([{ name: 'device-only.lith', text: '' }]));
+  await selfHostPage.evaluate(async (row) => {
+    localStorage.setItem('lithic-recent-liths', JSON.stringify([row]));
     localStorage.setItem('bookmarkedInstances', JSON.stringify([{
       url: 'https://personal.lithic.uk',
       label: 'personal.lithic.uk',
@@ -588,7 +603,7 @@ try {
       tx.onerror = () => reject(tx.error);
     });
     db.close();
-  });
+  }, fixtureRow('device-only.lith'));
   await selfHostPage.goto(`file://${artifact}?mode=self-host`, { waitUntil: 'domcontentloaded' });
   await selfHostPage.waitForSelector('main.container');
   // The mark is read once its bytes have arrived, so what is asserted below is the image
@@ -2861,6 +2876,14 @@ try {
         case 'github_device_poll':
           // Never authorized: the step is what is under test, not what comes after it.
           return { pending: true };
+        case 'platform_capabilities':
+          // What the platform can install, asked before the offer is allowed to exist at all
+          // (`platformInstallable`). A read that fails is no install, so a mock that stays
+          // silent here is a launcher that draws no offer in this mode however uninstalled it
+          // is — which is what this leg walked into. The answer is the one a platform that
+          // *has* an install gives: these fixture paths are Windows-shaped, and the app there
+          // copies itself and registers in the application menu.
+          return { install: true, launch_entry: 'application-menu' };
         case 'install_status':
           // The slow one, on request — and the only one of the three that is ever slow.
           // What is being pinned is the gap between the launcher painting and the

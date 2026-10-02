@@ -18,7 +18,7 @@
 //! The transport is `ureq`, blocking, with `native-tls`: the shim is one thread per
 //! connection, so a blocking client is the shape that fits, and on Linux `native-tls` is the
 //! same `openssl-sys` that libgit2's transport uses, which is what keeps one TLS stack in the
-//! artifact instead of two (see `agents.md`). On Windows and macOS it is the platform stack,
+//! artifact instead of two (see the round log under `docs/rounds/`). On Windows and macOS it is the platform stack,
 //! which needs no OpenSSL at all. **The feature alone does not choose it**: ureq's provider
 //! defaults to rustls whatever the features are, so [`agent`] names `native-tls` and the
 //! platform trust store explicitly. Left at the defaults, an `https` request panics instead of
@@ -27,7 +27,7 @@
 //! What is deliberately not here: no token is held between commands. The launcher keeps the
 //! token for the length of a setup and hands it back on each call, exactly as it does with the
 //! desktop app, and where it comes to rest afterwards is git's own credential helper rather
-//! than a file this process writes. See the credential entry in `agents.md`.
+//! than a file this process writes. See the credential entry in the round log (`docs/rounds/`).
 
 use std::sync::OnceLock;
 use std::time::Duration;

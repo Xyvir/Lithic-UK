@@ -8,8 +8,8 @@ edition = "2021"
 # No toolkit, and that is the whole point of this crate. `src-tauri` links GTK and
 # WebKitGTK through Tauri, which is why its AppImage is an 82 MB download: the engine
 # travels with the app. This binary carries none of that, so the artifact stays the
-# size of the payload it serves rather than the size of an engine (see agents.md,
-# the release section).
+# size of the payload it serves rather than the size of an engine (see the release round in
+# docs/rounds/).
 #
 # Two dependencies, and each one is here because the alternative was worse than the
 # crate. `getrandom` is the operating system's entropy source, which a per-launch
@@ -24,8 +24,8 @@ edition = "2021"
 # chosen for size first because that is the crate's whole proposition. The reads
 # (`shim/src/git.rs`) need nothing: a repository Lithic manages is marked by an origin URL in
 # `.git/config`, which is text. Everything else, the device flow (`shim/src/github.rs`) and
-# next the writes, needs TLS, and the decision recorded in `agents.md` is that the TLS is the
-# system's rather than ours. `libssl` is already on any Linux that has `ssh` or a package
+# next the writes, needs TLS, and the decision recorded in the round log (`docs/rounds/`) is that
+# the TLS is the system's rather than ours. `libssl` is already on any Linux that has `ssh` or a package
 # manager, so a dynamically linked one costs this artifact nothing, where a vendored one would
 # be a second copy of a library the machine is already patching.
 #

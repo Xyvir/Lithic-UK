@@ -3897,9 +3897,24 @@
   async function indexRestoredLiths(rows: CoverageRow[]): Promise<void> {
     if (rows.length === 0) return;
     const indexed = await indexRowsHere(rows, copy.status.indexingLabel);
-    status = indexed > 0
-      ? copy.status.indexedHere(indexed)
-      : copy.status.nothingToIndex;
+    reportAndRetire(indexed > 0 ? copy.status.indexedHere(indexed) : copy.status.nothingToIndex);
+  }
+
+  /**
+   * Say what a pass found, then take the line back.
+   *
+   * The header's line holds the last thing the launcher said and only a later thing said
+   * replaces it, which is right for a control's own answer: the click that asked is the next
+   * thing to happen. A pass that runs behind a dialog has no such click. This one is started
+   * while connecting and finishes after the dialog is gone, so its sentence - and the animated
+   * dots beside it, which mean work in progress - stood there for the rest of the session,
+   * reading as indexing that never stopped. It is retired on a timer instead, guarded by the
+   * text it wrote so a newer line is never taken away by an older report arriving late; the
+   * install confirmation is retired the same way, for the same reason.
+   */
+  function reportAndRetire(message: string, ms = 6000): void {
+    status = message;
+    setTimeout(() => { if (status === message) status = ''; }, ms);
   }
 
   /**

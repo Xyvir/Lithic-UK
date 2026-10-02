@@ -2,7 +2,7 @@
 /**
  * The copy gate: no em dash and no en dash anywhere in the launcher's sources, or the shim's.
  *
- * The rule is the third one at the top of `agents.md` — "No em dashes or en dashes. Use a
+ * The rule is the "In-App Copy: Terse, Non-Technical, No Em Dashes" section of `agents.md` — "No em dashes or en dashes. Use a
  * period, or rewrite." — and the reason it needs a gate rather than a reviewer is that the
  * offenders are never in one place: a modal's subtitle, a tooltip, a confirmation body, a
  * `title` a screen reader reads. Every one of them was added mid-sentence by an agent,
