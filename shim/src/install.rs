@@ -12,7 +12,9 @@
 //!
 //!   * Copy the AppImage the person launched to `Documents/Lithic/Lithic.AppImage`. The
 //!     *running image* (`$APPIMAGE`) is the file to copy, never `current_exe`, which answers
-//!     with the executable inside the temporary mount, gone at the next reboot.
+//!     with the executable inside the temporary mount, gone at the next reboot. That folder
+//!     is also where a first backup proposes to live, so its `.gitignore` names the copy
+//!     before the copy lands there (see [`ignore_installed_copy`]).
 //!   * Write a freedesktop desktop entry to `$XDG_DATA_HOME/applications/lithic.desktop`,
 //!     pointing at the copy with `%f` so a file manager hands over the file it was opened with.
 //!     That one file is also the file-association registration: its `MimeType=` line is what a
@@ -52,6 +54,9 @@ const MIME_FILE: &str = "lithic.xml";
 
 /// The file name the copy takes. `.AppImage` is kept, or the kernel stops running it as one.
 const TARGET_FILE: &str = "Lithic.AppImage";
+
+/// The folder's own ignore file, which is where the copy is kept out of a backup's content.
+const IGNORE_FILE: &str = ".gitignore";
 
 /// The file types this app opens, as the MIME types a Linux desktop understands.
 ///
@@ -176,6 +181,9 @@ impl Layout {
 fn perform(layout: &Layout) -> Result<PathBuf, String> {
     let target = layout.target();
     fs::create_dir_all(&layout.dir).map_err(|error| error.to_string())?;
+    // Before the copy, not after it: see `ignore_installed_copy`. A rule that arrived late
+    // would leave a window in which a save from inside a wiki commits the program itself.
+    ignore_installed_copy(&layout.dir, TARGET_FILE);
     // Copy only when the bytes differ, so a re-install keeps the copy's timestamp and does not
     // re-point an entry at a file that changed for no reason.
     let needs_copy = match (fs::read(&layout.source), fs::read(&target)) {
@@ -199,6 +207,39 @@ fn perform(layout: &Layout) -> Result<PathBuf, String> {
     }
     refresh_caches(&applications, &layout.data_home.join("mime"));
     Ok(target)
+}
+
+/// Keep the installed copy out of the folder's own content.
+///
+/// The install folder is also the folder a first backup proposes to live in
+/// (`syncfolder::proposed`), so a copy landing in `Documents/Lithic` would otherwise be
+/// committed and pushed by the next save: a 4 MB binary inside somebody's wiki history,
+/// and one that comes back on every machine that clones it. The folder's own `.gitignore`
+/// is what says otherwise, and it is written before the copy arrives.
+///
+/// The bare file name rather than a path, so the same line covers a backup rooted a level
+/// or two above this folder, and idempotent, because every install writes it again. Best
+/// effort: a folder whose ignore file cannot be written is still a folder to install into.
+///
+/// The desktop app does the same thing in its own words (`install_monolith` in
+/// `src-tauri/src/lib.rs`), since one machine can have either distribution and both land in
+/// the same folder; the two are held in step by a test on each side.
+fn ignore_installed_copy(dir: &Path, name: &str) {
+    if fs::create_dir_all(dir).is_err() {
+        return;
+    }
+    let path = dir.join(IGNORE_FILE);
+    let existing = fs::read_to_string(&path).unwrap_or_default();
+    if existing.lines().any(|line| line.trim() == name) {
+        return;
+    }
+    let mut text = existing;
+    if !text.is_empty() && !text.ends_with('\n') {
+        text.push('\n');
+    }
+    text.push_str(name);
+    text.push('\n');
+    let _ = fs::write(&path, text);
 }
 
 /// Mark the copy runnable. A no-op off unix, where the file arrives runnable.
@@ -462,6 +503,35 @@ mod tests {
         assert_eq!(quote_exec(Path::new("/a/b $c/Lithic")), "\"/a/b \\$c/Lithic\"");
     }
 
+    /// The copy is named in the folder's own ignore file, once, and what that file already
+    /// said is kept: the folder is somebody's backups as well as this program's home.
+    #[test]
+    fn the_installed_copy_is_named_in_the_folders_gitignore() {
+        let root = scratch("ignore");
+        let dir = root.join("Documents").join("Lithic");
+
+        // A folder with no ignore file gains one, and gains it even though the folder
+        // itself did not exist yet.
+        ignore_installed_copy(&dir, TARGET_FILE);
+        assert_eq!(fs::read_to_string(dir.join(IGNORE_FILE)).expect("ignore"), format!("{TARGET_FILE}\n"));
+
+        // A folder with one keeps every line it had, and a second install does not repeat
+        // this line: the file is written once per install and read by the backup's own walk.
+        fs::write(dir.join(IGNORE_FILE), "*.lock\nlighttpd.user").expect("existing");
+        ignore_installed_copy(&dir, TARGET_FILE);
+        ignore_installed_copy(&dir, TARGET_FILE);
+        let text = fs::read_to_string(dir.join(IGNORE_FILE)).expect("ignore");
+        assert_eq!(text, format!("*.lock\nlighttpd.user\n{TARGET_FILE}\n"));
+        assert_eq!(text.lines().filter(|line| *line == TARGET_FILE).count(), 1, "{text}");
+
+        // A line that is already present in another spelling of whitespace is the same line.
+        fs::write(dir.join(IGNORE_FILE), format!("  {TARGET_FILE}  \n")).expect("whitespace");
+        ignore_installed_copy(&dir, TARGET_FILE);
+        assert_eq!(fs::read_to_string(dir.join(IGNORE_FILE)).expect("ignore").lines().count(), 1);
+
+        let _ = fs::remove_dir_all(&root);
+    }
+
     /// The MIME file is what makes a `.lith` resolve to this app's own type.
     #[test]
     fn the_mime_definition_names_the_lith_type_and_its_extension() {
@@ -493,6 +563,12 @@ mod tests {
         let target = perform(&layout).expect("install");
         assert_eq!(target, root.join("Documents").join("Lithic").join("Lithic.AppImage"));
         assert_eq!(fs::read(&target).expect("copy"), b"an appimage, in bytes");
+        // The folder is where a first backup proposes to live, so the copy it receives is
+        // named in its ignore file rather than becoming content of that backup.
+        assert_eq!(
+            fs::read_to_string(root.join("Documents").join("Lithic").join(IGNORE_FILE)).expect("ignore"),
+            format!("{TARGET_FILE}\n")
+        );
 
         let entry = fs::read_to_string(data.join("applications").join(ENTRY_FILE)).expect("entry");
         assert!(entry.contains(&format!("Exec={} %f", target.display())), "{entry}");

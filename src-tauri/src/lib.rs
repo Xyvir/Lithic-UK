@@ -306,6 +306,39 @@ fn platform_capabilities() -> platform::Capabilities {
     platform::capabilities()
 }
 
+/// Keep the installed copy out of the folder's own content.
+///
+/// The install folder is also the folder a first backup proposes to live in (see
+/// `proposed_sync_folder`), so a copy landing in `Documents/Lithic` would otherwise be
+/// committed and pushed by the next save: a multi-megabyte binary inside somebody's wiki
+/// history, and one every machine that clones it gets back. The folder's own `.gitignore`
+/// is what says otherwise, and it is written before the copy arrives rather than after it.
+///
+/// The bare file name rather than a path, so the same line covers a backup rooted a level
+/// or two above this folder, and idempotent, because every install writes it again. Best
+/// effort: a folder whose ignore file cannot be written is still a folder to install into.
+///
+/// The shim does the same thing in its own words (`shim/src/install.rs`), since one machine
+/// can have either distribution and both land in the same folder; the two are held in step
+/// by a test on each side.
+fn ignore_installed_copy(dir: &Path, name: &str) {
+    if fs::create_dir_all(dir).is_err() {
+        return;
+    }
+    let path = dir.join(".gitignore");
+    let existing = fs::read_to_string(&path).unwrap_or_default();
+    if existing.lines().any(|line| line.trim() == name) {
+        return;
+    }
+    let mut text = existing;
+    if !text.is_empty() && !text.ends_with('\n') {
+        text.push('\n');
+    }
+    text.push_str(name);
+    text.push('\n');
+    let _ = fs::write(&path, text);
+}
+
 /// Copy the running program to a stable, *visible* per-user location so file
 /// associations ("Open with Lithic") survive updates and app moves, then ask the
 /// platform to make it launchable and reachable from its own menu.
@@ -332,6 +365,12 @@ fn install_monolith() -> Result<InstallResult, String> {
         .parent()
         .map(|parent| parent.to_path_buf())
         .ok_or_else(|| "Could not resolve a user program directory".to_string())?;
+
+    // The folder is also where a first backup proposes to live, so the copy is named in
+    // its ignore file before the copy lands there rather than after it.
+    if let Some(name) = target.file_name().and_then(|name| name.to_str()) {
+        ignore_installed_copy(&target_dir, name);
+    }
 
     // Copy only when different to keep timestamps stable across re-installs.
     let needs_copy = match fs::read(&source) {
@@ -3620,6 +3659,31 @@ mod tests {
         assert_eq!(repo.index().unwrap().len(), 0);
 
         let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// The install folder is where a first backup proposes to live, so the copy is
+    /// named in that folder's own ignore file and never becomes content of the backup.
+    #[test]
+    fn the_installed_copy_is_named_in_the_folders_gitignore() {
+        let root = scratch("install-ignore");
+        let dir = root.join("Documents").join("Lithic");
+
+        // A folder with no ignore file gains one, and gains it even though the folder
+        // itself did not exist yet.
+        ignore_installed_copy(&dir, "Lithic.exe");
+        let ignore = dir.join(".gitignore");
+        assert_eq!(fs::read_to_string(&ignore).unwrap(), "Lithic.exe\n");
+
+        // A folder with one keeps every line it had, and a second install does not repeat
+        // this one: the same folder is somebody's backups as well as this program's home.
+        fs::write(&ignore, "*.lock\nlighttpd.user").unwrap();
+        ignore_installed_copy(&dir, "Lithic.exe");
+        ignore_installed_copy(&dir, "Lithic.exe");
+        let text = fs::read_to_string(&ignore).unwrap();
+        assert_eq!(text, "*.lock\nlighttpd.user\nLithic.exe\n");
+        assert_eq!(text.lines().filter(|line| *line == "Lithic.exe").count(), 1);
+
+        let _ = fs::remove_dir_all(&root);
     }
 
     /// Progress is what separates a slow first connect from a frozen one, and it
