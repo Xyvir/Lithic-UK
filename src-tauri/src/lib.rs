@@ -49,12 +49,13 @@ fn read_lith_path(path: String) -> Result<LithFile, String> {
 }
 
 /// Default dialog starting point: the installed bundle folder when the app
-/// has been installed (Documents\Lithic), else the exe's own folder so
-/// thumb-drive bundles start where the liths live.
+/// has been installed (Documents\Lithic), else the program's own folder (the
+/// folder holding the bundle on macOS) so thumb-drive bundles start where the
+/// liths live.
 fn dialog_start_dir() -> Option<PathBuf> {
     platform::install_dir()
         .filter(|dir| dir.is_dir())
-        .or_else(exe_dir)
+        .or_else(platform::program_dir)
 }
 
 // The dialog commands are async, and that is load-bearing: a sync command runs
@@ -748,7 +749,7 @@ async fn git_sync_setup(
 ) -> Result<GitSyncSetup, String> {
     // The folder the dialog named, made when it is the one Lithic itself proposed: a fresh
     // machine has no `Documents\Lithic`, and the first connect is what creates it.
-    let proposal = proposed_sync_folder(exe_dir().as_deref(), install_folder().as_deref());
+    let proposal = proposed_sync_folder(platform::program_dir().as_deref(), install_folder().as_deref());
     let dir = connect_dir(&path, proposal.as_deref())?;
     let repo = repo.trim().trim_end_matches(".git").trim().to_string();
     if repo.is_empty() || token.trim().is_empty() {
@@ -982,7 +983,7 @@ fn library_folders() -> Vec<PathBuf> {
     if let Some(dir) = install_folder() {
         folders.push(dir);
     }
-    if let Some(dir) = exe_dir() {
+    if let Some(dir) = platform::program_dir() {
         if !folders.contains(&dir) {
             folders.push(dir);
         }
@@ -1143,7 +1144,7 @@ fn git_sync_folder(derived: Option<String>) -> SyncFolderAnswer {
     let chosen = chosen_sync_folder();
     // An empty string is a launcher with nothing to name, not a folder called nothing.
     let derived = derived.filter(|path| !path.trim().is_empty());
-    let proposal = proposed_sync_folder(exe_dir().as_deref(), install_folder().as_deref());
+    let proposal = proposed_sync_folder(platform::program_dir().as_deref(), install_folder().as_deref());
     let folder = answer_folder(
         chosen.as_deref(),
         derived.as_deref().map(Path::new),
@@ -1639,7 +1640,7 @@ fn git_sync_status(path: String) -> Option<GitSyncStatus> {
 /// those aren't ours.
 #[tauri::command]
 fn git_sync_disconnect(path: String) -> Result<(), String> {
-    disconnect_sync_folder(&path, exe_dir().as_deref())
+    disconnect_sync_folder(&path, platform::state_dir().as_deref())
 }
 
 /// The disconnect itself, with the sidecar directory named by the caller so the whole of it
@@ -2230,12 +2231,6 @@ fn git_sync_reauth(path: String, repo: String, token: String) -> Result<String, 
     Ok(repo)
 }
 
-/// Folder the running exe lives in — the root all sidecar-relative paths
-/// resolve against (the process CWD is unreliable on Windows).
-fn exe_dir() -> Option<PathBuf> {
-    std::env::current_exe().ok()?.parent().map(|parent| parent.to_path_buf())
-}
-
 /// Best-effort relative path from base to target. Empty or `..`-leading
 /// results (target outside the bundle, e.g. another drive) return None so
 /// the caller keeps the absolute path — relative escapes would silently
@@ -2263,9 +2258,9 @@ fn relative_to(target: &std::path::Path, base: &std::path::Path) -> Option<PathB
     }
 }
 
-/// Read the portable recents sidecar: recents.txt beside the exe, one path
+/// Read the portable recents sidecar: recents.txt beside the program, one path
 /// per line, most recent first. Comments (#) and blanks are skipped.
-/// Relative lines resolve against the exe's folder (process CWD is not
+/// Relative lines resolve against that folder (process CWD is not
 /// reliable), and paths that no longer exist on this machine are dropped so
 /// a moved thumb drive only ever offers files that are actually present.
 /// Missing sidecar simply yields an empty list — optional by design.
@@ -2274,7 +2269,7 @@ fn relative_to(target: &std::path::Path, base: &std::path::Path) -> Option<PathB
 /// paths and never become rows: the picked folder is read back by `chosen_sync_folder`.
 #[tauri::command]
 fn read_recents_sidecar() -> Vec<String> {
-    let Some(dir) = exe_dir() else { return Vec::new(); };
+    let Some(dir) = platform::state_dir() else { return Vec::new(); };
     read_recents_in(&dir)
 }
 
@@ -2302,8 +2297,8 @@ fn read_recents_in(dir: &Path) -> Vec<String> {
         .collect()
 }
 
-/// Write the portable recents sidecar beside the exe. Paths that live under
-/// the exe's folder are stored relative (so a thumb-drive bundle keeps its
+/// Write the portable recents sidecar beside the program. Paths that live under
+/// the program's folder are stored relative (so a thumb-drive bundle keeps its
 /// recents across machines); everything else stays absolute and is skipped
 /// gracefully on machines where it doesn't resolve.
 ///
@@ -2311,7 +2306,7 @@ fn read_recents_in(dir: &Path) -> Vec<String> {
 /// the Install button): delete recents.txt to restore the offer.
 #[tauri::command]
 fn write_recents_sidecar(paths: Vec<String>, dismissed: bool) -> Result<(), String> {
-    let Some(dir) = exe_dir() else { return Ok(()); };
+    let Some(dir) = platform::state_dir() else { return Ok(()); };
     write_recents_in(&dir, paths, dismissed)
 }
 
@@ -2404,7 +2399,7 @@ fn sync_folder_value_in(dir: &Path) -> Option<String> {
 /// a drive that was not plugged in hands the dialog back to the automatic rules rather
 /// than naming a path that is not there.
 fn chosen_sync_folder() -> Option<PathBuf> {
-    chosen_sync_folder_in(&exe_dir()?)
+    chosen_sync_folder_in(&platform::state_dir()?)
 }
 
 /// The picked folder as it resolves for `dir` — the half of the question that does not
@@ -2455,7 +2450,7 @@ async fn pick_sync_folder(app: tauri::AppHandle, current: Option<String>) -> Res
         .filter(|dir| dir.is_dir())
         .map(Path::to_path_buf)
         .or_else(chosen_sync_folder)
-        .or_else(exe_dir);
+        .or_else(platform::program_dir);
     if let Some(dir) = start {
         picker = picker.set_directory(dir);
     }
@@ -2464,7 +2459,7 @@ async fn pick_sync_folder(app: tauri::AppHandle, current: Option<String>) -> Res
     });
     let Some(folder) = receiver.recv().ok().flatten() else { return Ok(None) };
     let path = folder.into_path().map_err(|error| error.to_string())?;
-    if let Some(dir) = exe_dir() {
+    if let Some(dir) = platform::state_dir() {
         set_sync_folder_in(&dir, Some(&path))?;
     }
     Ok(Some(path.to_string_lossy().into_owned()))
@@ -2474,7 +2469,7 @@ async fn pick_sync_folder(app: tauri::AppHandle, current: Option<String>) -> Res
 /// marker are left alone, and the next read answers with the automatic folder.
 #[tauri::command]
 fn clear_sync_folder_override() -> Result<(), String> {
-    let Some(dir) = exe_dir() else { return Ok(()) };
+    let Some(dir) = platform::state_dir() else { return Ok(()) };
     set_sync_folder_in(&dir, None)
 }
 
@@ -2497,7 +2492,7 @@ fn sidecar_dismissed(dir: &Path) -> bool {
 #[tauri::command]
 fn install_offer_status() -> InstallOfferStatus {
     let installed = platform::install_target().map(|path| path.is_file()).unwrap_or(false);
-    let dismissed = exe_dir().map(|dir| sidecar_dismissed(&dir)).unwrap_or(false);
+    let dismissed = platform::state_dir().map(|dir| sidecar_dismissed(&dir)).unwrap_or(false);
     InstallOfferStatus { installed, dismissed }
 }
 
@@ -2505,7 +2500,7 @@ fn install_offer_status() -> InstallOfferStatus {
 /// forget friendly: recents (if any) are preserved.
 #[tauri::command]
 fn set_install_dismissed(dismissed: bool) -> Result<(), String> {
-    let Some(dir) = exe_dir() else { return Ok(()); };
+    let Some(dir) = platform::state_dir() else { return Ok(()); };
     let paths: Vec<String> = if dir.join("recents.txt").is_file() {
         fs::read_to_string(dir.join("recents.txt"))
             .map(|text| {
@@ -2703,10 +2698,11 @@ struct SecretCheck {
     band: Option<String>,
 }
 
-/// Where the vault lives: beside the executable for a portable bundle, in app
-/// data for an installed copy — the rule `recents.txt` already follows.
+/// Where the vault lives: beside the program for a portable bundle, in app
+/// data for an installed copy — the question `platform::state_dir` already
+/// answers for the sidecar beside it (and on macOS, behind a bundle).
 fn vault_path() -> PathBuf {
-    credentials::vault_path(exe_dir(), dirs::data_dir().map(|dir| dir.join("Lithic")))
+    credentials::vault_path(platform::state_dir(), dirs::data_dir().map(|dir| dir.join("Lithic")))
 }
 
 /// Can this process create a file in `dir`?
@@ -4114,7 +4110,7 @@ mod tests {
     /// is no way to point the backup at another folder — which is also why
     /// re-attaching is what lifts it, and why this drives the real connect path.
     ///
-    /// `None` for the sidecar on purpose: the command wrapper hands it the exe's own
+    /// `None` for the sidecar on purpose: the command wrapper hands it the program's own
     /// folder, and a test has no business writing a recents file beside the test binary.
     #[test]
     fn a_disconnected_library_is_not_preferred_again_until_it_is_attached() {

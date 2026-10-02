@@ -85,6 +85,44 @@ LITHIC_BUILD_TAG=v2026.01.01-0000 npm run tauri build -- --bundles appimage
 
 `LITHIC_BUILD_TAG` is the release stamp this build belongs to: it is compiled in and served to the launcher, which compares it against the newest release on GitHub to decide whether to offer an update. Leave it unset to build an app that offers no update notice, which is what a local build does. If the machine has no FUSE, prefix the build with `APPIMAGE_EXTRACT_AND_RUN=1`, which runs the bundler's own AppImage tooling without mounting it, and that is how the release job builds this artifact. The finished file lands in `src-tauri/target/release/bundle/appimage/`.
 
+## macOS: A Disk Image, a Tarball, and a Cask
+
+A macOS release carries two files, and both hold the same **universal** bundle: Apple Silicon and Intel in one build, so the download is the same whichever Mac fetches it.
+
+**`Lithic_<stamp>.dmg` is the ordinary install.** Open it and drag `Lithic.app` to `/Applications`. The bundle is not signed or notarized — a Developer ID, and the notarization it enables, are a paid annual membership — so a disk image that arrived through a browser is quarantined and macOS will refuse the first launch until it is cleared: **System Settings → Privacy & Security → Open Anyway** (macOS Sequoia removed the right-click → Open shortcut that used to do this), or, for a download you have decided to trust, `xattr -dr com.apple.quarantine /Applications/Lithic.app`.
+
+**`Lithic_<stamp>_universal.app.tar.gz` is the same bundle as one file, for carrying.** Unpack it wherever you want the app to live and open it from there: nothing fetched by `curl` carries the quarantine attribute a browser adds, so there is no Gatekeeper step between unpacking and running. A copy unpacked into a folder of its own — a USB stick, an `Applications` folder in your home, a projects folder — keeps its state beside the bundle, the way the Windows and Linux builds keep `recents.txt` beside the program:
+
+```bash
+curl -LO https://github.com/Xyvir/Lithic-UK/releases/latest/download/Lithic_<stamp>_universal.app.tar.gz
+tar -xzf Lithic_<stamp>_universal.app.tar.gz
+open Lithic.app
+```
+
+**Or let Homebrew do it:**
+
+```bash
+brew install --cask xyvir/tap/lithic
+```
+
+The cask lives in [Xyvir/homebrew-tap](https://github.com/Xyvir/homebrew-tap) rather than in homebrew-cask, because an unsigned build cannot go in the official cask repository. It is also the install with no Gatekeeper step at all: Homebrew fetches with `curl`, so the app arrives unquarantined and opens on the first try. From then on `brew` is the updater (`brew upgrade --cask lithic`), and `brew uninstall --cask --zap lithic` removes the app and its state together.
+
+**What macOS does not have, and why.** There is no Install button in the launcher and no copy that updates itself: dragging the bundle into place *is* the install, the file types are the bundle's own `Info.plist`, and a Mac app that a package manager placed is the platform's own business rather than the app's to duplicate — which is also why a Mac copy is offered no by-hand update while `brew` stays its updater. State follows the same rule as the rest of the distribution, with the one concession macOS packaging forces: a bundle sitting in an `Applications` folder keeps its state in `~/Library/Application Support/Lithic`, because writing inside a bundle would be writing into the program — replaced by the next install, and not something a signed bundle permits. A bundle kept anywhere else is a copy being carried, and keeps `recents.txt`, the picked backup folder and the vault beside itself.
+
+### Building the macOS bundle yourself
+
+On a Mac, with Xcode's command line tools, Rust (stable) and Node 22 or newer. Both Apple targets, because the release is universal:
+
+```bash
+rustup target add aarch64-apple-darwin x86_64-apple-darwin
+npm ci
+npm --prefix launcher-ui ci
+node scripts/build-launcher.mjs
+LITHIC_BUILD_TAG=v2026.01.01-0000 npm run tauri build -- --target universal-apple-darwin --bundles app,dmg
+```
+
+The bundle lands in `src-tauri/target/universal-apple-darwin/release/bundle/macos/` and the disk image in the `dmg` folder beside it. Leave off `--target universal-apple-darwin` to build for this Mac alone, which is faster and is what `cargo run` does while you work. `LITHIC_BUILD_TAG` is the release stamp the build belongs to, the same as on Linux: unset, the app offers no update notice. Nothing signs or notarizes the result — the Mach-O is ad-hoc signed by the linker, which is the minimum Apple Silicon requires for any binary to run at all.
+
 ## Companion Project: Ephemeral.exe
 
 If you are interested in running codeblocks from Lithic or any other text-based PKMS, check out [**Ephemeral.exe**](https://github.com/Xyvir/Ephemeral.exe). It is a lightweight, daemonless utility that instantly executes code snippets directly from your clipboard inside isolated Podman containers. This allows you to run dozens of programming languages seamlessly from your notes without polluting your host system with local installations or complex dependencies.

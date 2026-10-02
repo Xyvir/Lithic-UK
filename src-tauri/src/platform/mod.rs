@@ -330,6 +330,122 @@ fn appimage() -> Option<PathBuf> {
         .filter(|path| !path.as_os_str().is_empty())
 }
 
+/// The folder the program is carried in: the running executable's own folder, or, on macOS,
+/// the folder holding the bundle that executable is inside.
+///
+/// This is what "beside the program" means everywhere else in the crate — where a portable
+/// copy keeps its state, where its liths are looked for, and the last place a dialog starts
+/// looking — and it is one function because macOS is the one platform where the executable's
+/// folder is not the folder a person moves. A Mac program is a bundle: `Lithic.app` holds
+/// `Contents/MacOS/Lithic`, the levels between the binary and the thing a user drags, copies
+/// or unplugs *are* the program, and the folder beside the bundle is what travels with it.
+pub fn program_dir() -> Option<PathBuf> {
+    program_dir_on(current(), running_image()?)
+}
+
+/// The same decision with its input named, so a test can drive every platform's answer from
+/// this one — the shape `install_dir_on` and `install_target_on` already use.
+fn program_dir_on(os: Os, image: PathBuf) -> Option<PathBuf> {
+    if matches!(os, Os::Macos) {
+        return bundle_parent(&image).or_else(|| parent_dir(&image));
+    }
+    parent_dir(&image)
+}
+
+fn parent_dir(image: &Path) -> Option<PathBuf> {
+    image.parent().map(Path::to_path_buf)
+}
+
+/// The folder holding the `.app` bundle `image` sits inside, when it sits inside one.
+///
+/// Found by walking up rather than by counting the components of a bundle's layout: the
+/// count is a fact about Tauri's bundle and the search is a fact about macOS. A run that is
+/// not inside a bundle at all — `cargo run` from a checkout — finds none and answers `None`,
+/// so the plain rule still applies there.
+fn bundle_parent(image: &Path) -> Option<PathBuf> {
+    image
+        .ancestors()
+        .find(|path| path.extension().is_some_and(|extension| extension == "app"))
+        .and_then(Path::parent)
+        .map(Path::to_path_buf)
+}
+
+/// The folder this copy keeps its own state in: the vault, and the portable sidecar
+/// (`recents.txt`, which also carries the picked backup folder and the install offer's
+/// dismissal). Created here when it is not there yet, because both of its writers assume
+/// their folder exists.
+///
+/// Windows and Linux keep the rule they have always had — beside the program — and that is
+/// deliberate rather than incidental: it is what makes a folder of liths, the program and its
+/// state one portable neighbourhood that a thumb drive carries whole.
+///
+/// macOS cannot have that rule, and the concession is contained here rather than borrowed
+/// back into the other two. A Mac program is a bundle, so "beside the executable" means
+/// *inside* the app, and state written there is state the next install replaces: a cask
+/// upgrade swaps the whole bundle and a hand-dragged newer copy does the same. Writing into
+/// the program is wrong in two more ways that do not depend on brew — a bundle that has had
+/// files added to it is a bundle whose signature no longer matches, and a quarantined run is
+/// translocated to a read-only path where the writes fail instead. So on macOS the question
+/// becomes which kind of copy is running. A bundle parked in an Applications folder
+/// (`/Applications` for a drag or a cask, `~/Applications` for one a user keeps of their
+/// own) is an installed app, and an installed app's state belongs to its user, in
+/// `~/Library/Application Support/Lithic`. A bundle in a folder that cannot be written — a
+/// read-only mounted disk image, a translocated quarantine copy — has nowhere to keep it
+/// either, and takes the same answer. A bundle anywhere else is a copy somebody is carrying,
+/// and it keeps its state beside itself: the portable rule, kept in the one place macOS
+/// still allows it.
+pub fn state_dir() -> Option<PathBuf> {
+    STATE_DIR
+        .get_or_init(|| {
+            let beside = program_dir();
+            // Asked once per process: the answer cannot change while the app runs, and the
+            // probe creates and removes a file in a folder that may be somebody's Desktop.
+            //
+            // Only macOS runs it. Windows and Linux do not ask this question — their
+            // answer is `beside`, whatever the folder can do — so probing there would be a
+            // write nobody asked for, in a folder that is also the folder a backup
+            // commits from.
+            let writable = matches!(current(), Os::Macos)
+                && beside.as_deref().is_some_and(crate::dir_writable);
+            let dir = state_dir_on(current(), beside, dirs::data_dir(), writable)?;
+            let _ = std::fs::create_dir_all(&dir);
+            Some(dir)
+        })
+        .clone()
+}
+
+/// The one answer per process `state_dir` caches. Every command that touches the sidecar or
+/// the vault asks this question, and none of them is asking about a different copy.
+static STATE_DIR: std::sync::OnceLock<Option<PathBuf>> = std::sync::OnceLock::new();
+
+/// The same decision with its inputs named, so a test can drive every platform's answer
+/// without being on it.
+fn state_dir_on(
+    os: Os,
+    beside: Option<PathBuf>,
+    app_data: Option<PathBuf>,
+    beside_writable: bool,
+) -> Option<PathBuf> {
+    if !matches!(os, Os::Macos) {
+        return beside;
+    }
+    let installed = beside.as_deref().is_some_and(is_applications_folder) || !beside_writable;
+    if installed {
+        return app_data.map(|dir| dir.join("Lithic"));
+    }
+    beside
+}
+
+/// Whether a folder is one a Mac parks a bundle in rather than carries it in.
+///
+/// By name rather than by a list of known locations: `/Applications`, `/System/Applications`
+/// and the `Applications` folder in a user's home are all called this, and a copy that ends
+/// up treated as installed has lost nothing — it simply keeps its state where an installed
+/// app keeps it.
+fn is_applications_folder(dir: &Path) -> bool {
+    dir.file_name().is_some_and(|name| name == "Applications")
+}
+
 /// Whether this process is the installed copy: the same file, not merely the same bytes.
 pub fn launched_from_install() -> bool {
     let Some(target) = install_target() else {
@@ -568,6 +684,89 @@ mod tests {
             Os::Linux,
             &Placement { image: None, flatpak: false, snap: false, roots: vec![PathBuf::from("/usr")] }
         ));
+    }
+
+    /// The folder the program travels in: the executable's own folder on every platform but
+    /// one, and the folder holding the bundle on macOS, because the executable is inside the
+    /// app rather than beside it.
+    #[test]
+    fn the_program_folder_is_the_bundles_parent_on_macos_and_the_executables_elsewhere() {
+        let image = |path: &str| PathBuf::from(path);
+        assert_eq!(
+            program_dir_on(Os::Windows, image("/apps/Lithic/Lithic.exe")),
+            Some(PathBuf::from("/apps/Lithic"))
+        );
+        assert_eq!(
+            program_dir_on(Os::Linux, image("/home/u/Documents/Lithic/Lithic.AppImage")),
+            Some(PathBuf::from("/home/u/Documents/Lithic")),
+            "an AppImage's own folder is the folder it travels in, extension and all"
+        );
+        assert_eq!(
+            program_dir_on(Os::Macos, image("/Applications/Lithic.app/Contents/MacOS/Lithic")),
+            Some(PathBuf::from("/Applications"))
+        );
+        assert_eq!(
+            program_dir_on(Os::Macos, image("/Volumes/STICK/Lithic.app/Contents/MacOS/Lithic")),
+            Some(PathBuf::from("/Volumes/STICK")),
+            "a bundle on a stick travels with its own folder, which is the whole portable rule"
+        );
+        // A run that is not inside a bundle — a checkout's `cargo run` — keeps the plain rule
+        // rather than reporting the folder above some unrelated `.app` in the path.
+        assert_eq!(
+            program_dir_on(Os::Macos, image("/Users/u/Lithic/src-tauri/target/debug/lithic")),
+            Some(PathBuf::from("/Users/u/Lithic/src-tauri/target/debug"))
+        );
+        assert_eq!(program_dir_on(Os::Other, image("/opt/lithic")), Some(PathBuf::from("/opt")));
+    }
+
+    /// Beside the program on the two platforms that have always done it, and the macOS
+    /// concession: an installed bundle keeps its state where the platform keeps an installed
+    /// app's, and a carried one keeps it beside itself.
+    #[test]
+    fn the_state_folder_is_beside_the_program_except_for_an_installed_mac_bundle() {
+        let data = Some(PathBuf::from("/home/u/Library/Application Support"));
+        let installed = PathBuf::from("/home/u/Library/Application Support/Lithic");
+
+        // Windows and Linux: the rule is the executable's folder, and nothing about it
+        // changes because the location happens to be called Applications.
+        for os in [Os::Windows, Os::Linux] {
+            assert_eq!(
+                state_dir_on(os, Some(PathBuf::from("/apps/Lithic")), data.clone(), true),
+                Some(PathBuf::from("/apps/Lithic"))
+            );
+            assert_eq!(
+                state_dir_on(os, Some(PathBuf::from("/Applications")), data.clone(), true),
+                Some(PathBuf::from("/Applications")),
+                "the portable rule does not learn the word Applications from macOS"
+            );
+        }
+
+        // macOS, parked in an Applications folder: installed, so the state is the user's.
+        assert_eq!(
+            state_dir_on(Os::Macos, Some(PathBuf::from("/Applications")), data.clone(), true),
+            Some(installed.clone())
+        );
+        assert_eq!(
+            state_dir_on(Os::Macos, Some(PathBuf::from("/Users/u/Applications")), data.clone(), true),
+            Some(installed.clone())
+        );
+
+        // macOS, carried: beside the bundle, whether that is a stick, a Desktop or Downloads.
+        for carried in ["/Volumes/STICK", "/Users/u/Desktop", "/Users/u/Downloads/Lithic"] {
+            assert_eq!(
+                state_dir_on(Os::Macos, Some(PathBuf::from(carried)), data.clone(), true),
+                Some(PathBuf::from(carried))
+            );
+        }
+
+        // macOS, nowhere to write: a read-only mounted image or a translocated copy has no
+        // beside to write to, and the user's own folder is the answer that works.
+        assert_eq!(
+            state_dir_on(Os::Macos, Some(PathBuf::from("/Volumes/Lithic")), data.clone(), false),
+            Some(installed.clone())
+        );
+        // And with no app data folder to name at all, the answer is honestly nothing.
+        assert_eq!(state_dir_on(Os::Macos, Some(PathBuf::from("/Volumes/Lithic")), None, false), None);
     }
 
     /// What each platform can do, stated once so a change to one of these has to be a
