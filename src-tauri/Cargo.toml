@@ -59,11 +59,28 @@ sha2 = "0.10"
 # OsRng for the vault's salt and nonce. Already in the tree at this major.
 getrandom = "0.2"
 # In-process git for the GitHub sync. `https` maps to the platform TLS stack
-# (WinHTTP on Windows, OpenSSL elsewhere); the default features are empty, so
-# it has to be requested explicitly. `vendored-libgit2` compiles the vendored C
-# sources with the `cc` crate and links them statically — no cmake, no system
-# libgit2, nothing for a user to install.
+# (WinHTTP on Windows, SecureTransport on macOS, OpenSSL elsewhere); the default
+# features are empty, so it has to be requested explicitly. `vendored-libgit2`
+# compiles the vendored C sources with the `cc` crate and links them statically —
+# no cmake, no system libgit2, nothing for a user to install.
 git2 = { version = "0.21.0", default-features = false, features = ["https", "vendored-libgit2"] }
+
+# The one thing a macOS build has to have that it does not use, and the only reason
+# this table exists. `git2`'s `https` feature enables `openssl-sys` on every unix, and on
+# Apple nothing links it: libgit2-sys's own build script gives libgit2 SecureTransport for
+# its transport and CommonCrypto for its SHA-256 there, and only reaches for OpenSSL
+# everywhere else. What is left is a build script that has to SUCCEED and a library nothing
+# references — and the build script still has to find an OpenSSL, which is what a universal
+# build cannot do: the arm64 slice finds Homebrew's copy on a developer's Mac and the Intel
+# slice never does, and pointing both at Homebrew's would put a path from somebody's machine
+# into a distributed app and a Homebrew dylib in its install names. `vendored` is the answer
+# that asks nothing of the machine: `openssl-src` compiles OpenSSL for whichever slice is
+# being built, statically, and because no symbol from it is referenced the linker drops it
+# from the binary. Linux and Windows are untouched: this dependency is only in the graph for
+# the macOS target, so the AppImage and the executable keep the system OpenSSL and WinHTTP
+# they already link.
+[target.'cfg(target_os = "macos")'.dependencies]
+openssl-sys = { version = "0.9", features = ["vendored"] }
 
 [profile.release]
 # The executable carries its whole frontend (the launcher and the wiki, ~8 MB of

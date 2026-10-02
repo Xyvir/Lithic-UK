@@ -121,7 +121,7 @@ node scripts/build-launcher.mjs
 LITHIC_BUILD_TAG=v2026.01.01-0000 npm run tauri build -- --target universal-apple-darwin --bundles app,dmg
 ```
 
-The bundle lands in `src-tauri/target/universal-apple-darwin/release/bundle/macos/` and the disk image in the `dmg` folder beside it. Leave off `--target universal-apple-darwin` to build for this Mac alone, which is faster and is what `cargo run` does while you work. `LITHIC_BUILD_TAG` is the release stamp the build belongs to, the same as on Linux: unset, the app offers no update notice. Nothing signs or notarizes the result — the Mach-O is ad-hoc signed by the linker, which is the minimum Apple Silicon requires for any binary to run at all.
+The first build compiles OpenSSL once, and that is expected rather than something to fix: `git2`'s `https` feature asks for it on every unix, macOS's libgit2 uses the system's SecureTransport instead and never references it, and the crate vendors it for this target rather than looking for one on the machine or linking a Homebrew dylib into a distributed app. The bundle lands in `src-tauri/target/universal-apple-darwin/release/bundle/macos/` and the disk image in the `dmg` folder beside it. Leave off `--target universal-apple-darwin` to build for this Mac alone, which is faster and is what `cargo run` does while you work. `LITHIC_BUILD_TAG` is the release stamp the build belongs to, the same as on Linux: unset, the app offers no update notice. Nothing signs or notarizes the result — the Mach-O is ad-hoc signed by the linker, which is the minimum Apple Silicon requires for any binary to run at all.
 
 ## Companion Project: Ephemeral.exe
 

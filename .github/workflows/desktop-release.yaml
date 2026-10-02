@@ -591,8 +591,12 @@ jobs:
         with:
           targets: aarch64-apple-darwin,x86_64-apple-darwin
 
-      # No system packages: Xcode and the SDK ship with the runner, and nothing in this
-      # build links a library the base image does not already carry.
+      # No system packages: Xcode and the SDK ship with the runner. The one library this
+      # build wants and the image may not have is OpenSSL, which `git2`'s https feature asks
+      # for on every unix even though Apple's libgit2 uses SecureTransport and never touches
+      # it — `src-tauri/Cargo.toml` vendors that dependency for this target alone, which is
+      # also what makes a universal build possible (the Intel slice has no OpenSSL of its own
+      # to find) and keeps a Homebrew path out of the app.
 
       - name: Install Dependencies
         run: |
