@@ -46,15 +46,104 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y libwebkit2gtk-4.1-dev libgtk-3-dev libayatana-appindicator3-dev librsvg2-dev libssl-dev
 
-      - name: cargo check
+      # The two sync prongs are cargo features, and what they gate is what is *in the
+      # binary*: libgit2 and the GitHub device flow (`sync-github`), or the device engine
+      # (`sync-iroh`, the default). The launcher pinned with `--sync=` picks a feature set
+      # (see Cargo.toml), so every combination that flag can produce has to compile, and
+      # this is the job that says so: the default is what every published build uses, the
+      # two together are `--sync=both`, and the third is what proves each prong is genuinely
+      # optional rather than merely disabled (`--no-default-features`, which no pin asks for
+      # and which is exactly the point of checking it).
+      #
+      # No `-D warnings` here by design (see the note at the top of this file), so a
+      # cfg'd-out helper that nothing uses any more is a warning rather than a failure.
+      # The release jobs build with no feature flags at all, so cargo's default set *is* the
+      # app's `--sync=auto` pin: the device prong, and no libgit2. Changing that default would
+      # repin every published app silently, which is what this reads out of cargo's own
+      # resolution rather than trusting the manifest text.
+      - name: The default feature set is the auto pin
+        working-directory: src-tauri
+        run: |
+          default=$(cargo metadata --no-deps --format-version 1 \
+            | node -e "let d='';process.stdin.on('data',c=>d+=c).on('end',()=>{const p=JSON.parse(d).packages.find(p=>p.name==='lithic');console.log(JSON.stringify(p.features.default))})")
+          echo "default features: $default"
+          test "$default" = '["sync-iroh"]'
+
+      - name: "cargo check (default: device sync, no libgit2)"
         working-directory: src-tauri
         run: cargo check --all-targets 2>&1 | tail -40 && exit ${PIPESTATUS[0]}
+
+      - name: cargo check (both prongs)
+        working-directory: src-tauri
+        run: cargo check --all-targets --features sync-github 2>&1 | tail -40 && exit ${PIPESTATUS[0]}
+
+      - name: cargo check (no sync at all)
+        working-directory: src-tauri
+        run: cargo check --all-targets --no-default-features 2>&1 | tail -40 && exit ${PIPESTATUS[0]}
 
       # The GitHub-sync tests in main.rs. `cargo check --all-targets` only
       # type-checks them and the release workflow never runs cargo at all, so
       # without this step they only execute on a machine running the local
       # push gate. Linking the test binary needs the system deps above, hence
       # running after the cheap type gate rather than before it.
+      #
+      # `--features sync-github` deliberately, and not the default set: the git tests are
+      # behind that feature like the commands they exercise, so the default run would
+      # silently stop exercising them.
       - name: cargo test
         working-directory: src-tauri
-        run: cargo test --quiet 2>&1 | tail -40 && exit ${PIPESTATUS[0]}
+        run: cargo test --quiet --features sync-github 2>&1 | tail -40 && exit ${PIPESTATUS[0]}
+
+  # The same feature matrix on the one platform that can actually resolve it. A
+  # `cfg(windows)` dependency is invisible from the job above in both directions: a
+  # version whose windows family does not come out of the lockfile does not fail here
+  # (`wmi` did exactly that, and it was the release's `build-windows` job that found
+  # it, after a push), and `winreg`/`windows`/`webview2-com` are never compiled at all,
+  # so their APIs are unchecked until a release attempt. This job is `cargo check`
+  # rather than `cargo test` on purpose: the tests are run by the job above, and what
+  # this one is for is that the graph resolves and the Windows-only code compiles.
+  # `--all-targets` still type-checks the test modules, so a Windows-only compile break
+  # in them is caught here even though nothing is linked or run.
+  #
+  # No system dependencies to install: WinHTTP and SChannel are the platform's, so
+  # `git2`'s `https` transport needs no OpenSSL here, and the `openssl-sys` entry in
+  # the `sync-github` feature names a dependency that is declared for the macOS target
+  # alone (see Cargo.toml), which for this target is nothing to do. WebView2 is present
+  # on the runner image.
+  check-windows:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v5
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Rust Cache
+        uses: swatinem/rust-cache@v2
+        with:
+          workspaces: 'src-tauri -> target'
+
+      # The same assertion the job above makes, because the two must not be able to
+      # disagree about what a published build is: cargo's own resolution, read from
+      # this platform, still has to say the default set is the device prong alone.
+      - name: The default feature set is the auto pin
+        working-directory: src-tauri
+        run: |
+          $json = cargo metadata --no-deps --format-version 1 | ConvertFrom-Json
+          $pkg = $json.packages | Where-Object { $_.name -eq 'lithic' }
+          $default = ($pkg.features.default | ConvertTo-Json -Compress)
+          Write-Host "default features: $default"
+          if ($default -ne '["sync-iroh"]') { throw "default features are $default" }
+
+      - name: "cargo check (default: device sync, no libgit2)"
+        working-directory: src-tauri
+        run: cargo check --all-targets
+
+      - name: cargo check (both prongs)
+        working-directory: src-tauri
+        run: cargo check --all-targets --features sync-github
+
+      - name: cargo check (no sync at all)
+        working-directory: src-tauri
+        run: cargo check --all-targets --no-default-features

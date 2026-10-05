@@ -935,6 +935,11 @@ function injectSaverBootstrap(
         // it (the engine document is a rewrite of the launcher page, so a
         // direct reference back into the launcher UI is impossible).
         var savedPath = handle && handle.__lithicTauriPath__;
+        // An app whose Rust was built without the repository prong (--sync=iroh) has no
+        // git_sync_commit, so this invoke is refused there. It is caught below like any other
+        // failed backup, and the launcher listens to the outcome only when it draws the
+        // repository controls at all (hasLocalSync), so a build without the prong reports
+        // nothing anywhere rather than a backup that could not have happened.
         if (tauriInvoke && savedPath) {
           var announce = function(outcome) {
             var payload = {

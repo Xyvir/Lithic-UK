@@ -26,19 +26,52 @@ const generatedCss = resolve(outputDir, 'launcher.css');
 // A locale that is meant to be committed into `src/launcher.html` belongs in
 // `launcher-ui/.env` instead, which CI and the artifact freshness gate both read: a flag
 // only a person remembers to pass would put the gate and the artifact out of step for ever.
+//
+// `--sync=iroh` is the same shape of scratch build for the sync prongs, and its default is
+// the one the repository publishes: `auto`, which asks the process behind the page which
+// prong it has. The pins are `auto`, `github`, `iroh` and `both` (`launcher-ui/src/sync-pin.ts`
+// is where the meaning of each lives); a pin that leaves device sync out (`github`) also
+// drops the wasm glue from the bundle, which is why the flag exists rather than a runtime
+// switch. Anything that names no pin builds `auto`, which is what CI and the freshness gate
+// do, so the committed artifact is always the asking one.
+const PIN_FOR_BUILD = ['auto', 'github', 'iroh', 'both'];
 const argv = process.argv.slice(2);
 const localeFlag = argv.find((arg) => arg.startsWith('--locale='));
 const locale = (localeFlag ? localeFlag.slice('--locale='.length) : process.env.VITE_LAUNCHER_LOCALE)?.trim();
+const syncFlag = argv.find((arg) => arg.startsWith('--sync='));
+const sync = (syncFlag ? syncFlag.slice('--sync='.length) : process.env.VITE_LITHIC_SYNC)?.trim() || 'auto';
+if (!PIN_FOR_BUILD.includes(sync)) {
+  console.error(`FAIL unknown --sync pin '${sync}'. Use one of: ${PIN_FOR_BUILD.join(', ')}`);
+  process.exit(1);
+}
+const publishedDestination = resolve(outputDir, 'launcher.html');
 const destination = resolve(
-  argv.find((arg) => !arg.startsWith('--')) ?? process.env.LAUNCHER_OUT ?? resolve(outputDir, 'launcher.html')
+  argv.find((arg) => !arg.startsWith('--')) ?? process.env.LAUNCHER_OUT ?? publishedDestination
 );
+// The published artifact is the asking one (`auto`), always: it is what CI builds, what the
+// freshness gate rebuilds, and what every distribution fetches (the PWA, an instance through
+// `autoupdate.sh`, the desktop bundle). A pinned build is a scratch build to a scratch path;
+// writing one to the published name would ship a page that cannot tell a host what to do,
+// and the next freshness check would fail it anyway. Refused here rather than discovered later.
+if (sync !== 'auto' && destination === publishedDestination) {
+  console.error(
+    `FAIL --sync=${sync} is a scratch build and cannot be written to ${publishedDestination}.`
+  );
+  console.error('  Give it a destination (`node scripts/build-launcher.mjs --sync=' + sync + ' build/launcher.html`)');
+  console.error('  or LAUNCHER_OUT; the published artifact is always `auto`.');
+  process.exit(1);
+}
 
 await new Promise((resolveBuild, rejectBuild) => {
   const child = spawn(process.execPath, [viteBin, 'build', '--config', 'vite.config.ts'], {
     cwd: root,
     stdio: 'inherit',
     shell: false,
-    env: { ...process.env, ...(locale ? { VITE_LAUNCHER_LOCALE: locale } : {}) }
+    env: {
+      ...process.env,
+      ...(locale ? { VITE_LAUNCHER_LOCALE: locale } : {}),
+      VITE_LITHIC_SYNC: sync
+    }
   });
   child.on('error', rejectBuild);
   child.on('exit', (code) => {
@@ -64,4 +97,4 @@ html = html
 await mkdir(dirname(destination), { recursive: true });
 await writeFile(destination, html);
 await Promise.all([rm(generatedHtml, { force: true }), rm(generatedJs, { force: true }), rm(generatedCss, { force: true })]);
-console.log(`Wrote ${destination}${locale ? ` (locale ${locale})` : ''}`);
+console.log(`Wrote ${destination}${locale ? ` (locale ${locale})` : ''} (sync ${sync})`);

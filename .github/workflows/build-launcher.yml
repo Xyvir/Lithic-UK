@@ -35,7 +35,18 @@ jobs:
         run: npm test
 
       - name: Build launcher
-        run: npm run build:launcher
+        # The published artifact is the asking one (`auto`): both prongs compiled in, and the
+        # page asks the executable which one it has. Any other pin at this path is refused by
+        # the build script itself (see scripts/build-launcher.mjs), so this names the default
+        # on purpose rather than by omission.
+        run: npm run build:launcher -- --sync=auto
+
+      # The pin, proved against the artifacts it builds: `--sync=github` and `--sync=iroh` are
+      # built into a scratch directory and each one is checked for the code it sheds (the wasm
+      # glue for the first, the repository dialog for the second), plus the committed artifact
+      # for carrying both. See scripts/check-sync-pin.mjs.
+      - name: Verify sync pin
+        run: npm run check:sync-pin
 
       - name: Install Puppeteer browser
         run: npx puppeteer browsers install chrome

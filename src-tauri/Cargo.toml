@@ -15,6 +15,35 @@ crate-type = ["staticlib", "cdylib", "rlib"]
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
 
+# The two sync prongs, each a cargo feature because what it gates is what ends up in the
+# binary. `--sync=` on `scripts/build-launcher.mjs` is the launcher's half of the same pin
+# (`launcher-ui/src/sync-pin.ts`); this is the executable's, and the two are asked for together
+# when a pinned artifact is built. The launcher reads the answer at runtime
+# (`sync_capabilities`) rather than assuming, because the artifact it ships is one file for
+# every variant of the app.
+#
+# The default is `auto`, which for the app means the device prong alone: the engine is linked
+# (`sync-iroh`), in-process git is not, and libgit2 and its vendored C sources are not compiled
+# or linked at all. That is the build the release workflow publishes and the one every user
+# runs. The other three pins are opt-in:
+#
+#   cargo build                                  # --sync=auto   device sync only
+#   cargo build --features sync-github           # --sync=both   both prongs
+#   cargo build --no-default-features            # neither       (no sync at all)
+#   cargo build --no-default-features --features sync-github      # --sync=github  repository only
+#
+# `sync-github` is the expensive one to add: it compiles libgit2's vendored C sources and,
+# on macOS only, the OpenSSL that `git2`'s `https` transport nominally wants (see the note
+# above that table). Nothing else in the app needs git2, so leaving the feature off is a real
+# subtraction from the executable rather than a disabled menu item.
+[features]
+default = ["sync-iroh"]
+sync-iroh = ["dep:lithic-sync"]
+# `openssl-sys` is declared for the macOS target alone, and naming it here is what keeps it out
+# of a build that has no git2 to satisfy: on Linux and Windows the entry names a dependency
+# that is not in the graph for them, which cargo resolves as nothing to do.
+sync-github = ["dep:git2", "dep:openssl-sys"]
+
 [target.'cfg(windows)'.dependencies]
 winreg = "0.52"
 # A Start Menu entry on install, written through the shell's own IShellLink, and
@@ -64,13 +93,13 @@ getrandom = "0.2"
 # all live under the app's own state folder rather than in a page's memory. It pulls
 # an async runtime, a TLS stack and the iroh protocol crates into the executable,
 # which is the size this feature costs; the release job measures it.
-lithic-sync = { path = "../sync" }
+lithic-sync = { path = "../sync", optional = true }
 # In-process git for the GitHub sync. `https` maps to the platform TLS stack
 # (WinHTTP on Windows, SecureTransport on macOS, OpenSSL elsewhere); the default
 # features are empty, so it has to be requested explicitly. `vendored-libgit2`
 # compiles the vendored C sources with the `cc` crate and links them statically —
 # no cmake, no system libgit2, nothing for a user to install.
-git2 = { version = "0.21.0", default-features = false, features = ["https", "vendored-libgit2"] }
+git2 = { version = "0.21.0", default-features = false, features = ["https", "vendored-libgit2"], optional = true }
 
 # The one thing a macOS build has to have that it does not use, and the only reason
 # this table exists. `git2`'s `https` feature enables `openssl-sys` on every unix, and on
@@ -87,7 +116,7 @@ git2 = { version = "0.21.0", default-features = false, features = ["https", "ven
 # the macOS target, so the AppImage and the executable keep the system OpenSSL and WinHTTP
 # they already link.
 [target.'cfg(target_os = "macos")'.dependencies]
-openssl-sys = { version = "0.9", features = ["vendored"] }
+openssl-sys = { version = "0.9", features = ["vendored"], optional = true }
 
 [profile.release]
 # The executable carries its whole frontend (the launcher and the wiki, ~8 MB of

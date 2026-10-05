@@ -1,15 +1,34 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::{Mutex, OnceLock};
+// Emitter is the trait behind the sync modal's progress events, which only exist in a build
+// with the repository prong. Every other emit in the crate is in a module of its own (the
+// device prong's events are `devicesync`'s), so the import goes with the feature rather than
+// warning about being unused in a build that has no sync modal.
+#[cfg(feature = "sync-github")]
 use tauri::Emitter;
 use tauri_plugin_dialog::DialogExt;
 
 mod credentials;
 mod webview_auth;
+// The two prongs of sync, each behind the cargo feature that pins it. `sync-iroh` is the
+// default (`--sync=auto`, which is what every build of the app ships): the device engine is
+// linked, and in-process git is not, so libgit2 is not in the executable at all. `sync-github`
+// adds it back, which is what `--sync=github` and `--sync=both` ask for. Both features are
+// additive and independent, so all four configurations compile:
+//
+//   cargo check --all-targets                        # iroh only (the default, and CI's)
+//   cargo check --all-targets --features sync-github  # both
+//   cargo check --all-targets --no-default-features   # neither
+//
+// Everything below that needs one of them says so with the same cfg, and `sync_capabilities`
+// is what tells the launcher which it got.
+#[cfg(feature = "sync-github")]
 mod gitcore;
 mod instance_search;
 mod instance_copy;
 mod cdp;
+#[cfg(feature = "sync-iroh")]
 mod devicesync;
 mod platform;
 
@@ -308,6 +327,33 @@ fn platform_capabilities() -> platform::Capabilities {
     platform::capabilities()
 }
 
+/// Which sync prongs this executable was built with.
+///
+/// Cargo features rather than a runtime setting, because what they gate is what is *in the
+/// binary*: an app built without `sync-github` has no libgit2 and no `git_sync_*` commands at
+/// all, and one built without `sync-iroh` has no device engine. A launcher cannot see any of
+/// that from the outside, and the artifact it ships is the same for every app variant (see
+/// `launcher-ui/src/sync-pin.ts`, where the same question is asked at build time), so the
+/// binary is asked only what only it knows. `cfg!` rather than two cfg'd functions: the answer
+/// is a fact about this build, and the honest place for the branches is the command table,
+/// where a missing command simply is not there.
+#[derive(serde::Serialize)]
+struct SyncCapabilities {
+    /// The in-process git prong: the repository a folder is backed up into, and the GitHub
+    /// device flow that authorizes it.
+    github: bool,
+    /// The device engine: this crate's `lithic-sync`, native.
+    iroh: bool,
+}
+
+#[tauri::command]
+fn sync_capabilities() -> SyncCapabilities {
+    SyncCapabilities {
+        github: cfg!(feature = "sync-github"),
+        iroh: cfg!(feature = "sync-iroh"),
+    }
+}
+
 /// Keep the installed copy out of the folder's own content.
 ///
 /// The install folder is also the folder a first backup proposes to live in (see
@@ -437,6 +483,7 @@ fn install_monolith() -> Result<InstallResult, String> {
 const SYNC_DOC_EXTENSIONS: [&str; 7] = ["lith", "json", "md", "tid", "txt", "ipynb", "html"];
 
 /// True for the document types the sync reports on.
+#[cfg(feature = "sync-github")]
 fn is_sync_doc(path: &str) -> bool {
     Path::new(path)
         .extension()
@@ -448,6 +495,7 @@ fn is_sync_doc(path: &str) -> bool {
 /// Progress line for the launcher's sync modal. Connect is a handful of long
 /// blocking calls (fetch, the rescue writes, commit, push), so the modal shows
 /// the stage it is on instead of a dead "Syncing…" label that reads as frozen.
+#[cfg(feature = "sync-github")]
 #[derive(Clone, serde::Serialize)]
 struct SyncProgress {
     stage: String,
@@ -456,6 +504,7 @@ struct SyncProgress {
 
 /// What `git_sync_setup` hands back: the summary line for the modal, plus the
 /// folder's wikis so a first connect can slot them into recents immediately.
+#[cfg(feature = "sync-github")]
 #[derive(serde::Serialize)]
 struct GitSyncSetup {
     summary: String,
@@ -464,6 +513,7 @@ struct GitSyncSetup {
 
 /// A staging line: the total first, then how far along it is, because "0 of
 /// 3,910" as the opening line reads like a fault rather than a beginning.
+#[cfg(feature = "sync-github")]
 fn stage_label(verb: &str, done: usize, total: usize) -> String {
     if done == 0 {
         format!("{} {} files…", verb, total)
@@ -476,6 +526,7 @@ fn stage_label(verb: &str, done: usize, total: usize) -> String {
 /// line is why `detail` may be a running count — the modal only needs the
 /// latest, but "how far did it get" is the question afterwards. Best effort on
 /// the emit: a closed window just means nobody is watching.
+#[cfg(feature = "sync-github")]
 fn report(window: &tauri::WebviewWindow, stage: &str, detail: &str) {
     log_sync(&format!("{} · {}", stage, detail));
     let _ = window.emit(
@@ -505,6 +556,7 @@ fn report(window: &tauri::WebviewWindow, stage: &str, detail: &str) {
 //     dirs::data_local_dir().map(|dir| dir.join("Lithic").join("sync.log"))
 // }
 
+#[cfg(feature = "sync-github")]
 fn log_sync(message: &str) {
     // Body commented out; see the note above. The calls stay in place so
     // re-enabling is a matter of uncommenting here, not rethreading them.
@@ -535,9 +587,11 @@ fn log_sync(message: &str) {
 
 /// Start a run's log: the marker line, then the folder this run acts on.
 /// No-op while verbose sync logging is commented out.
+#[cfg(feature = "sync-github")]
 fn begin_sync_log(_dir: &Path, _repo: &str) {}
 
 /// What the first-connect merge did, for the message the launcher shows.
+#[cfg(feature = "sync-github")]
 #[derive(Debug, Default, PartialEq, Eq)]
 struct SyncMerge {
     /// Remote files the local folder did not have; brought down.
@@ -561,6 +615,7 @@ struct SyncMerge {
 /// rewrites the remote branch, so anything left behind would be deleted from
 /// GitHub. Offline, or a remote branch that does not exist yet, leaves the
 /// folder untouched.
+#[cfg(feature = "sync-github")]
 fn merge_with_remote_branch(
     dir: &Path,
     progress: &dyn Fn(&str, &str),
@@ -642,6 +697,7 @@ fn merge_with_remote_branch(
 /// Point the folder at a remote, merge in what only the remote has, and
 /// publish the union. Split out from the command so the whole connect flow can
 /// run against a local remote in tests; `remote_url` already embeds the token.
+#[cfg(feature = "sync-github")]
 fn sync_with_remote(
     dir: &Path,
     remote_url: &str,
@@ -741,6 +797,7 @@ fn sync_with_remote(
 /// fetch/commit/push over HTTPS), so it runs on the blocking pool rather than
 /// holding an async worker for the length of a network round trip, and each
 /// stage is reported to the modal as it starts.
+#[cfg(feature = "sync-github")]
 #[tauri::command]
 async fn git_sync_setup(
     path: String,
@@ -810,6 +867,7 @@ async fn git_sync_setup(
 /// it is inside, then unwinds and reports its own outcome. The launcher must
 /// therefore keep showing progress until `git_sync_setup` itself answers rather
 /// than treating this as having finished the job.
+#[cfg(feature = "sync-github")]
 #[tauri::command]
 fn git_sync_cancel() {
     gitcore::cancel();
@@ -870,6 +928,7 @@ fn list_lith_wikis(dir: &Path, max_results: usize) -> Vec<String> {
 ///
 /// Discovery stays flat (`list_lith_wikis`); this only resolves containment for
 /// a file the user already has in front of them.
+#[cfg(feature = "sync-github")]
 #[tauri::command]
 fn git_sync_coverage(paths: Vec<String>) -> std::collections::HashMap<String, String> {
     let mut backed: std::collections::HashMap<String, String> = std::collections::HashMap::new();
@@ -888,6 +947,7 @@ fn git_sync_coverage(paths: Vec<String>) -> std::collections::HashMap<String, St
 /// resolved which folder the backup acts on, and a rebuild hands over whichever of
 /// the two it holds. Accepting both keeps one command serving both callers, rather
 /// than a mode flag or a second command per subject.
+#[cfg(feature = "sync-github")]
 fn sync_dir_of(given: &Path) -> Option<PathBuf> {
     if given.is_dir() {
         return Some(given.to_path_buf());
@@ -900,6 +960,7 @@ fn sync_dir_of(given: &Path) -> Option<PathBuf> {
 /// The marker is an origin URL Lithic wrote, with the token embedded — the same
 /// one self-host writes — and it is what keeps a git folder the user made
 /// themselves out of every automatic commit and push.
+#[cfg(feature = "sync-github")]
 fn is_managed_dir(dir: &Path) -> bool {
     dir.join(".git").is_dir() && managed_remote_url(dir).is_some()
 }
@@ -913,12 +974,14 @@ fn is_managed_dir(dir: &Path) -> bool {
 /// attachment is what would keep aiming the backup at the folder that failed. A save
 /// is still committed into such a folder (a save only needs the marker); what it
 /// cannot do is outrank the folder the user actually attached.
+#[cfg(feature = "sync-github")]
 fn is_attached(dir: &Path) -> bool {
     is_managed_dir(dir) && has_commit(dir)
 }
 
 /// Whether Lithic has ever committed here — so a repository it made is on disk,
 /// whatever became of the remote.
+#[cfg(feature = "sync-github")]
 fn has_commit(dir: &Path) -> bool {
     gitcore::open(dir)
         .map(|repo| gitcore::head_exists(&repo))
@@ -939,6 +1002,7 @@ fn has_commit(dir: &Path) -> bool {
 /// origin does not. A repository the user deliberately disconnected is not preferred
 /// again (`lithic.detached`), which is also the only way to point the backup at a
 /// different folder afterwards.
+#[cfg(feature = "sync-github")]
 fn is_left_repository(dir: &Path) -> bool {
     if !dir.join(".git").is_dir() || !has_commit(dir) {
         return false;
@@ -958,11 +1022,13 @@ fn walk_up(dir: &Path) -> impl Iterator<Item = PathBuf> + '_ {
 }
 
 /// The nearest folder at or above `dir` that is a repository Lithic manages.
+#[cfg(feature = "sync-github")]
 fn managed_root_for(dir: &Path) -> Option<PathBuf> {
     walk_up(dir).find(|candidate| is_managed_dir(candidate))
 }
 
 /// The nearest folder at or above `dir` that is a finished attachment.
+#[cfg(feature = "sync-github")]
 fn attached_root_for(dir: &Path) -> Option<PathBuf> {
     walk_up(dir).find(|candidate| is_attached(candidate))
 }
@@ -1007,6 +1073,7 @@ fn library_folders() -> Vec<PathBuf> {
 /// derived from the picker: `None` means the caller keeps what it chose, which is
 /// also what a Disconnect leaves behind — the folder you are working in is the next
 /// thing the dialog proposes.
+#[cfg(feature = "sync-github")]
 fn preferred_sync_folder(derived: Option<&Path>, libraries: &[PathBuf]) -> Option<PathBuf> {
     if let Some(root) = derived.and_then(sync_dir_of).and_then(|dir| attached_root_for(&dir)) {
         return Some(root);
@@ -1022,6 +1089,7 @@ fn preferred_sync_folder(derived: Option<&Path>, libraries: &[PathBuf]) -> Optio
 /// user having said so. The order is deliberate and so is the check — a recorded folder
 /// that is not on this machine falls through to the inference instead of naming a path
 /// that is not there.
+#[cfg(feature = "sync-github")]
 fn resolved_sync_folder(chosen: Option<&Path>, derived: Option<&Path>, libraries: &[PathBuf]) -> Option<PathBuf> {
     if let Some(dir) = chosen.filter(|dir| dir.is_dir()) {
         return Some(dir.to_path_buf());
@@ -1031,6 +1099,7 @@ fn resolved_sync_folder(chosen: Option<&Path>, derived: Option<&Path>, libraries
 
 /// Whether a folder keeps a Lith of its own. Flat, because that is how every other
 /// reader here lists a folder: a wiki in a subfolder belongs to that subfolder.
+#[cfg(feature = "sync-github")]
 fn holds_a_lith(dir: &Path) -> bool {
     !list_lith_wikis(dir, 1).is_empty()
 }
@@ -1053,6 +1122,7 @@ fn holds_a_lith(dir: &Path) -> bool {
 /// alternative is asking somebody setting up a new device to invent the folder their own
 /// backup already lives in. Only a machine with no Documents folder to name at all has
 /// nothing to propose, and the dialog asks instead of guessing.
+#[cfg(feature = "sync-github")]
 fn proposed_sync_folder(exe: Option<&Path>, install: Option<&Path>) -> Option<PathBuf> {
     if let Some(dir) = exe {
         if install == Some(dir) || holds_a_lith(dir) {
@@ -1075,6 +1145,7 @@ fn proposed_sync_folder(exe: Option<&Path>, install: Option<&Path>) -> Option<Pa
 /// Nothing is ever made for a path the launcher derived: a stale recents row naming a
 /// folder that is gone must not turn that name into a new folder, because the answer to
 /// where a backup goes has to come from the user rather than from an old row.
+#[cfg(feature = "sync-github")]
 fn connect_dir(path: &str, proposal: Option<&Path>) -> Result<PathBuf, String> {
     let given = Path::new(path);
     if given.is_dir() {
@@ -1109,6 +1180,7 @@ fn connect_dir(path: &str, proposal: Option<&Path>) -> Result<PathBuf, String> {
 /// (the "save a Lith first" line is about the launcher having nothing, and it does have a row),
 /// and a Connect that answers `Cannot resolve a folder for …` after the fact. The proposal
 /// answers instead, which is the folder a machine with no recents at all is offered.
+#[cfg(feature = "sync-github")]
 fn answer_folder(
     chosen: Option<&Path>,
     derived: Option<&Path>,
@@ -1128,6 +1200,7 @@ fn answer_folder(
 /// names the folder it is about to act on, and it also has to know whether that folder is
 /// the user's own pick — the only case where offering to go back to the automatic one makes
 /// sense.
+#[cfg(feature = "sync-github")]
 #[derive(serde::Serialize)]
 struct SyncFolderAnswer {
     /// `None` means nothing is attached near either and nothing can be proposed, and the
@@ -1140,6 +1213,7 @@ struct SyncFolderAnswer {
 
 /// The folder the desktop app's backup should act on, given the path the launcher derived
 /// for itself.
+#[cfg(feature = "sync-github")]
 #[tauri::command]
 fn git_sync_folder(derived: Option<String>) -> SyncFolderAnswer {
     let chosen = chosen_sync_folder();
@@ -1162,6 +1236,7 @@ fn git_sync_folder(derived: Option<String>) -> SyncFolderAnswer {
 ///
 /// Accepts a folder or any file inside it, so the caller can hand over the same
 /// path it uses as its sync target without knowing which it holds.
+#[cfg(feature = "sync-github")]
 #[tauri::command]
 fn list_folder_liths(path: String) -> Vec<String> {
     let Some(dir) = sync_dir_of(Path::new(&path)) else {
@@ -1174,6 +1249,7 @@ fn list_folder_liths(path: String) -> Vec<String> {
 /// auto-commit in these repositories: Lithic's remotes embed the oauth2 token
 /// (the marker self-host uses too), so opening a file from a git folder the
 /// user made themselves never causes it to be committed or pushed anywhere.
+#[cfg(feature = "sync-github")]
 fn managed_remote_url(dir: &Path) -> Option<String> {
     let repo = gitcore::open(dir).ok()?;
     let url = gitcore::remote_url(&repo, "origin")?;
@@ -1184,12 +1260,14 @@ fn managed_remote_url(dir: &Path) -> Option<String> {
 /// self-host's github-sync.sh writes it, and it doubles as the marker that
 /// tells us a folder is ours to commit into. One function builds it so the
 /// connect path and the reconnect path cannot drift apart.
+#[cfg(feature = "sync-github")]
 fn sync_remote_url(repo: &str, token: &str) -> String {
     format!("https://oauth2:{}@github.com/{}.git", token, repo)
 }
 
 /// A managed remote taken apart. The embedded token is what marks the folder
 /// as ours; owner/name are what a health check needs to address the repository.
+#[cfg(feature = "sync-github")]
 #[derive(Debug, PartialEq, Eq)]
 struct ManagedRemote {
     owner: String,
@@ -1205,6 +1283,7 @@ struct ManagedRemote {
 /// because this also reads remotes an older Lithic or self-host may have
 /// written. A URL that carries the marker but cannot be read reports as
 /// malformed to the user, which is a state reconnect can repair.
+#[cfg(feature = "sync-github")]
 fn parse_managed_remote(url: &str) -> Option<ManagedRemote> {
     let (userinfo, host_and_path) = url.split_once("://")?.1.split_once('@')?;
     let token = userinfo.strip_prefix("oauth2:")?.trim();
@@ -1231,6 +1310,7 @@ fn parse_managed_remote(url: &str) -> Option<ManagedRemote> {
 /// GitHub is now behind. Either way the save itself succeeded, which is why a
 /// failed push is reported here rather than returned as a failure: an offline
 /// save must still work.
+#[cfg(feature = "sync-github")]
 #[derive(serde::Serialize)]
 struct GitSyncCommit {
     /// The folder is a Lithic-managed repository, so this save was a backup.
@@ -1241,6 +1321,7 @@ struct GitSyncCommit {
     error: Option<String>,
 }
 
+#[cfg(feature = "sync-github")]
 impl GitSyncCommit {
     fn nothing() -> Self {
         Self { managed: false, pushed: false, error: None }
@@ -1268,6 +1349,7 @@ impl GitSyncCommit {
 /// from a wiki reloads the launcher, and the push triggered by that wiki's exit
 /// save is still in progress in Rust. Without this the icon would look idle
 /// while a backup is genuinely under way.
+#[cfg(feature = "sync-github")]
 #[derive(Default)]
 struct CommitLog {
     failures: Mutex<std::collections::HashMap<String, String>>,
@@ -1276,6 +1358,7 @@ struct CommitLog {
     in_flight: Mutex<std::collections::HashMap<String, u32>>,
 }
 
+#[cfg(feature = "sync-github")]
 impl CommitLog {
     /// `None` clears the folder: a push that landed is the fix, so there is
     /// nothing left to warn about.
@@ -1326,6 +1409,7 @@ impl CommitLog {
 /// arrives here from the engine's own saver and from the launcher's recent list,
 /// and those two do not have to spell it with the same slash. A key that missed
 /// would silently drop the one signal that a backup stopped landing.
+#[cfg(feature = "sync-github")]
 fn folder_key(dir: &Path) -> String {
     dir.to_string_lossy().replace('\\', "/")
 }
@@ -1334,13 +1418,16 @@ fn folder_key(dir: &Path) -> String {
 /// done since it started, and the commands that read and write it are stateless
 /// by design (an async command holding a managed `State` borrow cannot span an
 /// await, which is exactly what a heartbeat does).
+#[cfg(feature = "sync-github")]
 static COMMIT_LOG: std::sync::OnceLock<CommitLog> = std::sync::OnceLock::new();
 
+#[cfg(feature = "sync-github")]
 fn commit_log() -> &'static CommitLog {
     COMMIT_LOG.get_or_init(CommitLog::default)
 }
 
 /// The synchronous half: stage the file, commit it, and push.
+#[cfg(feature = "sync-github")]
 fn commit_saved_file(
     dir: &Path,
     file: &Path,
@@ -1371,6 +1458,7 @@ fn commit_saved_file(
 /// can report it later. Skips non-synced folders so plain saves never error, and
 /// runs the git work — including a network push — on the blocking pool rather
 /// than holding an async worker for the length of a round trip.
+#[cfg(feature = "sync-github")]
 async fn git_sync_commit_inner(
     path: String,
     message: String,
@@ -1421,6 +1509,7 @@ async fn git_sync_commit_inner(
     }
 }
 
+#[cfg(feature = "sync-github")]
 #[tauri::command]
 async fn git_sync_commit(path: String, message: String) -> Result<GitSyncCommit, String> {
     git_sync_commit_inner(path, message, commit_log()).await
@@ -1434,6 +1523,7 @@ async fn git_sync_commit(path: String, message: String) -> Result<GitSyncCommit,
 
 /// Device-flow app client id (the "Lithic Sync" GitHub App). Same shape as
 /// self-host's GITHUB_CLIENT_ID; overridable for local testing.
+#[cfg(feature = "sync-github")]
 fn github_client_id() -> String {
     std::env::var("GITHUB_CLIENT_ID")
         .unwrap_or_else(|_| "Iv23lippjEJMp4KLlLKI".to_string())
@@ -1458,6 +1548,7 @@ fn http_client() -> Option<&'static reqwest::Client> {
         .as_ref()
 }
 
+#[cfg(feature = "sync-github")]
 async fn github_post_form(url: &str, form: &str) -> Result<serde_json::Value, String> {
     let client = http_client().ok_or_else(|| "no HTTP client".to_string())?;
     let response = client
@@ -1492,6 +1583,7 @@ async fn github_api_get(url: &str, token: &str) -> Result<serde_json::Value, Str
     response.json().await.map_err(|error| error.to_string())
 }
 
+#[cfg(feature = "sync-github")]
 async fn github_api_post(url: &str, token: &str, json: &serde_json::Value) -> Result<serde_json::Value, String> {
     let client = http_client().ok_or_else(|| "no HTTP client".to_string())?;
     let response = client
@@ -1527,6 +1619,7 @@ fn json_str(value: &serde_json::Value, key: &str) -> Option<String> {
 
 /// Step 1 of the device flow: ask GitHub for a user code to authorize the
 /// Lithic Sync app. Mirrors self-host's /api/github/device-code handler.
+#[cfg(feature = "sync-github")]
 #[tauri::command]
 async fn github_device_code() -> Result<serde_json::Value, String> {
     let form = format!("client_id={}&scope=repo", github_client_id());
@@ -1539,6 +1632,7 @@ async fn github_device_code() -> Result<serde_json::Value, String> {
 
 /// Step 2 of the device flow: poll the token endpoint while the user
 /// authorizes. Returns `pending` until GitHub issues the access token.
+#[cfg(feature = "sync-github")]
 #[tauri::command]
 async fn github_device_poll(device_code: String) -> Result<serde_json::Value, String> {
     let form = format!(
@@ -1560,6 +1654,7 @@ async fn github_device_poll(device_code: String) -> Result<serde_json::Value, St
     }
 }
 
+#[cfg(feature = "sync-github")]
 #[derive(serde::Serialize)]
 struct ManagedRepo {
     full_name: String,
@@ -1567,6 +1662,7 @@ struct ManagedRepo {
 
 /// Repos the user owns, filtered client-side by the UI for Lithic-managed
 /// names (parity with self-host's /api/github/list-repos).
+#[cfg(feature = "sync-github")]
 #[tauri::command]
 async fn github_list_repos(token: String) -> Result<Vec<ManagedRepo>, String> {
     let data = github_api_get(
@@ -1588,6 +1684,7 @@ async fn github_list_repos(token: String) -> Result<Vec<ManagedRepo>, String> {
 }
 
 /// Create a private sync repo (parity with self-host's /api/github/create-repo).
+#[cfg(feature = "sync-github")]
 #[tauri::command]
 async fn github_create_repo(token: String, name: String) -> Result<ManagedRepo, String> {
     let name = name.trim();
@@ -1608,6 +1705,7 @@ async fn github_create_repo(token: String, name: String) -> Result<ManagedRepo, 
     Ok(ManagedRepo { full_name })
 }
 
+#[cfg(feature = "sync-github")]
 #[derive(serde::Serialize)]
 struct GitSyncStatus {
     connected: bool,
@@ -1620,6 +1718,7 @@ struct GitSyncStatus {
 /// Status for the reactive sync icon: connected only when the file's folder
 /// is a git repo whose origin was configured by Lithic (oauth2 remote, same
 /// marker git_sync_commit uses).
+#[cfg(feature = "sync-github")]
 #[tauri::command]
 fn git_sync_status(path: String) -> Option<GitSyncStatus> {
     let dir = sync_dir_of(Path::new(&path))?;
@@ -1639,6 +1738,7 @@ fn git_sync_status(path: String) -> Option<GitSyncStatus> {
 /// Disconnect: drop the managed origin remote, and forget the folder pick that aimed the
 /// backup. Refuses to touch repos the user configured themselves (no oauth2 marker) —
 /// those aren't ours.
+#[cfg(feature = "sync-github")]
 #[tauri::command]
 fn git_sync_disconnect(path: String) -> Result<(), String> {
     disconnect_sync_folder(&path, platform::state_dir().as_deref())
@@ -1646,6 +1746,7 @@ fn git_sync_disconnect(path: String) -> Result<(), String> {
 
 /// The disconnect itself, with the sidecar directory named by the caller so the whole of it
 /// — the detached mark and the forgotten pick — can be tested against a folder of its own.
+#[cfg(feature = "sync-github")]
 fn disconnect_sync_folder(path: &str, sidecar: Option<&Path>) -> Result<(), String> {
     let dir = sync_dir_of(Path::new(path))
         .filter(|dir| dir.is_dir())
@@ -2013,6 +2114,7 @@ async fn fetch_instance_icon(url: String, state: tauri::State<'_, VaultState>) -
 // which is what lets the launcher paint green only when it is telling the truth.
 
 /// What one heartbeat learned about the connection.
+#[cfg(feature = "sync-github")]
 #[derive(Debug, PartialEq, Eq, Clone, Copy)]
 enum Health {
     Ok,
@@ -2032,6 +2134,7 @@ enum Health {
 /// GitHub answers 404 both for a repository that was deleted and for a private
 /// one this token cannot see, so `Missing` is reported as "deleted, renamed, or
 /// no longer shared" rather than asserting which of the two happened.
+#[cfg(feature = "sync-github")]
 fn verdict_for(status: u16, push_allowed: Option<bool>, rate_limited: bool) -> Health {
     match status {
         // 409 is a repository with no commits yet: the repository and the token
@@ -2050,6 +2153,7 @@ fn verdict_for(status: u16, push_allowed: Option<bool>, rate_limited: bool) -> H
 
 /// The launcher's view of a heartbeat: a machine-readable verdict plus the one
 /// sentence the icon's tooltip and the sync dialog both show.
+#[cfg(feature = "sync-github")]
 #[derive(serde::Serialize)]
 struct GitSyncHealth {
     state: &'static str,
@@ -2061,6 +2165,7 @@ struct GitSyncHealth {
     last_commit_error: Option<String>,
 }
 
+#[cfg(feature = "sync-github")]
 impl GitSyncHealth {
     fn unmanaged() -> Self {
         Self {
@@ -2142,6 +2247,7 @@ impl GitSyncHealth {
 /// Time-boxed: a heartbeat that can hang would leave the icon reading "checking"
 /// forever, which is worse than the wrong colour. Errors here are transport
 /// errors — being unreachable is a verdict, not a failed command.
+#[cfg(feature = "sync-github")]
 async fn github_api_probe(url: &str, token: &str) -> Result<(u16, bool, Option<bool>), String> {
     let client = http_client().ok_or_else(|| "no HTTP client".to_string())?;
     let response = client
@@ -2176,6 +2282,7 @@ async fn github_api_probe(url: &str, token: &str) -> Result<(u16, bool, Option<b
 /// repository that was deleted or renamed, and a token that can read but not
 /// push. Never returns an error — "cannot reach github.com" is a verdict the
 /// launcher renders, not a failed command.
+#[cfg(feature = "sync-github")]
 #[tauri::command]
 async fn git_sync_heartbeat(path: String) -> Result<GitSyncHealth, String> {
     let folder = sync_dir_of(Path::new(&path));
@@ -2210,6 +2317,7 @@ async fn git_sync_heartbeat(path: String) -> Result<GitSyncHealth, String> {
 /// The remedy for a token GitHub no longer accepts. Going through the full
 /// connect again would re-fetch and re-merge a folder that has already been
 /// merged, which is a lot of work and a chance to touch files for no reason.
+#[cfg(feature = "sync-github")]
 #[tauri::command]
 fn git_sync_reauth(path: String, repo: String, token: String) -> Result<String, String> {
     let dir = sync_dir_of(Path::new(&path))
@@ -2438,6 +2546,7 @@ fn set_sync_folder_in(dir: &Path, picked: Option<&Path>) -> Result<(), String> {
 /// Async, and that is load-bearing: a command runs on the main thread, and Tauri 2's
 /// blocking pickers must not be called there. This one parks on a channel while the
 /// dialog's own callback (which fires on the main thread) delivers the chosen folder.
+#[cfg(feature = "sync-github")]
 #[tauri::command]
 async fn pick_sync_folder(app: tauri::AppHandle, current: Option<String>) -> Result<Option<String>, String> {
     let (sender, receiver) = std::sync::mpsc::channel();
@@ -3078,7 +3187,10 @@ pub fn run() {
             }
             // Device sync's host is built here, with a state folder resolved once per
             // process, and it starts nothing until the page's first `device_sync_*`
-            // ask: a machine that never opens the panel never binds an endpoint.
+            // ask: a machine that never opens the panel never binds an endpoint. A build
+            // without the prong has no such commands to answer, so there is nothing to
+            // manage either.
+            #[cfg(feature = "sync-iroh")]
             tauri::Manager::manage(app, devicesync::DeviceSync::new(app.handle()));
             Ok(())
         })
@@ -3100,22 +3212,46 @@ pub fn run() {
             open_external,
             read_recents_sidecar,
             write_recents_sidecar,
+            // The pinned prongs, and the reason each entry carries its own cfg.
+            // `generate_handler!` parses an attribute per path and emits it on the match
+            // arm it builds, so a cfg'd-out command is not in the table at all rather than
+            // answering an error: the page can only call what the executable has, and the
+            // launcher is told which that is by `sync_capabilities` below. The commands
+            // that stay in every build are the ones with no prong behind them: the sidecar
+            // reads and writes, the folder offer's own override, and the copy that lands a
+            // Lith in a folder the user picked.
+            #[cfg(feature = "sync-github")]
             git_sync_setup,
+            #[cfg(feature = "sync-github")]
             git_sync_cancel,
+            #[cfg(feature = "sync-github")]
             git_sync_commit,
+            #[cfg(feature = "sync-github")]
             github_device_code,
+            #[cfg(feature = "sync-github")]
             github_device_poll,
+            #[cfg(feature = "sync-github")]
             github_list_repos,
+            #[cfg(feature = "sync-github")]
             github_create_repo,
+            #[cfg(feature = "sync-github")]
             git_sync_status,
+            #[cfg(feature = "sync-github")]
             git_sync_disconnect,
+            #[cfg(feature = "sync-github")]
             git_sync_heartbeat,
+            #[cfg(feature = "sync-github")]
             git_sync_reauth,
+            #[cfg(feature = "sync-github")]
             git_sync_folder,
+            #[cfg(feature = "sync-github")]
             pick_sync_folder,
             clear_sync_folder_override,
+            #[cfg(feature = "sync-github")]
             git_sync_coverage,
+            #[cfg(feature = "sync-github")]
             list_folder_liths,
+            sync_capabilities,
             probe_instance,
             fetch_instance_icon,
             check_credential,
@@ -3133,11 +3269,17 @@ pub fn run() {
             destroy_credentials,
             instance_cache_search,
             forget_instance_copy,
+            #[cfg(feature = "sync-iroh")]
             devicesync::device_sync_start,
+            #[cfg(feature = "sync-iroh")]
             devicesync::device_sync_share,
+            #[cfg(feature = "sync-iroh")]
             devicesync::device_sync_join,
+            #[cfg(feature = "sync-iroh")]
             devicesync::device_sync_entries,
+            #[cfg(feature = "sync-iroh")]
             devicesync::device_sync_read,
+            #[cfg(feature = "sync-iroh")]
             devicesync::device_sync_publish
         ])
         .run(tauri::generate_context!())
@@ -3325,6 +3467,7 @@ mod tests {
         remote
     }
 
+    #[cfg(feature = "sync-github")]
     #[test]
     fn the_save_path_only_commits_in_lithic_managed_repos() {
         let root = scratch("managed");
@@ -3350,6 +3493,7 @@ mod tests {
         let _ = fs::remove_dir_all(&root);
     }
 
+    #[cfg(feature = "sync-github")]
     #[test]
     fn a_save_commits_the_changed_file_and_skips_empty_commits() {
         let root = scratch("save");
@@ -3386,6 +3530,7 @@ mod tests {
         let _ = fs::remove_dir_all(&root);
     }
 
+    #[cfg(feature = "sync-github")]
     #[test]
     fn sync_doc_filter_covers_lithic_documents_only() {
         assert!(is_sync_doc("wiki.lith"));
@@ -3395,6 +3540,7 @@ mod tests {
         assert!(!is_sync_doc("no-extension"));
     }
 
+    #[cfg(feature = "sync-github")]
     #[test]
     fn merge_rescues_remote_only_files_and_keeps_the_local_copy_on_a_clash() {
         let root = scratch("merge");
@@ -3466,6 +3612,7 @@ mod tests {
         let _ = fs::remove_dir_all(&root);
     }
 
+    #[cfg(feature = "sync-github")]
     #[test]
     fn merge_is_a_no_op_without_a_remote_branch() {
         let root = scratch("fresh");
@@ -3503,6 +3650,7 @@ mod tests {
         let _ = fs::remove_dir_all(&root);
     }
 
+    #[cfg(feature = "sync-github")]
     #[test]
     fn connect_publishes_the_union_without_overwriting_local_work() {
         let root = scratch("connect");
@@ -3557,6 +3705,7 @@ mod tests {
 
     /// The modal's progress line is fed by these stages; without them a slow
     /// first connect sits on a dead "Syncing…" button and reads as frozen.
+    #[cfg(feature = "sync-github")]
     #[test]
     fn connect_reports_each_stage_it_reaches() {
         let root = scratch("progress");
@@ -3617,6 +3766,7 @@ mod tests {
     /// it — but a folder of thousands of unrelated files is the wrong unit, and
     /// the count is only knowable before anything is hashed. The index must come
     /// out untouched, because the caller treats a refusal as "leave no trace".
+    #[cfg(feature = "sync-github")]
     #[test]
     fn a_first_connect_declines_a_folder_far_larger_than_a_backup() {
         let dir = scratch("oversized");
@@ -3648,6 +3798,7 @@ mod tests {
 
     /// The staging walk has to be stoppable, or a first connect to the wrong
     /// folder can only be waited out or killed.
+    #[cfg(feature = "sync-github")]
     #[test]
     fn a_cancelled_first_connect_stages_nothing() {
         let dir = scratch("cancelled");
@@ -3695,6 +3846,7 @@ mod tests {
 
     /// Progress is what separates a slow first connect from a frozen one, and it
     /// has to arrive before the first file is hashed rather than after.
+    #[cfg(feature = "sync-github")]
     #[test]
     fn staging_reports_its_total_before_it_starts_and_stages_every_file() {
         let dir = scratch("staging");
@@ -3759,6 +3911,7 @@ mod tests {
     /// user to create a repository inside another one.
     ///
     /// Discovery is flat, so this is the only place nesting is reasoned about.
+    #[cfg(feature = "sync-github")]
     #[test]
     fn coverage_resolves_each_wiki_up_to_its_repository_root() {
         let root = scratch("coverage");
@@ -3827,6 +3980,7 @@ mod tests {
     /// The library folder outranks the folder a recent row implies. Without this,
     /// saving one exported Lith into Downloads made the next connect commit
     /// Downloads — the measured failure this exists to prevent.
+    #[cfg(feature = "sync-github")]
     #[test]
     fn an_attached_library_outranks_the_derived_folder() {
         let root = scratch("prefer");
@@ -3859,6 +4013,7 @@ mod tests {
 
     /// A folder the user picked in the dialog outranks both automatic rules: the derived
     /// path and the library folder a previous attachment left behind.
+    #[cfg(feature = "sync-github")]
     #[test]
     fn a_picked_folder_outranks_the_automatic_answers() {
         let root = scratch("picked");
@@ -3902,6 +4057,7 @@ mod tests {
     /// A fresh download with nothing to go on: no recents, no open Lith and no repository
     /// anywhere. The proposal is the program's own folder, and only where that folder is
     /// evidence rather than an accident of where the program was unzipped to.
+    #[cfg(feature = "sync-github")]
     #[test]
     fn a_fresh_download_proposes_the_programs_own_folder_only_as_evidence() {
         let root = scratch("propose");
@@ -3953,6 +4109,7 @@ mod tests {
 
     /// The one folder a connect makes for itself, and the folder it must never silently
     /// become.
+    #[cfg(feature = "sync-github")]
     #[test]
     fn a_connect_makes_the_proposed_folder_and_never_the_folder_holding_it() {
         let root = scratch("connect-dir");
@@ -3988,6 +4145,7 @@ mod tests {
     /// The proposal fills the case where the launcher named nothing that is on this machine,
     /// and no case where it named something that is: a derived Lith is the one the user is
     /// working in, and a proposal about the program's own folder must not outrank it.
+    #[cfg(feature = "sync-github")]
     #[test]
     fn the_proposal_fills_only_the_case_where_nothing_was_named_here() {
         let root = scratch("propose-fill");
@@ -4079,6 +4237,7 @@ mod tests {
     /// be gone while the attachment is real, and the commits it left are the
     /// evidence. The user's `Documents\Lithic` was measured in exactly this state,
     /// so requiring the marker would have left the launcher aiming at a Downloads row.
+    #[cfg(feature = "sync-github")]
     #[test]
     fn a_library_whose_remote_is_gone_is_still_the_backup_folder() {
         let root = scratch("lostremote");
@@ -4102,6 +4261,7 @@ mod tests {
     /// A folder with a `.git` and nothing in it is not an attachment: that is what a
     /// connect killed before its first commit leaves behind — measured on the user's
     /// Downloads folder, which carried Lithic's remote and no branch at all.
+    #[cfg(feature = "sync-github")]
     #[test]
     fn an_empty_repository_is_not_an_attachment() {
         let root = scratch("emptyrepo");
@@ -4123,6 +4283,7 @@ mod tests {
     ///
     /// `None` for the sidecar on purpose: the command wrapper hands it the program's own
     /// folder, and a test has no business writing a recents file beside the test binary.
+    #[cfg(feature = "sync-github")]
     #[test]
     fn a_disconnected_library_is_not_preferred_again_until_it_is_attached() {
         let root = scratch("disconnect");
@@ -4147,6 +4308,7 @@ mod tests {
     /// while a backup is being set up, so a folder left recorded after a Disconnect would
     /// be a choice nobody could see and nobody could undo — and it would outrank the rules
     /// that work the folder out from evidence on the setup that follows.
+    #[cfg(feature = "sync-github")]
     #[test]
     fn a_disconnect_forgets_the_folder_that_was_picked() {
         let root = scratch("disconnect-pick");
@@ -4179,6 +4341,7 @@ mod tests {
 
     /// The folder the user is looking at wins when it is itself attached, and a
     /// wiki nested inside an attachment resolves to the root that publishes it.
+    #[cfg(feature = "sync-github")]
     #[test]
     fn an_attachment_behind_the_open_lith_outranks_the_library() {
         let root = scratch("opened");
@@ -4201,6 +4364,7 @@ mod tests {
     /// A connect that dies before its first commit leaves the marker and no
     /// commit. Preferring that is what would keep aiming the backup at the folder
     /// that failed, so the marker alone is not an attachment.
+    #[cfg(feature = "sync-github")]
     #[test]
     fn a_marker_without_a_commit_is_not_an_attachment() {
         let root = scratch("halfwritten");
@@ -4239,6 +4403,7 @@ mod tests {
     /// folder once it has resolved which folder the backup acts on, so the folder
     /// walk has to work from a file inside the folder as well as from the folder
     /// itself.
+    #[cfg(feature = "sync-github")]
     #[test]
     fn list_folder_liths_accepts_a_file_or_a_folder() {
         let root = scratch("folderlist");
@@ -4293,6 +4458,7 @@ mod tests {
     /// The remote URL is written by the connect path and read by the health
     /// check, so the two halves have to agree — a drift here would show up as a
     /// user whose sync is fine but whose heartbeat insists it is malformed.
+    #[cfg(feature = "sync-github")]
     #[test]
     fn a_managed_remote_round_trips_through_its_parts() {
         let url = sync_remote_url("owner/lithic-sync-ab2d", "gho_token");
@@ -4323,6 +4489,7 @@ mod tests {
     /// The mapping that decides whether a green icon is honest. A revoked token,
     /// a deleted repository and a read-only token all leave the marker intact,
     /// so this is the only thing between the user and a silent failure.
+    #[cfg(feature = "sync-github")]
     #[test]
     fn a_heartbeat_verdict_says_which_failure_it_is() {
         assert_eq!(verdict_for(200, Some(true), false), Health::Ok);
@@ -4345,6 +4512,7 @@ mod tests {
     /// A plain save in a folder Lithic does not manage must never look like a
     /// failed backup — that is the whole reason the outcome is reported rather
     /// than thrown.
+    #[cfg(feature = "sync-github")]
     #[test]
     fn a_save_outside_a_managed_folder_reports_nothing_to_do() {
         let root = scratch("commitoutcome");
@@ -4369,6 +4537,7 @@ mod tests {
     /// Reconnecting re-points the credential and nothing else: the folder was
     /// already merged, so a re-auth that re-fetched would be slow and a chance
     /// to touch files for no reason.
+    #[cfg(feature = "sync-github")]
     #[test]
     fn a_reauth_repoints_the_credential_without_touching_the_work_tree() {
         let root = scratch("reauth");
@@ -4408,6 +4577,7 @@ mod tests {
     /// not as a log line: this is the case the icon turns red about, and a
     /// report that swallowed the message would leave a red cloud with nothing
     /// to say about it.
+    #[cfg(feature = "sync-github")]
     #[test]
     fn a_rejected_push_is_reported_as_a_failed_backup() {
         let root = scratch("pushreject");
@@ -4442,6 +4612,7 @@ mod tests {
     /// inside the engine document, so nothing else carries the reason back to
     /// the launcher, and a record that outlived its fix would be a permanent
     /// red cloud.
+    #[cfg(feature = "sync-github")]
     #[test]
     fn the_commit_log_remembers_a_failure_until_a_push_lands() {
         let log = CommitLog::default();
@@ -4482,6 +4653,7 @@ mod tests {
         assert_eq!(classify_manifest(200, b""), "other");
     }
 
+    #[cfg(feature = "sync-github")]
     #[test]
     fn the_commit_log_tracks_a_backup_while_it_runs() {
         let log = CommitLog::default();
@@ -4500,6 +4672,7 @@ mod tests {
     /// Two in-flight backups of one folder must not clear the mark when the
     /// first finishes, or the icon would go idle while the second is still
     /// pushing.
+    #[cfg(feature = "sync-github")]
     #[test]
     fn overlapping_backups_hold_the_mark_until_the_last_one_finishes() {
         let log = CommitLog::default();
@@ -4520,6 +4693,7 @@ mod tests {
     /// The engine's saver and the launcher's recent list both report a folder,
     /// and the two do not have to agree on the separator. A key that missed
     /// would drop the only signal that a backup stopped landing.
+    #[cfg(feature = "sync-github")]
     #[test]
     fn the_commit_log_key_ignores_separator_style() {
         assert_eq!(

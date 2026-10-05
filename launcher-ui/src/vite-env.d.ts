@@ -18,6 +18,11 @@ declare global {
   interface ImportMetaEnv {
     /** The locale a language build ships, e.g. `es`. See `copy.ts`. */
     readonly VITE_LAUNCHER_LOCALE?: string;
+    /**
+     * The sync prongs a pinned build speaks: `auto`, `github`, `iroh` or `both`. See
+     * `sync-pin.ts`, and `--sync=` on `scripts/build-launcher.mjs`, which sets it.
+     */
+    readonly VITE_LITHIC_SYNC?: string;
   }
 }
 

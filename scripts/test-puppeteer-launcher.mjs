@@ -2884,6 +2884,13 @@ try {
           // *has* an install gives: these fixture paths are Windows-shaped, and the app there
           // copies itself and registers in the application menu.
           return { install: true, launch_entry: 'application-menu' };
+        case 'sync_capabilities':
+          // Which sync prongs the mocked executable has. Both halves of a pinned build live
+          // in Rust (cargo features, `--sync=`), so this is the app's report rather than the
+          // launcher's, and this mock is the app with the repository prong and no device prong:
+          // the archived build, which is the one that draws the heading's sync button and none
+          // of the device controls these legs never ask for.
+          return { github: true, iroh: false };
         case 'install_status':
           // The slow one, on request — and the only one of the three that is ever slow.
           // What is being pinned is the gap between the launcher painting and the
@@ -5055,6 +5062,10 @@ try {
             return Promise.resolve(pick ? { name: pick.name, path: pick.path, text: pick.text } : null);
           }
           if (command === 'read_recents_sidecar') return Promise.resolve([]);
+          // The prongs the mocked executable has, and the reason the repository controls are
+          // drawn at all: `hasLocalSync` is the app's own report plus the build's pin now, so a
+          // mock that stays silent here is a launcher with no sync button to press.
+          if (command === 'sync_capabilities') return Promise.resolve({ github: true, iroh: false });
           // Not the mode's default `null`: the launcher dereferences this map (it is
           // keyed by path), and these rows are the first in this suite to carry one.
           if (command === 'git_sync_coverage') return Promise.resolve({});
@@ -5264,6 +5275,7 @@ try {
         invoke: (command, args) => {
           window.__lithicSyncedCall({ command, args });
           if (command === 'read_recents_sidecar') return Promise.resolve(fixture.recents);
+          if (command === 'sync_capabilities') return Promise.resolve({ github: true, iroh: false });
           if (command === 'git_sync_coverage') return Promise.resolve(fixture.coverage);
           if (command === 'git_sync_folder') return Promise.resolve({ folder: fixture.root, overridden: false });
           if (command === 'list_folder_liths') return Promise.resolve(fixture.listed);

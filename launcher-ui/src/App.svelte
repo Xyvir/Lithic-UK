@@ -37,6 +37,8 @@
   import PinEntry from './PinEntry.svelte';
   import DeviceSyncPanel from './DeviceSyncPanel.svelte';
   import { deviceSyncSession, deviceSyncSupport } from './device-sync';
+  // Which prongs this build was pinned to speak. See `sync-pin.ts`.
+  import { SHOWS_DEVICE_SYNC, SHOWS_GITHUB_SYNC } from './sync-pin';
   import { deleteRemoteFile, fetchRemoteFiles, fetchRemoteWiki, fetchRemoteWikiMeta, probePatchApi, createLockHeartbeat, readRemoteLock, uploadRemoteFile, webdavUrl, resolveSessionId, lithUploadName, type WebdavFile } from './webdav';
   import { normalizeLithName } from './legacy-saver';
   import { searchCachedWikis } from './cache-search';
@@ -133,8 +135,30 @@
    * rides on the desktop app's bridge (`legacy-launcher-runtime.ts`). Everything the launcher
    * page itself does, this flag covers in both backends, and the calls that still name one
    * backend say why at their call site.
+   *
+   * Two answers about the build now sit inside this one. `SHOWS_GITHUB_SYNC` is the pin the
+   * launcher was compiled with: an `iroh` build resolves the question to false everywhere, because
+   * it has no repository prong to reach. `hostGithubSync` is what the process behind the page
+   * reports (`sync_capabilities`), which is what keeps an app whose Rust was built without libgit2
+   * from drawing a control whose commands were compiled out with it. A shim answers out of its own
+   * wire, so its branch reads the secret alone.
+   *
+   * The host's answer arrives after the first paint (it is an IPC call, and the boot does not wait
+   * on it), so this starts false and the repository controls appear when the answer lands. Late
+   * rather than optimistic: a control that appears a moment late costs nothing, a control drawn
+   * over commands that are not in the executable is a button that fails.
    */
-  $: hasLocalSync = mode === 'tauri' || shimToken !== null;
+  let hostGithubSync = false;
+  /**
+   * Whether the process behind this page compiled device sync in.
+   *
+   * The same report, and needed for the same reason: the engine a page can reach is not the same
+   * question as the engine its build carries. An app built without the iroh prong still serves a
+   * launcher carrying the browser half of it, and that half is what the circle would otherwise
+   * open. A page outside the app is answered by its own build, so nothing reads this there.
+   */
+  let hostDeviceSync = false;
+  $: hasLocalSync = SHOWS_GITHUB_SYNC && (mode === 'tauri' ? hostGithubSync : shimToken !== null);
   /**
    * A shim that served this page answers `file` on every browser, because the shim itself
    * writes the path the desktop's chooser named: on Firefox the platform has no File System
@@ -300,6 +324,18 @@
       // hidden rather than promising something this platform may not do.
       platformInstallable = false;
       platformEntry = null;
+    }
+    try {
+      const sync = await tauriInvoke<{ github: boolean; iroh: boolean }>('sync_capabilities');
+      hostGithubSync = sync.github === true;
+      hostDeviceSync = sync.iroh === true;
+    } catch {
+      // The report is what the two local-sync controls are drawn from, so a report that could
+      // not be read leaves both undrawn rather than promising a command this executable may not
+      // have. An app older than this command is exactly that case, and the launcher it embeds is
+      // the older one that asks nothing.
+      hostGithubSync = false;
+      hostDeviceSync = false;
     }
     try {
       const result = await tauriInvoke<{ installed: boolean; up_to_date: boolean; running_from_install: boolean }>('install_status');
@@ -768,10 +804,22 @@
    * Whether this page can run an engine at all, and which one. Read once, with the mode and
    * for the same reason: what serves the page cannot change while it lives. Two prongs hang
    * off this, the PWA's wasm module and the app's native engine, so a `file://` copy and a
-   * browser-only page never draw the control.
+   * browser-only page never draw the control; whether the build carries an engine at all is
+   * the pin's own answer, which comes first because a build that has none never asks the page.
    */
-  const deviceSyncRuns = deviceSyncSupport().ok;
+  const deviceSyncRuns = SHOWS_DEVICE_SYNC && deviceSyncSupport().ok;
   let showDeviceSync = false;
+  /**
+   * Whether the device-sync circle is drawn.
+   *
+   * Three answers, and all three are needed. The pin (`SHOWS_DEVICE_SYNC`) says whether this
+   * build carries an engine at all; `deviceSyncRuns` asks the page whether one could run here;
+   * and inside the app the host's own report is the third, because a launcher carrying the
+   * browser engine's glue says nothing about the Rust behind it. A browser-only page is out for
+   * the reason it always was: a shim's payload is a named list of files, `launcher.wasm` is not
+   * on it, and the shim has no engine prong of its own yet.
+   */
+  $: deviceSyncShown = deviceSyncRuns && !browserOnly && (mode !== 'tauri' || hostDeviceSync);
 
   /**
    * Open the panel, and load the engine behind it.
@@ -4301,6 +4349,10 @@
     // a push that never landed has to reach the icon, or a green cloud sits over
     // a repository that stopped receiving saves.
     const onGitSyncSaved = (event: Event) => {
+      // A build with no repository prong has nothing to say about a backup, and nothing that
+      // draws one: the save-time commit the engine reports on is refused before it starts (see
+      // the commit site in `legacy-launcher-runtime.ts`), and this is the other end of it.
+      if (!hasLocalSync) return;
       markGitSyncActivity();
       const detail = (event as CustomEvent<{ ok?: boolean; managed?: boolean; error?: string | null }>).detail;
       if (!detail) return;
@@ -5178,17 +5230,18 @@
     -->
     {#if mode === 'webapp' && !browserOnly}<button class="help-button" aria-label={copy.app.viewIntro} title={copy.app.viewIntro} on:click={openIntro}>{introBusy ? '…' : '?'}</button>{/if}
     <!--
-      Device sync's circle, drawn where an engine can run. That is the published PWA, whose
-      engine is the wasm module it ships beside itself, and the desktop app, whose engine is
-      native and keeps its state under the app's own folder. A `file://` copy keeps the
-      no-sync behaviour it has today, and the shim and an instance wait for their own
-      milestones: a page the local shim served resolves to `webapp` the same as the PWA,
-      but its payload is a named list of files and `launcher.wasm` is not on it, and an
-      instance's device sync arrives with the server prong. `deviceSyncRuns` is what asks
-      the page, and the mode is what keeps the two webapp-shaped pages apart. The glyph is
-      a screen and a phone, because what this pairs is the machines a person reads on.
+      Device sync's circle, drawn where an engine can run and the build carries one. That is the
+      published PWA, whose engine is the wasm module it ships beside itself; an instance, whose
+      launcher ships the same module (`deploy/autoupdate.sh` fetches it beside the launcher and
+      warns when it cannot); and the desktop app, whose engine is native and keeps its state
+      under the app's own folder. A `file://` copy keeps the no-sync behaviour it has today, and
+      a shim keeps it for its own milestone: its payload is a named list of files,
+      `launcher.wasm` is not on it, and it has no engine prong yet. `deviceSyncShown` is where
+      the three questions (the pin, the page, and the host) are asked, and its comment is where
+      they are written down. The glyph is a screen and a phone, because what this pairs is the
+      machines a person reads on.
     -->
-    {#if deviceSyncRuns && mode !== 'self-host' && !browserOnly}<button class="device-sync-button" aria-label={copy.deviceSync.openAria} title={copy.deviceSync.title} on:click={openDeviceSyncModal}><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="2" y="4" width="13" height="9" rx="1.5"/><path d="M5 17h7"/><rect x="17" y="8" width="5" height="11" rx="1.5"/></svg></button>{/if}
+    {#if deviceSyncShown}<button class="device-sync-button" aria-label={copy.deviceSync.openAria} title={copy.deviceSync.title} on:click={openDeviceSyncModal}><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="2" y="4" width="13" height="9" rx="1.5"/><path d="M5 17h7"/><rect x="17" y="8" width="5" height="11" rx="1.5"/></svg></button>{/if}
     <!--
       The round control is one button with one job per page, never both at once. The intro
       belongs to the published PWA, whose server serves `intro.lith` beside it, and the sync
@@ -5197,9 +5250,11 @@
       browser-only is exactly what makes it resolve to `webapp`, the same as the PWA, so the
       declaration is what tells the two apart. A browser-only page therefore draws the sync
       button alone, matching the desktop app it is the Linux half of, and its header carries
-      no way into the intro even though the shim still ships the payload for it.
+      no way into the intro even though the shim still ships the payload for it. The pin is the
+      last word on whether this control is drawn at all: an `iroh` build draws no repository
+      control anywhere, the instance's own sync included.
     -->
-    {#if hasLocalSync || isSelfHost()}<button class="sync-button {headingSyncState}" aria-label={copy.dialogs.gitSync.title} title={headingSyncTitle} on:click={openGitSyncModal}><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 17.6A5 5 0 0 0 18 8h-1.3A8 8 0 1 0 4 16.3"/><path d="M12 12v9"/><path d="m8.5 15.5 3.5-3.5 3.5 3.5"/></svg>{#if headingSyncState === 'checking'}<span class="sync-glyph ring" aria-hidden="true"></span>{:else if headingSyncState === 'error'}<span class="sync-glyph alert" aria-hidden="true">!</span>{:else if headingSyncState === 'connected'}<span class="sync-glyph dot" aria-hidden="true"></span>{/if}</button>{/if}
+    {#if SHOWS_GITHUB_SYNC && (hasLocalSync || isSelfHost())}<button class="sync-button {headingSyncState}" aria-label={copy.dialogs.gitSync.title} title={headingSyncTitle} on:click={openGitSyncModal}><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 17.6A5 5 0 0 0 18 8h-1.3A8 8 0 1 0 4 16.3"/><path d="M12 12v9"/><path d="m8.5 15.5 3.5-3.5 3.5 3.5"/></svg>{#if headingSyncState === 'checking'}<span class="sync-glyph ring" aria-hidden="true"></span>{:else if headingSyncState === 'error'}<span class="sync-glyph alert" aria-hidden="true">!</span>{:else if headingSyncState === 'connected'}<span class="sync-glyph dot" aria-hidden="true"></span>{/if}</button>{/if}
     </div>
   </header>
   <!--
@@ -5236,7 +5291,13 @@
   {#if showDeviceSync}
     <DeviceSyncPanel session={deviceSync} formatSize={formatLithSize} onClose={closeDeviceSyncModal} />
   {/if}
-  {#if showGitSyncModal}
+  <!--
+    The repository dialog, and the last word on whether an `iroh` build carries it. The circle
+    above is what opens it, so this is unreachable there either way; naming the pin here as well
+    is what takes the markup out of the artifact, since a folded literal is a branch no bundler
+    has to keep (see `define` in `vite.config.ts`).
+  -->
+  {#if SHOWS_GITHUB_SYNC && showGitSyncModal}
     <div class="modal-overlay" role="presentation" on:click={(event) => event.currentTarget === event.target && closeGitSyncModal()}>
       <div class="launcher-modal git-sync-modal" role="dialog" aria-modal="true" aria-labelledby="gitsync-title">          <button class="modal-close" aria-label={copy.dialogs.gitSync.closeAria} on:click={closeGitSyncModal}>×</button>
         <h2 id="gitsync-title">{copy.dialogs.gitSync.title}</h2>

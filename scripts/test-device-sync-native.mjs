@@ -9,11 +9,18 @@
  * resolved to this machine by the browser), a stand-in for the bridge Rust injects answers
  * the commands over an in-page folder, and the panel is walked the way a person walks it.
  *
- * What this proves: the heading draws the circle on the app and not on a plain page, the
- * driver takes the native transport (`device_sync_*` commands, base64 bytes, the app's own
- * event) instead of the wasm module, publishing hands the file's exact bytes over the IPC,
- * the event Rust emits lands in the panel and refreshes its list, and a copy is saved
- * through the app's own save command rather than a browser download.
+ * What this proves: the heading draws the circle where an engine can run and the build has
+ * one, the driver takes the native transport (`device_sync_*` commands, base64 bytes, the
+ * app's own event) inside the app instead of the wasm module, publishing hands the file's
+ * exact bytes over the IPC, the event Rust emits lands in the panel and refreshes its list,
+ * and a copy is saved through the app's own save command rather than a browser download.
+ *
+ * The three ways the circle is withheld are driven here too, because each is a different
+ * question: an app whose executable was built without the iroh prong (the host's report, which
+ * is how one committed artifact serves every app variant), a page that declares itself
+ * browser-only (the shim, whose payload has no `launcher.wasm` on it), and the one place a
+ * page outside the app gets the circle at all, a self-host page, which takes the browser prong
+ * rather than the app's.
  *
  * What it does not prove: the Rust side. The engine's behaviour is the crate's own tests
  * (`sync/tests/`), and the command layer is compiled by CI (`rust-check.yml`), not here.
@@ -34,6 +41,9 @@ import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'no
 import { tmpdir } from 'node:os';
 import { extname, join, resolve, sep } from 'node:path';
 import puppeteer from 'puppeteer';
+
+/** The declaration the shim's page carries (see `mode.ts`), which the second control adds. */
+const BROWSER_ONLY_META = 'lithic-browser-only';
 
 const root = process.cwd();
 const artifact = resolve(root, 'src/launcher.html');
@@ -76,7 +86,7 @@ const POLL = { polling: 250, timeout: 30000 };
  * models the one behaviour the panel depends on: publishing adds an entry, and the event
  * the native engine emits is what tells the page to read the list again.
  */
-function bridge() {
+function bridge(capabilities) {
   const state = {
     commands: [],
     entries: [],
@@ -84,7 +94,10 @@ function bridge() {
     saved: null,
     listener: null,
     nodeId: 'node-app',
-    ticket: 'ticket-app'
+    ticket: 'ticket-app',
+    // What the mocked executable was built with. The archive app is the default: the
+    // repository prong and no device prong, which is what `--sync=auto` builds.
+    capabilities: capabilities ?? { github: false, iroh: true }
   };
   const encode = (bytes) => {
     let binary = '';
@@ -102,6 +115,8 @@ function bridge() {
       invoke: async (command, args) => {
         state.commands.push({ command, args: args ?? null });
         switch (command) {
+          case 'sync_capabilities':
+            return state.capabilities;
           case 'device_sync_start':
             return { node_id: state.nodeId };
           case 'device_sync_share':
@@ -162,13 +177,69 @@ try {
   const port = server.address().port;
   const appUrl = `http://tauri.localhost:${port}/src/launcher.html`;
 
-  // The negative control: the same launcher on an address that is not the app's draws no
-  // device-sync circle at all, however much the page could run were it the app.
+  // The first control: the same launcher, served by an executable that was built without the
+  // iroh prong, draws no device-sync circle however much the page itself could run. This is the
+  // half of the pin the page has to ask about: one committed launcher is embedded in every app
+  // variant, so what the process reports is the only thing that can tell them apart.
+  const archive = await browser.newPage();
+  await archive.setViewport({ width: 1000, height: 800 });
+  await archive.evaluateOnNewDocument(bridge, { github: true, iroh: false });
+  await archive.goto(appUrl, { waitUntil: 'domcontentloaded' });
+  await archive.waitForSelector('.heading-actions', { timeout: 30000 });
+  // Waited for rather than sampled: the control for the prong this executable *does* have is
+  // what says the report was read at all, and it arrives with it.
+  await archive.waitForSelector('.heading .sync-button', { timeout: 30000 });
+  assert.equal(
+    await archive.$('.device-sync-button'),
+    null,
+    'an app built without the iroh prong should draw no device-sync circle'
+  );
+  await archive.close();
+
+  // The second control: a page that declares itself browser-only draws none either, which is
+  // the shim's rule until it grows an engine prong of its own. The declaration is the shim's
+  // markup, so it is added to the document the server hands over.
+  const shim = await browser.newPage();
+  await shim.setViewport({ width: 1000, height: 800 });
+  await shim.setRequestInterception(true);
+  shim.on('request', (request) => {
+    if (!request.isNavigationRequest() || !request.url().endsWith('/src/launcher.html')) {
+      void request.continue();
+      return;
+    }
+    const html = readFileSync(artifact, 'utf8').replace(
+      '<head>',
+      `<head>\n<meta name="${BROWSER_ONLY_META}" content="1">`
+    );
+    void request.respond({ status: 200, contentType: 'text/html; charset=utf-8', body: html });
+  });
+  await shim.goto(`http://127.0.0.1:${port}/src/launcher.html`, { waitUntil: 'domcontentloaded' });
+  await shim.waitForSelector('.heading-actions', { timeout: 30000 });
+  assert.equal(
+    await shim.$('.device-sync-button'),
+    null,
+    'a page that declares itself browser-only should draw no device-sync circle'
+  );
+  await shim.close();
+
+  // The third control is the one page outside the app that does draw it: an instance's launcher
+  // ships the same wasm module, so a self-host page takes the browser prong rather than the
+  // app's. Which prong it took is what the request for the module proves, and the app's own
+  // bridge is not in this document at all.
   const plain = await browser.newPage();
   await plain.setViewport({ width: 1000, height: 800 });
+  const plainUrls = [];
+  plain.on('request', (request) => plainUrls.push(request.url()));
   await plain.goto(`http://127.0.0.1:${port}/src/launcher.html`, { waitUntil: 'domcontentloaded' });
-  await plain.waitForSelector('.heading-actions', { timeout: 30000 });
-  assert.equal(await plain.$('.device-sync-button'), null, 'a plain page should draw no device-sync circle');
+  await plain.waitForSelector('.device-sync-button', { timeout: 30000 });
+  await plain.click('.device-sync-button');
+  await plain.waitForSelector('.device-sync-modal', { timeout: 30000 });
+  await plain.waitForFunction(() => !document.querySelector('.device-sync-status')?.textContent?.includes('node-app'));
+  await new Promise((done) => setTimeout(done, 1500));
+  assert.ok(
+    plainUrls.some((url) => url.endsWith('/src/launcher.wasm')),
+    'a self-host page should reach for the wasm module, not the app bridge'
+  );
   await plain.close();
 
   const page = await browser.newPage();

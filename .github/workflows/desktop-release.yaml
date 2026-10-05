@@ -95,8 +95,15 @@ jobs:
       - name: Run Launcher UI Tests
         run: npm --prefix launcher-ui test
 
+      # `--sync=auto` is the pin every published build carries: both prongs compiled into the
+      # launcher, and the page asks the executable which one it has (`sync_capabilities`).
+      # That is what lets one artifact be the app's and an instance's at once. The
+      # executable's half of the same pin is its cargo features, whose default set is the same
+      # choice (see src-tauri/Cargo.toml); `--sync=github` or `--sync=iroh` here would have to
+      # be matched by `--features` on the `tauri build` below, and neither is what this
+      # workflow publishes.
       - name: Build Launcher (Svelte Launcher Bundle)
-        run: node scripts/build-launcher.mjs
+        run: node scripts/build-launcher.mjs --sync=auto
 
       # --- DEBUG STEP ---
       - name: Debug - List Files & Tauri Info
@@ -286,8 +293,15 @@ jobs:
       - name: Run Launcher UI Tests
         run: npm --prefix launcher-ui test
 
+      # `--sync=auto` is the pin every published build carries: both prongs compiled into the
+      # launcher, and the page asks the executable which one it has (`sync_capabilities`).
+      # That is what lets one artifact be the app's and an instance's at once. The
+      # executable's half of the same pin is its cargo features, whose default set is the same
+      # choice (see src-tauri/Cargo.toml); `--sync=github` or `--sync=iroh` here would have to
+      # be matched by `--features` on the `tauri build` below, and neither is what this
+      # workflow publishes.
       - name: Build Launcher (Svelte Launcher Bundle)
-        run: node scripts/build-launcher.mjs
+        run: node scripts/build-launcher.mjs --sync=auto
 
       # Same rule as the Windows job: regenerate the icon set from the one source
       # image so the AppImage's icon, the desktop entry and the taskbar icon are
@@ -462,8 +476,15 @@ jobs:
           npm ci
           npm --prefix launcher-ui ci
 
+      # `--sync=auto` is the pin every published build carries: both prongs compiled into the
+      # launcher, and the page asks the executable which one it has (`sync_capabilities`).
+      # That is what lets one artifact be the app's and an instance's at once. The
+      # executable's half of the same pin is its cargo features, whose default set is the same
+      # choice (see src-tauri/Cargo.toml); `--sync=github` or `--sync=iroh` here would have to
+      # be matched by `--features` on the `tauri build` below, and neither is what this
+      # workflow publishes.
       - name: Build Launcher (Svelte Launcher Bundle)
-        run: node scripts/build-launcher.mjs
+        run: node scripts/build-launcher.mjs --sync=auto
 
       - name: Generate Date-Based Tag
         id: tag
@@ -606,8 +627,15 @@ jobs:
       - name: Run Launcher UI Tests
         run: npm --prefix launcher-ui test
 
+      # `--sync=auto` is the pin every published build carries: both prongs compiled into the
+      # launcher, and the page asks the executable which one it has (`sync_capabilities`).
+      # That is what lets one artifact be the app's and an instance's at once. The
+      # executable's half of the same pin is its cargo features, whose default set is the same
+      # choice (see src-tauri/Cargo.toml); `--sync=github` or `--sync=iroh` here would have to
+      # be matched by `--features` on the `tauri build` below, and neither is what this
+      # workflow publishes.
       - name: Build Launcher (Svelte Launcher Bundle)
-        run: node scripts/build-launcher.mjs
+        run: node scripts/build-launcher.mjs --sync=auto
 
       # Same rule as the other jobs: regenerate the icon set from the one source image, so
       # the icon in the dock and the icon in Finder are the same drawing.

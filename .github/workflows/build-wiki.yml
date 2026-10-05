@@ -130,7 +130,11 @@ jobs:
 
       - name: Build Launcher (Svelte)
         if: env.BUILD_CONFIG == 'prod'
-        run: npm run build:launcher
+        # `--sync=auto` is the pin the published artifact always carries: both prongs compiled
+        # in, and the page asks whichever process serves it which one exists. This is the job
+        # whose output is committed as src/launcher.html, so a pin other than the default here
+        # would be refused by the build script (and failed by the freshness gate).
+        run: npm run build:launcher -- --sync=auto
 
       - name: Verify Launcher Artifact (prod only)
         if: env.BUILD_CONFIG == 'prod'
