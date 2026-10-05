@@ -2,17 +2,18 @@
   /**
    * Device sync, as the launcher drives it.
    *
-   * This is the whole user-facing half of the browser engine: it shows this device's
-   * ticket, takes another device's, lists the paired folder, and is where bytes go out
-   * (a picked Lith) and come in (a saved copy of an entry). Every button asks the
-   * session rather than the engine, and every line it draws comes from the state the
-   * session published, so the panel itself holds no facts about the folder.
+   * This is the whole user-facing half of the engine: it shows this device's ticket,
+   * takes another device's, lists the paired folder, and is where bytes go out (a picked
+   * Lith) and come in (a saved copy of an entry). Every button asks the session rather
+   * than the engine, and every line it draws comes from the state the session published,
+   * so the panel itself holds no facts about the folder.
    *
-   * The panel is the PWA's. The desktop app and the shim have no engine of their own yet
-   * (the native prong is a later milestone), so the heading only offers this where the
-   * browser engine can run, which is the same judgement `deviceSyncSupport` makes.
+   * One panel, two engines: the browser's wasm module and the desktop app's native one
+   * (see `device-sync.ts`). Nothing here branches on which, except a saved copy, which on
+   * the app is a file the app writes rather than a download the page starts.
    */
   import { onDestroy } from 'svelte';
+  import { saveTextVerifiably } from './file-bridge.ts';
   import { copy } from './copy';
   import { copyText } from './clipboard';
   import type { DeviceSyncSession, DeviceSyncState, SyncedEntry } from './device-sync';
@@ -33,6 +34,7 @@
   let publishBusy = false;
   let pullBusy: string | null = null;
   let note: string | null = null;
+  let errorNote: string | null = null;
   let fileInput: HTMLInputElement | undefined;
 
   /**
@@ -110,12 +112,21 @@
   async function saveEntry(entry: SyncedEntry) {
     pullBusy = entry.name;
     note = null;
+    errorNote = null;
     try {
       const bytes = await session.pull(entry.name);
-      if (bytes) {
+      if (!bytes) return;
+      if (session.native) {
+        // The app owns the dialog and the write, so a copy is a file on disk and the
+        // answer proves it, exactly like every other save in the launcher.
+        const outcome = await saveTextVerifiably(entry.name, new TextDecoder().decode(bytes));
+        if (outcome !== 'cancelled') note = copy.deviceSync.saved(entry.name);
+      } else {
         download(entry.name, bytes);
         note = copy.deviceSync.saved(entry.name);
       }
+    } catch (error) {
+      errorNote = copy.deviceSync.error(error instanceof Error ? error.message : String(error));
     } finally {
       pullBusy = null;
     }
@@ -264,6 +275,7 @@
 
       <p class="device-sync-activity" role="status">{activityLabel(state)}</p>
       {#if note}<p class="device-sync-note ok" role="status">{note}</p>{/if}
+      {#if errorNote}<p class="device-sync-note error" role="alert">{errorNote}</p>{/if}
       {#if state.error}<p class="device-sync-note error" role="alert">{errorLabel(state.error)}</p>{/if}
     {/if}
   </div>

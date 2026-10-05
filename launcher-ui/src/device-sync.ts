@@ -1,30 +1,39 @@
 /**
- * The launcher's side of the browser sync engine.
+ * The launcher's side of device sync, on either prong.
  *
- * The engine is a wasm module built from the `sync` crate by
+ * There are two engines behind one panel and this module is the only place that knows
+ * it. The browser's is a wasm module built from the `sync` crate by
  * `sync/scripts/build-wasm-launcher.sh`, served as `launcher.wasm` beside
  * `src/launcher.html`, with its glue committed under `lithic-sync/` and bundled into
- * the launcher. This module is the only place that knows any of that: it loads the
- * module the first time device sync is actually used, keeps the device's identity in
- * the launcher's own store, and turns the engine's events into plain values a
- * component can hold.
+ * the launcher. The desktop app's is native: Rust links the same crate, keeps its
+ * identity and its copies under the app's own state folder, and answers the same calls
+ * over Tauri IPC with the same events. Which one a page gets is decided once, by
+ * `deviceSyncSupport`: the app's own page is the only one the native engine is reachable
+ * from, and everything else that can run an engine at all runs the browser's.
  *
- * Four rules shape it.
+ * The rules that hold on both prongs:
  *
- * - Nothing is downloaded until it is needed. The glue is a dynamic import and the
- *   binary is fetched by the loader, so a page that never opens the panel pays for
- *   neither, and a `file://` copy (whose fetches are refused) or an instance that
- *   never shipped `launcher.wasm` reports "unavailable" rather than failing at boot.
- * - The identity belongs to the device, not to the session. Thirty-two bytes are
- *   generated once and kept in the launcher's IndexedDB, so a reload rejoins with the
- *   same node id instead of pairing again, and clearing site data means pairing again.
- * - One engine per page. The wasm surface registers a callback for the life of the
- *   module and offers no way to unregister it, so the session is a singleton: opening
- *   the panel twice must not deliver every event twice.
- * - The engine keeps nothing. Its replica is memory-only and the launcher's own store
- *   is the durable copy, so an entry that arrives is bytes to hand to the launcher
- *   rather than a file the engine now owns.
+ * - Nothing happens until it is needed. The glue is a dynamic import and the binary is
+ *   fetched by the loader; on the native prong the first command is the start. A page
+ *   that never opens the panel pays for neither, and a `file://` copy (whose fetches
+ *   are refused) reports "unavailable" rather than failing at boot.
+ * - One engine per page. Neither engine can be told to stop following the folder, so
+ *   the session is a singleton: opening the panel twice must not deliver every event
+ *   twice.
+ * - The session holds no facts of its own. Every button asks the engine, and every line
+ *   the panel draws comes from the state the session published.
+ *
+ * The engines differ in what they keep. The browser's is memory-only and the launcher's
+ * own store is the durable copy, so the device's thirty-two byte identity is generated
+ * once and kept in IndexedDB, and a reload rejoins with the same node id instead of
+ * pairing again. The native engine keeps everything under the app's state folder, so
+ * there the identity is Rust's and the pairing survives a relaunch on its own; the
+ * session still remembers the ticket text it minted, because that is what the panel's
+ * ticket box reads before anyone presses the button again.
  */
+
+import { hasTauriInvoke, tauriInvoke, tauriListen } from './file-bridge.ts';
+import { servedByApp } from './mode.ts';
 
 /** The identity is a 32 byte seed, which is what the engine's `start` insists on. */
 export const IDENTITY_BYTES = 32;
@@ -66,18 +75,37 @@ export type DeviceSyncEvent =
 /** Why device sync cannot run on this page. */
 export type UnsupportedReason = 'file' | 'no-wasm' | 'no-crypto';
 
+/** Which engine a page runs: the app's own, or the one built into the bundle. */
+export type SyncBackend = 'native' | 'browser';
+
 /**
- * Whether this page can run the engine at all.
+ * Whether this page can run an engine at all, and which one.
  *
- * `file` is deliberate rather than a failure: a launcher opened from a USB stick has
- * no origin to fetch its own sibling files from, which is also why `file://` keeps the
- * no-sync behaviour the desktop app and the PWA are for.
+ * The app's own page is the one place the native engine is reachable from: Rust refuses
+ * IPC from a document outside the app's URL, so a bookmarked instance opened in the app's
+ * window (which has the injected global too) is not one. Everything else that can run an
+ * engine at all runs the browser's, which needs WebAssembly and the randomness the
+ * identity is made of. `file` is deliberate rather than a failure: a launcher opened from
+ * a USB stick has no origin to fetch its own sibling files from, which is also why
+ * `file://` keeps the no-sync behaviour the desktop app and the PWA are for.
  */
-export function deviceSyncSupport(): { ok: true } | { ok: false; reason: UnsupportedReason } {
+export function deviceSyncSupport(): { ok: true; kind: SyncBackend } | { ok: false; reason: UnsupportedReason } {
+  if (nativeBackend()) return { ok: true, kind: 'native' };
   if (typeof WebAssembly === 'undefined' || typeof fetch !== 'function') return { ok: false, reason: 'no-wasm' };
   if (typeof crypto === 'undefined' || typeof crypto.getRandomValues !== 'function') return { ok: false, reason: 'no-crypto' };
   if (typeof location !== 'undefined' && location.protocol === 'file:') return { ok: false, reason: 'file' };
-  return { ok: true };
+  return { ok: true, kind: 'browser' };
+}
+
+/**
+ * Whether this page is the app's own, with its commands reachable.
+ *
+ * The served location is the question rather than the injected global, because with
+ * `withGlobalTauri` the global is in every document the app's window loads, an instance's
+ * own launcher included, where an invoke is refused.
+ */
+function nativeBackend(): boolean {
+  return typeof location !== 'undefined' && servedByApp(location) && hasTauriInvoke();
 }
 
 /**
@@ -210,6 +238,108 @@ export const wasmEngineFactory: EngineFactory = async (identity, onEvent) => {
   return engine;
 };
 
+/** The event the app's own engine emits on. The driver listens in place of the glue's callback. */
+export const NATIVE_EVENT = 'device-sync-event';
+
+/**
+ * Encode bytes for the Tauri IPC, which carries JSON and nothing else.
+ *
+ * In chunks: `String.fromCharCode` takes one argument per byte, and a whole Lith's worth
+ * of them in one call is a stack overflow waiting to happen.
+ */
+export function bytesToBase64(bytes: Uint8Array): string {
+  let binary = '';
+  for (let index = 0; index < bytes.length; index += 0x8000) {
+    binary += String.fromCharCode(...bytes.subarray(index, index + 0x8000));
+  }
+  return btoa(binary);
+}
+
+/** The bytes a base64 string carries: the inverse of `bytesToBase64`, byte for byte. */
+export function base64ToBytes(encoded: string): Uint8Array {
+  const binary = atob(encoded);
+  const bytes = new Uint8Array(binary.length);
+  for (let index = 0; index < binary.length; index += 1) {
+    bytes[index] = binary.charCodeAt(index);
+  }
+  return bytes;
+}
+
+/**
+ * The native engine, as far as the session uses it: the browser surface over Tauri IPC.
+ *
+ * The node id is known before this is built (the start answers with it), and the rest is
+ * one command per call, with bytes base64 because that is what the IPC can carry. The
+ * commands are named for the panel's own vocabulary, and the keys of every answer are
+ * the browser glue's, so nothing above this class branches on the prong.
+ */
+class NativeEngine implements SyncEngineLike {
+  private readonly id: string;
+
+  constructor(nodeId: string) {
+    this.id = nodeId;
+  }
+
+  node_id(): string {
+    return this.id;
+  }
+
+  share(): Promise<string> {
+    return tauriInvoke<string>('device_sync_share');
+  }
+
+  join(ticket: string): Promise<void> {
+    return tauriInvoke<void>('device_sync_join', { ticket });
+  }
+
+  entries(): Promise<RawEntry[]> {
+    return tauriInvoke<RawEntry[]>('device_sync_entries');
+  }
+
+  async read(name: string): Promise<Uint8Array | undefined> {
+    const encoded = await tauriInvoke<string | null>('device_sync_read', { name });
+    return encoded === null ? undefined : base64ToBytes(encoded);
+  }
+
+  publish(name: string, bytes: Uint8Array): Promise<void> {
+    return tauriInvoke<void>('device_sync_publish', { name, bytes: bytesToBase64(bytes) });
+  }
+
+  subscribe(callback: (event: unknown) => void): void {
+    tauriListen<unknown>(NATIVE_EVENT, callback);
+  }
+}
+
+/**
+ * How the native engine is obtained. It takes no identity: the app's is Rust's, kept
+ * under the app's own state folder, so it survives a cleared webview profile and never
+ * crosses the IPC.
+ */
+export type NativeEngineFactory = (onEvent: (event: DeviceSyncEvent) => void) => Promise<SyncEngineLike>;
+
+/**
+ * The real native factory: subscribe first, then start.
+ *
+ * The order matters only for what a resumed pairing reports while it is attaching (a seed
+ * or an external drift); the listener is registered before the first command so none of it
+ * is missed, and the refresh that follows a start reads the list either way. A start that
+ * fails takes the listener back down, because there is no engine for it to belong to.
+ */
+export const nativeEngineFactory: NativeEngineFactory = async (onEvent) => {
+  const stopListening = tauriListen<unknown>(NATIVE_EVENT, (payload) => {
+    const event = toEvent(payload);
+    if (event) onEvent(event);
+  });
+  try {
+    const started = await tauriInvoke<{ node_id?: unknown }>('device_sync_start');
+    const nodeId = typeof started?.node_id === 'string' ? started.node_id : '';
+    return new NativeEngine(nodeId);
+  } catch (error) {
+    stopListening?.();
+    throw error;
+  }
+};
+
 /** Where the session is on its way from "not loaded" to "paired folder". */
 export type DeviceSyncPhase = 'idle' | 'loading' | 'ready' | 'unavailable' | 'failed';
 
@@ -270,10 +400,10 @@ export async function readWhenReady(
 /**
  * One page's engine, and the state derived from it.
  *
- * `start` is the whole lifecycle: it checks that this page can run the engine at all,
- * loads the identity, loads the module, and reads the folder once. Everything after
- * that is a method that asks the engine a question and folds the answer into the state
- * the panel is drawing.
+ * `start` is the whole lifecycle: it checks that this page can run an engine at all and
+ * which one it is, gets it running (the identity and the module here, one command on the
+ * native prong), and reads the folder once. Everything after that is a method that asks
+ * the engine a question and folds the answer into the state the panel is drawing.
  */
 export class DeviceSyncSession {
   private state: DeviceSyncState = EMPTY;
@@ -283,12 +413,28 @@ export class DeviceSyncSession {
   private readonly listeners = new Set<(state: DeviceSyncState) => void>();
   private readonly store: SyncStore;
   private readonly factory: EngineFactory;
+  private readonly nativeFactory: NativeEngineFactory;
+  private nativeEngine = false;
 
   // Fields are assigned in the body rather than declared as constructor parameters: the
   // unit tests run under Node's type stripping, which refuses a parameter property.
-  constructor(store: SyncStore, factory: EngineFactory = wasmEngineFactory) {
+  constructor(
+    store: SyncStore,
+    factory: EngineFactory = wasmEngineFactory,
+    nativeFactory: NativeEngineFactory = nativeEngineFactory
+  ) {
     this.store = store;
     this.factory = factory;
+    this.nativeFactory = nativeFactory;
+  }
+
+  /**
+   * Whether this session drives the app's own engine. Known once `start` has run. The
+   * panel reads it for the one place a prong shows through: how a copy is saved, which on
+   * the app is a file the app writes rather than a download this page starts.
+   */
+  get native(): boolean {
+    return this.nativeEngine;
   }
 
   /** What the panel draws. A snapshot: the state object is replaced on every change. */
@@ -317,8 +463,13 @@ export class DeviceSyncSession {
     }
     this.patch({ phase: 'loading', error: null });
     try {
-      const identity = await loadIdentity(this.store);
-      this.engine = await this.factory(identity, (event) => this.handle(event));
+      if (support.kind === 'native') {
+        this.nativeEngine = true;
+        this.engine = await this.nativeFactory((event) => this.handle(event));
+      } else {
+        const identity = await loadIdentity(this.store);
+        this.engine = await this.factory(identity, (event) => this.handle(event));
+      }
       const ticket = await this.rememberedTicket();
       this.patch({ phase: 'ready', nodeId: this.engine.node_id(), ticket, error: null });
       await this.refresh();

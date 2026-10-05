@@ -92,7 +92,8 @@ impl Config {
         }
     }
 
-    /// A config with no folder at all, for the browser and for tests.
+    /// A config with no folder at all: the browser prong, a host that syncs picked
+    /// files rather than a directory (the desktop app today), and tests.
     pub fn memory() -> Self {
         Self {
             dir: None,
@@ -266,8 +267,11 @@ impl SyncEngine {
             let ticket = text
                 .parse::<Ticket>()
                 .context("the saved pairing ticket is unreadable")?;
+            // Resuming does not wait for the first sync round: the replica is already
+            // on disk, so the publish rule has the entries it needs, and a start must
+            // not hold a page for a peer that is asleep. A fresh join does wait.
             engine
-                .join(&ticket)
+                .join_inner(&ticket, false)
                 .await
                 .context("failed to resume the saved pairing")?;
         }
@@ -314,7 +318,16 @@ impl SyncEngine {
     }
 
     /// Pair with another device, or rejoin a pairing already in progress.
+    ///
+    /// Waits for the first sync round before seeding, so a local folder cannot
+    /// beat a newer entry the document already holds. [`SyncEngine::start`] uses
+    /// the same path with the wait off when it resumes a saved pairing, because
+    /// there the document's entries are already local.
     pub async fn join(&self, ticket: &Ticket) -> Result<()> {
+        self.join_inner(ticket, true).await
+    }
+
+    async fn join_inner(&self, ticket: &Ticket, wait_for_sync: bool) -> Result<()> {
         let namespace = ticket.namespace();
         {
             let guard = self.inner.doc.lock().await;
@@ -329,7 +342,7 @@ impl SyncEngine {
             .into_iter()
             .filter(|addr| addr.id != self.inner.endpoint.id())
             .collect();
-        let wait_for_sync = !peers.is_empty();
+        let wait_for_sync = wait_for_sync && !peers.is_empty();
         let doc = self
             .inner
             .api

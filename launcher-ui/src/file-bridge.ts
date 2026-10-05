@@ -47,6 +47,15 @@ export function tauriInvoke<T = unknown>(command: string, args?: Record<string, 
   return api.invoke(command, args) as Promise<T>;
 }
 
+/**
+ * Whether a Tauri invoke is reachable from this page. The version-compat lookup below
+ * is the only thing that knows the global's shape, so the question is asked here rather
+ * than read out of `__TAURI__` at each caller.
+ */
+export function hasTauriInvoke(): boolean {
+  return tauriApi() !== null;
+}
+
 function tauriApi(): TauriApi | null {
   const root = (globalThis as typeof globalThis & {
     __TAURI__?: {

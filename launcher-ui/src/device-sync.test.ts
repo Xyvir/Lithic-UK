@@ -1,12 +1,13 @@
 /**
- * The launcher's driver for the browser engine, tested without a browser.
+ * The launcher's driver for device sync, tested without a browser and without the app.
  *
- * The engine's own sync is proven elsewhere (the crate's smoke script, and the launcher's
- * browser pass); nothing here loads wasm. What is pinned is the half the launcher owns: the
- * identity is generated once and kept, a ticket is remembered rather than minted twice, the
- * engine's entry and event objects are read as values rather than trusted, a read that is
- * still downloading is retried instead of reported as an error, and the state a component
- * draws says what actually happened.
+ * The engines' own sync is proven elsewhere (the crate's tests and smoke script, and the
+ * launcher's browser pass); nothing here loads wasm or reaches Rust. What is pinned is the
+ * half the launcher owns: which engine a page gets, the identity generated once and kept,
+ * a ticket remembered rather than minted twice, the engine's entry and event objects read
+ * as values rather than trusted, a read that is still downloading retried instead of
+ * reported as an error, the commands the native prong sends and the shapes it accepts,
+ * and the state a component draws saying what actually happened.
  */
 import test from 'node:test';
 import assert from 'node:assert/strict';
@@ -16,6 +17,8 @@ import {
   IDENTITY_KEY,
   TICKET_KEY,
   asIdentity,
+  base64ToBytes,
+  bytesToBase64,
   deviceSyncSession,
   deviceSyncSupport,
   loadIdentity,
@@ -86,6 +89,64 @@ class FakeEngine implements SyncEngineLike {
   /** What the engine would emit, delivered to whoever subscribed. */
   emit(event: unknown): void {
     this.listener?.(event);
+  }
+}
+
+/**
+ * The app's own page, with a stand-in for the bridge Rust injects.
+ *
+ * `servedByApp` is what makes a page the app's, and `__TAURI__` is what makes its
+ * commands reachable, so both are installed here and taken back down when the test ends.
+ */
+interface FakeTauri {
+  /** Every command the page asked, in order, with the arguments it sent. */
+  invokes: Array<{ command: string; args?: Record<string, unknown> }>;
+  /** What the next `device_sync_start` and friends answer. Throwing is a refusal. */
+  answer: (command: string, args?: Record<string, unknown>) => unknown;
+  /** The event handler the page registered, and how often one was taken back down. */
+  listener: ((message: { payload: unknown }) => void) | null;
+  unlistened: number;
+}
+
+async function withAppPage<T>(run: (tauri: FakeTauri) => Promise<T>): Promise<T> {
+  const beforeLocation = Object.getOwnPropertyDescriptor(globalThis, 'location');
+  const beforeTauri = Object.getOwnPropertyDescriptor(globalThis, '__TAURI__');
+  const tauri: FakeTauri = { invokes: [], listener: null, unlistened: 0, answer: () => null };
+  Object.defineProperty(globalThis, 'location', {
+    value: { protocol: 'https:', hostname: 'tauri.localhost', pathname: '/launcher.html' },
+    configurable: true
+  });
+  Object.defineProperty(globalThis, '__TAURI__', {
+    value: {
+      core: {
+        invoke: (command: string, args?: Record<string, unknown>) => {
+          tauri.invokes.push({ command, args });
+          try {
+            return Promise.resolve(tauri.answer(command, args));
+          } catch (error) {
+            return Promise.reject(error);
+          }
+        }
+      },
+      event: {
+        listen: (event: string, handler: (message: { payload: unknown }) => void) => {
+          tauri.listener = handler;
+          return Promise.resolve(() => {
+            tauri.unlistened += 1;
+            tauri.listener = null;
+          });
+        }
+      }
+    },
+    configurable: true
+  });
+  try {
+    return await run(tauri);
+  } finally {
+    if (beforeLocation) Object.defineProperty(globalThis, 'location', beforeLocation);
+    else delete (globalThis as { location?: unknown }).location;
+    if (beforeTauri) Object.defineProperty(globalThis, '__TAURI__', beforeTauri);
+    else delete (globalThis as { __TAURI__?: unknown }).__TAURI__;
   }
 }
 
@@ -193,8 +254,8 @@ test('a file:// page reports device sync unavailable rather than loading anythin
     if (before) Object.defineProperty(globalThis, 'location', before);
     else delete (globalThis as { location?: unknown }).location;
   }
-  // Node has no `location` at all, and that is not a refusal.
-  assert.deepEqual(deviceSyncSupport(), { ok: true });
+  // Node has no `location` at all, and that is not a refusal: it is the browser's engine.
+  assert.deepEqual(deviceSyncSupport(), { ok: true, kind: 'browser' });
 });
 
 test('an unavailable session never reaches the engine', async () => {
@@ -328,4 +389,123 @@ test('the page has one session, because the engine cannot be told to stop', () =
   const first = deviceSyncSession(new MemoryStore());
   const second = deviceSyncSession(new MemoryStore());
   assert.equal(first, second);
+});
+
+test('the app page gets the native engine, and needs no wasm of its own', async () => {
+  await withAppPage(async () => {
+    assert.deepEqual(deviceSyncSupport(), { ok: true, kind: 'native' });
+  });
+  // Back outside the app, and that is the browser's engine rather than a refusal.
+  assert.deepEqual(deviceSyncSupport(), { ok: true, kind: 'browser' });
+});
+
+test('a page on the app url with no bridge is not a native one', async () => {
+  // The global is missing (a test harness, an embedding): the page falls back to the
+  // browser's checks rather than promising commands nothing answers.
+  const before = Object.getOwnPropertyDescriptor(globalThis, 'location');
+  Object.defineProperty(globalThis, 'location', {
+    value: { protocol: 'tauri:', hostname: 'localhost', pathname: '/launcher.html' },
+    configurable: true
+  });
+  try {
+    assert.deepEqual(deviceSyncSupport(), { ok: true, kind: 'browser' });
+  } finally {
+    if (before) Object.defineProperty(globalThis, 'location', before);
+    else delete (globalThis as { location?: unknown }).location;
+  }
+});
+
+test('a native session asks Rust for the engine and never loads the browser one', async () => {
+  await withAppPage(async (tauri) => {
+    let reads = 0;
+    tauri.answer = (command) => {
+      switch (command) {
+        case 'device_sync_start':
+          return { node_id: 'node-app' };
+        case 'device_sync_share':
+          return 'ticket-app';
+        case 'device_sync_entries':
+          return [{ name: 'a.lith', size: 3, hash: 'h', author: 'node-app', timestamp: 3_000_000 }];
+        case 'device_sync_read':
+          reads += 1;
+          // The content is still downloading: the first read fails the way the native
+          // engine fails, and the driver waits rather than reporting it.
+          if (reads === 1) throw new Error('the content of a.lith is not available yet');
+          return bytesToBase64(new Uint8Array([1, 2, 3]));
+        default:
+          return null;
+      }
+    };
+
+    const engine = new FakeEngine();
+    let browserFactoryCalls = 0;
+    const browserFactory: EngineFactory = () => {
+      browserFactoryCalls += 1;
+      return Promise.resolve(engine);
+    };
+    const session = new DeviceSyncSession(new MemoryStore(), browserFactory);
+
+    await session.start();
+    assert.equal(session.native, true);
+    assert.equal(browserFactoryCalls, 0);
+    assert.equal(session.current.phase, 'ready');
+    assert.equal(session.current.nodeId, 'node-app');
+    assert.deepEqual(session.current.entries.map((entry) => entry.name), ['a.lith']);
+
+    assert.equal(await session.share(), 'ticket-app');
+    assert.equal(await session.join(' docabc\n'), true);
+    assert.equal(await session.publish('b.lith', new Uint8Array([9, 8])), true);
+    assert.deepEqual(await session.pull('a.lith'), new Uint8Array([1, 2, 3]));
+    assert.equal(reads, 2, 'the failed read should have been retried');
+
+    // The commands the native engine sends, and the arguments that cross in each
+    // direction: a normalized ticket in, base64 bytes out.
+    const commands = tauri.invokes.map((call) => call.command);
+    assert.equal(commands[0], 'device_sync_start');
+    assert.ok(commands.includes('device_sync_entries'));
+    assert.deepEqual(
+      tauri.invokes.find((call) => call.command === 'device_sync_join')?.args,
+      { ticket: 'docabc' }
+    );
+    assert.deepEqual(
+      tauri.invokes.find((call) => call.command === 'device_sync_publish')?.args,
+      { name: 'b.lith', bytes: bytesToBase64(new Uint8Array([9, 8])) }
+    );
+
+    // The events arrive on the name Rust emits, and land in the state the panel reads.
+    assert.ok(tauri.listener, 'the driver should have subscribed before starting');
+    tauri.listener?.({ payload: { kind: 'peer-up', from: 'node-b' } });
+    assert.deepEqual(session.current.peers, ['node-b']);
+    tauri.listener?.({ payload: { kind: 'remote-update', name: 'a.lith', from: 'node-b' } });
+    assert.equal(session.current.activity?.kind, 'remote-update');
+  });
+});
+
+test('a native start that fails takes its listener back down', async () => {
+  await withAppPage(async (tauri) => {
+    tauri.answer = () => {
+      throw new Error('this machine has no state folder for device sync');
+    };
+    const session = new DeviceSyncSession(new MemoryStore());
+    await session.start();
+    assert.equal(session.current.phase, 'failed');
+    assert.match(String(session.current.error), /state folder/);
+    assert.equal(tauri.unlistened, 1);
+  });
+});
+
+test('bytes survive the base64 round trip the IPC needs', () => {
+  const cases = [
+    new Uint8Array(0),
+    new Uint8Array([0]),
+    new Uint8Array([0, 255, 128, 63]),
+    // One byte past the chunk boundary, because the encoder works in chunks.
+    new Uint8Array(0x8000 + 1).map((_, index) => index % 251)
+  ];
+  for (const bytes of cases) {
+    assert.deepEqual(base64ToBytes(bytesToBase64(bytes)), bytes);
+  }
+  const hello = new TextEncoder().encode('hello');
+  assert.equal(bytesToBase64(hello), 'aGVsbG8=');
+  assert.deepEqual(base64ToBytes('aGVsbG8='), hello);
 });

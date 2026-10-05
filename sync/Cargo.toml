@@ -31,6 +31,9 @@ iroh-docs = { version = "0.101", default-features = false }
 iroh-gossip = { version = "0.101", default-features = false, features = ["net"] }
 n0-future = "0.3"
 tokio = { version = "1", default-features = false, features = ["sync"] }
+# The native hosts' event wire shape (`WireEvent`). serde is already compiled into
+# this crate through iroh, so this names it rather than adding it.
+serde = { version = "1", features = ["derive"] }
 js-sys = { version = "0.3.106", optional = true }
 wasm-bindgen = { version = "0.2.129", optional = true }
 wasm-bindgen-futures = { version = "0.4.79", optional = true }
@@ -54,3 +57,8 @@ panic = "abort"
 [dev-dependencies]
 tempfile = "3"
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "time"] }
+# The wire mapping test builds every event variant, and the two peer arms carry an
+# endpoint id: the same iroh the library already links, named here so a test can make
+# one. serde_json is what pins the JSON a page receives, field by field.
+iroh = { version = "1.3", default-features = false, features = ["tls-ring"] }
+serde_json = "1"

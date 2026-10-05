@@ -758,16 +758,17 @@
   /**
    * Device sync, and the one engine this page will ever have.
    *
-   * The session is the page's, not the panel's, because the wasm surface cannot be told to
-   * stop following the folder: a session created per opening would leave the previous one's
+   * The session is the page's, not the panel's, because neither engine can be told to stop
+   * following the folder: a session created per opening would leave the previous one's
    * callbacks in place, and every event would arrive twice. Creating it loads nothing (see
    * `device-sync.ts`), so this costs a page that never opens the panel nothing at all.
    */
   const deviceSync = deviceSyncSession(idb);
   /**
-   * Whether this page can run the engine at all. Read once, with the mode and for the same
-   * reason: what serves the page cannot change while it lives. It is the browser prong's
-   * control that hangs off this, so a `file://` copy and the desktop app never draw one.
+   * Whether this page can run an engine at all, and which one. Read once, with the mode and
+   * for the same reason: what serves the page cannot change while it lives. Two prongs hang
+   * off this, the PWA's wasm module and the app's native engine, so a `file://` copy and a
+   * browser-only page never draw the control.
    */
   const deviceSyncRuns = deviceSyncSupport().ok;
   let showDeviceSync = false;
@@ -5177,17 +5178,17 @@
     -->
     {#if mode === 'webapp' && !browserOnly}<button class="help-button" aria-label={copy.app.viewIntro} title={copy.app.viewIntro} on:click={openIntro}>{introBusy ? '…' : '?'}</button>{/if}
     <!--
-      Device sync's circle, drawn only where the engine can run: the published PWA, which is
-      the one prong with no backend to borrow one from. A `file://` copy keeps the no-sync
-      behaviour it has today, and the desktop app and an instance wait for their own
-      milestones, which is what `deviceSyncRuns` and the mode together decide. A page the
-      local shim served is left out for a third reason: it resolves to `webapp` the same as
-      the PWA, but its payload is a named list of files and `launcher.wasm` is not on it, so
-      a circle there would open a panel whose only sentence is that the engine is missing.
-      The glyph is a screen and a phone, because what this pairs is the machines a person
-      reads on.
+      Device sync's circle, drawn where an engine can run. That is the published PWA, whose
+      engine is the wasm module it ships beside itself, and the desktop app, whose engine is
+      native and keeps its state under the app's own folder. A `file://` copy keeps the
+      no-sync behaviour it has today, and the shim and an instance wait for their own
+      milestones: a page the local shim served resolves to `webapp` the same as the PWA,
+      but its payload is a named list of files and `launcher.wasm` is not on it, and an
+      instance's device sync arrives with the server prong. `deviceSyncRuns` is what asks
+      the page, and the mode is what keeps the two webapp-shaped pages apart. The glyph is
+      a screen and a phone, because what this pairs is the machines a person reads on.
     -->
-    {#if deviceSyncRuns && mode === 'webapp' && !browserOnly}<button class="device-sync-button" aria-label={copy.deviceSync.openAria} title={copy.deviceSync.title} on:click={openDeviceSyncModal}><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="2" y="4" width="13" height="9" rx="1.5"/><path d="M5 17h7"/><rect x="17" y="8" width="5" height="11" rx="1.5"/></svg></button>{/if}
+    {#if deviceSyncRuns && mode !== 'self-host' && !browserOnly}<button class="device-sync-button" aria-label={copy.deviceSync.openAria} title={copy.deviceSync.title} on:click={openDeviceSyncModal}><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="2" y="4" width="13" height="9" rx="1.5"/><path d="M5 17h7"/><rect x="17" y="8" width="5" height="11" rx="1.5"/></svg></button>{/if}
     <!--
       The round control is one button with one job per page, never both at once. The intro
       belongs to the published PWA, whose server serves `intro.lith` beside it, and the sync

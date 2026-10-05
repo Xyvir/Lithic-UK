@@ -26,12 +26,16 @@
 mod engine;
 mod events;
 mod folder;
+#[cfg(feature = "native")]
+mod host;
 mod ticket;
 #[cfg(feature = "wasm")]
 mod wasm;
 
 pub use engine::{Config, FileEntry, Network, Status, SyncEngine};
-pub use events::SyncEvent;
+pub use events::{SyncEvent, WireEvent};
+#[cfg(feature = "native")]
+pub use host::Host;
 pub use ticket::{Ticket, TicketMode};
 #[cfg(feature = "wasm")]
 pub use wasm::SyncEngine as BrowserEngine;

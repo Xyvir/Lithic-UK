@@ -58,6 +58,13 @@ base64 = "0.22"
 sha2 = "0.10"
 # OsRng for the vault's salt and nonce. Already in the tree at this major.
 getrandom = "0.2"
+# Device sync: the shared engine crate, the same one the PWA's wasm module is built
+# from (`sync/scripts/build-wasm-launcher.sh`). Native here, so the redb replica
+# store, the on-disk blob store, the pairing ticket and this machine's iroh identity
+# all live under the app's own state folder rather than in a page's memory. It pulls
+# an async runtime, a TLS stack and the iroh protocol crates into the executable,
+# which is the size this feature costs; the release job measures it.
+lithic-sync = { path = "../sync" }
 # In-process git for the GitHub sync. `https` maps to the platform TLS stack
 # (WinHTTP on Windows, SecureTransport on macOS, OpenSSL elsewhere); the default
 # features are empty, so it has to be requested explicitly. `vendored-libgit2`

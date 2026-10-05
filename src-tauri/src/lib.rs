@@ -10,6 +10,7 @@ mod gitcore;
 mod instance_search;
 mod instance_copy;
 mod cdp;
+mod devicesync;
 mod platform;
 
 struct StartupFile(Mutex<Option<String>>);
@@ -3075,6 +3076,10 @@ pub fn run() {
             if let Some(window) = tauri::Manager::get_webview_window(app, "main") {
                 webview_auth::install(&window, app.handle().clone());
             }
+            // Device sync's host is built here, with a state folder resolved once per
+            // process, and it starts nothing until the page's first `device_sync_*`
+            // ask: a machine that never opens the panel never binds an endpoint.
+            tauri::Manager::manage(app, devicesync::DeviceSync::new(app.handle()));
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -3127,7 +3132,13 @@ pub fn run() {
             forget_credentials,
             destroy_credentials,
             instance_cache_search,
-            forget_instance_copy
+            forget_instance_copy,
+            devicesync::device_sync_start,
+            devicesync::device_sync_share,
+            devicesync::device_sync_join,
+            devicesync::device_sync_entries,
+            devicesync::device_sync_read,
+            devicesync::device_sync_publish
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
