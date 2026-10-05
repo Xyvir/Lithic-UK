@@ -127,14 +127,21 @@ jobs:
       # The same assertion the job above makes, because the two must not be able to
       # disagree about what a published build is: cargo's own resolution, read from
       # this platform, still has to say the default set is the device prong alone.
+      #
+      # Read and compared as a joined string rather than as JSON, and that is not a
+      # shortcut: PowerShell unwraps a one-element array, so `ConvertTo-Json` on cargo's
+      # own `["sync-iroh"]` answers `"sync-iroh"` and the assertion below would compare two
+      # shapes of the same answer and fail on a launcher that is exactly right. (This job's
+      # first run did precisely that.) The join names cargo's members in cargo's order.
       - name: The default feature set is the auto pin
         working-directory: src-tauri
         run: |
           $json = cargo metadata --no-deps --format-version 1 | ConvertFrom-Json
           $pkg = $json.packages | Where-Object { $_.name -eq 'lithic' }
-          $default = ($pkg.features.default | ConvertTo-Json -Compress)
+          if (-not $pkg) { throw 'cargo metadata did not report a package called lithic' }
+          $default = ($pkg.features.default -join ',')
           Write-Host "default features: $default"
-          if ($default -ne '["sync-iroh"]') { throw "default features are $default" }
+          if ($default -ne 'sync-iroh') { throw "default features are: $default" }
 
       - name: "cargo check (default: device sync, no libgit2)"
         working-directory: src-tauri
