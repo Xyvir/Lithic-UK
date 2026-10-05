@@ -4,8 +4,13 @@
  *
  * This is the proof that the Svelte side actually drives the wasm engine: not that the
  * crate syncs (its own smoke script proves that in Node), but that the shipped
- * `src/launcher.html` plus the shipped `src/launcher.wasm` can pair two browsers through
- * the panel and move a Lith between them, with the bytes compared at the end.
+ * `src/launcher.html` plus the shipped `src/launcher.wasm` can pair two browsers, move a
+ * Lith from one recent list to the other, and compare the bytes at the end.
+ *
+ * The Lith travels through the recent list and nothing else, which is the shape the feature
+ * settled into: the panel pairs and says nothing about files, the row a device has and this
+ * one does not is drawn as a row of its own, and the row's own mark is what sends and what
+ * loads. There is no picker anywhere in either half.
  *
  * Two browser *contexts*, not two tabs. Contexts are separate storages, which is what
  * makes them two devices: two tabs of one browser share IndexedDB, so the second tab
@@ -26,7 +31,7 @@
  *
  *   PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium node scripts/test-device-sync.mjs
  *
- * Exit 0 = paired, published, pulled, and the downloaded bytes match what was published.
+ * Exit 0 = paired, sent from one device's row, loaded back through the other's, byte for byte.
  */
 import assert from 'node:assert/strict';
 import { createServer } from 'node:http';
@@ -84,39 +89,75 @@ async function fieldValue(page, selector, timeout = 120000) {
   return page.$eval(selector, (node) => node.value);
 }
 
-/** The name of the entry a page's panel lists, once it lists it. */
-async function waitForEntry(page, name) {
+/** The body of the header's line, which is where a row's own answer lands. */
+async function statusLine(page) {
+  return page.$eval('.status-line', (node) => node.textContent ?? '').catch(() => '');
+}
+
+/**
+ * A row for a Lith the devices hold and this page does not, once it is drawn.
+ *
+ * The row is the whole of the load half: it exists because the folder holds a name the
+ * recent list does not, and its control is what fetches the bytes.
+ */
+async function waitForDeviceRow(page, name) {
   await page.waitForFunction(
-    (wanted) => [...document.querySelectorAll('.device-sync-entry-name')].some((node) => node.textContent === wanted),
+    (wanted) => [...document.querySelectorAll('.device-only-row .recent-name')].some((node) => (node.textContent ?? '').includes(wanted)),
     POLL,
     name
   );
 }
 
-/** The panel's last-activity line, once one of the two pages has moved something. */
-async function waitForActivity(page, includes) {
-  await page.waitForFunction(
-    (wanted) => (document.querySelector('.device-sync-activity')?.textContent ?? '').includes(wanted),
-    POLL,
-    includes
-  );
+/** Whether the row for this name is drawn as already on the devices. */
+async function rowShared(page, name) {
+  return page.evaluate((wanted) => {
+    const rows = [...document.querySelectorAll('.recent-row')];
+    const row = rows.find((node) => (node.textContent ?? '').includes(wanted));
+    const button = row?.querySelector('.device-row-button');
+    return Boolean(button?.classList.contains('shared'));
+  }, name);
 }
 
-/** One panel, opened the way a person opens it, with this page's errors collected. */
-async function openPanel(context, url, errors, label) {
+/** One page, opened the way this pass needs it: its own viewport, its own errors. */
+async function newPage(context, url, errors, label) {
   const page = await context.newPage();
   await page.setViewport({ width: 1000, height: 800 });
   page.on('pageerror', (error) => errors.push(`${label}: ${error.message}`));
   await page.goto(url, { waitUntil: 'domcontentloaded' });
+  return page;
+}
+
+/**
+ * One recent row, handed to the launcher the way a Lith this page created and never saved
+ * is: a name and its own text. That is the simplest row with bytes in it, and the only one a
+ * browser context can be given without a file picker, which is exactly what this pass is
+ * about (the picker is gone from both halves now).
+ */
+async function seedOwnRow(page, row) {
+  await page.evaluate((seeded) => {
+    localStorage.setItem('lithic-recent-liths', JSON.stringify([seeded]));
+  }, row);
+  await page.reload({ waitUntil: 'domcontentloaded' });
+  await page.waitForFunction((wanted) => [...document.querySelectorAll('.recent-name')].some((node) => (node.textContent ?? '').includes(wanted)), POLL, row.name);
+}
+
+/** One panel, opened the way a person opens it. */
+async function openPanel(page) {
   await page.waitForSelector('.device-sync-button', { timeout: 30000 });
   await page.click('.device-sync-button');
   await page.waitForSelector('.device-sync-modal');
   return page;
 }
 
+/** Close it, because the rows a person then presses are behind it. */
+async function closePanel(page) {
+  await page.click('.device-sync-modal .modal-close');
+  await page.waitForFunction(() => !document.querySelector('.device-sync-modal'));
+}
+
 const scratch = mkdtempSync(join(tmpdir(), 'lithic-device-sync-'));
 const downloads = join(scratch, 'downloads');
-const proofPath = join(scratch, 'devicesync-proof.lith');
+const proofName = 'devicesync-proof.lith';
 // A body with a title so the file is one the wiki could open, and bytes that differ from
 // its own name so a download that answered with the wrong entry would not match.
 const proof = ['title: Sync Proof', 'type: text/vnd.tiddlywiki', '', 'published by device A', ''].join('\n');
@@ -130,7 +171,6 @@ const browser = await puppeteer.launch({
 const errors = [];
 
 try {
-  writeFileSync(proofPath, proof, 'utf8');
   mkdirSync(downloads, { recursive: true });
 
   await new Promise((done) => server.listen(0, '127.0.0.1', done));
@@ -140,38 +180,69 @@ try {
   // download at the end is B's, and Chrome refuses one from an incognito-like context
   // whatever `Browser.setDownloadBehavior` says. Two storages is what makes two devices,
   // so the pair is one of each rather than both in the default one.
-  const deviceA = await openPanel(await browser.createBrowserContext(), url, errors, 'device A');
-  const deviceB = await openPanel(browser.defaultBrowserContext(), url, errors, 'device B');
+  const deviceA = await newPage(await browser.createBrowserContext(), url, errors, 'device A');
+  await seedOwnRow(deviceA, { name: proofName, text: proof });
+  const deviceB = await newPage(browser.defaultBrowserContext(), url, errors, 'device B');
+
+  // A recent list with nothing in it, and nothing on it: the row B will show comes from the
+  // devices and from nowhere else, so the pull at the end is the only way the bytes reach it.
+  assert.equal(
+    await deviceB.$$eval('.recent-row', (rows) => rows.length),
+    0,
+    'device B should start with no rows at all'
+  );
 
   // Pairing: A shows a ticket, B pastes it. The ticket is the whole handshake, so its
   // presence is also the proof that the engine loaded and reached the relay at all.
+  await openPanel(deviceA);
   await deviceA.click('.device-sync-ticket-show');
   const ticket = await fieldValue(deviceA, '.device-sync-ticket-read');
   assert.match(ticket, /^\S{40,}$/, `a ticket came back minted: ${ticket.slice(0, 24)}…`);
+  await closePanel(deviceA);
 
+  await openPanel(deviceB);
   await deviceB.type('.device-sync-ticket-join', ticket);
   await deviceB.click('.device-sync-pair');
+  await closePanel(deviceB);
 
-  // Publishing: the picked file goes to the folder, and A's own list answers with it.
-  const picker = await deviceA.$('.device-sync-file');
-  await picker.uploadFile(proofPath);
-  await waitForEntry(deviceA, 'devicesync-proof.lith');
-  const published = await deviceA.$eval('.device-sync-note.ok', (node) => node.textContent ?? '');
-  assert.ok(published.includes('devicesync-proof.lith'), `A reported its own publish: ${published}`);
+  // Sending: the row's own mark publishes the Lith this page holds and the folder does not.
+  // The row is grey before the press and green after it, which is the one thing a paired
+  // person reads off the list.
+  assert.equal(await rowShared(deviceA, proofName), false, 'A has not sent its Lith yet');
+  await deviceA.click('.recent-row .device-row-button');
+  await deviceA.waitForFunction(
+    (wanted) => (document.querySelector('.status-line')?.textContent ?? '').includes(wanted),
+    POLL,
+    proofName
+  );
+  const sent = await statusLine(deviceA);
+  assert.ok(sent.includes(proofName), `A reported its own send: ${sent}`);
+  await deviceA.waitForFunction(
+    (wanted) => [...document.querySelectorAll('.recent-row')].some((row) => (row.textContent ?? '').includes(wanted) && row.querySelector('.device-row-button.shared')),
+    POLL,
+    proofName
+  );
 
-  // The other device: the entry arrives, and so does the event that says another device
-  // wrote it. This is the subscribe half of the surface, read from the panel's own line.
-  await waitForEntry(deviceB, 'devicesync-proof.lith');
-  await waitForActivity(deviceB, 'devicesync-proof.lith');
+  // The other device: the entry arrives, and so does the event that says another device wrote
+  // it. The row is what says so, and the panel's own activity line is the other half of the
+  // surface, read by reopening the panel the event refreshed behind.
+  await waitForDeviceRow(deviceB, proofName);
+  await openPanel(deviceB);
+  await deviceB.waitForFunction(
+    (wanted) => (document.querySelector('.device-sync-activity')?.textContent ?? '').includes(wanted),
+    POLL,
+    proofName
+  );
+  await closePanel(deviceB);
 
-  // And the bytes themselves: B saves a copy, and the file that lands is compared with
-  // what A published. A read that was still downloading would be an error here rather
-  // than a file, which is the retry the driver does.
+  // And the bytes themselves: B loads the Lith from its device row, and the file that lands
+  // is compared with what A published. A read that was still downloading would be an error
+  // here rather than a file, which is the retry the driver does.
   const client = await deviceB.createCDPSession();
   await client.send('Browser.setDownloadBehavior', { behavior: 'allow', downloadPath: downloads, eventsEnabled: true });
-  await deviceB.click('.device-sync-save');
+  await deviceB.click('.device-only-row .device-row-button');
 
-  const landed = join(downloads, 'devicesync-proof.lith');
+  const landed = join(downloads, proofName);
   const deadline = Date.now() + 60000;
   while (Date.now() < deadline) {
     if (existsSync(landed)) break;
@@ -184,7 +255,7 @@ try {
   // launcher while pairing would not stop the archive from arriving over the network.
   assert.deepEqual(errors, [], 'the launcher threw on the page it was driven through');
 
-  console.log('DEVICE SYNC OK: two contexts paired over the relay, published one Lith, pulled it back byte for byte.');
+  console.log('DEVICE SYNC OK: two contexts paired over the relay, one row sent the Lith, the other device drew a row for it and loaded it back byte for byte.');
 } finally {
   await browser.close();
   await new Promise((done) => server.close(done));

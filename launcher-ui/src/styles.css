@@ -982,13 +982,6 @@ footer > * { pointer-events: auto; }
 .device-sync-modal .device-sync-ticket:focus { outline: none; border-color: var(--lithic-amber); }
 .device-sync-modal .device-sync-step .modal-actions { margin-top: 10px; }
 .device-sync-modal .device-sync-hint { margin: 8px 0 0; color: var(--lithic-ink-soft); font-size: 0.85rem; line-height: 1.45; }
-.device-sync-modal .device-sync-entries { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; max-height: 220px; overflow-y: auto; }
-.device-sync-modal .device-sync-entries li { display: flex; align-items: center; gap: 10px; padding: 6px 8px; border: 1px solid var(--lithic-line-faint); border-radius: 7px; background: var(--lithic-surface-control); }
-.device-sync-modal .device-sync-entry { display: flex; flex: 1 1 auto; min-width: 0; flex-direction: column; }
-.device-sync-modal .device-sync-entry-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.device-sync-modal .device-sync-entry-size { color: var(--lithic-ink-faint); font-size: 0.78rem; }
-.device-sync-modal .device-sync-save { flex: 0 0 auto; padding: 6px 10px; font-size: 0.82rem; }
-.device-sync-modal .device-sync-file { display: none; }
 .device-sync-modal .device-sync-activity { margin: 14px 0 0; color: var(--lithic-ink-soft); font-size: 0.85rem; }
 .device-sync-modal .device-sync-note { margin: 8px 0 0; font-size: 0.85rem; }
 .device-sync-modal .device-sync-note.ok { color: var(--lithic-ok); }
@@ -1224,6 +1217,20 @@ footer > * { pointer-events: auto; }
 .recent-icon-button:disabled { opacity: 0.25; cursor: default; }
 .recent-icon-button svg { width: 21px; height: 21px; fill: none; stroke: currentColor; stroke-width: 1.55; stroke-linecap: round; stroke-linejoin: round; }
 .cache-history-button { color: var(--lithic-ink-muted); }
+/*
+ * Device sync's mark on a recent row, and the same mark on the rows that are only the
+ * devices' (see the recent list). Grey means the devices have not been sent this Lith and
+ * pressing does that; green means they already hold a copy and pressing sends this one as a
+ * new version, which is the whole of what a paired person needs to know about a row. The two
+ * colours are the vault key's pair, which is the other mark on a row that says "nothing here"
+ * against "already set up".
+ */
+.device-row-button { color: var(--lithic-ink-faint); }
+.device-row-button.shared { color: var(--lithic-ok); }
+.device-row-button:hover:enabled { color: var(--lithic-accent); }
+.device-row-button.shared:hover:enabled { color: var(--lithic-ok-light); }
+/* The name of a Lith this device does not hold: a fact, not a control, so it does not open. */
+.device-only-name { display: block; width: 100%; }
 /*
  * The saved-logins key on a bookmark row. Grey means nothing is saved for this
  * address and clicking sets one up; green means a login is saved and clicking

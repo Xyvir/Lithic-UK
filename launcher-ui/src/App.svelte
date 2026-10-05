@@ -3,7 +3,7 @@
   // Every word this component shows. Nothing below spells copy of its own.
   import { LOCALE_TAG, copy, type LaunchEntry } from './copy';
   import { declaresBrowserOnly, handoffQuery, LAUNCHER_QUERY_PARAM, launcherReturn, withLauncherHandoff, type LauncherMode } from './mode';
-  import { createFileBridge, tauriInvoke, tauriListen, saveTextVerifiably } from './file-bridge';
+  import { createFileBridge, tauriInvoke, tauriListen, saveTextVerifiably, saveTextWhere } from './file-bridge';
   import { orphanPill, orphanDownloadNote, type OrphanDownloadState } from './orphan-download';
   import { isScratchFileName, isHtmlMonolithName, tracksUnsavedEdits, resolveMountName, resolveScratchKind, type ScratchKind } from './scratch-editor';
   import { pwaInstall, promptPwaInstall } from './pwa-install';
@@ -36,7 +36,8 @@
   import { offlineMode, looksUnreachable } from './offline-mode';
   import PinEntry from './PinEntry.svelte';
   import DeviceSyncPanel from './DeviceSyncPanel.svelte';
-  import { deviceSyncSession, deviceSyncSupport } from './device-sync';
+  import { deviceSyncSession, deviceSyncSupport, type DeviceSyncState, type SyncedEntry } from './device-sync';
+  import { deviceOnlyEntries, publishSource, syncIndex, type PublishSource } from './recent-sync';
   // Which prongs this build was pinned to speak. See `sync-pin.ts`.
   import { SHOWS_DEVICE_SYNC, SHOWS_GITHUB_SYNC } from './sync-pin';
   import { deleteRemoteFile, fetchRemoteFiles, fetchRemoteWiki, fetchRemoteWikiMeta, probePatchApi, createLockHeartbeat, readRemoteLock, uploadRemoteFile, webdavUrl, resolveSessionId, lithUploadName, type WebdavFile } from './webdav';
@@ -809,6 +810,8 @@
    */
   const deviceSyncRuns = SHOWS_DEVICE_SYNC && deviceSyncSupport().ok;
   let showDeviceSync = false;
+  /** The one device job in flight, by name, so two presses cannot both read the engine. */
+  let deviceSyncBusy: string | null = null;
   /**
    * Whether the device-sync circle is drawn.
    *
@@ -820,6 +823,43 @@
    * on it, and the shim has no engine prong of its own yet.
    */
   $: deviceSyncShown = deviceSyncRuns && !browserOnly && (mode !== 'tauri' || hostDeviceSync);
+
+  /**
+   * What the session last published, followed from boot rather than from the panel.
+   *
+   * The recent list is where the folder's Liths are, so the list has to hear the session
+   * whether or not the modal is open: a Lith another device writes becomes a row without
+   * anybody opening anything, which is the whole of "the recent list records what synced".
+   * Following costs nothing until an engine exists (a listener on a state object), and the
+   * session still starts on the first ask, which is the panel or a row's own control.
+   */
+  let deviceSyncState: DeviceSyncState = deviceSync.current;
+  deviceSync.follow((next) => (deviceSyncState = next));
+
+  /** The folder's entries by name, which is the only identity a row and an entry share. */
+  $: deviceSynced = syncIndex(deviceSyncState.entries);
+  /**
+   * The Liths only the devices have: one row each, in the folder's own order.
+   *
+   * Derived from the session's listing rather than written into recents, which is the one
+   * place this deliberately differs from adopting a folder. There, the folder's Liths are
+   * files on this disk, so an adopted row can be opened; here the engine's copy lives in its
+   * own replica, so a row that named it would be a row that cannot be opened. A derived row
+   * also cannot go stale: a changed pairing, or a device removing a Lith, takes the row with
+   * it and leaves nothing behind (see `recent-sync.ts` for the three rules this follows).
+   */
+  $: deviceOnly = deviceSyncState.phase === 'ready'
+    ? deviceOnlyEntries(recentFiles.map((file) => ({ name: getEntryName(file) })), deviceSyncState.entries)
+    : [];
+  /**
+   * Whether the recent rows may speak for the folder yet.
+   *
+   * The circle is the front door and the list is the room: until the session has started
+   * there is no folder to say anything about, so the rows stay exactly what they were before
+   * device sync existed. That is also what keeps a device control off every row of a launcher
+   * whose owner has never paired anything, which is every instance until somebody asks.
+   */
+  $: deviceRowsArmed = deviceSyncRuns && !browserOnly && deviceSyncState.phase === 'ready';
 
   /**
    * Open the panel, and load the engine behind it.
@@ -842,6 +882,119 @@
    */
   function closeDeviceSyncModal() {
     showDeviceSync = false;
+  }
+
+  /** The browser handle a row carries, when it is one this page can read through. */
+  function rowHandle(file: any): any {
+    const handle = file?.handle;
+    return handle && typeof handle.getFile === 'function' ? handle : undefined;
+  }
+
+  /**
+   * Where a recent row's own Lith can be read from, or null when nothing here can read it.
+   *
+   * The page is what decides that, not the row: a browser cannot open a path however well it
+   * remembers one, and only an instance can ask a server for a Lith by name. See
+   * `recent-sync.ts`, which holds the order the four sources are tried in.
+   */
+  function rowPublishSource(file: any): PublishSource | null {
+    return publishSource(
+      { name: getEntryName(file), path: recentDiskPath(file), text: file?.text, handle: rowHandle(file) },
+      { canReadPath: mode === 'tauri' || shimToken !== null, canFetchByName: isSelfHost() }
+    );
+  }
+
+  /**
+   * A recent row's own bytes, through whichever of the four places this page can reach.
+   *
+   * The handle's permission is asked for the way `openRecent` asks for it, because a row
+   * picked in an earlier session can have had its grant expire, and a publish that failed on
+   * a permission the user would have given is the worse of the two failures.
+   */
+  async function readRowLith(file: any): Promise<string | null> {
+    switch (rowPublishSource(file)) {
+      case 'text':
+        return String(file?.text);
+      case 'path':
+        return await readDiskWikiText(recentDiskPath(file) as string);
+      case 'handle': {
+        const handle = rowHandle(file);
+        if (handle.queryPermission) {
+          const options = { mode: 'read' };
+          if ((await handle.queryPermission(options)) !== 'granted') await handle.requestPermission(options);
+        }
+        const picked = await handle.getFile();
+        return await picked.text();
+      }
+      case 'server':
+        return await readRemoteWikiText(getEntryName(file));
+      default:
+        return null;
+    }
+  }
+
+  /**
+   * Send a recent row's own Lith to the paired devices.
+   *
+   * The session is asked to publish, which starts the engine if this page has not started it
+   * yet: pressing the mark is an ask, the same as opening the panel is. A name the devices
+   * already hold is a new version of it rather than a clobber, because the engine's document
+   * keeps every version and publishes the latest, so this needs no confirmation of its own.
+   *
+   * The line lands in the header rather than in the modal, because that is where the person
+   * is: the panel can be shut, and a send from a row is exactly the case where it is.
+   */
+  async function sendToDevices(file: any): Promise<void> {
+    const name = getEntryName(file);
+    deviceSyncBusy = name;
+    try {
+      const text = await readRowLith(file);
+      // Unreachable through the UI: the control is only drawn where a source exists, so this
+      // is the guard rather than the case a person can meet.
+      if (text === null) return;
+      if (await deviceSync.publish(name, new TextEncoder().encode(text))) {
+        status = copy.status.deviceSent(name);
+        return;
+      }
+      status = copy.status.deviceSendFailed(deviceSync.current.error ?? copy.deviceSync.unavailable.engine);
+    } catch (error) {
+      status = copy.status.deviceSendFailed(error instanceof Error ? error.message : String(error));
+    } finally {
+      deviceSyncBusy = null;
+    }
+  }
+
+  /**
+   * Load a Lith the devices have and this one does not.
+   *
+   * Offered only for a name nothing here holds (see `recent-sync.ts`), which is what makes it
+   * safe to write without asking first: the save either names a new file or lands on one the
+   * user just picked, and it can never arrive on top of a copy this device already keeps.
+   * The row that follows is an ordinary one, so the Lith stops being a device-only row.
+   */
+  async function loadFromDevices(entry: SyncedEntry): Promise<void> {
+    deviceSyncBusy = entry.name;
+    try {
+      const bytes = await deviceSync.pull(entry.name);
+      if (!bytes) {
+        status = copy.status.deviceLoadFailed(deviceSync.current.error ?? copy.deviceSync.unavailable.engine);
+        return;
+      }
+      if (deviceSync.native) {
+        const saved = await saveTextWhere(entry.name, new TextDecoder().decode(bytes));
+        if (saved.outcome === 'cancelled') return;
+        status = copy.status.deviceLoaded(entry.name);
+        if (saved.path) await remember({ name: entry.name, path: saved.path });
+      } else {
+        // The folder's bytes are the file, so they are handed over without conversion.
+        saveBytesAs(entry.name, bytes);
+        status = copy.status.deviceLoaded(entry.name);
+      }
+    } catch (error) {
+      status = copy.status.deviceLoadFailed(error instanceof Error ? error.message : String(error));
+    } finally {
+      deviceSyncBusy = null;
+    }
   }
 
   function openGitSyncModal() {
@@ -1332,6 +1485,7 @@
   $: recentPanelShown =
     bookmarks.length > 0 ||
     recentFiles.length > 0 ||
+    deviceOnly.length > 0 ||
     remoteFiles.length > 0 ||
     isSelfHost() ||
     Object.keys(cachedEntries).length > 0 ||
@@ -2430,6 +2584,16 @@
     return showsForQuery(name, search) || Boolean(cacheSearchMatches[name]?.preview);
   });
 
+  /**
+   * The rows only the devices have, filtered by the same search box.
+   *
+   * A name rather than a body here: the launcher has no copy of a Lith this device does not
+   * hold, so there is no text to search inside it and the row answers by its title alone.
+   */
+  $: filteredDeviceOnly = deviceOnly.filter((entry) => showsForQuery(entry.name, search));
+  /** Names the device-only rows already answer, so a stale cache cannot double a row. */
+  $: deviceOnlyNames = new Set(deviceOnly.map((entry) => entry.name.toLowerCase()));
+
   // Self-host: the server's own Liths are the primary list, filtered by the
   // same search box as the local recents.
   // ...and by what this device holds of them, which is the half the local list has always
@@ -2488,10 +2652,13 @@
 
   $: filteredCached = Object.values(cachedEntries).filter((entry) => {
     const isRecent = recentFiles.some((file) => getEntryName(file) === entry.name);
+    // A Lith the devices hold as well has its own row above, and the same name twice reads
+    // as two Liths. The device-only row is the one that can be loaded, so it is the one kept.
+    const isDeviceOnly = deviceOnlyNames.has(entry.name.toLowerCase());
     // Rows only a search can produce, so no query means no row. Unlike the lists
     // above, where an empty box is the whole list.
     if (!search.trim()) return false;
-    return !isRecent && (titleMatches(entry.name, search) || Boolean(cacheSearchMatches[entry.name]?.preview));
+    return !isRecent && !isDeviceOnly && (titleMatches(entry.name, search) || Boolean(cacheSearchMatches[entry.name]?.preview));
   });
 
   // The name that will actually be created (extension normalized), used to
@@ -3802,6 +3969,28 @@
   function saveBlobAs(fileName: string, text: string) {
     const lith = text.trim().startsWith('[') ? serializeJsonToLith(text) : text;
     const blob = new Blob([lith], { type: 'application/x-lith' });
+    const url = URL.createObjectURL(blob);
+    const anchor = document.createElement('a');
+    anchor.href = url;
+    anchor.download = fileName;
+    document.body.appendChild(anchor);
+    anchor.click();
+    anchor.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 0);
+  }
+
+  /**
+   * Hand exact bytes to the browser as a download, with no conversion.
+   *
+   * Separate from `saveBlobAs` because that one is for a *cache*: it rewrites a serialized
+   * tiddler array into a Lith. The bytes here are already a Lith file, as the folder holds
+   * it and as some other device wrote it, so anything this page did to them would be a
+   * second format in the middle of a sync.
+   */
+  function saveBytesAs(fileName: string, bytes: Uint8Array) {
+    // The assertion is the lib's own type parameter, not a runtime claim: it wants a view
+    // over a plain ArrayBuffer, and a wasm-bindgen Uint8Array is always exactly that.
+    const blob = new Blob([bytes as unknown as BlobPart], { type: 'application/x-lith' });
     const url = URL.createObjectURL(blob);
     const anchor = document.createElement('a');
     anchor.href = url;
@@ -5289,7 +5478,7 @@
     </div>
   {/if}
   {#if showDeviceSync}
-    <DeviceSyncPanel session={deviceSync} formatSize={formatLithSize} onClose={closeDeviceSyncModal} />
+    <DeviceSyncPanel session={deviceSync} onClose={closeDeviceSyncModal} />
   {/if}
   <!--
     The repository dialog, and the last word on whether an `iroh` build carries it. The circle
@@ -6234,6 +6423,7 @@
           {@const unsavedRow = Boolean(dirtyEntries[name])}
           {@const localOnlyRow = showBackupStatus && Boolean(diskPath) && localOnlyPaths.has(diskPath as string)}
           {@const markedRow = browserOnlyRow || localOnlyRow || unsavedRow}
+          {@const sharedRow = deviceSynced.has(name.toLowerCase())}
           <div class="recent-row">
             <!--
               The hover answers the one question a row cannot show: where this Lith lives
@@ -6282,6 +6472,27 @@
                 {/if}
               </button>
             {/if}
+            <!--
+              The device mark, on the row rather than in the panel, because the recent list
+              is where the folder's Liths are: a name the folder holds is already on the
+              devices and pressing sends this copy as a new version, and a name it does not
+              hold is one nothing has published yet. It is drawn only where the session has
+              started (see `deviceRowsArmed`) and only where this page can actually read the
+              row's own bytes, so a control that could not do its job is never shown. A Lith
+              whose copy lives only in browser storage has one, which is the whole of what the
+              old panel's picker was for.
+            -->
+            {#if deviceRowsArmed && rowPublishSource(file) !== null}
+              <button
+                class="recent-icon-button device-row-button"
+                class:shared={sharedRow}
+                type="button"
+                disabled={deviceSyncBusy !== null}
+                aria-label={sharedRow ? copy.row.deviceSharedAria(name) : copy.row.deviceSendAria(name)}
+                title={sharedRow ? copy.row.deviceSharedTitle : copy.row.deviceSendTitle}
+                on:click={() => void sendToDevices(file)}
+              ><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="2" y="4" width="13" height="9" rx="1.5"/><path d="M5 17h7"/><rect x="17" y="8" width="5" height="11" rx="1.5"/></svg></button>
+            {/if}
             {#if cacheSearchMatches[name]?.preview}
               <div
                 use:positionCachePreview
@@ -6295,6 +6506,26 @@
               >{@html cacheSearchMatches[name].preview}</div>
             {/if}
             <button class="recent-icon-button remove-recent" type="button" aria-label={copy.row.removeAria(name)} on:click={() => removeRecent(file)}><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m7 7 10 10M17 7 7 17"></path></svg></button>
+          </div>
+        {/each}
+        <!--
+          The Liths only the devices have. A row rather than a count somewhere, because the
+          recent list is the record of what a person has and this device does not have these
+          yet: the row says which device they are on and offers the one thing that can be
+          done about it. Nothing here is removable, because nothing here is this device's to
+          delete, and the row goes when the folder does.
+        -->
+        {#each filteredDeviceOnly as entry (entry.name)}
+          <div class="recent-row device-only-row">
+            <div class="recent-name cached-result device-only-name" role="note" title={copy.row.deviceOnlyAria(entry.name)}>{@html titleMarkup(entry.name, search)}<span class="cached-size">{formatLithSize(entry.size)}</span><span class="cached-label">{copy.row.deviceOnlyLabel}</span></div>
+            <button
+              class="recent-icon-button device-row-button shared"
+              type="button"
+              disabled={deviceSyncBusy !== null}
+              aria-label={copy.row.deviceLoadAria(entry.name)}
+              title={deviceSyncBusy === entry.name ? copy.row.deviceLoading : copy.row.deviceLoad}
+              on:click={() => void loadFromDevices(entry)}
+            ><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="2" y="4" width="13" height="9" rx="1.5"/><path d="M5 17h7"/><rect x="17" y="8" width="5" height="11" rx="1.5"/></svg></button>
           </div>
         {/each}
         {#each filteredCached as entry}

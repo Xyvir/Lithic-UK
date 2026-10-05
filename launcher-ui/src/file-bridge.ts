@@ -123,6 +123,21 @@ interface FilePickerHandle {
 }
 
 /**
+ * A save's outcome, and whatever the platform could say about where it landed.
+ *
+ * `path` is the desktop app's answer (Rust wrote the file, so it names where it is) and the
+ * shim's, which chooses a path the same way; `handle` is the Chromium picker's, which is a
+ * permission rather than an address and is what lets the page read the file back later. Both
+ * are null from the legacy download, the one rung that cannot say where anything went, which
+ * is also why that rung's outcome is `started` rather than `saved`.
+ */
+export interface SaveResult {
+  outcome: SaveOutcome;
+  path: string | null;
+  handle: unknown | null;
+}
+
+/**
  * Save text to a file, reporting whether the platform could confirm the write.
  *
  * The distinction is the whole point: the desktop app writes through Rust and
@@ -130,8 +145,13 @@ interface FilePickerHandle {
  * landed. The legacy `<a download>` fallback cannot (the browser never reports
  * whether a download finished) so it reports `started`, and callers must not
  * present that as a file that exists.
+ *
+ * The place as well as the answer, because a save is also a fact about the file: a caller
+ * that just wrote a Lith this device did not have has a row to record, and only this rung
+ * knows whether it can be recorded as a path, as a handle, or not at all.
  */
-export async function saveTextVerifiably(fileName: string, text: string): Promise<SaveOutcome> {
+export async function saveTextWhere(fileName: string, text: string): Promise<SaveResult> {
+  const nowhere: SaveResult = { outcome: 'started', path: null, handle: null };
   const api = tauriApi();
   if (api) {
     try {
@@ -140,9 +160,13 @@ export async function saveTextVerifiably(fileName: string, text: string): Promis
       const result = (await api.invoke('save_lith_file', { text, suggestedName: fileName })) as
         | { name?: string; path?: string }
         | null;
-      return result?.path ? 'saved' : 'started';
+      return result?.path
+        ? { outcome: 'saved', path: result.path, handle: null }
+        : nowhere;
     } catch (error) {
-      if (error instanceof Error && /cancel/i.test(error.message)) return 'cancelled';
+      if (error instanceof Error && /cancel/i.test(error.message)) {
+        return { outcome: 'cancelled', path: null, handle: null };
+      }
       throw error;
     }
   }
@@ -155,9 +179,9 @@ export async function saveTextVerifiably(fileName: string, text: string): Promis
     const picked = await shimPick('save', { suggestedName: fileName });
     if (picked.ok) {
       const target = picked.value.paths[0];
-      if (!target) return 'cancelled';
+      if (!target) return { outcome: 'cancelled', path: null, handle: null };
       const written = await shimWrite(target, text);
-      if (written.ok) return 'saved';
+      if (written.ok) return { outcome: 'saved', path: target, handle: null };
     }
   }
 
@@ -172,10 +196,10 @@ export async function saveTextVerifiably(fileName: string, text: string): Promis
       const writable = await handle.createWritable();
       await writable.write(text);
       await writable.close();
-      return 'saved';
+      return { outcome: 'saved', path: null, handle };
     } catch (error) {
       if (error && typeof error === 'object' && (error as { name?: string }).name === 'AbortError') {
-        return 'cancelled';
+        return { outcome: 'cancelled', path: null, handle: null };
       }
       // Any other picker failure falls through to the legacy path.
     }
@@ -190,7 +214,12 @@ export async function saveTextVerifiably(fileName: string, text: string): Promis
   anchor.click();
   anchor.remove();
   setTimeout(() => URL.revokeObjectURL(url), 0);
-  return 'started';
+  return nowhere;
+}
+
+/** The same save, for the callers that only need the outcome. */
+export async function saveTextVerifiably(fileName: string, text: string): Promise<SaveOutcome> {
+  return (await saveTextWhere(fileName, text)).outcome;
 }
 
 async function fetchText(url: string): Promise<string> {

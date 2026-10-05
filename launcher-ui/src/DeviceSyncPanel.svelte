@@ -1,26 +1,24 @@
 <script lang="ts">
   /**
-   * Device sync, as the launcher drives it.
+   * Device sync, as the launcher drives it: the pairing, and nothing else.
    *
-   * This is the whole user-facing half of the engine: it shows this device's ticket,
-   * takes another device's, lists the paired folder, and is where bytes go out (a picked
-   * Lith) and come in (a saved copy of an entry). Every button asks the session rather
-   * than the engine, and every line it draws comes from the state the session published,
-   * so the panel itself holds no facts about the folder.
+   * This panel used to carry a copy of the folder's own listing and a picker that added a
+   * Lith to it, which made it a second, smaller recents list: the same names in another
+   * order, with the launcher's own way of saving a copy, and a folder nobody could see from
+   * anywhere else in the app. It holds neither now. Every Lith in the folder is a row in the
+   * launcher's recent list, whether this device has it or not, and the control on that row
+   * is what loads one or sends one; this modal is only where two devices find each other.
+   * `recent-sync.ts` is where the rules live and `App.svelte` is where the rows are drawn.
    *
    * One panel, two engines: the browser's wasm module and the desktop app's native one
-   * (see `device-sync.ts`). Nothing here branches on which, except a saved copy, which on
-   * the app is a file the app writes rather than a download the page starts.
+   * (see `device-sync.ts`). Nothing here branches on which.
    */
   import { onDestroy } from 'svelte';
-  import { saveTextVerifiably } from './file-bridge.ts';
   import { copy } from './copy';
   import { copyText } from './clipboard';
-  import type { DeviceSyncSession, DeviceSyncState, SyncedEntry } from './device-sync';
+  import type { DeviceSyncSession, DeviceSyncState } from './device-sync';
 
   export let session: DeviceSyncSession;
-  /** How the launcher spells a byte count, so a row here matches every other row. */
-  export let formatSize: (bytes: number) => string;
   export let onClose: () => void;
 
   let state: DeviceSyncState = session.current;
@@ -31,11 +29,6 @@
   let joinBusy = false;
   let ticketBusy = false;
   let copied = false;
-  let publishBusy = false;
-  let pullBusy: string | null = null;
-  let note: string | null = null;
-  let errorNote: string | null = null;
-  let fileInput: HTMLInputElement | undefined;
 
   /**
    * The engine's own id, shortened for reading. It is a 64 character public key, and the
@@ -82,7 +75,6 @@
 
   async function showTicket() {
     ticketBusy = true;
-    note = null;
     try {
       await session.share();
     } finally {
@@ -99,7 +91,6 @@
 
   async function pair() {
     joinBusy = true;
-    note = null;
     try {
       if (await session.join(joinText)) {
         joinText = '';
@@ -107,62 +98,6 @@
     } finally {
       joinBusy = false;
     }
-  }
-
-  async function saveEntry(entry: SyncedEntry) {
-    pullBusy = entry.name;
-    note = null;
-    errorNote = null;
-    try {
-      const bytes = await session.pull(entry.name);
-      if (!bytes) return;
-      if (session.native) {
-        // The app owns the dialog and the write, so a copy is a file on disk and the
-        // answer proves it, exactly like every other save in the launcher.
-        const outcome = await saveTextVerifiably(entry.name, new TextDecoder().decode(bytes));
-        if (outcome !== 'cancelled') note = copy.deviceSync.saved(entry.name);
-      } else {
-        download(entry.name, bytes);
-        note = copy.deviceSync.saved(entry.name);
-      }
-    } catch (error) {
-      errorNote = copy.deviceSync.error(error instanceof Error ? error.message : String(error));
-    } finally {
-      pullBusy = null;
-    }
-  }
-
-  async function publishPicked(event: Event) {
-    const input = event.currentTarget as HTMLInputElement;
-    const file = input.files?.[0];
-    if (!file) return;
-    publishBusy = true;
-    note = null;
-    try {
-      const bytes = new Uint8Array(await file.arrayBuffer());
-      if (await session.publish(file.name, bytes)) {
-        note = copy.deviceSync.published(file.name);
-      }
-    } finally {
-      publishBusy = false;
-      // Emptied so picking the same file again is still a change.
-      input.value = '';
-    }
-  }
-
-  /** Hand the bytes to the browser as a download, the way the version history does. */
-  function download(name: string, bytes: Uint8Array) {
-    // The assertion is the lib's own type parameter, not a runtime claim: it wants a view
-    // over a plain ArrayBuffer, and a wasm-bindgen Uint8Array is always exactly that.
-    const blob = new Blob([bytes as unknown as BlobPart], { type: 'application/x-lith' });
-    const url = URL.createObjectURL(blob);
-    const anchor = document.createElement('a');
-    anchor.href = url;
-    anchor.download = name;
-    document.body.appendChild(anchor);
-    anchor.click();
-    anchor.remove();
-    setTimeout(() => URL.revokeObjectURL(url), 0);
   }
 </script>
 
@@ -231,51 +166,13 @@
         <p class="device-sync-hint">{copy.deviceSync.joinHint}</p>
       </section>
 
-      <section class="device-sync-step">
-        <h3>{copy.deviceSync.folderTitle}</h3>
-        {#if state.entries.length === 0}
-          <p class="device-sync-hint">{copy.deviceSync.folderEmpty}</p>
-        {:else}
-          <ul class="device-sync-entries">
-            {#each state.entries as entry (entry.name)}
-              <li>
-                <span class="device-sync-entry">
-                  <span class="device-sync-entry-name">{entry.name}</span>
-                  <span class="device-sync-entry-size">{formatSize(entry.size)}</span>
-                </span>
-                <button
-                  class="modal-action secondary device-sync-save"
-                  disabled={pullBusy !== null}
-                  on:click={() => saveEntry(entry)}
-                  aria-label={`${copy.deviceSync.download}: ${entry.name}`}
-                  >{pullBusy === entry.name ? copy.deviceSync.downloading : copy.deviceSync.download}</button
-                >
-              </li>
-            {/each}
-          </ul>
-        {/if}
-        <div class="modal-actions">
-          <button class="modal-action device-sync-add" disabled={publishBusy || state.phase !== 'ready'} on:click={() => fileInput?.click()}>
-            {publishBusy ? copy.deviceSync.publishing : copy.deviceSync.add}
-          </button>
-        </div>
-        <p class="device-sync-hint">{copy.deviceSync.addHint}</p>
-        <!-- Hidden rather than absent: the picker a browser opens can only be asked for
-             by an input, and the button above is what a person presses. -->
-        <input
-          class="device-sync-file"
-          type="file"
-          accept=".lith,application/x-lith"
-          tabindex="-1"
-          aria-hidden="true"
-          bind:this={fileInput}
-          on:change={publishPicked}
-        />
-      </section>
-
       <p class="device-sync-activity" role="status">{activityLabel(state)}</p>
-      {#if note}<p class="device-sync-note ok" role="status">{note}</p>{/if}
-      {#if errorNote}<p class="device-sync-note error" role="alert">{errorNote}</p>{/if}
+      <!--
+        Where the folder's Liths are now. The listing that used to sit here was the launcher's
+        own second copy of the recent list, so the one thing this modal owes a person is the
+        sentence that says so, in the place they would look for it.
+      -->
+      <p class="device-sync-hint">{copy.deviceSync.recentsHint}</p>
       {#if state.error}<p class="device-sync-note error" role="alert">{errorLabel(state.error)}</p>{/if}
     {/if}
   </div>

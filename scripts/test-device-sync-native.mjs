@@ -11,9 +11,12 @@
  *
  * What this proves: the heading draws the circle where an engine can run and the build has
  * one, the driver takes the native transport (`device_sync_*` commands, base64 bytes, the
- * app's own event) inside the app instead of the wasm module, publishing hands the file's
- * exact bytes over the IPC, the event Rust emits lands in the panel and refreshes its list,
- * and a copy is saved through the app's own save command rather than a browser download.
+ * app's own event) inside the app instead of the wasm module, a recent row's own mark sends
+ * the file's exact bytes over the IPC (read off the disk through the app, not out of the
+ * row), the event Rust emits refreshes the list the event is about, and a Lith only the
+ * folder holds is a row that loads through the app's own save rather than a browser
+ * download. The Lith travels through the recent list on both sides, which is the shape this
+ * settled into: the panel pairs, and the list is the record.
  *
  * The three ways the circle is withheld are driven here too, because each is a different
  * question: an app whose executable was built without the iroh prong (the host's report, which
@@ -86,11 +89,25 @@ const POLL = { polling: 250, timeout: 30000 };
  * models the one behaviour the panel depends on: publishing adds an entry, and the event
  * the native engine emits is what tells the page to read the list again.
  */
-function bridge(capabilities) {
+function bridge(capabilities, seed) {
+  const encoder = new TextEncoder();
   const state = {
     commands: [],
-    entries: [],
-    bytes: new Map(),
+    // The folder as the app's engine already holds it. A row with no local copy is what the
+    // recent list draws from this, so a seeded entry is how a pass gets one.
+    entries: (seed?.folder ?? []).map(([name, text]) => ({
+      name,
+      size: encoder.encode(text).length,
+      hash: `hash-${name}`,
+      author: 'peer-node',
+      timestamp: 1_700_000_000_000_000
+    })),
+    bytes: new Map((seed?.folder ?? []).map(([name, text]) => [name, encoder.encode(text)])),
+    // What the app can read off this disk, by file name, which is what a path row is read
+    // through (`read_lith_path`). Separate from the folder above, because the two answers are
+    // different questions: a Lith can be on this disk and not on the devices, which is exactly
+    // the state a send is for.
+    disk: new Map(seed?.disk ?? []),
     saved: null,
     listener: null,
     nodeId: 'node-app',
@@ -127,11 +144,17 @@ function bridge(capabilities) {
             const bytes = state.bytes.get(args.name);
             return bytes ? encode(bytes) : null;
           }
+          case 'read_lith_path': {
+            const name = String(args.path).split('/').pop();
+            const text = state.disk.get(name);
+            if (text === undefined) throw new Error(`no such file: ${args.path}`);
+            return { name, path: args.path, text };
+          }
           case 'device_sync_publish': {
             const bytes = decode(args.bytes);
             state.bytes.set(args.name, bytes);
             state.entries = [
-              ...state.entries,
+              ...state.entries.filter((entry) => entry.name !== args.name),
               { name: args.name, size: bytes.length, hash: 'hash', author: state.nodeId, timestamp: 1_700_000_000_000_000 }
             ];
             // The native engine tells the page its own way; the same event the crate's
@@ -161,7 +184,14 @@ function bridge(capabilities) {
 
 const scratch = mkdtempSync(join(tmpdir(), 'lithic-device-sync-native-'));
 const proofPath = join(scratch, 'native-proof.lith');
+// The file's own name, which is also what the bridge reads a path by: a real read goes
+// through the app, and the app resolves a path to a file.
+const proofName = 'native-proof.lith';
 const proof = ['title: Native Proof', 'type: text/vnd.tiddlywiki', '', 'published through the app bridge', ''].join('\n');
+// The Lith the peer holds and this device does not: the row the list has to invent, from the
+// folder's own listing, and the one that loads rather than sends.
+const foreignName = 'from-other-device.lith';
+const foreign = ['title: From The Peer', 'type: text/vnd.tiddlywiki', '', 'written on the other device', ''].join('\n');
 
 const server = staticServer(root);
 const browser = await puppeteer.launch({
@@ -245,8 +275,21 @@ try {
   const page = await browser.newPage();
   await page.setViewport({ width: 1000, height: 800 });
   page.on('pageerror', (error) => errors.push(error.message));
-  await page.evaluateOnNewDocument(bridge);
+  // The folder the app's engine already holds: one Lith only the peer has, which is the row
+  // this list has to draw and the only way a pass can get one without a second machine.
+  await page.evaluateOnNewDocument(bridge, undefined, {
+    folder: [[foreignName, foreign]],
+    disk: [[proofName, proof], [foreignName, foreign]]
+  });
   await page.goto(appUrl, { waitUntil: 'domcontentloaded' });
+
+  // One recent row of this device's own, with a path: the app reads it through its bridge,
+  // which is what sending from a row is, and the file it names is the proof file on disk.
+  await page.evaluate((row) => {
+    localStorage.setItem('lithic-recent-liths', JSON.stringify([row]));
+  }, { name: proofName, path: proofPath });
+  await page.reload({ waitUntil: 'domcontentloaded' });
+  await page.waitForFunction((wanted) => [...document.querySelectorAll('.recent-name')].some((node) => (node.textContent ?? '').includes(wanted)), POLL, proofName);
 
   // The circle is the app's, drawn from the mode and the page's own reachability.
   await page.waitForSelector('.device-sync-button', { timeout: 30000 });
@@ -275,42 +318,77 @@ try {
   const joined = await page.evaluate(() => window.__TAURI_STUB__.commands.find((call) => call.command === 'device_sync_join').args);
   assert.deepEqual(joined, { ticket: 'ticket-from-other' }, 'the ticket crosses normalized');
 
-  // Publishing: the picked file's bytes cross the IPC base64, and the entry the bridge
-  // adds arrives because the event told the panel to read the list again.
-  const picker = await page.$('.device-sync-file');
-  await picker.uploadFile(proofPath);
-  await page.waitForFunction(
-    () => document.querySelectorAll('.device-sync-entry-name').length > 0,
-    POLL
-  );
+  // The panel is the pairing and nothing else now, so the rows are behind it and the Liths
+  // travel through them: shut it, and the list is what a person works from.
+  await page.click('.device-sync-modal .modal-close');
+  await page.waitForFunction(() => !document.querySelector('.device-sync-modal'));
+
+  // Sending: the row's own mark, whose bytes come off this disk through the bridge. The row
+  // is grey until the send lands and green after it, which is the state a paired person reads.
+  const beforeSend = await page.$eval('.recent-row .device-row-button', (node) => node.classList.contains('shared'));
+  assert.equal(beforeSend, false, 'the row should start unsent');
+  await page.click('.recent-row .device-row-button');
+  await page.waitForFunction(() => window.__TAURI_STUB__.commands.some((call) => call.command === 'device_sync_publish'), POLL);
   const published = await page.evaluate(() => {
     const stub = window.__TAURI_STUB__;
     const call = stub.commands.find((entry) => entry.command === 'device_sync_publish');
-    const write = new TextDecoder().decode(stub.bytes.get(call.args.name));
-    return { name: call.args.name, text: write, call };
+    const read = stub.commands.find((entry) => entry.command === 'read_lith_path');
+    return {
+      name: call.args.name,
+      text: new TextDecoder().decode(stub.bytes.get(call.args.name)),
+      readPath: read?.args?.path ?? null
+    };
   });
-  assert.equal(published.name, 'native-proof.lith');
-  assert.equal(published.text, proof, 'the bytes that crossed the IPC are the file that was picked');
-  const activity = await page.$eval('.device-sync-activity', (node) => node.textContent ?? '');
-  assert.ok(activity.includes('native-proof.lith'), `the panel heard the engine's own event: ${activity}`);
+  assert.equal(published.name, proofName);
+  assert.equal(published.text, proof, 'the bytes that crossed the IPC are the file the row points at');
+  assert.equal(published.readPath, proofPath, 'the bytes came off the disk through the app, not from the row');
+  await page.waitForFunction(
+    () => Boolean(document.querySelector('.recent-row .device-row-button.shared')),
+    POLL
+  );
+  const sent = await page.$eval('.status-line', (node) => node.textContent ?? '');
+  assert.ok(sent.includes(proofName), `the header reported the send: ${sent}`);
 
-  // Saving a copy is the app's save, not a browser download: Rust names the file and the
-  // panel reports the same sentence every other save does.
-  await page.click('.device-sync-save');
-  await page.waitForFunction(
-    () => Boolean(window.__TAURI_STUB__.saved),
-    POLL
-  );
+  // The panel's own line is the other half of the event surface, read by reopening it: the
+  // engine's `seeded` event is what the bridge emitted, and the panel heard it.
+  await page.click('.device-sync-button');
+  await page.waitForSelector('.device-sync-modal', { timeout: 30000 });
+  const activity = await page.$eval('.device-sync-activity', (node) => node.textContent ?? '');
+  assert.ok(activity.includes(proofName), `the panel heard the engine's own event: ${activity}`);
+  await page.click('.device-sync-modal .modal-close');
+  await page.waitForFunction(() => !document.querySelector('.device-sync-modal'));
+
+  // Loading: the Lith only the peer has is a row of its own, and its control fetches the
+  // bytes and hands them to the app's own save, which is a file on disk rather than a
+  // browser download. The row the save then records is this device's, so the device-only row
+  // is gone and what took its place names the path Rust answered with.
+  const deviceRow = await page.$$eval('.device-only-row .recent-name', (nodes) => nodes.map((node) => node.textContent ?? ''));
+  assert.ok(deviceRow.some((text) => text.includes(foreignName)), `the peer's Lith should be a row of its own: ${JSON.stringify(deviceRow)}`);
+  await page.click('.device-only-row .device-row-button');
+  await page.waitForFunction(() => Boolean(window.__TAURI_STUB__.saved), POLL);
   const saved = await page.evaluate(() => window.__TAURI_STUB__.saved);
-  assert.equal(saved.name, 'native-proof.lith');
-  assert.equal(saved.text, proof, 'the copy is the same bytes the folder holds');
+  assert.equal(saved.name, foreignName);
+  assert.equal(saved.text, foreign, 'the copy is the same bytes the folder holds');
+  const read = await page.evaluate(() => window.__TAURI_STUB__.commands.some((call) => call.command === 'device_sync_read'));
+  assert.ok(read, 'loading a row should read the entry through the app');
   await page.waitForFunction(
-    () => (document.querySelector('.device-sync-note.ok')?.textContent ?? '').includes('native-proof.lith'),
-    POLL
+    (wanted) => {
+      const rows = [...document.querySelectorAll('.recent-row')];
+      const mine = rows.find((row) => (row.textContent ?? '').includes(wanted) && !row.classList.contains('device-only-row'));
+      return Boolean(mine) && !document.querySelector('.device-only-row');
+    },
+    POLL,
+    foreignName
   );
+  const ownRowPath = await page.evaluate((wanted) => {
+    const rows = [...document.querySelectorAll('.recent-row')];
+    const row = rows.find((node) => (node.textContent ?? '').includes(wanted));
+    return row?.querySelector('.recent-name')?.getAttribute('title') ?? null;
+  }, foreignName);
+  assert.equal(ownRowPath, `/tmp/${foreignName}`, 'the loaded Lith should be recorded as the file the app wrote');
 
   assert.deepEqual(errors, [], 'the launcher threw on the page it was driven through');
-  console.log('DEVICE SYNC NATIVE OK: the app page drew the circle, started the native engine, paired, published through the IPC, heard its own event, and saved a copy through the app.');
+  console.log('DEVICE SYNC NATIVE OK: the app page drew the circle, started the native engine, paired, sent a Lith from a recent row through the IPC, heard its own event, and loaded the peer\u2019s Lith into a row of its own.');
 } finally {
   await browser.close();
   await new Promise((done) => server.close(done));
