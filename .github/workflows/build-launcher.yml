@@ -60,4 +60,7 @@ jobs:
           path: |
             src/launcher.html
             src/lithic.html
+            # The device sync engine the launcher fetches at runtime. It sits beside
+            # the launcher in every deployment, so the preview carries it too.
+            src/launcher.wasm
           retention-days: 14

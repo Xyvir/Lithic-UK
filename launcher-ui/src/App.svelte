@@ -35,6 +35,8 @@
   import { copyDropNote, forgetInstanceCopy } from './instance-copy';
   import { offlineMode, looksUnreachable } from './offline-mode';
   import PinEntry from './PinEntry.svelte';
+  import DeviceSyncPanel from './DeviceSyncPanel.svelte';
+  import { deviceSyncSession, deviceSyncSupport } from './device-sync';
   import { deleteRemoteFile, fetchRemoteFiles, fetchRemoteWiki, fetchRemoteWikiMeta, probePatchApi, createLockHeartbeat, readRemoteLock, uploadRemoteFile, webdavUrl, resolveSessionId, lithUploadName, type WebdavFile } from './webdav';
   import { normalizeLithName } from './legacy-saver';
   import { searchCachedWikis } from './cache-search';
@@ -751,6 +753,46 @@
     // Built from the paths Rust handed back rather than from the recent list, which
     // caps itself at twenty rows and would quietly index the first of a big folder.
     void indexRestoredLiths(paths.map((path) => ({ name: path.split(/[\\/]/).pop() || path, path })));
+  }
+
+  /**
+   * Device sync, and the one engine this page will ever have.
+   *
+   * The session is the page's, not the panel's, because the wasm surface cannot be told to
+   * stop following the folder: a session created per opening would leave the previous one's
+   * callbacks in place, and every event would arrive twice. Creating it loads nothing (see
+   * `device-sync.ts`), so this costs a page that never opens the panel nothing at all.
+   */
+  const deviceSync = deviceSyncSession(idb);
+  /**
+   * Whether this page can run the engine at all. Read once, with the mode and for the same
+   * reason: what serves the page cannot change while it lives. It is the browser prong's
+   * control that hangs off this, so a `file://` copy and the desktop app never draw one.
+   */
+  const deviceSyncRuns = deviceSyncSupport().ok;
+  let showDeviceSync = false;
+
+  /**
+   * Open the panel, and load the engine behind it.
+   *
+   * The load is deliberately not awaited: the panel draws the session's state, and a load
+   * that is still going, cannot run, or failed is a line in that panel rather than a reason
+   * for it not to open.
+   */
+  function openDeviceSyncModal() {
+    showDeviceSync = true;
+    void deviceSync.start();
+  }
+
+  /**
+   * Close the panel, and leave the engine running.
+   *
+   * The session outlives the dialog on purpose: it is what keeps the folder's list and the
+   * peer set current while the panel is shut, and reopening is then an answer that is
+   * already there rather than a second load. Only a reload ends it.
+   */
+  function closeDeviceSyncModal() {
+    showDeviceSync = false;
   }
 
   function openGitSyncModal() {
@@ -5135,6 +5177,18 @@
     -->
     {#if mode === 'webapp' && !browserOnly}<button class="help-button" aria-label={copy.app.viewIntro} title={copy.app.viewIntro} on:click={openIntro}>{introBusy ? '…' : '?'}</button>{/if}
     <!--
+      Device sync's circle, drawn only where the engine can run: the published PWA, which is
+      the one prong with no backend to borrow one from. A `file://` copy keeps the no-sync
+      behaviour it has today, and the desktop app and an instance wait for their own
+      milestones, which is what `deviceSyncRuns` and the mode together decide. A page the
+      local shim served is left out for a third reason: it resolves to `webapp` the same as
+      the PWA, but its payload is a named list of files and `launcher.wasm` is not on it, so
+      a circle there would open a panel whose only sentence is that the engine is missing.
+      The glyph is a screen and a phone, because what this pairs is the machines a person
+      reads on.
+    -->
+    {#if deviceSyncRuns && mode === 'webapp' && !browserOnly}<button class="device-sync-button" aria-label={copy.deviceSync.openAria} title={copy.deviceSync.title} on:click={openDeviceSyncModal}><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="2" y="4" width="13" height="9" rx="1.5"/><path d="M5 17h7"/><rect x="17" y="8" width="5" height="11" rx="1.5"/></svg></button>{/if}
+    <!--
       The round control is one button with one job per page, never both at once. The intro
       belongs to the published PWA, whose server serves `intro.lith` beside it, and the sync
       button to anything that can reach a local repository; on an instance and in the app the
@@ -5177,6 +5231,9 @@
         {/each}
       </ul>
     </div>
+  {/if}
+  {#if showDeviceSync}
+    <DeviceSyncPanel session={deviceSync} formatSize={formatLithSize} onClose={closeDeviceSyncModal} />
   {/if}
   {#if showGitSyncModal}
     <div class="modal-overlay" role="presentation" on:click={(event) => event.currentTarget === event.target && closeGitSyncModal()}>

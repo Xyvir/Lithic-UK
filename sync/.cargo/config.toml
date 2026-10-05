@@ -1,0 +1,4 @@
+# The browser's randomness source for the wasm target. The iroh crates expect
+# this flag alongside getrandom's `wasm_js` feature, which Cargo.toml enables.
+[target.wasm32-unknown-unknown]
+rustflags = ['--cfg', 'getrandom_backend="wasm_js"']

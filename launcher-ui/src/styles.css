@@ -235,6 +235,24 @@ h1 { flex: none; min-width: 0; margin: 0; color: var(--lithic-ink-strong); font-
   font-size: 1.35rem;
 }
 .help-button:hover { border-color: var(--lithic-line-hover); background: var(--lithic-surface-panel); }
+/* Device sync's circle, the same shape as the backup's without its state vocabulary: a
+   paired folder is either not set up or working, and the panel is where the exceptions
+   are spelled out. The heading carries neither a count nor a colour for it. */
+.device-sync-button {
+  display: grid;
+  place-items: center;
+  width: 38px;
+  height: 38px;
+  padding: 0;
+  border: 2px solid var(--lithic-line-faint);
+  border-radius: 50%;
+  background: transparent;
+  color: var(--lithic-ink-faint);
+  cursor: pointer;
+  transition: color 0.2s, border-color 0.2s;
+}
+.device-sync-button:hover { border-color: var(--lithic-line-hover); background: var(--lithic-surface-panel); color: var(--lithic-ink-muted); }
+.device-sync-button svg { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
 /* "Back to the main launcher". Rendered only for a page the app's window loaded
    from elsewhere (a bookmarked instance: see launcherReturn in mode.ts), where
    the desktop window has no browser chrome and no other control returns: without
@@ -943,6 +961,38 @@ footer > * { pointer-events: auto; }
  */
 .modal-action.danger { border-color: var(--lithic-danger-soft); background: var(--lithic-danger-wash-12); color: var(--lithic-danger-soft); }
 .modal-action.danger:hover:not(:disabled) { background: var(--lithic-danger-wash-20); color: var(--lithic-danger-soft); }
+/*
+ * Device sync, the panel the heading's round control opens.
+ *
+ * The ticket is the one monospaced thing in the launcher: it is a base32 blob meant to be
+ * copied verbatim, and a proportional serif breaks it mid-word where a person cannot see
+ * whether what they copied was the whole thing. Everything else keeps the dialogs' own
+ * shape, which is why these rules only name what the panel adds: the room an entries list
+ * wants, one hue for a success line and one for a failure, and a file input that is a
+ * button's hidden other half. Each rule is scoped to the modal because `.launcher-modal p`
+ * colours every paragraph in the dialog, and an unscoped hint would lose to it.
+ */
+.device-sync-modal { width: min(100%, 520px); }
+.device-sync-modal .device-sync-status { display: flex; flex-wrap: wrap; gap: 4px 14px; margin: 0 0 6px; color: var(--lithic-ink-muted); font-size: 0.85rem; }
+.device-sync-modal .device-sync-folder { color: var(--lithic-ink-soft); }
+.device-sync-modal .device-sync-peers { color: var(--lithic-ok); }
+.device-sync-modal .device-sync-step { margin-top: 16px; padding-top: 12px; border-top: 1px solid var(--lithic-line-faint); }
+.device-sync-modal .device-sync-step h3 { margin: 0 0 8px; font-size: 0.95rem; color: var(--lithic-ink-strong); }
+.device-sync-modal .device-sync-ticket { width: 100%; resize: vertical; padding: 10px; border: 1px solid var(--lithic-line); border-radius: 7px; background: var(--lithic-surface-control); color: var(--lithic-ink); font: 0.78rem/1.5 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; word-break: break-all; }
+.device-sync-modal .device-sync-ticket:focus { outline: none; border-color: var(--lithic-amber); }
+.device-sync-modal .device-sync-step .modal-actions { margin-top: 10px; }
+.device-sync-modal .device-sync-hint { margin: 8px 0 0; color: var(--lithic-ink-soft); font-size: 0.85rem; line-height: 1.45; }
+.device-sync-modal .device-sync-entries { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; max-height: 220px; overflow-y: auto; }
+.device-sync-modal .device-sync-entries li { display: flex; align-items: center; gap: 10px; padding: 6px 8px; border: 1px solid var(--lithic-line-faint); border-radius: 7px; background: var(--lithic-surface-control); }
+.device-sync-modal .device-sync-entry { display: flex; flex: 1 1 auto; min-width: 0; flex-direction: column; }
+.device-sync-modal .device-sync-entry-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.device-sync-modal .device-sync-entry-size { color: var(--lithic-ink-faint); font-size: 0.78rem; }
+.device-sync-modal .device-sync-save { flex: 0 0 auto; padding: 6px 10px; font-size: 0.82rem; }
+.device-sync-modal .device-sync-file { display: none; }
+.device-sync-modal .device-sync-activity { margin: 14px 0 0; color: var(--lithic-ink-soft); font-size: 0.85rem; }
+.device-sync-modal .device-sync-note { margin: 8px 0 0; font-size: 0.85rem; }
+.device-sync-modal .device-sync-note.ok { color: var(--lithic-ok); }
+.device-sync-modal .device-sync-note.error { color: var(--lithic-danger); }
 .recent-modal { position: relative; width: min(100%, 700px); max-height: 80vh; padding: 20px; border: 1px solid var(--lithic-line); border-radius: 10px; background: var(--lithic-surface-panel); box-shadow: 0 12px 40px var(--lithic-shadow); }
 .recent-modal h2 { margin: 0 0 14px; font-size: 1.5rem; }
 /* The ×, and the only dismiss a dialog carries. Whatever the label would have been. A

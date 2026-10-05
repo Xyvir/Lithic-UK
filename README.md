@@ -208,8 +208,33 @@ MISC
 - Replace overtype with omni-editor
 - Rust Backend for Launcher apps
 - Multiplatform Launcher apps
-- native e2ec p2p syncing via Iroh Docs?
+- native e2ec p2p syncing via Iroh Docs (settled design in 'P2P Device Sync' below).
 - Create a vs-code extension? or extend an existing extension for viewing, editing, and folding *.lith files.
 With per-section syntax highlighting, section folding, etc.
 
-  
+## P2P Device Sync (settled design, browser-first)
+
+The engine and its browser binding are built: `lithic-sync` is one crate with a `wasm` feature, and the PWA drives it through a device sync panel, paired by ticket, with `src/launcher.wasm` built by `sync/scripts/build-wasm-launcher.sh` and fetched only when that panel is opened. Nothing is tied to a save yet, so the panel's own pick is the only thing that publishes today, and the desktop app keeps its folder-to-GitHub sync until a native adapter lands. The design is settled, and it is sequenced browser-first so the engine and its wasm binding are proven in the PWA before any native adapter is written; the desktop, the shim and the server then reuse the same crate behind thin adapters. The browser path is real today: `iroh-docs` builds and runs in the browser memory-only (since v0.97.0), `iroh-blobs` carries the same `wasm32-unknown-unknown` build, core `iroh` and `iroh-gossip` run relay-only in browsers, and `iroh-willow` is not part of this (unreleased, 0.0.1). The PWA is the reason for the order: it is a first-class client, and the one with no backend to borrow from.
+
+The design:
+
+- **Engine.** `iroh-docs` over iroh: ticket-based pairing, range-based reconciliation, and live events, in one new `lithic-sync` crate with a `wasm` feature, shared by every prong (the desktop app, the Linux shim, the self-host server, and the PWA). It carries no Tauri or GTK dependencies, so it builds and unit-tests on its own. Native prongs use the persistent store (`Docs::persistent`, redb) under the app's own state folder; the browser uses `Docs::memory()`.
+- **Replica model.** One document per synced folder, with entries keyed by file name. One write ticket pairs a device for every Lith in the folder; one read-only ticket serves the archivist.
+- **Browser persistence.** The doc replica is a session object; the durable copy stays the launcher's own IndexedDB layer (the documents, the git-lite history chain, and the dirty-state recovery). The iroh identity, the author and the write ticket live there too, so a reload rejoins without pairing again; clearing site data means pairing again.
+- **The publish rule.** Four rules keep a reload from ever beating a newer remote edit:
+  - Boot never publishes. Identity and ticket are imported, and a local file seeds an entry only where the doc has none (first join or recovery). Where the doc has an entry, the doc wins and the local copy is brought forward as external drift, which the history chain already understands.
+  - Only explicit saves publish. After the local write succeeds (IndexedDB in the browser, the file on desktop), the same bytes become the entry.
+  - Received updates never republish. A peer's write is materialized and applied through the diff/patch pair onto the history chain, then the UI refreshes.
+  - Newest explicit save wins per file. If the open document has unsaved edits when a remote update lands, the existing unsaved-edits prompt decides.
+- **Pairing.** A device shows its ticket as a QR code (rendered to SVG by the engine, so no new dependency reaches the launcher); the other side pastes it, or scans it where a camera exists. No account, no coordination server.
+- **The heading's round controls** (the single circled button in the launcher today):
+  - PWA: two circles, device sync and help.
+  - Self-host (the server, and the self-host desktop build): two circles, device sync and GitHub sync.
+  - Everywhere else (the desktop app, and the Linux shim, which counts as desktop): one circle, device sync.
+  - Both circles appear only while neither sync is set up; they are mutually exclusive, and the rule is enforced in the backend as well as the UI.
+- **Names and icons.** The iroh side is called device sync in the UI, in plain words, so `iroh` never appears; GitHub sync keeps its name. The existing cloud glyph becomes the device-sync icon, and GitHub sync gets a new octopus glyph in the same style.
+- **The wasm payload.** The engine ships as `src/launcher.wasm`, built and committed by CI beside `src/launcher.html`, the way the launcher itself is. Its glue is bundled into the launcher and the service worker caches it for offline boots; it is fetched lazily and only where the browser prong uses it, so `file://` and USB sticks keep today's no-sync behavior.
+- **GitHub sync is quarantined to self-host builds.** A `self-host-mode` Cargo feature gates the git core, the git and GitHub commands, and `git2` (with the macOS `openssl-sys` vendored table that exists only for it). `reqwest` and `base64` stay unconditional: they serve standard features (the instance probe and icon fetch; the credential vault). Standard desktop and shim builds drop the circle and the commands; the self-host desktop build and the server keep them. Each build registers one `invoke_handler` for its variant, selected with `#[cfg]`; two calls in sequence would silently discard the first. On-disk sync config is left untouched, so a self-host build resumes it.
+- **Archival.** An always-on anchor (an instance left running) exposes a read-only ticket; a scheduled job in the user's own repository joins it, writes the `.lith` files and commits when something changed. The job runs a small `lithic-archivist` binary from the same crate, published as a release asset, with a template workflow under `deploy/archivist/`. Standard clients carry no archival UI, no archive buttons and no webhooks; the read-only ticket is copied out of the app once, at setup. The anchor must be online when the job runs, and scheduled jobs pause after 60 days of repository inactivity.
+
+Sizes will grow: iroh brings an async runtime and a TLS stack to the shim and the desktop artifacts, and every release's sizes are measured and recorded.

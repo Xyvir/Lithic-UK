@@ -25,6 +25,10 @@ RUN chmod +x /app/entrypoint.sh /app/watcher.sh /app/autoupdate.sh /app/scripts/
 COPY index.html              /app/public/index.html
 COPY src/launcher.html       /app/public/src/launcher.html
 COPY src/lithic.html         /app/public/src/lithic.html
+# The device sync engine, fetched lazily by the launcher and only by the browser
+# prong's panel. It sits beside launcher.html because that is where the page
+# resolves it from, so an instance that ships the launcher ships its engine too.
+COPY src/launcher.wasm       /app/public/src/launcher.wasm
 
 # Static assets (non-fatal if missing)
 COPY favicon.ico              /app/public/favicon.ico

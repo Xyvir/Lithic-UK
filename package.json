@@ -14,6 +14,7 @@
     "check:light": "node scripts/check-light-artifact.mjs",
     "test:puppeteer": "node scripts/test-puppeteer-launcher.mjs",
     "test:puppeteer:headed": "HEADED=1 node scripts/test-puppeteer-launcher.mjs",
+    "test:device-sync": "node scripts/test-device-sync.mjs",
     "gallery": "node scripts/ui-gallery.mjs",
     "check:offline": "node scripts/check-launcher-offline.mjs --browser",
     "check:copy": "node scripts/check-launcher-copy.mjs",

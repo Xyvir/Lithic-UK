@@ -61,6 +61,10 @@ jobs:
           # Core Lithic files (graceful fail to prevent crash during untagged dev runs)
           cp src/launcher.html build/app/public/src/launcher.html 2>/dev/null || echo "Missing launcher.html"
           cp src/lithic.html   build/app/public/src/lithic.html 2>/dev/null || echo "Missing lithic.html"
+          # The device sync engine the launcher fetches at runtime, lazily and only
+          # where device sync is used. Without it the panel reports itself
+          # unavailable, so it ships with the launcher it belongs to.
+          cp src/launcher.wasm build/app/public/src/launcher.wasm 2>/dev/null || echo "Missing launcher.wasm"
 
           # Root index (redirects to launcher)
           cp index.html build/app/public/index.html 2>/dev/null || echo "Missing index.html"

@@ -2,13 +2,14 @@
 set -euo pipefail
 
 # Lithic Autoupdate Utility
-# Pulls the latest lithic.html and launcher.html from GitHub if they differ.
+# Pulls the latest lithic.html, launcher.html and launcher.wasm from GitHub if they differ.
 # Handles systemd timer setup for scheduled updates.
 
 APP_DIR="/app"
 PUBLIC_DIR="${APP_DIR}/public"
 LITHIC_HTML="${PUBLIC_DIR}/src/lithic.html"
 LAUNCHER_HTML="${PUBLIC_DIR}/src/launcher.html"
+LAUNCHER_WASM="${PUBLIC_DIR}/src/launcher.wasm"
 
 # Load config if present
 if [ -f "/etc/default/lithic" ]; then
@@ -51,7 +52,7 @@ run_update() {
     TEMP_DIR=$(mktemp -d)
     trap 'rm -rf "$TEMP_DIR"' EXIT
 
-    # Fetch latest launcher.html and lithic.html
+    # Fetch latest launcher.html, lithic.html and the device sync engine
     if ! curl -fsSL "https://raw.githubusercontent.com/${REPO}/${BRANCH}/src/launcher.html?t=$(date +%s)" -o "$TEMP_DIR/launcher.html"; then
         echo "[Autoupdate] ERROR: Failed to download launcher.html"
         exit 1
@@ -60,9 +61,16 @@ run_update() {
         echo "[Autoupdate] ERROR: Failed to download lithic.html"
         exit 1
     fi
+    # The engine is the biggest file this fetches, and it is the launcher's own
+    # sibling: an instance that pulled the launcher but not this would show device
+    # sync as unavailable. It is not fatal on its own, since the launcher and the
+    # wiki still update, so a failure here is a warning rather than an exit.
+    if ! curl -fsSL "https://raw.githubusercontent.com/${REPO}/${BRANCH}/src/launcher.wasm?t=$(date +%s)" -o "$TEMP_DIR/launcher.wasm"; then
+        echo "[Autoupdate] WARNING: Failed to download launcher.wasm (device sync will be unavailable)"
+    fi
 
     local updated=0
-    for file_name in "launcher.html" "lithic.html"; do
+    for file_name in "launcher.html" "lithic.html" "launcher.wasm"; do
         local_file="${PUBLIC_DIR}/src/${file_name}"
         remote_file="${TEMP_DIR}/${file_name}"
 
@@ -163,8 +171,9 @@ show_status() {
         trap 'rm -rf "$TEMP_DIR"' EXIT
         
         if curl -fsSL "https://raw.githubusercontent.com/${REPO}/${BRANCH}/src/launcher.html?t=$(date +%s)" -o "$TEMP_DIR/launcher.html" 2>/dev/null && \
-           curl -fsSL "https://raw.githubusercontent.com/${REPO}/${BRANCH}/src/lithic.html?t=$(date +%s)" -o "$TEMP_DIR/lithic.html" 2>/dev/null; then
-            for file_name in "launcher.html" "lithic.html"; do
+           curl -fsSL "https://raw.githubusercontent.com/${REPO}/${BRANCH}/src/lithic.html?t=$(date +%s)" -o "$TEMP_DIR/lithic.html" 2>/dev/null && \
+           curl -fsSL "https://raw.githubusercontent.com/${REPO}/${BRANCH}/src/launcher.wasm?t=$(date +%s)" -o "$TEMP_DIR/launcher.wasm" 2>/dev/null; then
+            for file_name in "launcher.html" "lithic.html" "launcher.wasm"; do
                 local_file="${PUBLIC_DIR}/src/${file_name}"
                 remote_file="${TEMP_DIR}/${file_name}"
                 if [ -f "$local_file" ]; then

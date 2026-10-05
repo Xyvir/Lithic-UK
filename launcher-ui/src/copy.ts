@@ -133,6 +133,66 @@ const en = {
     repeatPin: 'Repeat the PIN'
   },
 
+  /**
+   * Device sync: the panel, the pairing steps, and the sentences its events read as.
+   *
+   * Named for what the reader is doing rather than for what the engine calls it: no
+   * `iroh`, no `doc`, no `entry` anywhere in here. A ticket is a ticket because that is
+   * the word the panel shows, and the activity lines are the four things a person can
+   * actually observe (a file arrived, a file left, a device came, a device went).
+   */
+  deviceSync: {
+    title: 'Device Sync',
+    openAria: 'Open device sync',
+    closeAria: 'Close device sync',
+    loading: 'Starting the sync engine…',
+    /** Why this page cannot run the engine at all, one sentence per reason. */
+    unavailable: {
+      file: 'Device sync needs a page served by a web server. This launcher was opened from a file, so there is nothing for it to fetch its engine from.',
+      'no-wasm': 'This browser cannot run the piece of Lithic that device sync is built on.',
+      'no-crypto': 'This browser does not offer the randomness device sync needs.',
+      engine: 'The sync engine could not be loaded here. Everything else works as usual, and your Liths stay on this device.'
+    },
+    /** The engine's own id for this device, shown shortened rather than in full. */
+    nodeLabel: 'This device',
+    folderCount: (count: number): string =>
+      count === 1 ? 'One Lith in this folder' : `${count} Liths in this folder`,
+    peers: (count: number): string =>
+      count === 1 ? 'Paired with one device' : `Paired with ${count} devices`,
+    activity: {
+      idle: 'Nothing has synced yet.',
+      update: (name: string): string => `Updated by another device: ${name}`,
+      seeded: (name: string): string => `Added from this device: ${name}`,
+      drift: (name: string): string => `Changed outside this device: ${name}`,
+      peerUp: 'A device joined.',
+      peerDown: 'A device left.',
+      failed: (name: string, reason: string): string => `${name} did not sync: ${reason}`
+    },
+    ticketTitle: 'Your ticket',
+    ticketShow: 'Show this device’s ticket',
+    ticketBusy: 'Waiting for the network…',
+    ticketBody: 'Paste this into the other device. Anyone who has it can write to this folder.',
+    ticketHint: 'A ticket is how two devices find each other. No account, and no server of ours.',
+    ticketCopy: 'Copy',
+    ticketCopied: 'Copied',
+    joinTitle: 'Pair another device',
+    joinPlaceholder: 'Paste the ticket from the other device',
+    join: 'Pair',
+    joining: 'Pairing…',
+    joinHint: 'Pairing brings that device’s Liths into this folder.',
+    joinEmpty: 'That is not a ticket. Paste the whole text from the other device.',
+    folderTitle: 'This folder',
+    folderEmpty: 'Nothing in this folder yet. Pair a device, or add a Lith below.',
+    download: 'Save a copy',
+    downloading: 'Fetching…',
+    saved: (name: string): string => `Saved ${name}`,
+    add: 'Pick a Lith to add',
+    addHint: 'The file is published to this folder for every paired device.',
+    publishing: 'Publishing…',
+    published: (name: string): string => `Published ${name}`,
+    error: (detail: string): string => `Device sync hit a problem: ${detail}`
+  },
+
   dialogs: {
     gitSync: {
       title: 'GitHub Sync',
@@ -697,6 +757,60 @@ const es: Copy = {
     repeatPin: 'Repite el PIN'
   },
 
+  /**
+   * La sincronización de dispositivos: el panel, los pasos de emparejamiento y lo que
+   * dicen sus eventos.
+   */
+  deviceSync: {
+    title: 'Sincronización de dispositivos',
+    openAria: 'Abrir la sincronización de dispositivos',
+    closeAria: 'Cerrar la sincronización de dispositivos',
+    loading: 'Iniciando el motor de sincronización…',
+    unavailable: {
+      file: 'La sincronización de dispositivos necesita una página servida por un servidor web. Este launcher se abrió desde un archivo, así que no hay de dónde descargar su motor.',
+      'no-wasm': 'Este navegador no puede ejecutar la parte de Lithic sobre la que se construye la sincronización de dispositivos.',
+      'no-crypto': 'Este navegador no ofrece la aleatoriedad que la sincronización de dispositivos necesita.',
+      engine: 'El motor de sincronización no se pudo cargar aquí. Todo lo demás funciona igual, y tus Liths se quedan en este dispositivo.'
+    },
+    nodeLabel: 'Este dispositivo',
+    folderCount: (count: number): string =>
+      count === 1 ? 'Un Lith en esta carpeta' : `${count} Liths en esta carpeta`,
+    peers: (count: number): string =>
+      count === 1 ? 'Emparejado con un dispositivo' : `Emparejado con ${count} dispositivos`,
+    activity: {
+      idle: 'Todavía no se ha sincronizado nada.',
+      update: (name: string): string => `Actualizado por otro dispositivo: ${name}`,
+      seeded: (name: string): string => `Añadido desde este dispositivo: ${name}`,
+      drift: (name: string): string => `Cambiado fuera de este dispositivo: ${name}`,
+      peerUp: 'Se ha unido un dispositivo.',
+      peerDown: 'Se ha ido un dispositivo.',
+      failed: (name: string, reason: string): string => `${name} no se sincronizó: ${reason}`
+    },
+    ticketTitle: 'Tu ticket',
+    ticketShow: 'Mostrar el ticket de este dispositivo',
+    ticketBusy: 'Esperando a la red…',
+    ticketBody: 'Pégalo en el otro dispositivo. Quien lo tenga puede escribir en esta carpeta.',
+    ticketHint: 'Un ticket es como dos dispositivos se encuentran. Sin cuenta y sin servidor nuestro.',
+    ticketCopy: 'Copiar',
+    ticketCopied: 'Copiado',
+    joinTitle: 'Emparejar otro dispositivo',
+    joinPlaceholder: 'Pega el ticket del otro dispositivo',
+    join: 'Emparejar',
+    joining: 'Emparejando…',
+    joinHint: 'Emparejar trae los Liths de ese dispositivo a esta carpeta.',
+    joinEmpty: 'Eso no es un ticket. Pega el texto completo del otro dispositivo.',
+    folderTitle: 'Esta carpeta',
+    folderEmpty: 'Todavía no hay nada en esta carpeta. Empareja un dispositivo o añade un Lith abajo.',
+    download: 'Guardar una copia',
+    downloading: 'Descargando…',
+    saved: (name: string): string => `Guardado ${name}`,
+    add: 'Elegir un Lith para añadir',
+    addHint: 'El archivo se publica en esta carpeta para todos los dispositivos emparejados.',
+    publishing: 'Publicando…',
+    published: (name: string): string => `Publicado ${name}`,
+    error: (detail: string): string => `La sincronización de dispositivos falló: ${detail}`
+  },
+
   dialogs: {
     gitSync: {
       title: 'GitHub Sync',
@@ -1229,6 +1343,60 @@ const fr: Copy = {
     repeatPin: 'Répéter le PIN'
   },
 
+  /**
+   * La synchronisation entre appareils : le panneau, les étapes d’appairage et ce que
+   * disent ses événements.
+   */
+  deviceSync: {
+    title: 'Synchronisation entre appareils',
+    openAria: 'Ouvrir la synchronisation entre appareils',
+    closeAria: 'Fermer la synchronisation entre appareils',
+    loading: 'Démarrage du moteur de synchronisation…',
+    unavailable: {
+      file: 'La synchronisation entre appareils a besoin d’une page servie par un serveur web. Ce launcher a été ouvert depuis un fichier, il n’a donc nulle part où charger son moteur.',
+      'no-wasm': 'Ce navigateur ne peut pas exécuter la partie de Lithic sur laquelle repose la synchronisation entre appareils.',
+      'no-crypto': 'Ce navigateur ne fournit pas le hasard dont la synchronisation entre appareils a besoin.',
+      engine: 'Le moteur de synchronisation n’a pas pu être chargé ici. Tout le reste fonctionne comme d’habitude, et vos Liths restent sur cet appareil.'
+    },
+    nodeLabel: 'Cet appareil',
+    folderCount: (count: number): string =>
+      count === 1 ? 'Un Lith dans ce dossier' : `${count} Liths dans ce dossier`,
+    peers: (count: number): string =>
+      count === 1 ? 'Appairé avec un appareil' : `Appairé avec ${count} appareils`,
+    activity: {
+      idle: 'Rien ne s’est encore synchronisé.',
+      update: (name: string): string => `Mis à jour par un autre appareil : ${name}`,
+      seeded: (name: string): string => `Ajouté depuis cet appareil : ${name}`,
+      drift: (name: string): string => `Modifié en dehors de cet appareil : ${name}`,
+      peerUp: 'Un appareil a rejoint.',
+      peerDown: 'Un appareil est parti.',
+      failed: (name: string, reason: string): string => `${name} ne s’est pas synchronisé : ${reason}`
+    },
+    ticketTitle: 'Votre ticket',
+    ticketShow: 'Afficher le ticket de cet appareil',
+    ticketBusy: 'En attente du réseau…',
+    ticketBody: 'Collez-le dans l’autre appareil. Quiconque l’a peut écrire dans ce dossier.',
+    ticketHint: 'Un ticket est la façon dont deux appareils se trouvent. Sans compte et sans serveur à nous.',
+    ticketCopy: 'Copier',
+    ticketCopied: 'Copié',
+    joinTitle: 'Appairer un autre appareil',
+    joinPlaceholder: 'Collez le ticket de l’autre appareil',
+    join: 'Appairer',
+    joining: 'Appairage…',
+    joinHint: 'L’appairage amène les Liths de cet appareil dans ce dossier.',
+    joinEmpty: 'Ce n’est pas un ticket. Collez le texte complet de l’autre appareil.',
+    folderTitle: 'Ce dossier',
+    folderEmpty: 'Rien dans ce dossier pour l’instant. Appairez un appareil ou ajoutez un Lith ci-dessous.',
+    download: 'Enregistrer une copie',
+    downloading: 'Téléchargement…',
+    saved: (name: string): string => `Enregistré ${name}`,
+    add: 'Choisir un Lith à ajouter',
+    addHint: 'Le fichier est publié dans ce dossier pour tous les appareils appairés.',
+    publishing: 'Publication…',
+    published: (name: string): string => `Publié ${name}`,
+    error: (detail: string): string => `La synchronisation entre appareils a rencontré un problème : ${detail}`
+  },
+
   dialogs: {
     gitSync: {
       title: 'GitHub Sync',
@@ -1756,6 +1924,60 @@ const de: Copy = {
       `${label}, Zeichen ${position} von ${total}`,
     choosePin: 'PIN wählen',
     repeatPin: 'PIN wiederholen'
+  },
+
+  /**
+   * Die Gerätesynchronisierung: das Panel, die Kopplungsschritte und was ihre Ereignisse
+   * sagen.
+   */
+  deviceSync: {
+    title: 'Gerätesynchronisierung',
+    openAria: 'Gerätesynchronisierung öffnen',
+    closeAria: 'Gerätesynchronisierung schließen',
+    loading: 'Synchronisierungsmodul wird gestartet…',
+    unavailable: {
+      file: 'Die Gerätesynchronisierung braucht eine Seite, die von einem Webserver ausgeliefert wird. Dieser Launcher wurde aus einer Datei geöffnet, es gibt also nichts, woraus er sein Modul laden könnte.',
+      'no-wasm': 'Dieser Browser kann den Teil von Lithic nicht ausführen, auf dem die Gerätesynchronisierung aufbaut.',
+      'no-crypto': 'Dieser Browser bietet nicht den Zufall, den die Gerätesynchronisierung braucht.',
+      engine: 'Das Synchronisierungsmodul konnte hier nicht geladen werden. Alles andere funktioniert wie gewohnt, und Ihre Liths bleiben auf diesem Gerät.'
+    },
+    nodeLabel: 'Dieses Gerät',
+    folderCount: (count: number): string =>
+      count === 1 ? 'Ein Lith in diesem Ordner' : `${count} Liths in diesem Ordner`,
+    peers: (count: number): string =>
+      count === 1 ? 'Mit einem Gerät gekoppelt' : `Mit ${count} Geräten gekoppelt`,
+    activity: {
+      idle: 'Bisher wurde nichts synchronisiert.',
+      update: (name: string): string => `Von einem anderen Gerät aktualisiert: ${name}`,
+      seeded: (name: string): string => `Von diesem Gerät hinzugefügt: ${name}`,
+      drift: (name: string): string => `Außerhalb dieses Geräts geändert: ${name}`,
+      peerUp: 'Ein Gerät ist beigetreten.',
+      peerDown: 'Ein Gerät ist gegangen.',
+      failed: (name: string, reason: string): string => `${name} wurde nicht synchronisiert: ${reason}`
+    },
+    ticketTitle: 'Ihr Ticket',
+    ticketShow: 'Ticket dieses Geräts anzeigen',
+    ticketBusy: 'Warten auf das Netzwerk…',
+    ticketBody: 'Fügen Sie es auf dem anderen Gerät ein. Wer es hat, kann in diesen Ordner schreiben.',
+    ticketHint: 'Ein Ticket ist die Art, wie zwei Geräte zueinander finden. Kein Konto und kein Server von uns.',
+    ticketCopy: 'Kopieren',
+    ticketCopied: 'Kopiert',
+    joinTitle: 'Ein anderes Gerät koppeln',
+    joinPlaceholder: 'Fügen Sie das Ticket des anderen Geräts ein',
+    join: 'Koppeln',
+    joining: 'Wird gekoppelt…',
+    joinHint: 'Beim Koppeln kommen die Liths dieses Geräts in diesen Ordner.',
+    joinEmpty: 'Das ist kein Ticket. Fügen Sie den ganzen Text vom anderen Gerät ein.',
+    folderTitle: 'Dieser Ordner',
+    folderEmpty: 'Noch nichts in diesem Ordner. Koppeln Sie ein Gerät oder fügen Sie unten ein Lith hinzu.',
+    download: 'Kopie speichern',
+    downloading: 'Wird geholt…',
+    saved: (name: string): string => `${name} gespeichert`,
+    add: 'Ein Lith zum Hinzufügen wählen',
+    addHint: 'Die Datei wird in diesem Ordner für alle gekoppelten Geräte veröffentlicht.',
+    publishing: 'Wird veröffentlicht…',
+    published: (name: string): string => `${name} veröffentlicht`,
+    error: (detail: string): string => `Gerätesynchronisierung hat ein Problem: ${detail}`
   },
 
   dialogs: {

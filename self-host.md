@@ -229,7 +229,7 @@ curl -fsSL sh.lithic.uk | sudo bash
 ```
 
 ### Automatic Updates (LXC)
-For updating the "app" portion of the server (the UI files `lithic.html` and `launcher.html` where PKMS features and patches are frequently added), using the built-in `lithic-autoupdate` utility is the recommended method. It pulls the latest UI files from the GitHub repository to keep the front-end up to date without requiring a server reboot. It is designed to operate offline, checking connectivity before making request attempts and failing gracefully if the server has no internet access.
+For updating the "app" portion of the server (the UI files `lithic.html`, `launcher.html` and the device sync engine `launcher.wasm` that sits beside the launcher, where PKMS features and patches are frequently added), using the built-in `lithic-autoupdate` utility is the recommended method. It pulls the latest UI files from the GitHub repository to keep the front-end up to date without requiring a server reboot. It is designed to operate offline, checking connectivity before making request attempts and failing gracefully if the server has no internet access.
 
 By default, the daily autoupdate checker is **disabled** (unless enabled at install time). You can manage it using the `lithic-autoupdate` helper command from your server's SSH environment:
 

@@ -1,0 +1,56 @@
+[package]
+name = "lithic-sync"
+version = "0.1.0"
+description = "Device sync engine for Lithic folders, built on iroh documents"
+authors = ["you"]
+edition = "2021"
+rust-version = "1.91"
+publish = false
+
+# The engine is deliberately bare: no Tauri, no GTK, no web framework. Every
+# Lithic prong (desktop, shim, self-host server, PWA) reuses this one crate
+# behind a thin adapter, so it must build and unit-test on its own.
+# The browser artifact is a wasm module, so a cdylib is produced as well as
+# the rlib that every native prong links against.
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[features]
+default = ["native"]
+# Native prongs: the redb replica store, the on-disk blob store and a folder.
+native = ["iroh-docs/fs-store", "iroh-blobs/fs-store", "tokio/fs"]
+# The browser prong: memory-only stores, a wasm-bindgen surface, no filesystem.
+wasm = ["dep:wasm-bindgen", "dep:wasm-bindgen-futures", "dep:js-sys"]
+
+[dependencies]
+anyhow = "1"
+bytes = "1.7"
+iroh = { version = "1.3", default-features = false, features = ["tls-ring"] }
+iroh-blobs = { version = "0.103", default-features = false }
+iroh-docs = { version = "0.101", default-features = false }
+iroh-gossip = { version = "0.101", default-features = false, features = ["net"] }
+n0-future = "0.3"
+tokio = { version = "1", default-features = false, features = ["sync"] }
+js-sys = { version = "0.3.106", optional = true }
+wasm-bindgen = { version = "0.2.129", optional = true }
+wasm-bindgen-futures = { version = "0.4.79", optional = true }
+
+# The browser's randomness source, wired the same way the iroh crates wire it:
+# the feature here and the `getrandom_backend` flag in .cargo/config.toml must
+# both be present, and only for the wasm target.
+[target.'cfg(all(target_family = "wasm", target_os = "unknown"))'.dependencies]
+getrandom = { version = "0.4", features = ["wasm_js"] }
+
+# The browser artifact is downloaded by every visitor, so it is built for size
+# rather than for speed: the launcher ships the release wasm beside itself, and
+# a debug build of the same code is several times larger. This profile is the
+# crate's own (it is its own package root), so it cannot move a native build.
+[profile.release]
+opt-level = "z"
+lto = true
+codegen-units = 1
+panic = "abort"
+
+[dev-dependencies]
+tempfile = "3"
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "time"] }
