@@ -75,3 +75,48 @@ type: text/css
     width: 10px;
     height: 10px;
 }
+
+/* Touch pointers: the whiteboard layout's own floating bar sits in the same
+   top row as this menu panel and is 400px wide, so on a phone the two extra
+   buttons were being pushed underneath it - unclickable, and clipping the
+   rest of the row. On a coarse pointer they move to a second line inside the
+   panel, which hands the width they were using back to the row.
+
+   The panel is laid out as a grid rather than with flex-wrap, because a
+   wrapping flex container sizes itself to its content and would never wrap
+   until some fixed width was imposed on it - and any such width goes stale
+   the moment the page dropdown is wider than expected. Grid tracks follow
+   the content, so row one keeps its natural width and the buttons simply
+   land on the row below it. */
+@media (pointer: coarse) {
+    #TD-MenuPanel {
+        display: grid !important;
+        grid-template-columns: auto auto;
+        height: auto !important;
+    }
+
+    #TD-MenuPanel > #TD-MenuIcon {
+        grid-area: 1 / 1;
+    }
+
+    #TD-MenuPanel > #TD-Page {
+        grid-area: 1 / 2;
+    }
+
+    .lithic-wb-page-prev {
+        grid-area: 2 / 1;
+    }
+
+    .lithic-wb-page-next {
+        grid-area: 2 / 2;
+    }
+
+    /* The inline row only needed the 5px nudge up because the row itself was
+       40px tall; on their own line the buttons sit flush and use margins. */
+    .lithic-wb-page-prev,
+    .lithic-wb-page-next {
+        position: static !important;
+        top: auto !important;
+        margin: 4px 2px !important;
+    }
+}
