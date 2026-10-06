@@ -76,47 +76,83 @@ type: text/css
     height: 10px;
 }
 
-/* Touch pointers: the whiteboard layout's own floating bar sits in the same
-   top row as this menu panel and is 400px wide, so on a phone the two extra
-   buttons were being pushed underneath it - unclickable, and clipping the
-   rest of the row. On a coarse pointer they move to a second line inside the
-   panel, which hands the width they were using back to the row.
+/* Touch pointers: this menu panel and the layout's own 400px bar are layered
+   over the same top strip as tldraw's right-hand cluster (undo/redo/zoom/
+   styles), and on a phone there is not room for all three side by side. Two
+   collisions have to be undone without moving anything on a desktop, where
+   there is room for all of them.
 
-   The panel is laid out as a grid rather than with flex-wrap, because a
-   wrapping flex container sizes itself to its content and would never wrap
-   until some fixed width was imposed on it - and any such width goes stale
-   the moment the page dropdown is wider than expected. Grid tracks follow
-   the content, so row one keeps its natural width and the buttons simply
-   land on the row below it. */
+   First: the page arrows sat behind that bar (the bar is layered over the
+   board), so the last two panel items were unclickable. They move to a second
+   line below the panel. They are taken out of the flow rather than given a
+   grid row, because the panel shares its flex row with the right-hand cluster:
+   any in-flow child that grows makes the row taller and stretches that cluster
+   with it, so one extra line on the left was silently growing undo/redo on the
+   right. Positioned absolutely under the panel they add no height, and
+   overflow:visible lets them show below the panel's own 41px box. */
 @media (pointer: coarse) {
     #TD-MenuPanel {
-        display: grid !important;
-        grid-template-columns: auto auto;
-        height: auto !important;
-    }
-
-    #TD-MenuPanel > #TD-MenuIcon {
-        grid-area: 1 / 1;
-    }
-
-    #TD-MenuPanel > #TD-Page {
-        grid-area: 1 / 2;
-    }
-
-    .lithic-wb-page-prev {
-        grid-area: 2 / 1;
-    }
-
-    .lithic-wb-page-next {
-        grid-area: 2 / 2;
+        position: relative !important;
+        height: 41px !important;
+        overflow: visible !important;
     }
 
     /* The inline row only needed the 5px nudge up because the row itself was
        40px tall; on their own line the buttons sit flush and use margins. */
     .lithic-wb-page-prev,
     .lithic-wb-page-next {
-        position: static !important;
-        top: auto !important;
+        position: absolute !important;
+        top: 41px !important;
         margin: 4px 2px !important;
+    }
+
+    .lithic-wb-page-prev {
+        left: 0 !important;
+    }
+
+    .lithic-wb-page-next {
+        left: 42px !important;
+    }
+}
+
+/* Second: that bar is centred at width:400px, so on a landscape phone narrower
+   than about 844px its right end covers undo/redo. It starts just right of the
+   panel instead and is capped so it stops short of the cluster's 222px, which
+   leaves the space next to the panel as the only place the bar can live. The
+   board search field is the one item that flexes, so the fixed buttons beside
+   it never spill back over the cluster.
+
+   124px clears the widest page label a board is likely to reach - the panel
+   measures 99px at "Page 1" and grows about a pixel per character, so even
+   "Page 1234" stays clear of the bar. */
+@media (pointer: coarse) and (max-width: 1024px) {
+    .tw-whiteboard-layout-top-bar {
+        box-sizing: border-box !important;
+        left: 124px !important;
+        width: auto !important;
+        max-width: calc(100% - 356px) !important;
+        justify-content: flex-start !important;
+    }
+
+    .tw-whiteboard-layout-top-bar > span:first-child {
+        flex: 0 1 auto;
+        min-width: 0;
+    }
+
+    /* The search field carries an inline 230px width, so it cannot shrink on
+       its own - measured from the viewport it stays inside the bar's cap and
+       never slides over the buttons beside it. */
+    .lithic-wb-search-input {
+        width: min(230px, calc(100vw - 574px)) !important;
+    }
+}
+
+/* A short landscape phone (iPhone SE and friends) cannot give the board search
+   field a width worth having beside the four buttons, so the field steps aside
+   and leaves them all at full size. The dropdown arrow next to it still opens
+   the board list. */
+@media (pointer: coarse) and (max-width: 620px) {
+    .lithic-wb-search-input {
+        display: none !important;
     }
 }
