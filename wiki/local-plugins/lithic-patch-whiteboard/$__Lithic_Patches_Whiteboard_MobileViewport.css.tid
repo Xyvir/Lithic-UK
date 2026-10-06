@@ -1,0 +1,24 @@
+title: $:/Lithic/Patches/Whiteboard/MobileViewport
+tags: $:/tags/Stylesheet
+type: text/css
+
+/* A phone's browser draws its own chrome over the page, so 100vh is the
+   viewport with that chrome hidden, not the one the reader can see. The board
+   is sized in vh: the page layout passes height="100vh" to the whiteboard
+   widget, which writes it as an inline height on .tw-whiteboard-tldraw-container,
+   and tldraw anchors its bottom toolbar to the bottom of that box. On a phone
+   the box therefore runs on under the browser chrome, the toolbar is anchored
+   below the visible area, and no tool is reachable until the page is scrolled.
+
+   dvh is the viewport that is actually on screen, so the box ends where the
+   reader's screen ends and the toolbar arrives with it. The vh line stays in
+   front of the dvh line for engines that have no dvh, and !important is the
+   only way to reach a height the widget set inline. Scoped to a coarse
+   pointer, so a desktop window keeps its 100vh. */
+
+@media (pointer: coarse) {
+    .tw-whiteboard-tldraw-container {
+        height: 100vh !important;
+        height: 100dvh !important;
+    }
+}

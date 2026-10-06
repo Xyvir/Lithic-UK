@@ -15,13 +15,26 @@ type: text/css
      max-width: 1024px   leaves portrait monitors out of it
 
    Pure CSS: no script runs, the check happens before the first paint, and no
-   touch reaches the canvas while the gate is up. */
+   touch reaches the canvas while the gate is up.
+
+   The gate is a message, not a page, so nothing behind it may move either. A
+   finger dragged on the gate is swallowed by touch-action, and the document
+   behind it is given nothing to scroll. Both are guarded by the gate's own
+   presence, so they exist exactly while the whiteboard layout is mounted:
+   leaving the layout (or rotating, which drops the media query) restores
+   ordinary scrolling in the same frame. */
 
 .lithic-wb-rotate-gate {
     display: none;
 }
 
 @media (pointer: coarse) and (orientation: portrait) and (max-width: 1024px) {
+    html:has(.lithic-wb-rotate-gate),
+    body:has(.lithic-wb-rotate-gate) {
+        overflow: hidden !important;
+        overscroll-behavior: none;
+    }
+
     .lithic-wb-rotate-gate {
         position: fixed;
         top: 0;
@@ -39,6 +52,7 @@ type: text/css
         text-align: center;
         background: var(--lithic-c-page);
         color: var(--lithic-c-foreground);
+        touch-action: none;
     }
 }
 
