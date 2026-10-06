@@ -156,6 +156,8 @@ export class KeyvalWikiHistory implements WikiHistoryStore {
 
     const meta = (await this.store.get<WikiHistoryMeta>(metaKey(name))) ?? { headId: '', versions: [] };
     const head = meta.headId ? await this.materializeVersion(name, meta, meta.headId) : null;
+    const previous = meta.versions.find((version) => version.id === meta.headId);
+    if (previous) now = Math.max(now, previous.ts + 1);
     const ops: JsonPatchOp[] = head?.map ? diffTiddlerMaps(head.map, nextMap) : [];
 
     // A drifted mount forces a full base even for a small diff, so the chain
@@ -163,20 +165,34 @@ export class KeyvalWikiHistory implements WikiHistoryStore {
     // delta against a stale parent.
     const forceBase = options.forceBase === true;
 
-    let id: string;
+    let id = '';
     if (!head?.map || forceBase || bytesOf(JSON.stringify(ops)) > bytesOf(tiddlerJsonText) / 2) {
       // First version for this wiki, the delta stopped paying for itself
       // (more than half the size of a full snapshot), or the file drifted:
       // start a new base segment. Prior history stays intact/materializable.
-      id = versionId(now, tiddlerJsonText);
+      let ts = now;
+      id = versionId(ts, tiddlerJsonText);
+      const used = new Set(meta.versions.map((version) => version.id));
+      while (used.has(id)) {
+        ts += 1;
+        id = versionId(ts, tiddlerJsonText);
+      }
+      now = ts;
       await this.store.set(baseKey(name, id), { id, text: tiddlerJsonText });
-      const entry: VersionMeta = { id, ts: now, sizeBytes: bytesOf(tiddlerJsonText), isBase: true };
+      const entry: VersionMeta = { id, ts, sizeBytes: bytesOf(tiddlerJsonText), isBase: true };
       if (options.external) entry.external = true;
       meta.versions.push(entry);
     } else {
-      id = versionId(now, tiddlerJsonText, meta.headId);
-      await this.store.set(deltaKey(name, id), { id, parentId: meta.headId, ts: now, ops });
-      meta.versions.push({ id, ts: now, sizeBytes: bytesOf(mapToTiddlerArrayText(nextMap)) });
+      let ts = now;
+      id = versionId(ts, tiddlerJsonText, meta.headId);
+      const used = new Set(meta.versions.map((version) => version.id));
+      while (used.has(id)) {
+        ts += 1;
+        id = versionId(ts, tiddlerJsonText, meta.headId);
+      }
+      now = ts;
+      await this.store.set(deltaKey(name, id), { id, parentId: meta.headId, ts, ops });
+      meta.versions.push({ id, ts, sizeBytes: bytesOf(mapToTiddlerArrayText(nextMap)) });
     }
 
     meta.headId = id;

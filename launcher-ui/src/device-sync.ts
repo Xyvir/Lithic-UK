@@ -17,16 +17,16 @@
  *   fetched by the loader; on the native prong the first command is the start. A page
  *   that never opens the panel pays for neither, and a `file://` copy (whose fetches
  *   are refused) reports "unavailable" rather than failing at boot.
- * - One engine per page. Neither engine can be told to stop following the folder, so
- *   the session is a singleton: opening the panel twice must not deliver every event
- *   twice.
+ * - One engine per page. The browser binding currently has no detach call, so browser
+ *   unpair clears its saved ticket and reloads to end the old engine cleanly. Opening
+ *   the panel twice must not deliver every event twice.
  * - The session holds no facts of its own. Every button asks the engine, and every line
  *   the panel draws comes from the state the session published.
  *
- * The engines differ in what they keep. The browser's is memory-only and the launcher's
- * own store is the durable copy, so the device's thirty-two byte identity is generated
- * once and kept in IndexedDB, and a reload rejoins with the same node id instead of
- * pairing again. The native engine keeps everything under the app's state folder, so
+ * The engines differ in what they keep. The browser's replica lives only for this page,
+ * while its identity, pairing ticket, search cache and History Trail live in IndexedDB.
+ * A reload rejoins with the same node id, and unpairing clears only the ticket. The
+ * native engine keeps its replica under the app's state folder, so
  * there the identity is Rust's and the pairing survives a relaunch on its own; the
  * session still remembers the ticket text it minted, because that is what the panel's
  * ticket box reads before anyone presses the button again.
@@ -38,9 +38,12 @@ import { servedByApp } from './mode.ts';
 /** The identity is a 32 byte seed, which is what the engine's `start` insists on. */
 export const IDENTITY_BYTES = 32;
 
-/** Where the device's identity and its minted ticket live in the launcher's store. */
+/** Where the device's identity lives in the launcher's store. */
 export const IDENTITY_KEY = 'lithic-device-sync-identity';
+/** The ticket this device shows when sharing its current document. */
 export const TICKET_KEY = 'lithic-device-sync-ticket';
+/** The ticket this device uses to resume its current pairing. */
+export const PAIRING_KEY = 'lithic-device-sync-pairing';
 
 /**
  * Enough of the launcher's key/value store for this module to use it.
@@ -51,6 +54,7 @@ export const TICKET_KEY = 'lithic-device-sync-ticket';
 export interface SyncStore {
   get<T = unknown>(key: string): Promise<T | undefined>;
   set(key: string, value: unknown): Promise<void>;
+  del(key: string): Promise<void>;
 }
 
 /** One file in the paired folder, as the engine reports it. */
@@ -65,7 +69,7 @@ export interface SyncedEntry {
 
 /** What the folder did, translated from the wasm event object. */
 export type DeviceSyncEvent =
-  | { kind: 'remote-update'; name: string; from: string; base: Uint8Array | null; head: Uint8Array }
+  | { kind: 'remote-update'; name: string; from: string; base: Uint8Array | null; head: Uint8Array; at: number }
   | { kind: 'seeded'; name: string }
   | { kind: 'external-drift'; name: string }
   | { kind: 'peer-up'; from: string }
@@ -179,8 +183,9 @@ export function toEvent(raw: unknown): DeviceSyncEvent | null {
         kind: 'remote-update',
         name,
         from,
-        base: event.base instanceof Uint8Array ? event.base : null,
-        head: event.head instanceof Uint8Array ? event.head : new Uint8Array()
+        base: event.base instanceof Uint8Array ? event.base : typeof event.base === 'string' ? base64ToBytes(event.base) : null,
+        head: event.head instanceof Uint8Array ? event.head : typeof event.head === 'string' ? base64ToBytes(event.head) : new Uint8Array(),
+        at: typeof event.at === 'number' ? Math.round(event.at / 1000) : Date.now()
       };
     case 'seeded':
       return { kind: 'seeded', name };
@@ -202,6 +207,8 @@ export interface SyncEngineLike {
   node_id(): string;
   share(): Promise<string>;
   join(ticket: string): Promise<void>;
+  unpair?(): Promise<void>;
+  status?(): Promise<{ paired: boolean; peers: number }>;
   entries(): Promise<RawEntry[]>;
   read(name: string): Promise<Uint8Array | undefined>;
   publish(name: string, bytes: Uint8Array): Promise<void>;
@@ -308,6 +315,14 @@ class NativeEngine implements SyncEngineLike {
   subscribe(callback: (event: unknown) => void): void {
     tauriListen<unknown>(NATIVE_EVENT, callback);
   }
+
+  unpair(): Promise<void> {
+    return tauriInvoke<void>('device_sync_unpair');
+  }
+
+  status(): Promise<{ paired: boolean; peers: number }> {
+    return tauriInvoke<{ paired: boolean; peers: number }>('device_sync_status');
+  }
 }
 
 /**
@@ -353,6 +368,12 @@ export interface DeviceSyncState {
   entries: SyncedEntry[];
   /** Peers seen since this page loaded, oldest first. */
   peers: string[];
+  /** Peers currently connected, including a native snapshot after relaunch. */
+  peerCount: number;
+  /** Whether a pairing ticket is attached to this device. */
+  paired: boolean;
+  /** An Iroh operation or received update is in progress. */
+  operating: boolean;
   /** The last thing the folder did. */
   activity: DeviceSyncEvent | null;
   /** Why the session is unavailable or failed, or a failure that has since cleared. */
@@ -365,6 +386,9 @@ const EMPTY: DeviceSyncState = {
   ticket: null,
   entries: [],
   peers: [],
+  peerCount: 0,
+  paired: false,
+  operating: false,
   activity: null,
   error: null
 };
@@ -414,18 +438,25 @@ export class DeviceSyncSession {
   private readonly store: SyncStore;
   private readonly factory: EngineFactory;
   private readonly nativeFactory: NativeEngineFactory;
+  private readonly reloadBrowser: () => void;
   private nativeEngine = false;
+  private pairingAction: { kind: 'share' | 'join' | 'unpair'; promise: Promise<unknown> } | null = null;
+  private operationCount = 0;
 
   // Fields are assigned in the body rather than declared as constructor parameters: the
   // unit tests run under Node's type stripping, which refuses a parameter property.
   constructor(
     store: SyncStore,
     factory: EngineFactory = wasmEngineFactory,
-    nativeFactory: NativeEngineFactory = nativeEngineFactory
+    nativeFactory: NativeEngineFactory = nativeEngineFactory,
+    reloadBrowser: () => void = () => {
+      if (typeof location !== 'undefined') location.reload();
+    }
   ) {
     this.store = store;
     this.factory = factory;
     this.nativeFactory = nativeFactory;
+    this.reloadBrowser = reloadBrowser;
   }
 
   /**
@@ -471,7 +502,20 @@ export class DeviceSyncSession {
         this.engine = await this.factory(identity, (event) => this.handle(event));
       }
       const ticket = await this.rememberedTicket();
-      this.patch({ phase: 'ready', nodeId: this.engine.node_id(), ticket, error: null });
+      let paired = false;
+      let peerCount = 0;
+      if (this.nativeEngine) {
+        const status = await this.engine.status?.();
+        paired = status?.paired === true;
+        peerCount = status?.peers ?? 0;
+      } else {
+        const pairing = await this.rememberedPairingTicket();
+        if (pairing) {
+          await this.engine.join(pairing);
+          paired = true;
+        }
+      }
+      this.patch({ phase: 'ready', nodeId: this.engine.node_id(), ticket, paired, peerCount, error: null });
       await this.refresh();
     } catch (error) {
       this.patch({ phase: 'failed', error: message(error) });
@@ -488,6 +532,16 @@ export class DeviceSyncSession {
     }
   }
 
+  /** The saved ticket for rejoining this device's current document. */
+  private async rememberedPairingTicket(): Promise<string | null> {
+    try {
+      const stored = await this.store.get(PAIRING_KEY) ?? await this.store.get(TICKET_KEY);
+      return typeof stored === 'string' && stored.length > 0 ? stored : null;
+    } catch {
+      return null;
+    }
+  }
+
   /**
    * This device's ticket: the one it already had, or a freshly minted, remembered one.
    *
@@ -497,38 +551,158 @@ export class DeviceSyncSession {
    */
   async share(): Promise<string | null> {
     await this.start();
-    const existing = this.state.ticket;
-    if (existing) return existing;
+    if (this.state.paired) return this.state.ticket;
     if (!this.engine) return null;
+    if (this.pairingAction) {
+      if (this.pairingAction.kind !== 'share') return null;
+      return this.pairingAction.promise as Promise<string | null>;
+    }
+    const promise = this.runShare();
+    const action = { kind: 'share' as const, promise };
+    this.pairingAction = action;
+    try {
+      return await promise;
+    } finally {
+      if (this.pairingAction === action) this.pairingAction = null;
+    }
+  }
+
+  private async runShare(): Promise<string | null> {
+    if (!this.engine || (this.state.paired && this.state.ticket)) return this.state.ticket;
+    const alreadyPaired = this.state.paired;
+    this.beginOperation();
     try {
       const ticket = await this.engine.share();
+      if (!this.nativeEngine && !alreadyPaired) await this.store.set(PAIRING_KEY, ticket);
       await this.store.set(TICKET_KEY, ticket);
-      this.patch({ ticket, error: null });
+      this.patch({ ticket, paired: true, error: null });
       await this.refresh();
       return ticket;
     } catch (error) {
-      this.patch({ error: message(error) });
+      const reason = message(error);
+      if (alreadyPaired) {
+        this.patch({ error: reason });
+        return null;
+      }
+      try {
+        await this.abandonPairing();
+      } catch (cleanupError) {
+        this.patch({ paired: true, error: `${reason}; ${message(cleanupError)}` });
+        return null;
+      }
+      this.patch({ error: reason });
       return null;
+    } finally {
+      this.endOperation();
     }
+  }
+
+  /** Undo a pairing whose persistence failed, or detach the browser engine on reload. */
+  private async abandonPairing(): Promise<void> {
+    if (this.nativeEngine) {
+      if (!this.engine?.unpair) throw new Error('This desktop build cannot forget pairings');
+      await this.engine.unpair();
+    } else if (this.engine?.unpair) {
+      await this.engine.unpair();
+    }
+    await this.store.del(PAIRING_KEY);
+    await this.store.del(TICKET_KEY);
+    this.patch({ paired: false, ticket: null, entries: [], peers: [], peerCount: 0, activity: null });
+    if (!this.nativeEngine && !this.engine?.unpair) this.reloadBrowser();
   }
 
   /** Pair with another device from its ticket, then read the folder it brought. */
   async join(ticket: string): Promise<boolean> {
     await this.start();
+    if (this.pairingAction || this.state.paired) return false;
+    const promise = this.runJoin(ticket);
+    const action = { kind: 'join' as const, promise };
+    this.pairingAction = action;
+    try {
+      return await promise;
+    } finally {
+      if (this.pairingAction === action) this.pairingAction = null;
+    }
+  }
+
+  private async runJoin(ticket: string): Promise<boolean> {
+    if (this.state.paired) {
+      this.patch({ error: 'already-paired' });
+      return false;
+    }
     const cleaned = normalizeTicket(ticket);
     if (!cleaned) {
       this.patch({ error: 'empty-ticket' });
       return false;
     }
     if (!this.engine) return false;
+    let joined = false;
+    this.beginOperation();
     try {
       this.patch({ error: null });
       await this.engine.join(cleaned);
+      joined = true;
+      if (!this.nativeEngine) await this.store.set(PAIRING_KEY, cleaned);
+      await this.store.del(TICKET_KEY);
+      this.patch({ paired: true, ticket: null });
       await this.refresh();
+      return true;
+    } catch (error) {
+      const reason = message(error);
+      if (joined) {
+        try {
+          await this.abandonPairing();
+        } catch (cleanupError) {
+          this.patch({ paired: true, error: `${reason}; ${message(cleanupError)}` });
+          return false;
+        }
+      }
+      this.patch({ error: reason });
+      return false;
+    } finally {
+      this.endOperation();
+    }
+  }
+
+  /** Forget the current pairing without deleting this device's local files. */
+  async unpair(): Promise<boolean> {
+    await this.start();
+    while (this.pairingAction) {
+      const pending = this.pairingAction;
+      if (pending.kind === 'unpair') return pending.promise as Promise<boolean>;
+      await pending.promise;
+    }
+    if (!this.engine || !this.state.paired) return false;
+    const promise = this.runUnpair();
+    const action = { kind: 'unpair' as const, promise };
+    this.pairingAction = action;
+    try {
+      return await promise;
+    } finally {
+      if (this.pairingAction === action) this.pairingAction = null;
+    }
+  }
+
+  private async runUnpair(): Promise<boolean> {
+    if (!this.engine || !this.state.paired) return false;
+    this.beginOperation();
+    try {
+      if (this.nativeEngine) {
+        if (!this.engine.unpair) throw new Error('This desktop build cannot forget pairings');
+        await this.engine.unpair();
+      }
+      // The shipped browser binding cannot detach its background task, so a reload
+      // ends that runtime after its pairing tickets are forgotten.
+      await this.store.del(PAIRING_KEY);
+      await this.store.del(TICKET_KEY);
+      this.patch({ paired: false, ticket: null, entries: [], peers: [], peerCount: 0, activity: null, error: null });
+      if (!this.nativeEngine && !this.engine.unpair) this.reloadBrowser();
       return true;
     } catch (error) {
       this.patch({ error: message(error) });
       return false;
+    } finally {
+      this.endOperation();
     }
   }
 
@@ -536,6 +710,7 @@ export class DeviceSyncSession {
   async publish(name: string, bytes: Uint8Array): Promise<boolean> {
     await this.start();
     if (!this.engine) return false;
+    this.beginOperation();
     try {
       this.patch({ error: null });
       await this.engine.publish(name, bytes);
@@ -544,6 +719,8 @@ export class DeviceSyncSession {
     } catch (error) {
       this.patch({ error: message(error) });
       return false;
+    } finally {
+      this.endOperation();
     }
   }
 
@@ -551,6 +728,7 @@ export class DeviceSyncSession {
   async pull(name: string): Promise<Uint8Array | undefined> {
     await this.start();
     if (!this.engine) return undefined;
+    this.beginOperation();
     try {
       const bytes = await readWhenReady(this.engine, name);
       this.patch({ error: null });
@@ -558,6 +736,8 @@ export class DeviceSyncSession {
     } catch (error) {
       this.patch({ error: message(error) });
       return undefined;
+    } finally {
+      this.endOperation();
     }
   }
 
@@ -588,12 +768,30 @@ export class DeviceSyncSession {
         : event.kind === 'peer-down'
           ? this.state.peers.filter((peer) => peer !== event.from)
           : this.state.peers;
-    this.patch({ peers, activity: event });
+    const failed = event.kind === 'failed';
+    this.patch({
+      peers,
+      peerCount: event.kind === 'peer-up' || event.kind === 'peer-down' ? peers.length : this.state.peerCount,
+      activity: event,
+      ...(failed ? { error: event.reason } : {}),
+      ...(event.kind === 'peer-up' ? { paired: true } : {})
+    });
     // An update or a seed changes what the folder holds, so the list is read again
     // rather than patched here: the engine is the only thing that knows the row.
     if (event.kind === 'remote-update' || event.kind === 'seeded' || event.kind === 'external-drift') {
-      void this.refresh();
+      this.beginOperation();
+      void this.refresh().finally(() => this.endOperation());
     }
+  }
+
+  private beginOperation(): void {
+    this.operationCount += 1;
+    this.patch({ operating: true });
+  }
+
+  private endOperation(): void {
+    this.operationCount = Math.max(0, this.operationCount - 1);
+    this.patch({ operating: this.operationCount > 0 });
   }
 
   private patch(change: Partial<DeviceSyncState>): void {

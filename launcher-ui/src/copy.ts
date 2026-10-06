@@ -170,6 +170,14 @@ const en = {
     },
     ticketTitle: 'Your ticket',
     ticketShow: 'Show this device’s ticket',
+    unpair: 'Unpair this device',
+    unpairing: 'Unpairing…',
+    paired: 'Paired',
+    liveStatus: 'Device sync has a live connection to another device right now.',
+    waitingStatus: 'Device sync is paired, but no other devices are online right now.',
+    busyStatus: 'Device sync is exchanging changes with your other devices right now.',
+    errorStatus: 'Device sync could not finish its last operation on this device.',
+    idleStatus: 'Device sync has no active pairing on this device right now.',
     ticketBusy: 'Waiting for the network…',
     ticketBody: 'Paste this into the other device. Anyone who has it can write to this folder.',
     ticketHint: 'A ticket is how two devices find each other. No account, and no server of ours.',
@@ -181,6 +189,7 @@ const en = {
     joining: 'Pairing…',
     joinHint: 'Pairing brings that device’s Liths into this folder.',
     joinEmpty: 'That is not a ticket. Paste the whole text from the other device.',
+    alreadyPaired: 'Unpair this device before joining another folder.',
     recentsHint: 'Every Lith in this folder is a row in your recent list, whether this device has it or not. A row without the device mark is one your devices do not have yet, and its mark is what sends it.',
     error: (detail: string): string => `Device sync hit a problem: ${detail}`
   },
@@ -486,6 +495,8 @@ const en = {
     removeAria: (name: string) => `Remove ${name}`,
     cachedLocally: 'Cached locally',
     /** The device-sync mark: one control per row, which sends or says it is already there. */
+    deviceUnsyncedTitle: 'Not on your devices yet. Open to send this Lith.',
+    deviceUnsyncedAria: (name: string) => `Open history and send ${name} to your devices`,
     deviceSendTitle: 'Send to your devices',
     deviceSendAria: (name: string) => `Send ${name} to your devices`,
     deviceSharedTitle: 'On your devices. Sending this copy makes a new version of it.',
@@ -510,7 +521,8 @@ const en = {
     rebuildServerTitle: 'Read this server again and index its Liths here',
     rebuildDiskTitle: 'Rebuild this list from the files on disk',
     reset: 'Reset Recents',
-    resetTitle: 'Clears this list and its local history. Your files stay.'
+    resetTitle: 'Clears this list and its local history. Your files stay.',
+    rebuildDeviceTitle: 'Rebuild this list and its search history from your paired devices'
   },
 
   /** One line per row state, from the download of an orphaned cached copy. */
@@ -635,6 +647,7 @@ const en = {
     noCachedCopy: (name: string) => `No cached copy of ${name} to download`,
     deviceSent: (name: string) => `Sent ${name} to your devices`,
     deviceSendFailed: (detail: string) => `Could not send that Lith: ${detail}`,
+    deviceHistoryFailed: (detail: string) => `Could not save the received version: ${detail}`,
     deviceLoaded: (name: string) => `Loaded ${name} from your devices`,
     deviceLoadFailed: (detail: string) => `Could not load that Lith: ${detail}`,
     reindexing: 'Re-indexing recent liths…',
@@ -795,6 +808,14 @@ const es: Copy = {
     },
     ticketTitle: 'Tu ticket',
     ticketShow: 'Mostrar el ticket de este dispositivo',
+    unpair: 'Desemparejar este dispositivo',
+    unpairing: 'Desemparejando…',
+    paired: 'Emparejado',
+    liveStatus: 'La sincronización está conectada con otro dispositivo ahora mismo.',
+    waitingStatus: 'La sincronización está emparejada, pero no hay otros dispositivos conectados.',
+    busyStatus: 'La sincronización está intercambiando cambios con tus otros dispositivos.',
+    errorStatus: 'La sincronización no pudo completar la última operación en este dispositivo.',
+    idleStatus: 'Este dispositivo no tiene un emparejamiento activo ahora mismo.',
     ticketBusy: 'Esperando a la red…',
     ticketBody: 'Pégalo en el otro dispositivo. Quien lo tenga puede escribir en esta carpeta.',
     ticketHint: 'Un ticket es como dos dispositivos se encuentran. Sin cuenta y sin servidor nuestro.',
@@ -806,6 +827,7 @@ const es: Copy = {
     joining: 'Emparejando…',
     joinHint: 'Emparejar trae los Liths de ese dispositivo a esta carpeta.',
     joinEmpty: 'Eso no es un ticket. Pega el texto completo del otro dispositivo.',
+    alreadyPaired: 'Desempareja este dispositivo antes de unirte a otra carpeta.',
     recentsHint: 'Cada Lith de esta carpeta es una fila en tu lista de recientes, tenga este dispositivo una copia o no. Una fila sin la marca de dispositivos es una que tus dispositivos aún no tienen, y su marca es la que la envía.',
     error: (detail: string): string => `La sincronización de dispositivos falló: ${detail}`
   },
@@ -1097,6 +1119,8 @@ const es: Copy = {
     pinTitle: 'Abrir y fijar este tiddler',
     removeAria: (name: string) => `Quitar ${name}`,
     cachedLocally: 'Guardado localmente',
+    deviceUnsyncedTitle: 'Aún no está en tus dispositivos. Abre para enviar este Lith.',
+    deviceUnsyncedAria: (name: string) => `Abrir el historial y enviar ${name} a tus dispositivos`,
     deviceSendTitle: 'Enviar a tus dispositivos',
     deviceSendAria: (name: string) => `Enviar ${name} a tus dispositivos`,
     deviceSharedTitle: 'Está en tus dispositivos. Enviar esta copia crea una versión nueva.',
@@ -1119,7 +1143,8 @@ const es: Copy = {
     rebuildServerTitle: 'Leer este servidor otra vez e indexar sus Liths aquí',
     rebuildDiskTitle: 'Reconstruir esta lista desde los archivos en disco',
     reset: 'Reiniciar recientes',
-    resetTitle: 'Borra esta lista y su historial local. Tus archivos se quedan.'
+    resetTitle: 'Borra esta lista y su historial local. Tus archivos se quedan.',
+    rebuildDeviceTitle: 'Reconstruir esta lista y su historial desde tus dispositivos emparejados'
   },
 
   orphan: {
@@ -1234,6 +1259,7 @@ const es: Copy = {
     noCachedCopy: (name: string) => `No hay copia guardada de ${name} para descargar`,
     deviceSent: (name: string) => `Enviado ${name} a tus dispositivos`,
     deviceSendFailed: (detail: string) => `No se pudo enviar ese Lith: ${detail}`,
+    deviceHistoryFailed: (detail: string) => `No se pudo guardar la versión recibida: ${detail}`,
     deviceLoaded: (name: string) => `Cargado ${name} desde tus dispositivos`,
     deviceLoadFailed: (detail: string) => `No se pudo cargar ese Lith: ${detail}`,
     reindexing: 'Reindexando los liths recientes…',
@@ -1386,6 +1412,14 @@ const fr: Copy = {
     },
     ticketTitle: 'Votre ticket',
     ticketShow: 'Afficher le ticket de cet appareil',
+    unpair: 'Dissocier cet appareil',
+    unpairing: 'Dissociation…',
+    paired: 'Associé',
+    liveStatus: 'La synchronisation est connectée à un autre appareil en ce moment.',
+    waitingStatus: 'La synchronisation est associée, mais aucun autre appareil n’est connecté.',
+    busyStatus: 'La synchronisation échange des modifications avec vos autres appareils.',
+    errorStatus: 'La synchronisation n’a pas terminé sa dernière opération sur cet appareil.',
+    idleStatus: 'Cet appareil n’a pas d’association active pour le moment.',
     ticketBusy: 'En attente du réseau…',
     ticketBody: 'Collez-le dans l’autre appareil. Quiconque l’a peut écrire dans ce dossier.',
     ticketHint: 'Un ticket est la façon dont deux appareils se trouvent. Sans compte et sans serveur à nous.',
@@ -1397,6 +1431,7 @@ const fr: Copy = {
     joining: 'Appairage…',
     joinHint: 'L’appairage amène les Liths de cet appareil dans ce dossier.',
     joinEmpty: 'Ce n’est pas un ticket. Collez le texte complet de l’autre appareil.',
+    alreadyPaired: 'Dissociez cet appareil avant de rejoindre un autre dossier.',
     recentsHint: 'Chaque Lith de ce dossier est une ligne dans votre liste récente, que cet appareil en ait une copie ou non. Une ligne sans la marque des appareils est un Lith que vos appareils n’ont pas encore, et sa marque est ce qui l’envoie.',
     error: (detail: string): string => `La synchronisation entre appareils a rencontré un problème : ${detail}`
   },
@@ -1688,6 +1723,8 @@ const fr: Copy = {
     pinTitle: 'Ouvrir et épingler ce tiddler',
     removeAria: (name: string) => `Retirer ${name}`,
     cachedLocally: 'En cache local',
+    deviceUnsyncedTitle: 'Pas encore sur vos appareils. Ouvrez pour envoyer ce Lith.',
+    deviceUnsyncedAria: (name: string) => `Ouvrir l’historique et envoyer ${name} à vos appareils`,
     deviceSendTitle: 'Envoyer à vos appareils',
     deviceSendAria: (name: string) => `Envoyer ${name} à vos appareils`,
     deviceSharedTitle: 'Sur vos appareils. Envoyer cette copie en fait une nouvelle version.',
@@ -1710,7 +1747,8 @@ const fr: Copy = {
     rebuildServerTitle: 'Relire ce serveur et indexer ses Liths ici',
     rebuildDiskTitle: 'Reconstruire cette liste depuis les fichiers du disque',
     reset: 'Réinitialiser les récents',
-    resetTitle: 'Efface cette liste et son historique local. Vos fichiers restent.'
+    resetTitle: 'Efface cette liste et son historique local. Vos fichiers restent.',
+    rebuildDeviceTitle: 'Reconstruire cette liste et son historique depuis vos appareils associés'
   },
 
   orphan: {
@@ -1825,6 +1863,7 @@ const fr: Copy = {
     noCachedCopy: (name: string) => `Aucune copie en cache de ${name} à télécharger`,
     deviceSent: (name: string) => `${name} envoyé à vos appareils`,
     deviceSendFailed: (detail: string) => `Impossible d’envoyer ce Lith : ${detail}`,
+    deviceHistoryFailed: (detail: string) => `Impossible d’enregistrer la version reçue : ${detail}`,
     deviceLoaded: (name: string) => `${name} chargé depuis vos appareils`,
     deviceLoadFailed: (detail: string) => `Impossible de charger ce Lith : ${detail}`,
     reindexing: 'Réindexation des liths récents…',
@@ -1974,6 +2013,14 @@ const de: Copy = {
     },
     ticketTitle: 'Ihr Ticket',
     ticketShow: 'Ticket dieses Geräts anzeigen',
+    unpair: 'Dieses Gerät entkoppeln',
+    unpairing: 'Wird entkoppelt…',
+    paired: 'Gekoppelt',
+    liveStatus: 'Die Synchronisierung ist gerade mit einem anderen Gerät verbunden.',
+    waitingStatus: 'Die Synchronisierung ist gekoppelt, aber kein anderes Gerät ist online.',
+    busyStatus: 'Die Synchronisierung tauscht gerade Änderungen mit Ihren Geräten aus.',
+    errorStatus: 'Die Synchronisierung konnte den letzten Vorgang auf diesem Gerät nicht abschließen.',
+    idleStatus: 'Dieses Gerät hat gerade keine aktive Kopplung.',
     ticketBusy: 'Warten auf das Netzwerk…',
     ticketBody: 'Fügen Sie es auf dem anderen Gerät ein. Wer es hat, kann in diesen Ordner schreiben.',
     ticketHint: 'Ein Ticket ist die Art, wie zwei Geräte zueinander finden. Kein Konto und kein Server von uns.',
@@ -1985,6 +2032,7 @@ const de: Copy = {
     joining: 'Wird gekoppelt…',
     joinHint: 'Beim Koppeln kommen die Liths dieses Geräts in diesen Ordner.',
     joinEmpty: 'Das ist kein Ticket. Fügen Sie den ganzen Text vom anderen Gerät ein.',
+    alreadyPaired: 'Entkoppeln Sie dieses Gerät, bevor Sie einen anderen Ordner koppeln.',
     recentsHint: 'Jedes Lith in diesem Ordner ist eine Zeile in Ihrer Liste, ob dieses Gerät eine Kopie hat oder nicht. Eine Zeile ohne Gerätemarke hat Ihre Geräte noch nicht, und ihre Marke ist es, die sie sendet.',
     error: (detail: string): string => `Gerätesynchronisierung hat ein Problem: ${detail}`
   },
@@ -2276,6 +2324,8 @@ const de: Copy = {
     pinTitle: 'Diesen Tiddler öffnen und anheften',
     removeAria: (name: string) => `${name} entfernen`,
     cachedLocally: 'Lokal zwischengespeichert',
+    deviceUnsyncedTitle: 'Noch nicht auf Ihren Geräten. Öffnen, um diesen Lith zu senden.',
+    deviceUnsyncedAria: (name: string) => `Verlauf öffnen und ${name} an Ihre Geräte senden`,
     deviceSendTitle: 'An Ihre Geräte senden',
     deviceSendAria: (name: string) => `${name} an Ihre Geräte senden`,
     deviceSharedTitle: 'Auf Ihren Geräten. Senden Sie diese Kopie, wird daraus eine neue Version.',
@@ -2298,7 +2348,8 @@ const de: Copy = {
     rebuildServerTitle: 'Diesen Server erneut lesen und seine Liths hier indexieren',
     rebuildDiskTitle: 'Diese Liste aus den Dateien auf der Festplatte neu aufbauen',
     reset: 'Zuletzt verwendete zurücksetzen',
-    resetTitle: 'Leert diese Liste und ihren lokalen Verlauf. Deine Dateien bleiben.'
+    resetTitle: 'Leert diese Liste und ihren lokalen Verlauf. Deine Dateien bleiben.',
+    rebuildDeviceTitle: 'Diese Liste und den Suchverlauf von Ihren gekoppelten Geräten neu aufbauen'
   },
 
   orphan: {
@@ -2413,6 +2464,7 @@ const de: Copy = {
     noCachedCopy: (name: string) => `Keine zwischengespeicherte Kopie von ${name} zum Herunterladen`,
     deviceSent: (name: string) => `${name} an Ihre Geräte gesendet`,
     deviceSendFailed: (detail: string) => `Dieses Lith konnte nicht gesendet werden: ${detail}`,
+    deviceHistoryFailed: (detail: string) => `Die empfangene Version konnte nicht gespeichert werden: ${detail}`,
     deviceLoaded: (name: string) => `${name} von Ihren Geräten geladen`,
     deviceLoadFailed: (detail: string) => `Dieses Lith konnte nicht geladen werden: ${detail}`,
     reindexing: 'Zuletzt verwendete Liths werden neu indexiert…',

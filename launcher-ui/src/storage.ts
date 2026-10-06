@@ -404,6 +404,16 @@ export async function saveSearchCache(fileName: string, text: string): Promise<v
   }
 }
 
+/** Store a received Iroh version in the same History Trail and searchable cache as local saves. */
+export async function saveIrohVersion(fileName: string, text: string, at = Date.now(), store: CacheStore = idb): Promise<void> {
+  await new KeyvalWikiHistory(store).saveVersion(fileName, text, at, { forceBase: true, external: true });
+  await store.set('search_cache_' + fileName, {
+    text,
+    lastModified: new Date(at).toLocaleString(),
+    backupTimestamp: at
+  });
+}
+
 /**
  * True only for the key holding a wiki's whole current text.
  *
@@ -557,13 +567,14 @@ export async function listDirtyRecoveries(names: string[], store: CacheStore = i
  * falling back to materializing the newest history version (e.g. right after
  * the legacy backups were migrated away).
  */
-export async function getSearchCacheText(fileName: string): Promise<string> {
+export async function getSearchCacheText(fileName: string, store: CacheStore = idb): Promise<string> {
   try {
-    const legacy = await idb.get<{ text?: string }>('search_cache_' + fileName);
+    const legacy = await store.get<{ text?: string }>('search_cache_' + fileName);
     if (typeof legacy?.text === 'string' && legacy.text) return legacy.text;
-    const versions = await historyStore.listVersions(fileName);
+    const history = new KeyvalWikiHistory(store);
+    const versions = await history.listVersions(fileName);
     if (versions.length === 0) return '';
-    const newest = await historyStore.getVersion(fileName, versions[0].id);
+    const newest = await history.getVersion(fileName, versions[0].id);
     return newest?.text ?? '';
   } catch {
     return '';
@@ -619,8 +630,8 @@ export async function rememberFetchedLith(
 }
 
 /** Version summaries for the launcher's history modal (newest first). */
-export async function listWikiVersions(name: string): Promise<VersionSummary[]> {
-  return historyStore.listVersions(name);
+export async function listWikiVersions(name: string, store: CacheStore = idb): Promise<VersionSummary[]> {
+  return new KeyvalWikiHistory(store).listVersions(name);
 }
 
 /**

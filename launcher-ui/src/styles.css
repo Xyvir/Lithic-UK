@@ -235,10 +235,9 @@ h1 { flex: none; min-width: 0; margin: 0; color: var(--lithic-ink-strong); font-
   font-size: 1.35rem;
 }
 .help-button:hover { border-color: var(--lithic-line-hover); background: var(--lithic-surface-panel); }
-/* Device sync's circle, the same shape as the backup's without its state vocabulary: a
-   paired folder is either not set up or working, and the panel is where the exceptions
-   are spelled out. The heading carries neither a count nor a colour for it. */
+/* Device sync mirrors the backup circle's health colors, with the mark reserved for Iroh. */
 .device-sync-button {
+  position: relative;
   display: grid;
   place-items: center;
   width: 38px;
@@ -252,6 +251,15 @@ h1 { flex: none; min-width: 0; margin: 0; color: var(--lithic-ink-strong); font-
   transition: color 0.2s, border-color 0.2s;
 }
 .device-sync-button:hover { border-color: var(--lithic-line-hover); background: var(--lithic-surface-panel); color: var(--lithic-ink-muted); }
+.device-sync-button.connected { color: var(--lithic-ok); border-color: var(--lithic-ok-rim); }
+.device-sync-button.checking { color: var(--lithic-amber-progress); border-color: var(--lithic-amber-rim); animation: sync-check 2.6s ease-in-out infinite; }
+.device-sync-button.syncing { color: var(--lithic-sync); border-color: var(--lithic-sync-deep); animation: sync-pulse 1.5s ease-in-out infinite; }
+.device-sync-button.error { color: var(--lithic-danger); border-color: var(--lithic-danger-deep); }
+.device-sync-glyph { position: absolute; right: -2px; bottom: -2px; width: 13px; height: 13px; border-radius: 50%; }
+.device-sync-glyph.dot { background: var(--lithic-ok); }
+.device-sync-glyph.ring { border: 2px solid var(--lithic-amber-progress); background: var(--lithic-surface-app); }
+.device-sync-glyph.pulse { border: 2px solid var(--lithic-sync); background: var(--lithic-surface-app); }
+.device-sync-glyph.alert { display: grid; place-items: center; background: var(--lithic-danger-deep); color: var(--lithic-ink-inverse); font-size: 10px; font-weight: 700; line-height: 1; }
 .device-sync-button svg { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
 /* "Back to the main launcher". Rendered only for a page the app's window loaded
    from elsewhere (a bookmarked instance: see launcherReturn in mode.ts), where
@@ -975,7 +983,9 @@ footer > * { pointer-events: auto; }
 .device-sync-modal { width: min(100%, 520px); }
 .device-sync-modal .device-sync-status { display: flex; flex-wrap: wrap; gap: 4px 14px; margin: 0 0 6px; color: var(--lithic-ink-muted); font-size: 0.85rem; }
 .device-sync-modal .device-sync-folder { color: var(--lithic-ink-soft); }
-.device-sync-modal .device-sync-peers { color: var(--lithic-ok); }
+.device-sync-modal .device-sync-peers { color: var(--lithic-amber-progress); }
+.device-sync-modal .device-sync-unpair-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-top: 16px; padding-top: 12px; border-top: 1px solid var(--lithic-line-faint); color: var(--lithic-ok); }
+.device-sync-modal .device-sync-unpair-row .modal-action { flex: 0 0 auto; margin: 0; }
 .device-sync-modal .device-sync-step { margin-top: 16px; padding-top: 12px; border-top: 1px solid var(--lithic-line-faint); }
 .device-sync-modal .device-sync-step h3 { margin: 0 0 8px; font-size: 0.95rem; color: var(--lithic-ink-strong); }
 .device-sync-modal .device-sync-ticket { width: 100%; resize: vertical; padding: 10px; border: 1px solid var(--lithic-line); border-radius: 7px; background: var(--lithic-surface-control); color: var(--lithic-ink); font: 0.78rem/1.5 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; word-break: break-all; }

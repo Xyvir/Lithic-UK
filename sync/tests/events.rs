@@ -27,6 +27,7 @@ fn every_event_maps_to_the_wire_shape_a_page_reads() {
                 name: "notes.lith".to_string(),
                 base: None,
                 head: Default::default(),
+                at: 0,
                 from: peer,
             },
             kind: "remote-update",
@@ -102,15 +103,16 @@ fn every_event_maps_to_the_wire_shape_a_page_reads() {
         }
     }
 
-    // The patch a `RemoteUpdate` carries is deliberately not on the wire: the host that
-    // needs those bytes reads the entry instead.
+    // The received bytes are base64 on the wire so the launcher can preserve the version.
     let update = SyncEvent::RemoteUpdate {
         name: "notes.lith".to_string(),
         base: None,
         head: Default::default(),
+        at: 0,
         from: peer,
     };
     let json = serde_json::to_value(WireEvent::from(&update)).expect("a wire event should serialize");
     assert!(json.get("base").is_none());
-    assert!(json.get("head").is_none());
+    assert!(json.get("head").is_some());
+    assert_eq!(json["at"], 0);
 }

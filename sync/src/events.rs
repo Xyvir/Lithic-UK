@@ -1,5 +1,7 @@
 //! What the engine tells the host while it runs.
 
+use base64::engine::general_purpose::STANDARD;
+use base64::Engine as _;
 use bytes::Bytes;
 use iroh::EndpointId;
 
@@ -7,8 +9,8 @@ use serde::Serialize;
 
 /// One thing that happened to the synced folder.
 ///
-/// The host applies [`SyncEvent::RemoteUpdate`] to its history chain as a
-/// base-to-head patch, and uses the rest to keep the UI honest.
+/// Remote updates retain their base and head so each received version can be
+/// recorded by the launcher without racing a later update.
 #[derive(Debug, Clone)]
 pub enum SyncEvent {
     /// A file arrived from another device. `base` is what the local file
@@ -20,6 +22,8 @@ pub enum SyncEvent {
         base: Option<Bytes>,
         /// The bytes the document now holds.
         head: Bytes,
+        /// When the document entry was written, in microseconds since Unix epoch.
+        at: u64,
         /// The device the update came from.
         from: EndpointId,
     },
@@ -53,9 +57,8 @@ pub enum SyncEvent {
 /// no serde, and every native host serializes this one instead, so the launcher decodes
 /// one vocabulary whichever prong is running.
 ///
-/// A [`SyncEvent::RemoteUpdate`]'s base-to-head bytes are deliberately not on it: no
-/// host consumes the patch yet, and an event carrying a whole Lith is a copy nobody
-/// asked for. A host that needs those bytes reads the entry.
+/// Remote update bytes travel over the wire in base64 so the launcher's History Trail can
+/// record each version without racing a later update.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct WireEvent {
     /// Which event this is: `remote-update`, `seeded`, `external-drift`, `peer-up`,
@@ -70,46 +73,79 @@ pub struct WireEvent {
     /// A failure's plain sentence.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub reason: Option<String>,
+    /// The local bytes before a received update.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub base: Option<String>,
+    /// The received bytes now held by the document.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub head: Option<String>,
+    /// When the received entry was written, in microseconds since Unix epoch.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub at: Option<u64>,
 }
 
 impl From<&SyncEvent> for WireEvent {
     fn from(event: &SyncEvent) -> Self {
         match event {
-            SyncEvent::RemoteUpdate { name, from, .. } => Self {
+            SyncEvent::RemoteUpdate {
+                name,
+                from,
+                base,
+                head,
+                at,
+            } => Self {
                 kind: "remote-update",
                 name: Some(name.clone()),
                 from: Some(from.to_string()),
                 reason: None,
+                base: base.as_ref().map(|bytes| STANDARD.encode(bytes)),
+                head: Some(STANDARD.encode(head)),
+                at: Some(*at),
             },
             SyncEvent::Seeded { name } => Self {
                 kind: "seeded",
                 name: Some(name.clone()),
                 from: None,
                 reason: None,
+                base: None,
+                head: None,
+                at: None,
             },
             SyncEvent::ExternalDrift { name } => Self {
                 kind: "external-drift",
                 name: Some(name.clone()),
                 from: None,
                 reason: None,
+                base: None,
+                head: None,
+                at: None,
             },
             SyncEvent::PeerUp(peer) => Self {
                 kind: "peer-up",
                 name: None,
                 from: Some(peer.to_string()),
                 reason: None,
+                base: None,
+                head: None,
+                at: None,
             },
             SyncEvent::PeerDown(peer) => Self {
                 kind: "peer-down",
                 name: None,
                 from: Some(peer.to_string()),
                 reason: None,
+                base: None,
+                head: None,
+                at: None,
             },
             SyncEvent::Failed { name, reason } => Self {
                 kind: "failed",
                 name: Some(name.clone()),
                 from: None,
                 reason: Some(reason.clone()),
+                base: None,
+                head: None,
+                at: None,
             },
         }
     }

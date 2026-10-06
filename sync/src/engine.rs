@@ -367,6 +367,20 @@ impl SyncEngine {
         Ok(())
     }
 
+    /// Forget this device's pairing while keeping its local replica and files.
+    pub async fn unpair(&self) -> Result<()> {
+        let attached = self.inner.doc.lock().await.take();
+        if let Some(attached) = attached {
+            if let Err(error) = attached.doc.leave().await {
+                self.inner.doc.lock().await.replace(attached);
+                return Err(error).context("failed to stop syncing the document");
+            }
+            attached.pump.abort();
+        }
+        self.inner.clear_saved_ticket()?;
+        Ok(())
+    }
+
     /// Write a file and publish it. The file lands first, then the same
     /// bytes become the document entry.
     pub async fn publish(&self, name: &str, bytes: impl Into<Bytes>) -> Result<()> {
@@ -653,6 +667,7 @@ impl Inner {
                 name,
                 base,
                 head,
+                at: entry.timestamp(),
                 from,
             }),
             Err(err) => self.emit(SyncEvent::Failed {
@@ -708,12 +723,25 @@ impl Inner {
         Ok(())
     }
 
+    fn clear_saved_ticket(&self) -> Result<()> {
+        #[cfg(feature = "native")]
+        if let Some(dir) = &self.state_dir {
+            match std::fs::remove_file(dir.join(TICKET_FILE)) {
+                Ok(()) => {}
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+                Err(error) => return Err(error).context("failed to forget the pairing ticket"),
+            }
+        }
+        Ok(())
+    }
+
     fn emit(&self, event: SyncEvent) {
         let subscribers = { self.subscribers.lock().unwrap().clone() };
         for callback in subscribers {
             callback(event.clone());
         }
     }
+
 }
 
 #[cfg(feature = "native")]

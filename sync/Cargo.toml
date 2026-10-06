@@ -24,6 +24,7 @@ wasm = ["dep:wasm-bindgen", "dep:wasm-bindgen-futures", "dep:js-sys"]
 
 [dependencies]
 anyhow = "1"
+base64 = "0.23"
 bytes = "1.7"
 iroh = { version = "1.3", default-features = false, features = ["tls-ring"] }
 iroh-blobs = { version = "0.103", default-features = false }

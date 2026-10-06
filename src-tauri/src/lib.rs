@@ -3276,6 +3276,10 @@ pub fn run() {
             #[cfg(feature = "sync-iroh")]
             devicesync::device_sync_join,
             #[cfg(feature = "sync-iroh")]
+            devicesync::device_sync_status,
+            #[cfg(feature = "sync-iroh")]
+            devicesync::device_sync_unpair,
+            #[cfg(feature = "sync-iroh")]
             devicesync::device_sync_entries,
             #[cfg(feature = "sync-iroh")]
             devicesync::device_sync_read,

@@ -29,6 +29,7 @@
   let joinBusy = false;
   let ticketBusy = false;
   let copied = false;
+  let unpairBusy = false;
 
   /**
    * The engine's own id, shortened for reading. It is a 64 character public key, and the
@@ -70,7 +71,11 @@
   /** A failure the panel can name itself, or the engine's own detail. */
   function errorLabel(detail: string | null): string {
     if (!detail) return '';
-    return detail === 'empty-ticket' ? copy.deviceSync.joinEmpty : copy.deviceSync.error(detail);
+    return detail === 'empty-ticket'
+      ? copy.deviceSync.joinEmpty
+      : detail === 'already-paired'
+        ? copy.deviceSync.alreadyPaired
+        : copy.deviceSync.error(detail);
   }
 
   async function showTicket() {
@@ -99,6 +104,15 @@
       joinBusy = false;
     }
   }
+
+  async function unpair() {
+    unpairBusy = true;
+    try {
+      await session.unpair();
+    } finally {
+      unpairBusy = false;
+    }
+  }
 </script>
 
 <div
@@ -125,46 +139,57 @@
           >{copy.deviceSync.nodeLabel}: {state.nodeId ? shortId(state.nodeId) : '…'}</span
         >
         <span class="device-sync-folder">{copy.deviceSync.folderCount(state.entries.length)}</span>
-        {#if state.peers.length > 0}<span class="device-sync-peers">{copy.deviceSync.peers(state.peers.length)}</span>{/if}
+        <span class="device-sync-peers">{state.paired ? (state.peerCount > 0 ? copy.deviceSync.liveStatus : copy.deviceSync.waitingStatus) : copy.deviceSync.idleStatus}</span>
       </p>
 
-      <section class="device-sync-step">
-        <h3>{copy.deviceSync.ticketTitle}</h3>
-        {#if state.ticket}
-          <textarea class="device-sync-ticket device-sync-ticket-read" readonly rows="3" aria-label={copy.deviceSync.ticketTitle}>{state.ticket}</textarea
-          >
-          <div class="modal-actions">
-            <button class="modal-action device-sync-copy" on:click={copyTicket}>{copied ? copy.deviceSync.ticketCopied : copy.deviceSync.ticketCopy}</button>
-          </div>
-          <p class="device-sync-hint">{copy.deviceSync.ticketBody}</p>
-        {:else}
-          <div class="modal-actions">
-            <button class="modal-action device-sync-ticket-show" disabled={ticketBusy || state.phase !== 'ready'} on:click={showTicket}>
-              {ticketBusy ? copy.deviceSync.ticketBusy : copy.deviceSync.ticketShow}
-            </button>
-          </div>
-          <p class="device-sync-hint">{copy.deviceSync.ticketHint}</p>
-        {/if}
-      </section>
+      {#if !state.paired || state.ticket}
+        <section class="device-sync-step">
+          <h3>{copy.deviceSync.ticketTitle}</h3>
+          {#if state.ticket}
+            <textarea class="device-sync-ticket device-sync-ticket-read" readonly rows="3" aria-label={copy.deviceSync.ticketTitle}>{state.ticket}</textarea
+            >
+            <div class="modal-actions">
+              <button class="modal-action device-sync-copy" on:click={copyTicket}>{copied ? copy.deviceSync.ticketCopied : copy.deviceSync.ticketCopy}</button>
+            </div>
+            <p class="device-sync-hint">{copy.deviceSync.ticketBody}</p>
+          {:else}
+            <div class="modal-actions">
+              <button class="modal-action device-sync-ticket-show" disabled={ticketBusy || state.phase !== 'ready'} on:click={showTicket}>
+                {ticketBusy ? copy.deviceSync.ticketBusy : copy.deviceSync.ticketShow}
+              </button>
+            </div>
+            <p class="device-sync-hint">{copy.deviceSync.ticketHint}</p>
+          {/if}
+        </section>
+      {/if}
 
-      <section class="device-sync-step">
-        <h3>{copy.deviceSync.joinTitle}</h3>
-        <textarea
-          class="device-sync-ticket device-sync-ticket-join"
-          rows="2"
-          bind:value={joinText}
-          placeholder={copy.deviceSync.joinPlaceholder}
-          aria-label={copy.deviceSync.joinTitle}
-        ></textarea>
-        <div class="modal-actions">
-          <button
-            class="modal-action device-sync-pair"
-            disabled={joinBusy || !joinText.trim() || state.phase !== 'ready'}
-            on:click={pair}>{joinBusy ? copy.deviceSync.joining : copy.deviceSync.join}</button
-          >
+      {#if state.paired}
+        <div class="device-sync-unpair-row">
+          <span>{copy.deviceSync.paired}</span>
+          <button class="modal-action secondary" disabled={unpairBusy || state.operating} on:click={unpair}>
+            {unpairBusy ? copy.deviceSync.unpairing : copy.deviceSync.unpair}
+          </button>
         </div>
-        <p class="device-sync-hint">{copy.deviceSync.joinHint}</p>
-      </section>
+      {:else}
+        <section class="device-sync-step">
+          <h3>{copy.deviceSync.joinTitle}</h3>
+          <textarea
+            class="device-sync-ticket device-sync-ticket-join"
+            rows="2"
+            bind:value={joinText}
+            placeholder={copy.deviceSync.joinPlaceholder}
+            aria-label={copy.deviceSync.joinTitle}
+          ></textarea>
+          <div class="modal-actions">
+            <button
+              class="modal-action device-sync-pair"
+              disabled={joinBusy || !joinText.trim() || state.phase !== 'ready'}
+              on:click={pair}>{joinBusy ? copy.deviceSync.joining : copy.deviceSync.join}</button
+            >
+          </div>
+          <p class="device-sync-hint">{copy.deviceSync.joinHint}</p>
+        </section>
+      {/if}
 
       <p class="device-sync-activity" role="status">{activityLabel(state)}</p>
       <!--

@@ -117,12 +117,14 @@ fn event_to_value(event: &SyncEvent) -> JsValue {
             name,
             base,
             head,
+            at,
             from,
         } => {
             set(&object, "kind", &JsValue::from_str("remote-update"));
             set(&object, "name", &JsValue::from_str(name));
             set(&object, "base", &option_bytes(base.as_deref()));
             set(&object, "head", &Uint8Array::from(head.as_ref()).into());
+            set(&object, "at", &JsValue::from_f64(*at as f64));
             set(&object, "from", &JsValue::from_str(&from.to_string()));
         }
         SyncEvent::Seeded { name } => {

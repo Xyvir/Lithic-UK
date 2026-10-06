@@ -127,6 +127,7 @@ async fn the_watcher_hears_updates_as_wire_events() {
     assert_eq!(update.name.as_deref(), Some("notes.lith"));
     assert_eq!(update.from.as_deref(), Some(b_engine.node_id().as_str()));
     assert!(update.reason.is_none());
+    assert!(update.head.is_some());
 
     a_engine.shutdown().await.expect("shutdown should work");
     b_engine.shutdown().await.expect("shutdown should work");

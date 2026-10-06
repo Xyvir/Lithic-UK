@@ -28,7 +28,7 @@
   } from './shim-sync';
   import { bootLegacyWiki, bootLegacyHtml, writeHandoff, type RemoteTarget } from './legacy-launcher-runtime';
   import { EMOJI_LIST, uploadInstanceIcon, clearInstanceIcon, emojiFaviconUrl, applyFavicon, bustIconCache, readInstanceEmoji, readServerEmoji, saveInstanceEmoji, clearInstanceEmoji, instanceMarkUrl } from './instance-icon';
-  import { getRecentFiles, setRecentRows, mergeRecentRow, mergeRecentLists, isAnonymousRow, clearAllRecentFiles, purgeOldestCachesIfNeeded, saveSearchCache, forgetWikiCache, cachedWikiNames, idb, getSearchCacheText, readFetchedLith, rememberFetchedLith, listWikiVersions, wikiHasHistory, downloadWikiVersion, getDirtyState, clearDirtyState, listDirtyRecoveries, isWikiDriftedFromHead, isInstallDismissed, setInstallDismissed, recentDiskPath, type RecentEntry } from './storage';
+  import { getRecentFiles, setRecentRows, mergeRecentRow, mergeRecentLists, isAnonymousRow, clearAllRecentFiles, purgeOldestCachesIfNeeded, saveSearchCache, forgetWikiCache, cachedWikiNames, idb, getSearchCacheText, readFetchedLith, rememberFetchedLith, listWikiVersions, wikiHasHistory, downloadWikiVersion, saveIrohVersion, getDirtyState, clearDirtyState, listDirtyRecoveries, isWikiDriftedFromHead, isInstallDismissed, setInstallDismissed, recentDiskPath, type RecentEntry } from './storage';
   import { rememberRowKind, resolveStorageMode, storageModeOverride, browserOnlyMarkTitle, type StorageMode } from './browser-storage';
   import { readBookmarkEntries, saveBookmark, removeBookmark, setBookmarkIcon, refreshBookmarkIcon, verifyInstanceUrl, normalizeInstanceUrl, instanceLabel, type BookmarkEntry, type InstanceVerification } from './bookmarks';
   import { LOGIN_CHECK_LABELS, askInstanceAboutLogin, loginVerdict, loginVerdictFromError, typedLoginCheck, type LoginCheckState, type LoginVerdict } from './login-check';
@@ -36,7 +36,7 @@
   import { offlineMode, looksUnreachable } from './offline-mode';
   import PinEntry from './PinEntry.svelte';
   import DeviceSyncPanel from './DeviceSyncPanel.svelte';
-  import { deviceSyncSession, deviceSyncSupport, type DeviceSyncState, type SyncedEntry } from './device-sync';
+  import { deviceSyncSession, deviceSyncSupport, type DeviceSyncEvent, type DeviceSyncState, type SyncedEntry } from './device-sync';
   import { deviceOnlyEntries, publishSource, syncIndex, type PublishSource } from './recent-sync';
   // Which prongs this build was pinned to speak. See `sync-pin.ts`.
   import { SHOWS_DEVICE_SYNC, SHOWS_GITHUB_SYNC } from './sync-pin';
@@ -834,10 +834,46 @@
    * session still starts on the first ask, which is the panel or a row's own control.
    */
   let deviceSyncState: DeviceSyncState = deviceSync.current;
-  deviceSync.follow((next) => (deviceSyncState = next));
+  let lastIrohHistoryEvent: Extract<DeviceSyncEvent, { kind: 'remote-update' }> | null = null;
+  let irohHistoryWrites = Promise.resolve();
+  deviceSync.follow((next) => {
+    deviceSyncState = next;
+    const event = next.activity;
+    if (event?.kind === 'remote-update' && event !== lastIrohHistoryEvent) {
+      lastIrohHistoryEvent = event;
+      // Each event carries its own base and head. Serialize writes so a later
+      // delivery cannot become the history parent before an earlier one.
+      irohHistoryWrites = irohHistoryWrites.then(() => recordIrohUpdate(event));
+    }
+  });
+
+  async function recordIrohUpdate(event: Extract<DeviceSyncEvent, { kind: 'remote-update' }>): Promise<void> {
+    try {
+      const at = event.at || Date.now();
+      await saveIrohVersion(event.name, JSON.stringify(parseLithToJSON(new TextDecoder().decode(event.head))), at);
+      await updateCacheMatches(search);
+      await rereadHistoryAvailability([event.name]);
+    } catch (error) {
+      status = copy.status.deviceHistoryFailed(error instanceof Error ? error.message : String(error));
+    }
+  }
 
   /** The folder's entries by name, which is the only identity a row and an entry share. */
   $: deviceSynced = syncIndex(deviceSyncState.entries);
+  $: deviceSyncIndicatorState = deviceSyncState.phase === 'failed' || Boolean(deviceSyncState.error)
+    ? 'error'
+    : deviceSyncState.operating
+      ? 'syncing'
+      : deviceSyncState.paired && deviceSyncState.peerCount > 0
+        ? 'connected'
+        : deviceSyncState.paired
+          ? 'checking'
+          : 'idle';
+  $: deviceSyncIndicatorTitle = deviceSyncIndicatorState === 'error' ? copy.deviceSync.errorStatus
+    : deviceSyncIndicatorState === 'syncing' ? copy.deviceSync.busyStatus
+      : deviceSyncIndicatorState === 'connected' ? copy.deviceSync.liveStatus
+        : deviceSyncIndicatorState === 'checking' ? copy.deviceSync.waitingStatus
+          : copy.deviceSync.idleStatus;
   /**
    * The Liths only the devices have: one row each, in the folder's own order.
    *
@@ -848,7 +884,7 @@
    * also cannot go stale: a changed pairing, or a device removing a Lith, takes the row with
    * it and leaves nothing behind (see `recent-sync.ts` for the three rules this follows).
    */
-  $: deviceOnly = deviceSyncState.phase === 'ready'
+  $: deviceOnly = deviceSyncState.phase === 'ready' && deviceSyncState.paired
     ? deviceOnlyEntries(recentFiles.map((file) => ({ name: getEntryName(file) })), deviceSyncState.entries)
     : [];
   /**
@@ -859,7 +895,7 @@
    * device sync existed. That is also what keeps a device control off every row of a launcher
    * whose owner has never paired anything, which is every instance until somebody asks.
    */
-  $: deviceRowsArmed = deviceSyncRuns && !browserOnly && deviceSyncState.phase === 'ready';
+  $: deviceRowsArmed = deviceSyncRuns && !browserOnly && deviceSyncState.phase === 'ready' && deviceSyncState.paired;
 
   /**
    * Open the panel, and load the engine behind it.
@@ -944,21 +980,23 @@
    * The line lands in the header rather than in the modal, because that is where the person
    * is: the panel can be shut, and a send from a row is exactly the case where it is.
    */
-  async function sendToDevices(file: any): Promise<void> {
+  async function sendToDevices(file: any): Promise<boolean> {
     const name = getEntryName(file);
     deviceSyncBusy = name;
     try {
       const text = await readRowLith(file);
       // Unreachable through the UI: the control is only drawn where a source exists, so this
       // is the guard rather than the case a person can meet.
-      if (text === null) return;
+      if (text === null) return false;
       if (await deviceSync.publish(name, new TextEncoder().encode(text))) {
         status = copy.status.deviceSent(name);
-        return;
+        return true;
       }
       status = copy.status.deviceSendFailed(deviceSync.current.error ?? copy.deviceSync.unavailable.engine);
+      return false;
     } catch (error) {
       status = copy.status.deviceSendFailed(error instanceof Error ? error.message : String(error));
+      return false;
     } finally {
       deviceSyncBusy = null;
     }
@@ -1478,7 +1516,7 @@
   // because clearing was the only control left and it does exactly what it says. The folder
   // the dialog names is evidence of its own (`connectedSyncFolder`), and while it answers, the
   // rebuild is the honest operation and stays.
-  $: showRebuildControl = showBackupStatus || Boolean(gitSyncConnectedRepo) || isSelfHost();
+  $: showRebuildControl = showBackupStatus || Boolean(gitSyncConnectedRepo) || isSelfHost() || (deviceSyncShown && deviceSyncState.paired);
   // Whether the recent panel is on screen at all. Named because two places now ask: the
   // panel itself, and the install offer, which waits in a launcher with no panel to hold
   // it rather than in one that does (see the offer's two homes in the markup).
@@ -2344,6 +2382,7 @@
    * use on a phone and the download this dialog offers is the way out it names.
    */
   let historyBrowserOnly = false;
+  let historyIrohUnsynced = false;
   let historyBusy = false;
   let historyError = '';
   // Per-wiki version-history availability keys the history affordance:
@@ -3923,10 +3962,11 @@
    * (deltas materialized on demand) and lets the user download any of them
    * as a non-destructive `<stem>_recover_<stamp>.lith` copy.
    */
-  async function openHistoryModal(name: string, browserOnly = false) {
+  async function openHistoryModal(name: string, browserOnly = false, irohUnsynced = false) {
     historyName = name;
     historyEntries = [];
     historyBrowserOnly = browserOnly;
+    historyIrohUnsynced = irohUnsynced;
     historyError = '';
     showHistoryModal = true;
     historyBusy = true;
@@ -3943,10 +3983,17 @@
   function closeHistoryModal() {
     showHistoryModal = false;
     historyBrowserOnly = false;
+    historyIrohUnsynced = false;
     historyError = '';
   }
 
   /** Download one materialized version; history is never modified. */
+  async function publishHistoryToDevices(): Promise<void> {
+    const file = recentFiles.find((item) => getEntryName(item).toLowerCase() === historyName.toLowerCase());
+    if (!file) return;
+    if (await sendToDevices(file)) historyIrohUnsynced = false;
+  }
+
   async function downloadHistoryVersion(id: string) {
     try {
       const version = await downloadWikiVersion(historyName, id);
@@ -4221,6 +4268,22 @@
     mountError = '';
     status = copy.status.reindexing;
     try {
+      if (deviceSyncShown && deviceSyncState.paired) {
+        await deviceSync.refresh();
+        const entries = [...deviceSync.current.entries];
+        let indexed = 0;
+        for (const entry of entries) {
+          const bytes = await deviceSync.pull(entry.name);
+          if (!bytes) continue;
+          const parsed = JSON.stringify(parseLithToJSON(new TextDecoder().decode(bytes)));
+          await saveIrohVersion(entry.name, parsed, entry.at || Date.now());
+          indexed += 1;
+        }
+        await updateCacheMatches(search);
+        await rereadHistoryAvailability(entries.map((entry) => entry.name));
+        status = indexed > 0 ? copy.status.reindexed(indexed) : copy.status.nothingToIndex;
+        return;
+      }
       // Pass 1: re-list, replacing the list rather than patching it. That is
       // what lets one button do the job: the recent list is a *view* of what
       // is really there, so a stale row is removed by rebuilding instead of by
@@ -5430,7 +5493,7 @@
       they are written down. The glyph is a screen and a phone, because what this pairs is the
       machines a person reads on.
     -->
-    {#if deviceSyncShown}<button class="device-sync-button" aria-label={copy.deviceSync.openAria} title={copy.deviceSync.title} on:click={openDeviceSyncModal}><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="2" y="4" width="13" height="9" rx="1.5"/><path d="M5 17h7"/><rect x="17" y="8" width="5" height="11" rx="1.5"/></svg></button>{/if}
+    {#if deviceSyncShown}<button class="device-sync-button {deviceSyncIndicatorState}" aria-label={deviceSyncIndicatorTitle} title={deviceSyncIndicatorTitle} on:click={openDeviceSyncModal}><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="2" y="4" width="13" height="9" rx="1.5"/><path d="M5 17h7"/><rect x="17" y="8" width="5" height="11" rx="1.5"/></svg>{#if deviceSyncIndicatorState === 'error'}<span class="device-sync-glyph alert" aria-hidden="true">!</span>{:else if deviceSyncIndicatorState === 'syncing'}<span class="device-sync-glyph pulse" aria-hidden="true"></span>{:else if deviceSyncIndicatorState === 'checking'}<span class="device-sync-glyph ring" aria-hidden="true"></span>{:else if deviceSyncIndicatorState === 'connected'}<span class="device-sync-glyph dot" aria-hidden="true"></span>{/if}</button>{/if}
     <!--
       The round control is one button with one job per page, never both at once. The intro
       belongs to the published PWA, whose server serves `intro.lith` beside it, and the sync
@@ -6099,6 +6162,12 @@
           backup state today but cannot write to it yet, so offering the copy there would hand
           the user a button that cannot answer.
         -->
+        {#if historyIrohUnsynced && deviceSyncState.paired}
+          <div class="history-backup-offer" role="group" aria-label={copy.dialogs.history.backupGroupAria}>
+            <p>{copy.row.deviceUnsyncedTitle}</p>
+            <button class="modal-action" disabled={deviceSyncBusy !== null} on:click={publishHistoryToDevices}>{copy.row.deviceSendTitle}</button>
+          </div>
+        {/if}
         {#if mode === 'tauri' && historyLocalOnlyPath && historySyncedFolder}
           <div class="history-backup-offer" role="group" aria-label={copy.dialogs.history.backupGroupAria}>
             <p title={historySyncedFolder}>{copy.dialogs.history.localOnly(historySyncedFolder)}</p>
@@ -6422,8 +6491,9 @@
           {@const browserOnlyRow = (file as any).browserOnly === true}
           {@const unsavedRow = Boolean(dirtyEntries[name])}
           {@const localOnlyRow = showBackupStatus && Boolean(diskPath) && localOnlyPaths.has(diskPath as string)}
-          {@const markedRow = browserOnlyRow || localOnlyRow || unsavedRow}
           {@const sharedRow = deviceSynced.has(name.toLowerCase())}
+          {@const deviceUnsyncedRow = deviceRowsArmed && !sharedRow && rowPublishSource(file) !== null}
+          {@const markedRow = browserOnlyRow || localOnlyRow || unsavedRow || deviceUnsyncedRow}
           <div class="recent-row">
             <!--
               The hover answers the one question a row cannot show: where this Lith lives
@@ -6455,9 +6525,9 @@
                 class:modified={markedRow}
                 type="button"
                 disabled={!markedRow && !cachedEntries[name]}
-                aria-label={browserOnlyRow ? browserOnlyMarkTitle(name) : unsavedRow ? copy.row.unsavedAria(name) : localOnlyRow ? copy.row.localOnlyAria(name) : copy.row.historyAria(name)}
-                title={browserOnlyRow ? browserOnlyMarkTitle(name) : unsavedRow ? copy.row.unsavedFrom(new Date(dirtyEntries[name]).toLocaleString(LOCALE_TAG)) : localOnlyRow ? copy.row.localOnlyTitle : (cachedEntries[name] ? copy.row.showHistory : copy.row.noHistory)}
-                on:click={() => openHistoryModal(name, browserOnlyRow)}
+                aria-label={deviceUnsyncedRow ? copy.row.deviceUnsyncedAria(name) : browserOnlyRow ? browserOnlyMarkTitle(name) : unsavedRow ? copy.row.unsavedAria(name) : localOnlyRow ? copy.row.localOnlyAria(name) : copy.row.historyAria(name)}
+                title={deviceUnsyncedRow ? copy.row.deviceUnsyncedTitle : browserOnlyRow ? browserOnlyMarkTitle(name) : unsavedRow ? copy.row.unsavedFrom(new Date(dirtyEntries[name]).toLocaleString(LOCALE_TAG)) : localOnlyRow ? copy.row.localOnlyTitle : (cachedEntries[name] ? copy.row.showHistory : copy.row.noHistory)}
+                on:click={() => openHistoryModal(name, browserOnlyRow, deviceUnsyncedRow)}
               >
                 {#if markedRow}
                   <!--
@@ -6482,17 +6552,7 @@
               whose copy lives only in browser storage has one, which is the whole of what the
               old panel's picker was for.
             -->
-            {#if deviceRowsArmed && rowPublishSource(file) !== null}
-              <button
-                class="recent-icon-button device-row-button"
-                class:shared={sharedRow}
-                type="button"
-                disabled={deviceSyncBusy !== null}
-                aria-label={sharedRow ? copy.row.deviceSharedAria(name) : copy.row.deviceSendAria(name)}
-                title={sharedRow ? copy.row.deviceSharedTitle : copy.row.deviceSendTitle}
-                on:click={() => void sendToDevices(file)}
-              ><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="2" y="4" width="13" height="9" rx="1.5"/><path d="M5 17h7"/><rect x="17" y="8" width="5" height="11" rx="1.5"/></svg></button>
-            {/if}
+
             {#if cacheSearchMatches[name]?.preview}
               <div
                 use:positionCachePreview
@@ -6589,7 +6649,7 @@
       <div class="recent-foot">
         {#if !indexDbOnly && !offlineLauncher}
           {#if showRebuildControl}
-            <button class="reset-cache" on:click={rebuildRecents} disabled={rebuildBusy} title={isSelfHost() ? copy.foot.rebuildServerTitle : copy.foot.rebuildDiskTitle}>{
+            <button class="reset-cache" on:click={rebuildRecents} disabled={rebuildBusy} title={isSelfHost() ? copy.foot.rebuildServerTitle : deviceSyncShown && deviceSyncState.paired ? copy.foot.rebuildDeviceTitle : copy.foot.rebuildDiskTitle}>{
               rebuildBusy ? copy.foot.reindexing : copy.foot.rebuild
             }</button>
           {:else}

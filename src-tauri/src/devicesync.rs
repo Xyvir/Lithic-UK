@@ -108,6 +108,32 @@ pub async fn device_sync_join(
     engine.join(&ticket).await.map_err(display)
 }
 
+/// Whether this device has a pairing and how many peers are live.
+#[derive(Serialize)]
+pub struct DeviceSyncStatus {
+    paired: bool,
+    peers: usize,
+}
+
+/// Current pairing state, including a pairing restored from disk at app startup.
+#[tauri::command]
+pub async fn device_sync_status(
+    state: tauri::State<'_, DeviceSync>,
+) -> Result<DeviceSyncStatus, String> {
+    let engine = state.engine().await?;
+    let status = engine.status().await.map_err(display)?;
+    Ok(DeviceSyncStatus { paired: status.paired, peers: status.peers })
+}
+
+/// Forget this device's pairing without deleting its local files or replica.
+#[tauri::command]
+pub async fn device_sync_unpair(
+    state: tauri::State<'_, DeviceSync>,
+) -> Result<(), String> {
+    let engine = state.engine().await?;
+    engine.unpair().await.map_err(display)
+}
+
 /// One file in the folder, spelled exactly as the browser glue spells it.
 #[derive(Serialize)]
 pub struct DeviceSyncEntry {

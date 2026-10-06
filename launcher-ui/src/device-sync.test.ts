@@ -11,10 +11,12 @@
  */
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { getSearchCacheText, listWikiVersions, saveIrohVersion } from './storage.ts';
 import {
   DeviceSyncSession,
   IDENTITY_BYTES,
   IDENTITY_KEY,
+  PAIRING_KEY,
   TICKET_KEY,
   asIdentity,
   base64ToBytes,
@@ -36,11 +38,18 @@ import {
 /** The launcher's key/value store, in memory. */
 class MemoryStore implements SyncStore {
   private data = new Map<string, unknown>();
+  keys(): Promise<IDBValidKey[]> {
+    return Promise.resolve([...this.data.keys()]);
+  }
   get<T = unknown>(key: string): Promise<T | undefined> {
     return Promise.resolve(this.data.get(key) as T | undefined);
   }
   set(key: string, value: unknown): Promise<void> {
     this.data.set(key, value);
+    return Promise.resolve();
+  }
+  del(key: string): Promise<void> {
+    this.data.delete(key);
     return Promise.resolve();
   }
 }
@@ -150,7 +159,7 @@ async function withAppPage<T>(run: (tauri: FakeTauri) => Promise<T>): Promise<T>
   }
 }
 
-function sessionWith(options: { store?: MemoryStore; engine?: FakeEngine; events?: DeviceSyncEvent[] } = {}) {
+function sessionWith(options: { store?: MemoryStore; engine?: FakeEngine; events?: DeviceSyncEvent[]; reloadBrowser?: () => void } = {}) {
   const store = options.store ?? new MemoryStore();
   const engine = options.engine ?? new FakeEngine();
   let factoryCalls = 0;
@@ -163,7 +172,7 @@ function sessionWith(options: { store?: MemoryStore; engine?: FakeEngine; events
     });
     return engine;
   };
-  return { store, engine, session: new DeviceSyncSession(store, factory), factoryCalls: () => factoryCalls };
+  return { store, engine, session: new DeviceSyncSession(store, factory, undefined, options.reloadBrowser), factoryCalls: () => factoryCalls };
 }
 
 test('a new identity is 32 bytes and is kept, so the next boot reuses it', async () => {
@@ -223,15 +232,27 @@ test('an entry is read as a value, and anything else is refused', () => {
 
 test('every event kind maps to a plain value, and an unknown kind is dropped', () => {
   const head = new Uint8Array([1, 2]);
-  assert.deepEqual(toEvent({ kind: 'remote-update', name: 'a.lith', from: 'node-b', base: new Uint8Array([0]), head }), {
+  const first = toEvent({ kind: 'remote-update', name: 'a.lith', from: 'node-b', base: new Uint8Array([0]), head, at: 1_700_000_000_000_000 });
+  assert.deepEqual(first, {
     kind: 'remote-update',
     name: 'a.lith',
     from: 'node-b',
     base: new Uint8Array([0]),
-    head
+    head,
+    at: 1_700_000_000_000
   });
+  assert.deepEqual(toEvent({
+    kind: 'remote-update', name: 'a.lith', from: 'node-b',
+    base: bytesToBase64(new Uint8Array([3, 4])), head: bytesToBase64(head), at: 1_700_000_000_000_000
+  }), {
+    kind: 'remote-update', name: 'a.lith', from: 'node-b',
+    base: new Uint8Array([3, 4]), head, at: 1_700_000_000_000
+  });
+
   // A first publish has no base, and the glue answers with undefined rather than an id.
-  assert.equal((toEvent({ kind: 'remote-update', name: 'a.lith', from: 'node-b', head }) as { base: unknown }).base, null);
+  const firstVersion = toEvent({ kind: 'remote-update', name: 'a.lith', from: 'node-b', head, at: 1_700_000_000_000_000 });
+  assert.equal((firstVersion as { base: unknown }).base, null);
+  assert.equal((firstVersion as { at: number }).at, 1_700_000_000_000);
   assert.deepEqual(toEvent({ kind: 'seeded', name: 'a.lith' }), { kind: 'seeded', name: 'a.lith' });
   assert.deepEqual(toEvent({ kind: 'external-drift', name: 'a.lith' }), { kind: 'external-drift', name: 'a.lith' });
   assert.deepEqual(toEvent({ kind: 'peer-up', from: 'node-b' }), { kind: 'peer-up', from: 'node-b' });
@@ -275,7 +296,8 @@ test('an unavailable session never reaches the engine', async () => {
 
 test('starting reads the identity, the folder, and a ticket it already kept', async () => {
   const store = new MemoryStore();
-  await store.set(TICKET_KEY, 'kept-ticket');
+  await store.set(PAIRING_KEY, 'kept-ticket');
+  await store.set(TICKET_KEY, 'own-share-ticket');
   const engine = new FakeEngine();
   engine.rows = [{ name: 'b.lith', size: 2, hash: 'hb', author: 'node-a', timestamp: 2_000_000 }, { name: 'a.lith', size: 1 }];
   const { session } = sessionWith({ store, engine });
@@ -283,7 +305,10 @@ test('starting reads the identity, the folder, and a ticket it already kept', as
   await session.start();
   assert.equal(session.current.phase, 'ready');
   assert.equal(session.current.nodeId, 'node-a');
-  assert.equal(session.current.ticket, 'kept-ticket');
+  assert.equal(session.current.ticket, 'own-share-ticket');
+  assert.equal(await store.get(PAIRING_KEY), 'kept-ticket');
+  assert.equal(session.current.paired, true);
+  assert.ok(engine.calls.includes('join:kept-ticket'));
   // Sorted, so the panel's list does not move when the engine's order changes.
   assert.deepEqual(session.current.entries.map((entry) => entry.name), ['a.lith', 'b.lith']);
   assert.deepEqual(await store.get(IDENTITY_KEY) instanceof Uint8Array, true);
@@ -297,17 +322,77 @@ test('a ticket is minted once and remembered, not minted again on every look', a
   await session.start();
   assert.equal(await session.share(), 'ticket-1');
   assert.equal(await store.get(TICKET_KEY), 'ticket-1');
+  assert.equal(await store.get(PAIRING_KEY), 'ticket-1');
   assert.equal(await session.share(), 'ticket-1');
   assert.equal(engine.tickets, 1);
 });
 
-test('joining normalizes the paste, and a failed join is a value with its reason', async () => {
+test('sharing is unavailable after joining another device', async () => {
   const { engine, session } = sessionWith();
+  await session.start();
+  assert.equal(await session.join('peer-ticket'), true);
+  assert.equal(await session.share(), null);
+  assert.equal(engine.tickets, 0);
+  assert.deepEqual(engine.calls.filter((call) => call.startsWith('join:')), ['join:peer-ticket']);
+});
+
+test('unpair waits for a pending join, then detaches that pairing', async () => {
+  let reloaded = false;
+  const { engine, session, store } = sessionWith({ reloadBrowser: () => { reloaded = true; } });
+  await session.start();
+  let finishJoin!: () => void;
+  engine.join = (ticket) => {
+    engine.calls.push(`join:${ticket}`);
+    return new Promise<void>((resolve) => { finishJoin = resolve; });
+  };
+  const joining = session.join('peer-ticket');
+  await Promise.resolve();
+  assert.equal(typeof finishJoin, 'function');
+  const unpairing = session.unpair();
+  finishJoin();
+  assert.equal(await joining, true);
+  assert.equal(await unpairing, true);
+  assert.equal(session.current.paired, false);
+  assert.equal(await store.get(PAIRING_KEY), undefined);
+  assert.equal(reloaded, true);
+  assert.ok(!engine.calls.includes('unpair'));
+});
+
+test('a failed browser pairing save detaches and clears the incomplete ticket', async () => {
+  const store = new MemoryStore();
+  const originalSet = store.set.bind(store);
+  store.set = (key, value) => key === PAIRING_KEY
+    ? Promise.reject(new Error('storage refused'))
+    : originalSet(key, value);
+  let reloaded = false;
+  const { engine, session } = sessionWith({ store, reloadBrowser: () => { reloaded = true; } });
+  await session.start();
+  assert.equal(await session.join('peer-ticket'), false);
+  assert.equal(session.current.paired, false);
+  assert.equal(session.current.error, 'storage refused');
+  assert.equal(await store.get(PAIRING_KEY), undefined);
+  assert.equal(await store.get(TICKET_KEY), undefined);
+  assert.ok(!engine.calls.includes('unpair'));
+  assert.equal(reloaded, true);
+});
+
+test('joining normalizes and persists the ticket; unpair forgets it and keeps identity', async () => {
+  let reloaded = false;
+  const { engine, session, store } = sessionWith({ reloadBrowser: () => { reloaded = true; } });
   engine.rows = [{ name: 'a.lith' }];
   await session.start();
   assert.equal(await session.join('  doc abc\n'), true);
   assert.ok(engine.calls.includes('join:docabc'));
   assert.deepEqual(session.current.entries.map((entry) => entry.name), ['a.lith']);
+  assert.equal(session.current.paired, true);
+  assert.equal(await store.get(PAIRING_KEY), 'docabc');
+  assert.equal(await session.unpair(), true);
+  assert.equal(session.current.paired, false);
+  assert.equal(await store.get(PAIRING_KEY), undefined);
+  assert.equal(await store.get(TICKET_KEY), undefined);
+  assert.ok(await store.get(IDENTITY_KEY) instanceof Uint8Array);
+  assert.equal(reloaded, true);
+  assert.ok(!engine.calls.includes('unpair'), 'the shipped browser binding has no detach method');
 
   assert.equal(await session.join('   '), false);
   assert.equal(session.current.error, 'empty-ticket');
@@ -359,7 +444,7 @@ test('an update from a peer refreshes the list and moves the peer set', async ()
 
   engine.rows = [{ name: 'a.lith' }, { name: 'b.lith' }];
   engine.emit({ kind: 'peer-up', from: 'node-b' });
-  engine.emit({ kind: 'remote-update', name: 'b.lith', from: 'node-b', head: new Uint8Array([1]) });
+  engine.emit({ kind: 'remote-update', name: 'b.lith', from: 'node-b', head: new Uint8Array([1]), at: 1_700_000_000_000_000 });
   // The refresh the event asked for is not awaited by the event, so the list is read
   // again from the session rather than assumed to have landed.
   await new Promise((done) => setTimeout(done, 0));
@@ -383,6 +468,48 @@ test('following the session answers the current state first and stops when asked
   const after = seen.length;
   await session.share();
   assert.equal(seen.length, after);
+});
+
+test('browser unpair clears its ticket and restarts without losing local identity', async () => {
+  const store = new MemoryStore();
+  const identity = new Uint8Array(IDENTITY_BYTES).fill(12);
+  await store.set(IDENTITY_KEY, identity);
+  await store.set(PAIRING_KEY, 'saved-ticket');
+  const engines: FakeEngine[] = [];
+  const factory: EngineFactory = async (_identity, onEvent) => {
+    const engine = new FakeEngine();
+    engine.subscribe((raw) => {
+      const event = toEvent(raw);
+      if (event) onEvent(event);
+    });
+    engines.push(engine);
+    return engine;
+  };
+  let reloaded = false;
+  const session = new DeviceSyncSession(store, factory, undefined, () => { reloaded = true; });
+  await session.start();
+  assert.equal(session.current.paired, true);
+  assert.equal(engines.length, 1);
+  assert.equal(await session.unpair(), true);
+  assert.equal(engines.length, 1);
+  assert.equal(reloaded, true);
+  assert.equal(session.current.paired, false);
+  assert.equal(await store.get(PAIRING_KEY), undefined);
+  assert.deepEqual(await store.get(IDENTITY_KEY), identity);
+});
+
+test('received Iroh versions update the searchable cache and History Trail', async () => {
+  const store = new MemoryStore();
+  const first = JSON.stringify([{ title: 'A', text: 'first' }]);
+  const second = JSON.stringify([{ title: 'A', text: 'second' }]);
+  await saveIrohVersion('notes.lith', first, 1_700_000_000_000, store);
+  await saveIrohVersion('notes.lith', second, 1_700_000_000_001, store);
+  assert.equal(await getSearchCacheText('notes.lith', store), second);
+  const versions = await listWikiVersions('notes.lith', store);
+  assert.equal(versions.length, 2);
+  assert.equal(versions[0].external, true);
+  assert.equal(versions[0].isBase, true);
+  assert.equal((await store.get('search_cache_meta_notes.lith') as { versions: unknown[] }).versions.length, 2);
 });
 
 test('the page has one session, because the engine cannot be told to stop', () => {
@@ -422,6 +549,10 @@ test('a native session asks Rust for the engine and never loads the browser one'
       switch (command) {
         case 'device_sync_start':
           return { node_id: 'node-app' };
+        case 'device_sync_status':
+          return { paired: false, peers: 0 };
+        case 'device_sync_unpair':
+          return null;
         case 'device_sync_share':
           return 'ticket-app';
         case 'device_sync_entries':
@@ -452,8 +583,9 @@ test('a native session asks Rust for the engine and never loads the browser one'
     assert.equal(session.current.nodeId, 'node-app');
     assert.deepEqual(session.current.entries.map((entry) => entry.name), ['a.lith']);
 
-    assert.equal(await session.share(), 'ticket-app');
     assert.equal(await session.join(' docabc\n'), true);
+    assert.equal(session.current.ticket, null);
+    assert.equal(await session.share(), null, 'one device cannot switch documents by sharing after it joins');
     assert.equal(await session.publish('b.lith', new Uint8Array([9, 8])), true);
     assert.deepEqual(await session.pull('a.lith'), new Uint8Array([1, 2, 3]));
     assert.equal(reads, 2, 'the failed read should have been retried');
@@ -471,9 +603,13 @@ test('a native session asks Rust for the engine and never loads the browser one'
       tauri.invokes.find((call) => call.command === 'device_sync_publish')?.args,
       { name: 'b.lith', bytes: bytesToBase64(new Uint8Array([9, 8])) }
     );
+    assert.ok(commands.includes('device_sync_status'));
 
     // The events arrive on the name Rust emits, and land in the state the panel reads.
     assert.ok(tauri.listener, 'the driver should have subscribed before starting');
+    tauri.listener?.({ payload: { kind: 'peer-up', from: 'node-b' } });
+    assert.equal(await session.unpair(), true);
+    assert.ok(tauri.invokes.some((call) => call.command === 'device_sync_unpair'));
     tauri.listener?.({ payload: { kind: 'peer-up', from: 'node-b' } });
     assert.deepEqual(session.current.peers, ['node-b']);
     tauri.listener?.({ payload: { kind: 'remote-update', name: 'a.lith', from: 'node-b' } });
