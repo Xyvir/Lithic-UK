@@ -168,6 +168,27 @@ body { overflow-x: hidden; }
 {{$:/plugins/tobibeer/preview/popups}}
 </$navigator>
 
+<!-- Phones held in portrait cannot fit this layout: the board is taller than
+	it is wide and the 400px top bar has no room for its controls. So instead
+	of letting the board half-render, this gate covers the viewport and asks
+	for a rotation. It is hidden everywhere else, desktops included (see
+	$:/Lithic/Patches/Whiteboard/LandscapeGate), and carries an exit so a
+	portrait visitor is never trapped in the layout. -->
+<div class="lithic-wb-rotate-gate">
+	<svg class="lithic-wb-rotate-gate-glyph" width="72" height="72" viewBox="0 0 64 64" aria-hidden="true" focusable="false">
+		<path d="M54 32a22 22 0 1 1-22-22" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round"/>
+		<path d="M28 6 33 10 28 14" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round"/>
+		<rect x="23" y="17" width="18" height="30" rx="5" fill="none" stroke="currentColor" stroke-width="3"/>
+		<path d="M30 42h4" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+	</svg>
+	<p class="lithic-wb-rotate-gate-title">Rotate your device</p>
+	<p class="lithic-wb-rotate-gate-hint">The whiteboard needs a landscape screen.</p>
+	<$button class="lithic-wb-rotate-gate-exit" tooltip="Open In StoryView">
+		Exit whiteboard
+		<$action-setfield $tiddler="$:/layout" text="$:/core/ui/PageTemplate"/>
+	</$button>
+</div>
+
 </div>
 
 </$vars>

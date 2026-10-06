@@ -1,0 +1,76 @@
+title: $:/Lithic/Patches/Whiteboard/LandscapeGate
+tags: $:/tags/Stylesheet
+type: text/css
+
+/* The whiteboard layout is built for a wide screen: the board is a tldraw
+   canvas and the top bar is a fixed 400px strip of controls. Held in portrait,
+   a phone renders an unusable sliver of both. So the WhiteBoard page layout
+   mounts a gate (see .lithic-wb-rotate-gate there) and this sheet decides when
+   to show it: never in landscape, never on a desktop, and in portrait only on
+   a touch device no wider than a tablet.
+
+   Three conditions, each with a job:
+     pointer: coarse     a phone or tablet, never a resized desktop window
+     orientation         portrait only, so rotating hides the gate instantly
+     max-width: 1024px   leaves portrait monitors out of it
+
+   Pure CSS: no script runs, the check happens before the first paint, and no
+   touch reaches the canvas while the gate is up. */
+
+.lithic-wb-rotate-gate {
+    display: none;
+}
+
+@media (pointer: coarse) and (orientation: portrait) and (max-width: 1024px) {
+    .lithic-wb-rotate-gate {
+        position: fixed;
+        top: 0;
+        right: 0;
+        bottom: 0;
+        left: 0;
+        z-index: 9999999;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        gap: 1rem;
+        padding: 2rem;
+        box-sizing: border-box;
+        text-align: center;
+        background: var(--lithic-c-page);
+        color: var(--lithic-c-foreground);
+    }
+}
+
+.lithic-wb-rotate-gate-glyph {
+    width: 4.5rem;
+    height: 4.5rem;
+    opacity: 0.85;
+}
+
+.lithic-wb-rotate-gate-title {
+    margin: 0;
+    font-size: 1.2em;
+    font-weight: bold;
+}
+
+.lithic-wb-rotate-gate-hint {
+    margin: 0;
+    max-width: 22em;
+    color: var(--lithic-c-foreground-muted);
+}
+
+.lithic-wb-rotate-gate-exit {
+    margin-top: 0.75rem;
+    padding: 0.4rem 1.1rem;
+    border: 1px solid var(--lithic-c-menu-border);
+    border-radius: 2rem;
+    background: var(--lithic-c-menu-bg);
+    color: var(--lithic-c-menu-fg);
+    font: inherit;
+    cursor: pointer;
+}
+
+.lithic-wb-rotate-gate-exit:hover {
+    background: color-mix(in srgb, var(--lithic-c-menu-fg) 10%, var(--lithic-c-menu-bg));
+}
