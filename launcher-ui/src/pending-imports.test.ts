@@ -7,7 +7,6 @@ import {
   tagRootDogear,
   mergePendingImports,
   isPayloadShareUrl,
-  ephemeralIntegrationTiddlers,
   pinCachedTiddler
 } from './pending-imports.ts';
 
@@ -55,35 +54,6 @@ test('isPayloadShareUrl detects share links with payload params', () => {
   assert.equal(isPayloadShareUrl('https://lithic.uk/?lith=abc'), true);
   assert.equal(isPayloadShareUrl('https://lithic.uk/?url=x'), true);
   assert.equal(isPayloadShareUrl('https://lithic.uk/'), false);
-});
-
-test('ephemeral integration tiddlers are present and uniquely titled', () => {
-  const tiddlers = ephemeralIntegrationTiddlers();
-  assert.equal(tiddlers.length, 3);
-  const titles = tiddlers.map((t) => t.title);
-  assert.equal(new Set(titles).size, titles.length);
-  assert.ok(titles.some((title) => title.includes('action-ephemeral')));
-});
-
-test('ephemeral run-code button is suppressed on txt/untyped codeblocks', () => {
-  const tiddlers = ephemeralIntegrationTiddlers();
-  const override = tiddlers.find((t) => t.title.includes('codeblock-override'))!;
-  assert.ok(override, 'codeblock-override tiddler missing');
-  // The ephemeral run branch must exclude txt/text/plaintext/plain and the
-  // undeclared-language case, in a single filter run (AND semantics).
-  assert.match(override.text, /\[<language>!match\[jspython\]!match\[txt\]!match\[text\]!match\[plaintext\]!match\[plain\]!match\[\]\]/);
-  // The local jspython branch keeps its plain match so jspython still runs.
-  assert.match(override.text, /\[<language>match\[jspython\]\]/);
-});
-
-test('ephemeral runner uses the normal API request path without local tray integration', () => {
-  const tiddlers = ephemeralIntegrationTiddlers();
-  const action = tiddlers.find((t) => t.title.includes('action-ephemeral'))!;
-  assert.ok(action, 'action-ephemeral tiddler missing');
-  assert.match(action.text, /const endpoint = await _resolveEphemeralEndpoint\(\);/);
-  assert.match(action.text, /fetch\(endpoint, \{/);
-  assert.doesNotMatch(action.text, /ephemeral_tray_run|__TAURI__|127\.0\.0\.1|localhost:878|__EPHEMERAL_LOCAL_BASE__/);
-  assert.match(action.text, /No bastion server found in swarm\.json/);
 });
 
 const pinCache = JSON.stringify([

@@ -1,17 +1,6 @@
 import { parseLithToJSON } from './lithic-format.ts';
-import { EPHEMERAL_INTEGRATION_JSON } from './ephemeral-integration.ts';
 
 export type PendingTiddler = Record<string, string>;
-
-/**
- * Queue of tiddlers that should be injected into the next engine mount
- * (shared payloads from URL params, dropped .lith/.json files, the intro,
- * and the Ephemeral integration). Mirrors window.pendingImports in the
- * legacy launcher.
- */
-export function ephemeralIntegrationTiddlers(): PendingTiddler[] {
-  return EPHEMERAL_INTEGRATION_JSON.map((tiddler) => ({ ...tiddler }));
-}
 
 /**
  * Tag the root parent tiddler with Dogear so a shared payload opens at the

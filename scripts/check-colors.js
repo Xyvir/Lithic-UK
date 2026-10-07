@@ -122,6 +122,11 @@ var ALLOWLIST = [
     line: /"black"/,
     reason: 'Whiteboard paste dispatch leaves the widget default (document ink) alone rather than re-theming pasted content.'
   },
+  {
+    file: /ephemeral-runner\/\$__plugins_xyvir_ephemeral-runner_action-ephemeral\.js\.tid/,
+    line: /"black"/,
+    reason: 'Whiteboard artifact shape style: a tldraw document default stored in the generated whiteboard data, not wiki chrome.'
+  },
 ];
 
 // Drop shadows are depth cues rather than theme colours: a shadow needs a dark

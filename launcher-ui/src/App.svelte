@@ -57,7 +57,6 @@
     decodePayloadParam,
     fetchRemotePayload,
     mergePendingImports,
-    ephemeralIntegrationTiddlers,
     isPayloadShareUrl,
     pinCachedTiddler,
     type PendingTiddler
@@ -2754,13 +2753,13 @@
     writeHandoff(handoff);
     const scratchKind: ScratchKind | null = resolveScratchKind(safeName);
     const scratchMode = isScratch && scratchKind ? scratchKind : undefined;
-    // Inject the Ephemeral integration on every wiki mount, then drain
-    // whatever the user queued via drop / share URL / intro.
+    // Drain whatever the user queued via drop / share URL / intro.
     // The engine boots in place (document.open/write/close), keeping the
     // launcher URL in the address bar and preserving window globals; the
-    // globals are also injected defensively so the Ephemeral widget
-    // (__EPHEMERAL_MODE__) works regardless of the boot path.
-    await bootLegacyWiki(handoff, [...pendingImports, ...ephemeralIntegrationTiddlers(), ...extraTiddlers], {
+    // globals are also injected defensively so integrations that read them
+    // (e.g. the Ephemeral runner's __EPHEMERAL_MODE__ hint) work regardless
+    // of the boot path.
+    await bootLegacyWiki(handoff, [...pendingImports, ...extraTiddlers], {
       __EPHEMERAL_MODE__: mode === 'self-host' ? 'self-host' : 'paper-light',
       __LITHIC_LAUNCHER_MODE__: mode
     }, { driftedFromHead, scratchMode, remote, browserOnly: indexDbOnly, shimToken });
@@ -4100,8 +4099,7 @@
       payloadTiddlers: parsed
     };
     await bootLegacyWiki(handoff, [
-      { title: '$:/state/DisableAutoSaver', text: 'yes' },
-      ...ephemeralIntegrationTiddlers()
+      { title: '$:/state/DisableAutoSaver', text: 'yes' }
     ], {
       __EPHEMERAL_MODE__: mode === 'self-host' ? 'self-host' : 'paper-light',
       __LITHIC_LAUNCHER_MODE__: mode

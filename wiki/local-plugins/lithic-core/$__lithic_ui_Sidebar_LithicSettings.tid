@@ -19,6 +19,7 @@ type: text/vnd.tiddlywiki
   <div class="lithic-settings-heading">Lithic Settings</div>
   <<lithicSettingsToggle target:"$:/config/AutoSave" label:"Autosave" default:"no" reload:"yes" hint:"(takes effect after reload)">>
   <<lithicSettingsToggle target:"$:/themes/nico/notebook/options/stickytitles" label:"Sticky titles" default:"yes">>
+  <<lithicSettingsToggle target:"$:/config/lithic/ephemeral-runner/enabled" label:"Ephemeral runner" default:"no" hint:"(takes effect immediately)">>
   <div class="lithic-settings-link">
     <$button class="tc-btn-invisible lithic-settings-link-btn">
       <$action-navigate $to="$:/Plugins"/>

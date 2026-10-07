@@ -5,6 +5,7 @@
         "tiddlywiki/freelinks",
         "tiddlywiki/dynaview",
         "xyvir/anchors-for-streams",
+        "xyvir/ephemeral-runner",
         "xyvir/lithic-save",
         "xyvir/lithic-core",
         "xyvir/lithic-default-configs",

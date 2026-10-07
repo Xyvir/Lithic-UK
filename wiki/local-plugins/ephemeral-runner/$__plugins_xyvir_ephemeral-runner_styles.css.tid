@@ -1,8 +1,8 @@
-creator: wilk
-modifier: wilk
+title: $:/plugins/xyvir/ephemeral-runner/styles.css
 tags: $:/tags/Stylesheet
-title: $:/wilk/css/CopyCodeButton
+type: text/vnd.tiddlywiki
 
+/* Code-block toolbar. The run buttons sit to the right of the copy button. */
 div.wilk-copy-code-button {
 	position: relative;
 }
@@ -15,7 +15,6 @@ div.wilk-copy-code-button > button.tc-btn-invisible {
 div.wilk-copy-code-button > button.tc-btn-invisible:hover {
 	fill: <<colour tiddler-controls-foreground-hover>>;
 }
-
 div.wilk-copy-code-button > button.run-jspython-btn {
 	position: absolute;
 	right: 1.8em;
@@ -24,8 +23,16 @@ div.wilk-copy-code-button > button.run-jspython-btn {
 	color: <<colour tiddler-controls-foreground>>;
 	font-weight: bold;
 }
-
 div.wilk-copy-code-button > button.run-jspython-btn:hover {
 	fill: <<colour tiddler-controls-foreground-hover>>;
 	color: <<colour tiddler-controls-foreground-hover>>;
+}
+
+@keyframes ephemeral-bob {
+	0% { transform: translateY(0px); color: <<colour foreground>>; }
+	50% { transform: translateY(-3px); color: <<colour primary>>; }
+	100% { transform: translateY(0px); color: <<colour foreground>>; }
+}
+.ephemeral-running {
+	animation: ephemeral-bob 1s infinite ease-in-out !important;
 }

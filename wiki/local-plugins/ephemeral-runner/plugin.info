@@ -1,0 +1,11 @@
+{
+    "title": "$:/plugins/xyvir/ephemeral-runner",
+    "description": "Ephemeral code runner. Serves the run-code button beside each code block, choosing at runtime between a self-hosted instance's Ephemeral API and the public paper-light swarm. Off by default; enable it in Lithic Settings.",
+    "name": "Ephemeral Runner",
+    "author": "Lithic",
+    "version": "0.0.1",
+    "core-version": ">=5.0.0",
+    "source": "local",
+    "plugin-type": "plugin",
+    "plugin-priority": "2"
+}

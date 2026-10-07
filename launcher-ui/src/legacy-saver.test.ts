@@ -27,7 +27,7 @@ test('builds accurate user tiddler filter excluding all 39 default plugins and c
   assert.match(filter, /!prefix\[\$:\/state\]/);
   assert.match(filter, /-\[\[\$:\/plugins\/sq\/streams\]\]/);
   assert.match(filter, /-\[\[\$:\/plugins\/xyvir\/lithic-core\]\]/);
-  assert.equal(DEFAULT_PLUGINS.length, 41);
+  assert.equal(DEFAULT_PLUGINS.length, 42);
 });
 
 // The injected tiddlers are re-created on every mount, so a copy in the file is

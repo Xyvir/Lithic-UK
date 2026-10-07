@@ -1,7 +1,5 @@
-creator: wilk
-modifier: wilk
-tags: $:/tags/Global $:/wilk/tweaks/CopyCodeButton
-title: $:/wilk/buttons/copy-code
+title: $:/plugins/xyvir/ephemeral-runner/codeblock-override
+tags: $:/tags/Global
 
 \widget $codeblock(code, language)
 <div class="wilk-copy-code-button">
@@ -13,6 +11,13 @@ title: $:/wilk/buttons/copy-code
 				<$action-setfield $tiddler=<<consoleTiddler>> parent=<<currentTiddler>> />
 			</$set>
 		</$button>
+	</$list>
+	<$list filter="[[$:/config/lithic/ephemeral-runner/enabled]get[text]match[yes]]" variable="ignore">
+		<$list filter="[<language>!match[jspython]!match[txt]!match[text]!match[plaintext]!match[plain]!match[]]" variable="ignore">
+			<$button tooltip="Run on Ephemeral API" class="tc-btn-invisible run-jspython-btn">&gt;_
+				<$action-ephemeral code=<<code>> language=<<language>> parentTiddler=<<currentTiddler>> />
+			</$button>
+		</$list>
 	</$list>
 	<$button
 	message="tm-copy-to-clipboard"

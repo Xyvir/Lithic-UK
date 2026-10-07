@@ -1,32 +1,54 @@
-// Ported verbatim from the legacy launcher runtime (launcher-fragments/runtime.js,
-// lines 251-640) so local-mode engine mounts keep the Ephemeral code-runner
-// integration. Regenerate by re-extracting that block if the legacy launcher changes.
+title: $:/plugins/xyvir/ephemeral-runner/action-ephemeral.js
+type: application/javascript
+module-type: widget
 
-export type EphemeralTiddler = Record<string, string>;
-
-export const EPHEMERAL_INTEGRATION_JSON: EphemeralTiddler[] = [
-      {
-        "title": "$:/plugins/lithic/ephemeral/action-ephemeral.js",
-        "type": "application/javascript",
-        "module-type": "widget",
-        "text": `/*\\
-title: $:/plugins/lithic/ephemeral/action-ephemeral.js
+/*\
+title: $:/plugins/xyvir/ephemeral-runner/action-ephemeral.js
 type: application/javascript
 module-type: widget
 
 Action widget to run Ephemeral code.
-\\*/
+\*/
 (function(){
 "use strict";
 
 var Widget = require("$:/core/modules/widgets/widget.js").widget;
 
-// Resolve where to POST a job:
+// Decide where a job runs, without depending on the launcher:
 //   self-host   -> the same-origin /ephemeral/api/v1/run path
 //   paper-light -> the fastest/nearest bastion advertised in docs/swarm.json
+// The launcher's own answer (window.__EPHEMERAL_MODE__) wins when it is present;
+// a wiki opened without the launcher falls back to the same signals it reads.
+function _detectEphemeralMode() {
+    var win = (typeof window !== "undefined") ? window : null;
+    if (win && (win.__EPHEMERAL_MODE__ === "self-host" || win.__EPHEMERAL_MODE__ === "paper-light")) {
+        return win.__EPHEMERAL_MODE__;
+    }
+    var loc = win && win.location;
+    if (!loc) return "paper-light";
+    try {
+        var params = new URLSearchParams(loc.search || "");
+        var forced = ["mode", "launcher-mode", "launcher_mode"]
+            .map(function (key) { return (params.get(key) || "").trim().toLowerCase(); })
+            .filter(function (value) { return value === "self-host" || value === "webapp" || value === "tauri"; })[0];
+        if (forced) return forced === "self-host" ? "self-host" : "paper-light";
+    } catch (e) {
+        // An unreadable query is no query.
+    }
+    // Only http(s) can have an instance's /ephemeral API behind it. file: and
+    // tauri: are a copy on disk and the desktop app, neither of them an instance.
+    if (loc.protocol !== "http:" && loc.protocol !== "https:") return "paper-light";
+    var host = (loc.hostname || "").toLowerCase();
+    if (!host) return "paper-light";
+    // Published launcher deployments and the app's own webview are clients, not
+    // instances. Anything else reachable over http(s) is a server somebody runs.
+    if (host === "lithic.uk" || host === "www.lithic.uk") return "paper-light";
+    if (host === "tauri.localhost" || host.slice(-10) === ".github.io") return "paper-light";
+    return "self-host";
+}
+
 async function _resolveEphemeralEndpoint() {
-    var mode = (typeof window !== "undefined" && window.__EPHEMERAL_MODE__) || "self-host";
-    if (mode !== "paper-light") {
+    if (_detectEphemeralMode() !== "paper-light") {
         return "/ephemeral/api/v1/run";
     }
     var swarmUrls = [
@@ -92,11 +114,11 @@ class ActionEphemeralWidget extends Widget {
             // exactly as supplied (it overrides the fence language), and otherwise
             // wrap the code in a language-labelled triple-backtick block. This is
             // the same contract used by the self-hosted/local API client.
-            const code = String(this.code).replace(/^\uFEFF/, "");
-            const hasShebang = /^\s*#!/.test(code);
+            const code = String(this.code).replace(/^﻿/, "");
+            const hasShebang = /^s*#!/.test(code);
             const markdownPayload = hasShebang
                 ? code
-                : "\\\`\\\`\\\`" + this.language + "\\n" + code + "\\n\\\`\\\`\\\`";
+                : "\`\`\`" + this.language + "\n" + code + "\n\`\`\`";
             const utf8str = new TextEncoder().encode(markdownPayload);
             let binary = '';
             for (let i = 0; i < utf8str.byteLength; i++) {
@@ -124,7 +146,7 @@ class ActionEphemeralWidget extends Widget {
             try {
                 data = await response.json();
             } catch (parseErr) {
-                data = null; // non-JSON error body. Fall through to status handling
+                data = null; // non-JSON error body — fall through to status handling
             }
             if (!response.ok) {
                 const detail = (data && typeof data.detail === "string" && data.detail.trim())
@@ -151,7 +173,7 @@ class ActionEphemeralWidget extends Widget {
                             "stream-type": "default"
                         }));
                         this.appendToStream(this.parentTiddler, childTitle);
-                    } else if (ext.match(/^\.(png|jpe?g|webp|gif)$/)) {
+                    } else if (ext.match(/^.(png|jpe?g|webp|gif)$/)) {
                         const mime = ext === ".png" ? "image/png" : ext === ".webp" ? "image/webp" : ext === ".gif" ? "image/gif" : "image/jpeg";
                         const dataUri = "data:" + mime + ";base64," + data.stdout.trim();
                         
@@ -174,7 +196,7 @@ class ActionEphemeralWidget extends Widget {
                             
                             $tw.wiki.addTiddler(new $tw.Tiddler({
                                 title: childTitle,
-                                text: "<<wb-image \\"[[" + wbTitle + "]]\\" \\"80%\\">>",
+                                text: "<<wb-image \"[[" + wbTitle + "]]\" \"80%\">>",
                                 type: "text/vnd.tiddlywiki",
                                 parent: this.parentTiddler,
                                 "stream-type": "default"
@@ -228,7 +250,7 @@ class ActionEphemeralWidget extends Widget {
             const errTitle = $tw.wiki.generateNewTitle(this.parentTiddler + "/error");
             $tw.wiki.addTiddler(new $tw.Tiddler({
                 title: errTitle,
-                text: "❌ **Ephemeral API Error:**\\n\\n\\\`\\\`\\\`\\n" + e.toString() + "\\n\\\`\\\`\\\`",
+                text: "❌ **Ephemeral API Error:**\n\n\`\`\`\n" + e.toString() + "\n\`\`\`",
                 type: "text/x-markdown",
                 parent: this.parentTiddler,
                 "stream-type": "default"
@@ -274,7 +296,7 @@ class ActionEphemeralWidget extends Widget {
 
             pages[uuidPage] = {
                 id: uuidPage,
-                name: \`Page \${i}\`,
+                name: `Page ${i}`,
                 childIndex: i,
                 shapes: {},
                 bindings: {}
@@ -350,51 +372,4 @@ class ActionEphemeralWidget extends Widget {
 }
 
 exports["action-ephemeral"] = ActionEphemeralWidget;
-})();`
-      },
-      {
-        "title": "~$:/plugins/lithic/ephemeral/codeblock-override",
-        "tags": "$:/tags/Global",
-        "text": `\\widget $codeblock(code, language)
-<div class="wilk-copy-code-button">
-	<$list filter="[<language>match[jspython]]" variable="ignore">
-		<$button tooltip="Run Code" class="tc-btn-invisible run-jspython-btn">&gt;_
-			<$set name="consoleTiddler" value={{{ [<currentTiddler>addsuffix[/console]] }}}>
-				<$action-jspython code=<<code>> outputTiddler=<<consoleTiddler>> />
-				<$action-listops $tiddler=<<currentTiddler>> $field="stream-list" $subfilter="[<consoleTiddler>]" />
-				<$action-setfield $tiddler=<<consoleTiddler>> parent=<<currentTiddler>> />
-			</$set>
-		</$button>
-	</$list>
-	<$list filter="[<language>!match[jspython]!match[txt]!match[text]!match[plaintext]!match[plain]!match[]]" variable="ignore">
-		<$button tooltip="Run on Ephemeral API" class="tc-btn-invisible run-jspython-btn">&gt;_
-			<$action-ephemeral code=<<code>> language=<<language>> parentTiddler=<<currentTiddler>> />
-		</$button>
-	</$list>
-	<$button
-	message="tm-copy-to-clipboard"
-	param=<<code>>
-	tooltip="Copy"
-	class="tc-btn-invisible">
-		{{$:/core/images/copy-clipboard}}
-	</$button>
-	<$genesis $type="$codeblock" $remappable="no" code=<<code>> language=<<language>>/>
-</div>
-\\end`
-      },
-      {
-        "title": "$:/plugins/lithic/ephemeral/styles.css",
-        "tags": "$:/tags/Stylesheet",
-        "type": "text/vnd.tiddlywiki",
-        "text": `
-@keyframes ephemeral-bob {
-    0% { transform: translateY(0px); color: <<colour foreground>>; }
-    50% { transform: translateY(-3px); color: <<colour primary>>; }
-    100% { transform: translateY(0px); color: <<colour foreground>>; }
-}
-.ephemeral-running {
-    animation: ephemeral-bob 1s infinite ease-in-out !important;
-}
-`
-      }
-    ];
+})();

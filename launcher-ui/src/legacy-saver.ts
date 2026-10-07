@@ -40,6 +40,7 @@ export const DEFAULT_PLUGINS: string[] = [
   'tiddlywiki/katex',
   'tiddlywiki/markdown',
   'xyvir/anchors-for-streams',
+  'xyvir/ephemeral-runner',
   'xyvir/lithic-core',
   'xyvir/lithic-default-configs',
   'xyvir/lithic-patch-appear',
