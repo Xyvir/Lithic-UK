@@ -1,0 +1,21 @@
+title: $:/themes/nico/notebook/ui/Buttons/menu
+type: text/vnd.tiddlywiki
+
+<$reveal state="$:/state/notebook-sidebar" type="match" text="yes" default="no" retain="yes" animate="no">
+  <$button class="tc-btn-invisible sidebar-toggle open" tooltip="Toggle menu">
+    <$action-setfield $tiddler="$:/state/notebook-sidebar" text="no"/>
+    <$list filter="[[$:/state/lithic/tweak-sidebar]get[text]match[yes]]" variable="ignore">
+      <$action-setfield $tiddler="$:/state/lithic/tweak-sidebar" text="no"/>
+      <$list filter="[[$:/temp/edit-site-title]!is[missing]]" variable="ignore"><$action-setfield $tiddler="$:/SiteTitle" text={{$:/temp/edit-site-title}}/></$list>
+      <$list filter="[[$:/temp/edit-site-subtitle]!is[missing]]" variable="ignore"><$action-setfield $tiddler="$:/SiteSubtitle" text={{$:/temp/edit-site-subtitle}}/></$list>
+    </$list>
+    {{$:/themes/nico/notebook/images/bars}}
+  </$button>
+</$reveal>
+
+<$reveal type="nomatch" state="$:/state/notebook-sidebar" text="yes">
+  <$button class="tc-btn-invisible sidebar-toggle" tooltip="Toggle menu">
+    <$action-setfield $tiddler="$:/state/notebook-sidebar" text="yes"/>
+    {{$:/themes/nico/notebook/images/bars}}
+  </$button>
+</$reveal>
