@@ -1,0 +1,66 @@
+title: $:/plugins/xyvir/ephemeral-runner/mode.js
+type: application/javascript
+module-type: library
+
+/*\
+title: $:/plugins/xyvir/ephemeral-runner/mode.js
+type: application/javascript
+module-type: library
+
+Where an Ephemeral job runs, and which way this deployment's runner defaults.
+
+One detector, because the widget that runs a job and the startup module that publishes
+the answer must never disagree: a wiki that ran code against the public swarm while its
+settings row said "Use Private Ephemeral Runner" would be the worst of both.
+\*/
+(function(){
+"use strict";
+
+// The settings row and the checkbox run button both read this tiddler, so it is
+// published once at startup from the same answer the widget uses at run time.
+var MODE_TIDDLER = "$:/state/lithic/ephemeral-runner/mode";
+
+// Decide where a job runs, without depending on the launcher:
+//   self-host   -> the same-origin /ephemeral/api/v1/run path
+//   paper-light -> the fastest/nearest bastion advertised in docs/swarm.json
+// The launcher's own answer (window.__EPHEMERAL_MODE__) wins when it is present;
+// a wiki opened without the launcher falls back to the same signals it reads.
+function detectMode() {
+    var win = (typeof window !== "undefined") ? window : null;
+    if (win && (win.__EPHEMERAL_MODE__ === "self-host" || win.__EPHEMERAL_MODE__ === "paper-light")) {
+        return win.__EPHEMERAL_MODE__;
+    }
+    var loc = win && win.location;
+    if (!loc) return "paper-light";
+    try {
+        var params = new URLSearchParams(loc.search || "");
+        var forced = ["mode", "launcher-mode", "launcher_mode"]
+            .map(function (key) { return (params.get(key) || "").trim().toLowerCase(); })
+            .filter(function (value) { return value === "self-host" || value === "webapp" || value === "tauri"; })[0];
+        if (forced) return forced === "self-host" ? "self-host" : "paper-light";
+    } catch (e) {
+        // An unreadable query is no query.
+    }
+    // Only http(s) can have an instance's /ephemeral API behind it. file: and
+    // tauri: are a copy on disk and the desktop app, neither of them an instance.
+    if (loc.protocol !== "http:" && loc.protocol !== "https:") return "paper-light";
+    var host = (loc.hostname || "").toLowerCase();
+    if (!host) return "paper-light";
+    // Published launcher deployments and the app's own webview are clients, not
+    // instances. Anything else reachable over http(s) is a server somebody runs.
+    if (host === "lithic.uk" || host === "www.lithic.uk") return "paper-light";
+    if (host === "tauri.localhost" || host.slice(-10) === ".github.io") return "paper-light";
+    return "self-host";
+}
+
+// An instance running its own Ephemeral API is the safe case, so its runner is on
+// unless the user turns it off. Somebody else's host is not, so the PWA and the
+// desktop app ask first: the setting is an offer, not a default.
+function defaultEnabled() {
+    return detectMode() === "self-host" ? "yes" : "no";
+}
+
+exports.MODE_TIDDLER = MODE_TIDDLER;
+exports.detectMode = detectMode;
+exports.defaultEnabled = defaultEnabled;
+})();

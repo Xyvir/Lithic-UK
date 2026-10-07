@@ -1,0 +1,34 @@
+title: $:/plugins/xyvir/ephemeral-runner/startup-mode.js
+type: application/javascript
+module-type: startup
+
+/*\
+title: $:/plugins/xyvir/ephemeral-runner/startup-mode.js
+type: application/javascript
+module-type: startup
+
+Publishes the deployment mode where wikitext can read it.
+
+The mode is a fact about the deployment, not something the user sets, so it is
+recomputed and republished on every boot rather than saved: a wiki carried from an
+instance to the desktop app must not keep answering as the instance it came from.
+Startup runs before the first render, so the settings row and the code-block run
+button never draw a mode the widget would not act on.
+\*/
+(function(){
+"use strict";
+
+var mode = require("$:/plugins/xyvir/ephemeral-runner/mode.js");
+
+exports.name = "lithic-ephemeral-runner-mode";
+exports.after = ["load-modules"];
+exports.before = ["startup"];
+exports.synchronous = true;
+
+exports.startup = function() {
+    $tw.wiki.addTiddler({
+        title: mode.MODE_TIDDLER,
+        text: mode.detectMode()
+    });
+};
+})();

@@ -12,13 +12,13 @@ tags: $:/tags/Global
 			</$set>
 		</$button>
 	</$list>
-	<$list filter="[[$:/config/lithic/ephemeral-runner/enabled]get[text]match[yes]]" variable="ignore">
+	<$set name="ephemeralDefault" filter="[[$:/state/lithic/ephemeral-runner/mode]get[text]match[self-host]]" value="yes" emptyValue="no"><$list filter="[[$:/config/lithic/ephemeral-runner/enabled]get[text]else<ephemeralDefault>match[yes]]" variable="ignore">
 		<$list filter="[<language>!match[jspython]!match[txt]!match[text]!match[plaintext]!match[plain]!match[]]" variable="ignore">
 			<$button tooltip="Run on Ephemeral API" class="tc-btn-invisible run-jspython-btn">&gt;_
 				<$action-ephemeral code=<<code>> language=<<language>> parentTiddler=<<currentTiddler>> />
 			</$button>
 		</$list>
-	</$list>
+	</$list></$set>
 	<$button
 	message="tm-copy-to-clipboard"
 	param=<<code>>
