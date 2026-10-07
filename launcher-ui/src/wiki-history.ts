@@ -102,7 +102,14 @@ export function recoverStamp(ts: number): string {
   return toIso(ts).replace(/[-:]/g, '').replace(/\.\d{3}Z$/, 'Z');
 }
 
-/** Suggested download name for a recovered version: `<original>_recover_<stamp>.lith`. */
+/**
+ * Suggested download name for a recovered version: `<original>_recover_<stamp>.lith`.
+ *
+ * Deliberately not the build's document-format pin: what this names is an export of a
+ * tiddler store (`saveBlobAs` serializes the cached text with the Lith serializer), not a
+ * document a mount writes, and a recovered version is read back through the same parser
+ * however the build is pinned.
+ */
 export function recoveredFileName(name: string, ts: number): string {
   const stem = name.replace(/\.(?:html?|lith|json)$/i, '') || 'untitled';
   return `${stem}_recover_${recoverStamp(ts)}.lith`;

@@ -37,6 +37,7 @@
   import PinEntry from './PinEntry.svelte';
   import { deleteRemoteFile, fetchRemoteFiles, fetchRemoteWiki, fetchRemoteWikiMeta, probePatchApi, createLockHeartbeat, readRemoteLock, uploadRemoteFile, webdavUrl, resolveSessionId, lithUploadName, type WebdavFile } from './webdav';
   import { normalizeLithName } from './legacy-saver';
+  import { documentStem } from './document-format';
   import { searchCachedWikis } from './cache-search';
   import { matchMarkup, showsForQuery, titleMatches, titleMarkup } from './name-match';
   import { topHits, type InstanceCacheRead, type InstanceReads } from './instance-search';
@@ -2808,7 +2809,8 @@
 
   async function createBlankLith() {
     const safeName = normalizeLithName(newLithName);
-    const siteTitle = safeName.replace(/\.lith$/i, '');
+    // The title is the name without its extension, whichever extension this build writes.
+    const siteTitle = documentStem(safeName);
     showNewLithModal = false;
     busy = true;
     status = copy.status.loadingBlank;

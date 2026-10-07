@@ -3,7 +3,8 @@ import { parseLithToJSON } from './lithic-format.ts';
 import { resolveScratchKind, resolveScratchPlan, parseScratchSource, parseTidFile } from './scratch-editor.ts';
 import { tagRootDogear } from './pending-imports.ts';
 import { JSON_PATCH_RUNTIME } from './json-patch.ts';
-import { DEFAULT_PLUGINS, LITHIC_BASE_FILTER } from './legacy-saver.ts';
+import { LITHIC_BASE_FILTER, resolveDefaultPlugins } from './legacy-saver.ts';
+import { DOCUMENT_FORMAT, documentPickerTypes, normalizeDocumentName } from './document-format.ts';
 import { SCRATCH_SERIALIZE_RUNTIME } from './scratch-wiki.ts';
 import { TID_SERIALIZE_RUNTIME } from './tid-serialize-runtime.ts';
 import { IPYNB_SERIALIZE_RUNTIME } from './ipynb.ts';
@@ -98,6 +99,60 @@ async function fetchEngine(): Promise<string> {
   throw new Error(copy.status.engineMissing);
 }
 
+/**
+ * The ES5 reader for a base's declared document filter.
+ *
+ * Held as a `String.raw` template and spliced into the bootstrap because that bootstrap is
+ * itself a template literal: inside one, `\s` loses its backslash and `\\` becomes one, so a
+ * pattern written inline ships a different regex than the one in the source. Raw keeps the
+ * text below as the text that ships, which is also what lets a test assert it.
+ */
+const BASE_DOCUMENT_FILTER_READER = String.raw`    function baseDocumentFilter() {
+      var tw = root.$tw;
+      if (!tw || !tw.wiki || !tw.wiki.getTiddlerText) return '';
+      var declared = (tw.wiki.getTiddlerText('$:/config/lithic/document-filter', '') || '').trim();
+      if (declared) return declared;
+      var macro = tw.wiki.getTiddlerText('$:/lithic/config/PublishFilterPatch', '');
+      var body = /\\define\s+publishFilter\s*\(\)\s*\r?\n([\s\S]*?)\r?\n\\end/.exec(macro || '');
+      return body ? body[1].trim() : '';
+    }`;
+
+const TIDDLER_STORE = /<script class="tiddlywiki-tiddler-store" type="application\/json">([\s\S]*?)<\/script>/i;
+
+/**
+ * The plugin roots a base ships, read out of its own tiddler store.
+ *
+ * This is what makes the save filter correct for a base that is not Lithic. The launcher
+ * already reads this store (to splice injected tiddlers in), and the store is the base's own
+ * answer to "what do I ship": `prod-tiddlywiki.info` is not, because a JSON plugin installs
+ * at `wiki/tiddlers/` and an engine can carry a plugin no config lists (measured on this
+ * repository: `kookma/quickview`). A save that keeps a base's own plugin roots out of the
+ * user's document is the whole reason this list exists.
+ *
+ * A base that ships no store, or ships one this cannot read, answers with an empty list and
+ * the caller falls back to the generated list. Being wrong here is expensive in one direction
+ * only, which is why a parse failure is empty rather than an exception: an unreadable store
+ * must not stop a mount, and the fallback list is what it gets instead.
+ */
+export function readEnginePluginRoots(html: string): string[] {
+  const store = TIDDLER_STORE.exec(html);
+  if (!store) return [];
+  let tiddlers: unknown;
+  try {
+    tiddlers = JSON.parse(store[1]);
+  } catch {
+    return [];
+  }
+  if (!Array.isArray(tiddlers)) return [];
+  const roots = new Set<string>();
+  for (const tiddler of tiddlers as Array<Record<string, unknown>>) {
+    if (!tiddler || !tiddler['plugin-type']) continue;
+    const title = typeof tiddler.title === 'string' ? tiddler.title : '';
+    if (title.startsWith('$:/plugins/')) roots.add(title.slice('$:/plugins/'.length));
+  }
+  return [...roots].sort();
+}
+
 function injectTiddlers(html: string, tiddlers: Array<Record<string, string>>): string {
   const script = `<script class="tiddlywiki-tiddler-store" type="application/json">${JSON.stringify(tiddlers)}</script>`;
   const store = /(<script class="tiddlywiki-tiddler-store" type="application\/json">\[)([\s\S]*?)(\]\s*<\/script>)/i;
@@ -145,12 +200,21 @@ function injectSaverBootstrap(
   browserOnly = false,
   shimToken: string | null = null
 ): string {
-  const pluginsJson = JSON.stringify(DEFAULT_PLUGINS);
+  // Three answers to "what do I ship", in the order the saver prefers them: the mount's own
+  // declaration, the plugin roots read out of the base's store, and the built-in list.
+  const pluginsJson = JSON.stringify(resolveDefaultPlugins());
+  const basePluginsJson = JSON.stringify(readEnginePluginRoots(html));
+  const documentFormatJson = JSON.stringify(DOCUMENT_FORMAT);
   const jsonPatchRuntime = JSON_PATCH_RUNTIME;
   const baseFilterStr = JSON.stringify(LITHIC_BASE_FILTER);
   // The name chosen in the launcher prompt becomes the picker's suggested
   // filename. Escape "<" so a hostile name cannot break out of the script tag.
-  const suggestedNameJson = JSON.stringify(suggestedFileName || 'new.lith').replace(/</g, '\\u003c');
+  // A monolith mount keeps the page's own name; every other mount takes the name the build's
+  // document format writes, so a build pinned to `html` proposes `new.html` rather than a
+  // `.lith` it would then have to rename at the picker.
+  const suggestedNameJson = JSON.stringify(
+    isHtmlMode ? suggestedFileName || 'monolith.html' : normalizeDocumentName(suggestedFileName || 'new')
+  ).replace(/</g, '\\u003c');
   // The active file name keys the transient dirty-state backup in IndexedDB.
   // An HTML monolith leaves it empty and opts out: a page may carry its own
   // recovery through add-ons or plugins, and the launcher must not interpose on
@@ -159,7 +223,7 @@ function injectSaverBootstrap(
   const activeFileNameJson = isHtmlMode ? '""' : JSON.stringify(suggestedFileName || 'new.lith').replace(/</g, '\\u003c');
   const saveTypes = isHtmlMode
     ? [{ description: copy.fileTypes.html, accept: { 'text/html': ['.html', '.htm'] } }]
-    : [{ description: copy.fileTypes.monolith, accept: { 'application/x-lith': ['.lith'] } }, { description: copy.fileTypes.notebookOne, accept: { 'application/x-ipynb+json': ['.ipynb'] } }];
+    : documentPickerTypes();
   const saveTypesJson = JSON.stringify(saveTypes);
   const htmlModeLiteral = isHtmlMode ? 'true' : 'false';
   const driftedFromHeadLiteral = driftedFromHead ? 'true' : 'false';
@@ -195,10 +259,32 @@ function injectSaverBootstrap(
 
   const bootstrap = `${remoteRuntime}${scratchRuntimes}<script>${jsonPatchRuntime}</script>\n<script>(function(){
     var root = window;
+    var documentFormat = ${documentFormatJson};
+    // The plugin roots the base ships, read out of the store of the engine this saver is
+    // injected into. The list below is only the fallback for a base with no store to read.
+    var basePlugins = ${basePluginsJson};
     var defaultPlugins = ${pluginsJson};
-    var pluginExclusions = defaultPlugins.map(function(p){ return '-[[$:/plugins/' + p + ']]'; }).join(' ');
     var baseFilter = ${baseFilterStr};
-    var userTiddlerFilter = baseFilter + ' ' + pluginExclusions;
+    function activePlugins() {
+      var declared = root.__LITHIC_BASE_PLUGINS__;
+      if (declared && declared.length) return declared;
+      if (basePlugins.length) return basePlugins;
+      return defaultPlugins;
+    }
+    function pluginExclusionFilter() {
+      return activePlugins().map(function(p){ return '-[[$:/plugins/' + p + ']]'; }).join(' ');
+    }
+${BASE_DOCUMENT_FILTER_READER}
+    function userTiddlerFilter() {
+      var patch = baseDocumentFilter();
+      return baseFilter + ' ' + pluginExclusionFilter() + (patch ? ' ' + patch : '');
+    }
+    // The file's own extension decides the shape a save writes; this decides what a new
+    // document is offered as. A build pinned to html writes the base's own save template,
+    // while a .lith it was handed is still written as the .lith it is.
+    function prefersHtmlFor(name) {
+      return documentFormat === 'html' && String(name || '').toLowerCase().slice(-5) !== '.lith';
+    }
 
     var idbKeyval = (function (exports) {
       function Store(dbName, storeName) {
@@ -732,7 +818,7 @@ function injectSaverBootstrap(
     // cache is still updated with the same delta-based history the local modes
     // use, so version history works identically for remote wikis.
     function saveRemote(tw, callback) {
-      var jsonText = (tw && tw.wiki && tw.wiki.getTiddlersAsJson) ? tw.wiki.getTiddlersAsJson(userTiddlerFilter) : '[]';
+      var jsonText = (tw && tw.wiki && tw.wiki.getTiddlersAsJson) ? tw.wiki.getTiddlersAsJson(userTiddlerFilter()) : '[]';
       var lithText = serializeJsonToLith(jsonText);
       var patchApi = root.__LITHIC_LINE_PATCH__;
       var baseText = root.__LITHIC_REMOTE_BASE__ || '';
@@ -773,7 +859,7 @@ function injectSaverBootstrap(
     // the search index, unsaved-edit recovery, and the version-history modal
     // the user downloads their own hard copy from.
     function saveToBrowserStorage(tw, callback) {
-      var jsonText = (tw && tw.wiki && tw.wiki.getTiddlersAsJson) ? tw.wiki.getTiddlersAsJson(userTiddlerFilter) : '[]';
+      var jsonText = (tw && tw.wiki && tw.wiki.getTiddlersAsJson) ? tw.wiki.getTiddlersAsJson(userTiddlerFilter()) : '[]';
       var fileName = (handle && handle.name) || ${suggestedNameJson};
       var target = browserOnlyHandle(fileName);
       handle = target;
@@ -811,7 +897,7 @@ function injectSaverBootstrap(
         if (rows.length > 20) rows = rows.slice(0, 20);
         return idbKeyval.set('recentFiles', rows);
       });
-      var jsonText = (tw && tw.wiki && tw.wiki.getTiddlersAsJson) ? tw.wiki.getTiddlersAsJson(userTiddlerFilter) : '';
+      var jsonText = (tw && tw.wiki && tw.wiki.getTiddlersAsJson) ? tw.wiki.getTiddlersAsJson(userTiddlerFilter()) : '';
       return Promise.all([
         savedRow,
         jsonText ? saveSearchCache(fileName, jsonText) : null
@@ -828,7 +914,8 @@ function injectSaverBootstrap(
         return true;
       }
       if (browserOnly) {
-        if (${htmlModeLiteral}) {
+        var browserName = (handle && handle.name) || ${suggestedNameJson};
+        if (${htmlModeLiteral} || prefersHtmlFor(browserName)) {
           saveMonolithToBrowserStorage(tw, _text, callback);
         } else {
           saveToBrowserStorage(tw, callback);
@@ -890,7 +977,7 @@ function injectSaverBootstrap(
             return writable.write(payload).then(function() { return writable.close(); });
           });
           return writeP.then(function() {
-            var jsonText = (tw && tw.wiki && tw.wiki.getTiddlersAsJson) ? tw.wiki.getTiddlersAsJson(userTiddlerFilter) : '[]';
+            var jsonText = (tw && tw.wiki && tw.wiki.getTiddlersAsJson) ? tw.wiki.getTiddlersAsJson(userTiddlerFilter()) : '[]';
             return Promise.all([addRecent(handle), saveSearchCache(handle.name, jsonText)]);
           });
         }
@@ -898,7 +985,7 @@ function injectSaverBootstrap(
           ? function() { return handle.createWritable(); }
           : function() { return Promise.resolve(root.__LITHIC_WRITE_FILE__(handle)); };
         return Promise.resolve(writableFactory()).then(function(writable) {
-          if (${htmlModeLiteral}) {
+          if (${htmlModeLiteral} || prefersHtmlFor(handle.name)) {
             // HTML monolith mode: write the payload TW hands us (its own
             // serialized page), then record the same searchable cache and
             // version chain every other mount records, so a monolith is
@@ -909,11 +996,11 @@ function injectSaverBootstrap(
             return writable.write(_text).then(function() {
               return writable.close();
             }).then(function() {
-              var jsonText = (tw && tw.wiki && tw.wiki.getTiddlersAsJson) ? tw.wiki.getTiddlersAsJson(userTiddlerFilter) : '';
+              var jsonText = (tw && tw.wiki && tw.wiki.getTiddlersAsJson) ? tw.wiki.getTiddlersAsJson(userTiddlerFilter()) : '';
               return jsonText ? saveSearchCache(handle.name, jsonText) : null;
             });
           }
-          var jsonText = (tw && tw.wiki && tw.wiki.getTiddlersAsJson) ? tw.wiki.getTiddlersAsJson(userTiddlerFilter) : '[]';
+          var jsonText = (tw && tw.wiki && tw.wiki.getTiddlersAsJson) ? tw.wiki.getTiddlersAsJson(userTiddlerFilter()) : '[]';
           var lithText = serializeJsonToLith(jsonText);
           return writable.write(lithText).then(function() {
             return writable.close();

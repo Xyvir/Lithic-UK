@@ -1,4 +1,5 @@
 import { copy } from './copy.ts';
+import { DOCUMENT_FORMAT, documentPickerTypes, normalizeDocumentName } from './document-format.ts';
 import { serializeJsonToLith } from './lithic-format.ts';
 
 export type SaverTiddler = Record<string, unknown>;
@@ -14,6 +15,17 @@ export type SaveFilePicker = (options: {
   types: Array<{ description: string; accept: Record<string, string[]> }>;
 }) => Promise<LocalFileHandle>;
 
+/**
+ * The plugin roots a save excludes when the base declares nothing: the committed fallback.
+ *
+ * This literal is the *fallback*, not the source. A mount reads the plugin roots out of the
+ * base it is mounting (`readEnginePluginRoots` in `legacy-launcher-runtime.ts`), and
+ * `scripts/build-launcher.mjs` bakes the flattened staging tree's list in beside it through
+ * `resolveDefaultPlugins`. It stays here, and stays 42 names long, because a checkout with no
+ * staging tree still has to build a launcher, and because the engine-store parity test below
+ * needs something committed to police: a fallback that has rotted is exactly how a plugin
+ * bundle ends up inside a saved one-tiddler wiki.
+ */
 export const DEFAULT_PLUGINS: string[] = [
   'ahanniga/context-menu-plugin',
   'bj/Calendar',
@@ -60,6 +72,29 @@ export const DEFAULT_PLUGINS: string[] = [
 ];
 
 /**
+ * The plugin list a build carries, which CI generates from the tree the wiki build loads.
+ *
+ * `VITE_LITHIC_BASE_PLUGINS` is set by `scripts/build-launcher.mjs` from
+ * `scripts/generate-default-plugins.mjs`. It is absent in a checkout with no staging tree and
+ * in every unit test, which is why `DEFAULT_PLUGINS` remains the answer there.
+ */
+export function resolveDefaultPlugins(): string[] {
+  // Guarded on `import.meta.env` rather than on `location`, and this is the difference between
+  // working and throwing: Vite substitutes the literal below at build time, while Node leaves
+  // `import.meta.env` undefined, and a unit test that stubs a `location` global would make a
+  // `location`-based guard read a property of undefined and fail the whole mount.
+  const injected =
+    typeof import.meta.env === 'undefined' ? undefined : import.meta.env.VITE_LITHIC_BASE_PLUGINS;
+  if (!injected) return DEFAULT_PLUGINS;
+  try {
+    const parsed = JSON.parse(injected);
+    return Array.isArray(parsed) && parsed.length ? (parsed as string[]) : DEFAULT_PLUGINS;
+  } catch {
+    return DEFAULT_PLUGINS;
+  }
+}
+
+/**
  * Tiddlers the launcher itself puts into every mounted wiki: the shared widget
  * override and the Ephemeral API integration, plus the plugin-library flag the
  * engine bootstrap sets. They are part of how Lithic runs, not the user's
@@ -74,14 +109,52 @@ export const LITHIC_INJECTED_EXCLUSIONS =
 export const LITHIC_BASE_FILTER =
   `[all[tiddlers]!is[system]] [all[tiddlers]is[system]!prefix[$:/core]!prefix[$:/themes]!prefix[$:/temp]!prefix[$:/state]!prefix[$:/HistoryList]] [is[shadow]] -[prefix[$:/boot/]] -[[$:/isEncrypted]] -[[$:/library/sjcl.js]] -[[$:/status/RequireReloadDueToPluginChange]] -[[$:/StoryList]] -[[$:/config/PageControlButtons/Visibility/$:/core/ui/Buttons/new-journal]] -[[$:/lithic/startup/webdav-utils.js]] ${LITHIC_INJECTED_EXCLUSIONS}`;
 
-export function getLithicUserFilter(): string {
-  const pluginExclusions = DEFAULT_PLUGINS.map((p) => `-[[$:/plugins/${p}]]`).join(' ');
-  return `${LITHIC_BASE_FILTER} ${pluginExclusions}`;
+/**
+ * The filter a save runs over the wiki: what is the user's document and what is the base's.
+ *
+ * `plugins` is the set the *mounted base* ships, which the caller reads out of the engine it
+ * is mounting. It is an argument rather than a constant because that is the whole point of
+ * the white-label work: a base ships whatever it ships, and a hardcoded Lithic list would
+ * either miss a plugin (writing the base's own tiddlers into a user's file) or name one that
+ * is not there (harmless, but a lie in the filter). `DEFAULT_PLUGINS` is the fallback for a
+ * caller that has nothing better, and the generated list is what ships.
+ *
+ * `patch` is the base's own declaration of what its documents contain, appended to the
+ * filter. Lithic declares one (`$:/lithic/config/PublishFilterPatch`), and appending it is a
+ * no-op for Lithic's own saves because everything it subtracts is already excluded; the seam
+ * exists so a base whose documents should hold a different set can say so.
+ */
+export function getLithicUserFilter(options: { plugins?: readonly string[]; patch?: string } = {}): string {
+  const roots = options.plugins?.length ? options.plugins : DEFAULT_PLUGINS;
+  const pluginExclusions = pluginExclusionFilter(roots);
+  const patch = options.patch?.trim();
+  return `${LITHIC_BASE_FILTER} ${pluginExclusions}${patch ? ` ${patch}` : ''}`;
+}
+
+/** The `-[[$:/plugins/...]]` exclusions for a set of plugin roots. */
+export function pluginExclusionFilter(roots: readonly string[]): string {
+  return roots.map((p) => `-[[$:/plugins/${p}]]`).join(' ');
+}
+
+/**
+ * The filter fragment a base declares for its own documents, or an empty string.
+ *
+ * Two shapes are accepted, in order of preference: a plain tiddler holding the fragment
+ * (`$:/config/lithic/document-filter`), which is the shape a base author should reach for,
+ * and the macro Lithic already declares (`$:/lithic/config/PublishFilterPatch`), whose body
+ * is extracted because it is the same fragment in a wrapper. A base that declares neither
+ * contributes nothing, which is byte-for-byte today's filter.
+ */
+export function readBaseDocumentFilter(getText: (title: string, fallback?: string) => string): string {
+  const plain = getText('$:/config/lithic/document-filter', '').trim();
+  if (plain) return plain;
+  const macro = getText('$:/lithic/config/PublishFilterPatch', '');
+  const body = /\\define\s+publishFilter\s*\(\)\s*\r?\n([\s\S]*?)\r?\n\\end/.exec(macro);
+  return body ? body[1].trim() : '';
 }
 
 export function normalizeLithName(name: string): string {
-  const base = name.replace(/\.(?:html?|lith|json)$/i, '');
-  return `${base || 'untitled'}.lith`;
+  return normalizeDocumentName(name, DOCUMENT_FORMAT);
 }
 
 export function createLithSaver(options?: {
@@ -109,8 +182,8 @@ export function createLithSaver(options?: {
       }
       const saveOptions = isJsonMode
         ? {
-            suggestedName: options?.suggestedName ?? 'new.lith',
-            types: [{ description: copy.fileTypes.monolith, accept: { 'application/x-lith': ['.lith'] } }]
+            suggestedName: options?.suggestedName ?? normalizeDocumentName('new'),
+            types: documentPickerTypes()
           }
         : {
             suggestedName: 'lith.html',
@@ -137,7 +210,10 @@ export function createLithSaver(options?: {
         options?.getJson?.() ??
         runtimeTw?.wiki?.getTiddlersAsJson?.(getLithicUserFilter()) ??
         '[]';
-      if (activeHandle.name.endsWith('.lith')) {
+      // The file's own name decides the shape, never the build's pin: a `.lith` a user
+      // already has must still be written as a `.lith`, whatever this build produces by
+      // default. The pin governs the *suggested* names and the offered types above.
+      if (activeHandle.name.toLowerCase().endsWith('.lith')) {
         textToWrite = serializeJsonToLith(jsonText);
       } else {
         textToWrite = jsonText;

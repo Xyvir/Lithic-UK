@@ -7,7 +7,10 @@ import {
   normalizeLithName,
   getLithicUserFilter,
   installLegacyLithSaver,
-  DEFAULT_PLUGINS
+  readBaseDocumentFilter,
+  resolveDefaultPlugins,
+  DEFAULT_PLUGINS,
+  LITHIC_BASE_FILTER
 } from './legacy-saver.ts';
 
 test('normalizes launcher names to one lith extension', () => {
@@ -61,6 +64,62 @@ test('every plugin shipped in the engine is excluded from saves', () => {
     [],
     'a plugin the engine ships must be in DEFAULT_PLUGINS or it is saved into user files'
   );
+});
+
+// The list is only a fallback: a mount reads the roots out of the base it is mounting, and
+// this is the caller that knows them (see readEnginePluginRoots in legacy-launcher-runtime).
+test('the filter excludes the base the caller passes, not the committed list', () => {
+  const filter = getLithicUserFilter({ plugins: ['acme/base-a', 'acme/base-b'] });
+  assert.ok(filter.includes('-[[$:/plugins/acme/base-a]]'));
+  assert.ok(filter.includes('-[[$:/plugins/acme/base-b]]'));
+  assert.ok(!filter.includes('-[[$:/plugins/sq/streams]]'));
+  assert.ok(filter.startsWith(LITHIC_BASE_FILTER), 'the base filter is the floor, not a replacement');
+
+  // An empty set is not a declaration: it falls back rather than widening the save.
+  assert.ok(getLithicUserFilter({ plugins: [] }).includes('-[[$:/plugins/sq/streams]]'));
+});
+
+// What the base declares is appended, and a base that declares nothing contributes nothing.
+test('the base own document filter is appended to the save filter', () => {
+  const bare = getLithicUserFilter();
+  const withPatch = getLithicUserFilter({ patch: '-[prefix[$:/acme/private/]]' });
+  assert.equal(withPatch, `${bare} -[prefix[$:/acme/private/]]`);
+  assert.equal(getLithicUserFilter({ patch: '   ' }), bare, 'whitespace declares nothing');
+});
+
+test('a base can declare its document filter as a plain tiddler or as the macro', () => {
+  const macro = [
+    'tags: $:/tags/Macro',
+    'title: $:/lithic/config/PublishFilterPatch',
+    '',
+    '\\define publishFilter()',
+    '-[prefix[$:/state/]]',
+    '-[prefix[$:/temp/]]',
+    '\\end'
+  ].join('\r\n');
+  const store: Record<string, string> = { '$:/lithic/config/PublishFilterPatch': macro };
+  const getText = (title: string, fallback = '') => store[title] ?? fallback;
+
+  assert.equal(readBaseDocumentFilter(getText), '-[prefix[$:/state/]]\r\n-[prefix[$:/temp/]]');
+
+  // A plain tiddler outranks the macro, for a base that would rather not wrap it.
+  store['$:/config/lithic/document-filter'] = '[all[tiddlers]] -[prefix[$:/acme/]]';
+  assert.equal(readBaseDocumentFilter(getText), '[all[tiddlers]] -[prefix[$:/acme/]]');
+
+  // Neither shape declared, and a macro that defines something else, both contribute nothing.
+  assert.equal(readBaseDocumentFilter(() => ''), '');
+  assert.equal(
+    readBaseDocumentFilter((title: string, fallback = '') =>
+      title === '$:/lithic/config/PublishFilterPatch' ? '\\define other()\n-x\n\\end' : fallback
+    ),
+    ''
+  );
+});
+
+test('the committed list is what an unbuilt checkout resolves to', () => {
+  // Node has no build, so the injected list is absent and the literal answers. The parity
+  // test above is what keeps that literal honest against the engine.
+  assert.deepEqual(resolveDefaultPlugins(), DEFAULT_PLUGINS);
 });
 
 test('opens one Lithic picker with .lith mimetype and reuses the selected handle', async () => {

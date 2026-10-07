@@ -19,6 +19,8 @@
  * the API (or a non-self-host mount) falls back to the legacy full-file PUT.
  */
 
+import { advertisesDocument, serverDocumentName } from './document-format.ts';
+
 export const WEBDAV_BASE = '/sync/';
 export const LITHIC_API_BASE = '/api/lithic/';
 /** A lock older than this belongs to a dead session (server purge uses 120s). */
@@ -67,7 +69,8 @@ function firstElementText(block: string, name: string): string | null {
 }
 
 /**
- * Parse a PROPFIND multistatus body into the `.lith` files it advertises.
+ * Parse a PROPFIND multistatus body into the documents it advertises (see
+ * `advertisesDocument`: `.lith` for a `lith` build, monoliths for `html` or `both`).
  *
  * Both facts a row draws are read here and neither is required: the stamp orders the list,
  * the content length is what the row shows, and a store that omits either leaves that one
@@ -94,7 +97,11 @@ export function parsePropfindXml(xml: string): WebdavFile[] {
       // A malformed escape is not worth failing the whole listing over.
     }
     if (path.endsWith('/')) continue; // the collection itself
-    if (!path.toLowerCase().endsWith('.lith')) continue;
+    // What this build advertises, which is the write half of the document-format pin: a
+    // `lith` build lists its own documents, and `html` or `both` list the monoliths they
+    // write. Reading is unaffected, because a file the user names is opened by name rather
+    // than through this listing.
+    if (!advertisesDocument(path)) continue;
     const name = path.split('/').filter(Boolean).pop() ?? '';
     if (!name) continue;
     const stamp = firstElementText(block, 'getlastmodified');
@@ -240,9 +247,16 @@ export function createLockHeartbeat(options: {
   };
 }
 
-/** Uploads always land as `.lith`, even when a wiki arrives as bare JSON. */
+/**
+ * The name an upload lands under, in the format this build writes.
+ *
+ * A wiki can arrive as bare JSON, so the name is not always what the caller has; whatever it
+ * is, it takes the build's document extension unless it already names one. The self-host
+ * instance's listing is filtered by the same pin (`advertisesDocument`), so the two halves
+ * agree about what a document is called.
+ */
 export function lithUploadName(name: string): string {
-  return /\.lith$/i.test(name) ? name : `${name.replace(/\.[^.]+$/, '')}.lith`;
+  return serverDocumentName(name);
 }
 
 /**

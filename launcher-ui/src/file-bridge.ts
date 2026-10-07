@@ -10,6 +10,7 @@
  * nobody has opened, and each one is a whole wiki.
  */
 import { copy } from './copy.ts';
+import { documentMimetype, documentPickerTypes, normalizeDocumentName } from './document-format.ts';
 import { basename, hasShimBackend, shimPick, shimRead, shimWrite } from './shim-files.ts';
 
 export interface PickedLith {
@@ -158,7 +159,7 @@ export async function saveTextVerifiably(fileName: string, text: string): Promis
     try {
       const handle = (await picker({
         suggestedName: fileName,
-        types: [{ description: copy.fileTypes.monolith, accept: { 'application/x-lith': ['.lith'] } }]
+        types: documentPickerTypes()
       })) as FilePickerHandle;
       const writable = await handle.createWritable();
       await writable.write(text);
@@ -172,7 +173,7 @@ export async function saveTextVerifiably(fileName: string, text: string): Promis
     }
   }
 
-  const blob = new Blob([text], { type: 'application/x-lith' });
+  const blob = new Blob([text], { type: documentMimetype() });
   const url = URL.createObjectURL(blob);
   const anchor = document.createElement('a');
   anchor.href = url;
@@ -252,8 +253,8 @@ function browserBridge(): FileBridge {
       if (typeof window !== 'undefined' && (window as any).showSaveFilePicker) {
         try {
           const handle = await (window as any).showSaveFilePicker({
-            suggestedName: suggestedName.toLowerCase().endsWith('.lith') ? suggestedName : `${suggestedName}.lith`,
-            types: [{ description: copy.fileTypes.monolith, accept: { 'application/x-lith': ['.lith'] } }]
+            suggestedName: normalizeDocumentName(suggestedName),
+            types: documentPickerTypes()
           });
           const writable = await handle.createWritable();
           await writable.write(text);
@@ -266,11 +267,11 @@ function browserBridge(): FileBridge {
           // Fall back to blob anchor download below
         }
       }
-      const blob = new Blob([text], { type: 'application/x-lith' });
+      const blob = new Blob([text], { type: documentMimetype() });
       const url = URL.createObjectURL(blob);
       const anchor = document.createElement('a');
       anchor.href = url;
-      anchor.download = suggestedName.toLowerCase().endsWith('.lith') ? suggestedName : `${suggestedName}.lith`;
+      anchor.download = normalizeDocumentName(suggestedName);
       anchor.click();
       URL.revokeObjectURL(url);
       return { name: anchor.download };

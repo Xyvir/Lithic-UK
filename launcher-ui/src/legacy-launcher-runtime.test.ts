@@ -1,6 +1,14 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { resolveEngineCandidates, bootLegacyHtml, bootLegacyWiki, buildEngineHtml, writeHandoff } from './legacy-launcher-runtime.ts';
+import vm from 'node:vm';
+import {
+  resolveEngineCandidates,
+  bootLegacyHtml,
+  bootLegacyWiki,
+  buildEngineHtml,
+  readEnginePluginRoots,
+  writeHandoff
+} from './legacy-launcher-runtime.ts';
 
 test('resolves lithic.html as a sibling for file URLs', () => {
   assert.deepEqual(resolveEngineCandidates('file:///C:/Lithic/src/launcher.html'), [
@@ -650,7 +658,7 @@ test('browser-storage-only mounts save into IndexedDB instead of asking for a fi
   assert.match(html, /function saveToBrowserStorage\(tw, callback\)/);
   // A Lith still writes the tiddler JSON the search cache and the version chain are
   // built from; only a monolith has nothing that a tiddler store can hold.
-  assert.match(html, /if \(browserOnly\) \{\n        if \(false\) \{\n          saveMonolithToBrowserStorage\(tw, _text, callback\);\n        \} else \{\n          saveToBrowserStorage\(tw, callback\);\n        \}\n        return true;\n      \}/);
+  assert.match(html, /if \(browserOnly\) \{\n        var browserName = \(handle && handle\.name\) \|\| "notes\.lith";\n        if \(false \|\| prefersHtmlFor\(browserName\)\) \{\n          saveMonolithToBrowserStorage\(tw, _text, callback\);\n        \} else \{\n          saveToBrowserStorage\(tw, callback\);\n        \}\n        return true;\n      \}/);
   // The save writes the same two keys a real save writes: the flat cache the
   // recents row and search read, and the versioned history the download modal
   // materialises a hard copy from.
@@ -674,7 +682,7 @@ test('an HTML monolith in browser-only mode saves the page text into its own row
   assert.match(html, /var browserOnly = true;/);
   // The monolith branch is chosen ahead of the tiddler-JSON saver, and before anything
   // can reach for a picker that this mode's platforms do not have.
-  assert.match(html, /if \(browserOnly\) \{\n        if \(true\) \{\n          saveMonolithToBrowserStorage\(tw, _text, callback\);\n        \} else \{/);
+  assert.match(html, /if \(browserOnly\) \{\n        var browserName = \(handle && handle\.name\) \|\| "page\.html";\n        if \(true \|\| prefersHtmlFor\(browserName\)\) \{\n          saveMonolithToBrowserStorage\(tw, _text, callback\);\n        \} else \{/);
 
   // What it writes first is the browser-only row the launcher reads back, with the page
   // text on the row itself, keyed on the mount's own name and laid over the row it replaces.
@@ -725,4 +733,102 @@ test('an ordinary mount does not get the browser-storage save path', () => {
   const html = buildEngineHtml(ENGINE_STUB, { name: 'notes.lith', text: '' });
   assert.match(html, /var browserOnly = false;/);
   assert.match(html, /return root\.showSaveFilePicker \? root\.showSaveFilePicker\(saveOptions\) : Promise\.reject/);
+});
+
+/** A store tiddler list, wrapped in the script tag the engine carries it in. */
+function engineWithStore(tiddlers: Array<Record<string, string>>): string {
+  return `<!doctype html><html><head></head><body><script class="tiddlywiki-tiddler-store" type="application/json">${JSON.stringify(tiddlers)}</script></body></html>`;
+}
+
+// The exclusions are read out of the base being mounted, which is what makes the launcher
+// correct beside a base that is not Lithic: a base ships what it ships, and a hardcoded list
+// either misses one (writing the base's own tiddlers into a user's file) or names one that is
+// not there. Read from the same store the mount already splices into.
+test('the plugin roots come out of the base own store', () => {
+  const engine = engineWithStore([
+    { title: '$:/plugins/acme/base-a', 'plugin-type': 'plugin' },
+    { title: '$:/themes/acme/theme', 'plugin-type': 'plugin' },
+    { title: '$:/plugins/acme/base-b', 'plugin-type': 'plugin' },
+    { title: 'My Note', text: 'hello' },
+    // A shadow a plugin bundles is escaped inside that plugin's own text field, so it is not
+    // a root of its own; only the tiddler titled $:/plugins/... is.
+    {
+      title: '$:/plugins/acme/base-c',
+      'plugin-type': 'plugin',
+      text: '{"tiddlers":{"$:/plugins/acme/shadow":{}}}'
+    }
+  ]);
+  assert.deepEqual(readEnginePluginRoots(engine), ['acme/base-a', 'acme/base-b', 'acme/base-c']);
+});
+
+test('a base with no readable store answers with no roots so the fallback stands', () => {
+  assert.deepEqual(readEnginePluginRoots('<html><body>no store here</body></html>'), []);
+  assert.deepEqual(
+    readEnginePluginRoots(engineWithStore([]).replace('[]', 'not json')),
+    [],
+    'an unreadable store must not stop a mount'
+  );
+  assert.deepEqual(readEnginePluginRoots(engineWithStore([]).replace('[]', '{"title":"a"}')), []);
+});
+
+/**
+ * Assemble and run the injected saver's filter builder against a stub wiki.
+ *
+ * The filter only exists at save time and is built inside the mounted document, so this
+ * evaluates the shipped text rather than a port of it: the definitions are sliced off before
+ * the parts that touch IndexedDB, and the one function under test is handed back out.
+ */
+function evaluateInjectedFilter(html: string, tiddlerTexts: Record<string, string>): () => string {
+  const start = html.indexOf('(function(){\n    var root = window;');
+  assert.ok(start >= 0, 'the injected saver bootstrap is present');
+  const stop = html.indexOf('var idbKeyval', start);
+  assert.ok(stop > start, 'the filter definitions come before the storage layer');
+  const script = `${html.slice(start, stop)}    root.__TEST_FILTER__ = userTiddlerFilter;\n  })();`;
+
+  const sandbox: Record<string, unknown> = {};
+  sandbox.window = sandbox;
+  sandbox.$tw = {
+    wiki: {
+      getTiddlerText: (title: string, fallback = '') => tiddlerTexts[title] ?? fallback
+    }
+  };
+  vm.runInNewContext(script, sandbox);
+  return sandbox.__TEST_FILTER__ as () => string;
+}
+
+test('the injected saver builds its filter from the base it is in', () => {
+  const engine = engineWithStore([
+    { title: '$:/plugins/acme/base-a', 'plugin-type': 'plugin' },
+    { title: '$:/plugins/acme/base-b', 'plugin-type': 'plugin' }
+  ]);
+  const html = buildEngineHtml(engine, { name: 'notes.lith', text: '' });
+
+  const filter = evaluateInjectedFilter(html, {
+    '$:/lithic/config/PublishFilterPatch':
+      '\\define publishFilter()\r\n-[prefix[$:/acme/private/]]\r\n\\end'
+  })();
+
+  assert.ok(filter.includes('-[[$:/plugins/acme/base-a]]'), 'the base plugins are excluded');
+  assert.ok(filter.includes('-[[$:/plugins/acme/base-b]]'));
+  assert.ok(
+    !filter.includes('-[[$:/plugins/sq/streams]]'),
+    'the committed fallback is not consulted when the base answers'
+  );
+  assert.ok(
+    filter.includes('-[prefix[$:/acme/private/]]'),
+    'the base own declaration reaches the filter it is saved through'
+  );
+});
+
+test('a mount that declares nothing but a store still excludes that store', () => {
+  const engine = engineWithStore([{ title: '$:/plugins/acme/base-a', 'plugin-type': 'plugin' }]);
+  const filter = evaluateInjectedFilter(buildEngineHtml(engine, { name: 'notes.lith', text: '' }), {})();
+  assert.ok(filter.includes('-[[$:/plugins/acme/base-a]]'));
+  assert.ok(!filter.includes('-[prefix[$:/acme/private/]]'), 'no declaration appends nothing');
+});
+
+test('a mount into a base with no store falls back to the list the build carries', () => {
+  const filter = evaluateInjectedFilter(buildEngineHtml(ENGINE_STUB, { name: 'notes.lith', text: '' }), {})();
+  assert.ok(filter.includes('-[[$:/plugins/sq/streams]]'), 'the committed list is the floor');
+  assert.ok(!filter.includes('-[[$:/plugins/acme/base-a]]'));
 });
