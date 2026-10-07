@@ -6,6 +6,16 @@ Please note, the below instructions are loosely organized by priority, with most
 **CRITICAL RULE FOR ALL AGENTS:**
 If you need source context that is NOT available locally within this repository (such as vanilla TiddlyWiki core files or external third-party plugins), **DO NOT** attempt to find or download it yourself. Instead, you MUST explicitly **ASK THE USER (THE DEVELOPER)** to provide the relevant context manually. 
 
+# Do Not Watch CI/CD Runs (IMPORTANT)
+
+**CONTEXT:**
+Every push to `main` starts a release, and the developer monitors that pipeline personally. An agent that polls run status, conclusions, logs or artifacts after a push only reports what the developer is already reading, and it spends the session doing it.
+
+**STANDARD OPERATING PROCEDURE:**
+1. Push when asked, report the pushed commit, and stop there.
+2. Do NOT query the GitHub Actions API, do NOT watch or summarize run status or conclusions, and do NOT re-fetch to check whether a release commit has landed.
+3. Leave the pipeline entirely to the developer, who will pull the rebuilt artifacts when the release lands.
+
 # Plugin Directory Map — Sources vs. Build Staging (IMPORTANT)
 
 **CONTEXT:**
