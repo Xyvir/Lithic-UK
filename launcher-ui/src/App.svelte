@@ -5030,7 +5030,7 @@
 
 <svelte:head><title>{copy.app.title}</title></svelte:head>
 
-<main class="container" data-mode={mode} data-shim-backend={shimBackendUp}>
+<main class="container" class:panelled={recentPanelShown} data-mode={mode} data-shim-backend={shimBackendUp}>
   <!--
     The install offer, written once because it has two homes and never both at once: the
     panel's foot row (where a phone wants it, beside the rebuild control) and the footer

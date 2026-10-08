@@ -1423,6 +1423,108 @@ footer > * { pointer-events: auto; }
   .action-pair .bookmark-button { flex: 1 1 100%; }
 }
 
+/*
+ * A phone held sideways, where one column cannot work.
+ *
+ * The window is wide and short here (about 844 by 390 on the phone this was drawn for), and a
+ * single column spends nearly all of that short height before the list is reached: the mark,
+ * the title, the two action buttons and the search box add up to more than the window has, so
+ * the recent list, which is the whole reason the launcher is open, is pushed off the bottom
+ * with nothing left to scroll into. The heights that make that true are all off to `auto` on
+ * the way in: the container's 430px floor is taller than the window, so the bottom of the
+ * page is clipped by `body { overflow: hidden }`, and the panel's own flex share is whatever
+ * is left, which is nothing.
+ *
+ * So the page lays itself out as two columns while the window is landscape and short. The left
+ * column is the controls, in the order they are reached for: the heading, then the search box,
+ * then the pair of action buttons. The right column is the recent list, which now takes the full
+ * height of the row, with the rebuild/reset control at its bottom. Only a launcher whose panel
+ * is on screen is laid out this way (`panelled`, set by `recentPanelShown` in the template):
+ * with no rows to show there is no second column to fill.
+ *
+ * The search box belongs to the recent panel in the markup, and moving it to the other column
+ * is what `display: contents` on `.recent-section` buys: the panel stops drawing a box of its
+ * own and its three children (the search wrap, the list, the foot) become grid items the page
+ * can place. The list carries the panel's border and background, since it is now the box the
+ * eye reads as "the recent panel" on this screen.
+ *
+ * The height is the trigger rather than the width: a landscape tablet is 1024 by 768 and has
+ * no such problem, and the largest phone is about 415 tall. 560 leaves room for a browser's
+ * own chrome eating the top of the viewport, and any desktop window short enough to be caught
+ * is a window that wants this layout too.
+ */
+@media (orientation: landscape) and (max-height: 560px) {
+  main.container.panelled {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1.15fr);
+    /* heading, search box, then the rest for the actions; a last row for the foot. */
+    grid-template-rows: auto auto 1fr auto;
+    column-gap: 12px;
+    row-gap: 10px;
+    width: 100%;
+    /* The 430px floor is taller than this window; keeping it clips the page. */
+    min-height: 0;
+    padding: 10px 12px;
+  }
+  /* The left column: the controls, in reach order. */
+  main.container.panelled .heading {
+    grid-column: 1;
+    grid-row: 1;
+    min-height: 0;
+    margin-bottom: 0;
+    padding-bottom: 8px;
+  }
+  main.container.panelled h1 { font-size: 1.35rem; }
+  main.container.panelled .brand-icon-wrap { flex-basis: 42px; width: 42px; height: 42px; margin-right: 10px; }
+  main.container.panelled .brand-icon { width: 42px; height: 42px; }
+  main.container.panelled .recent-search-wrap { grid-column: 1; grid-row: 2; }
+  main.container.panelled .recent-search { height: 44px; }
+  main.container.panelled .launcher-actions { grid-column: 1; grid-row: 3; align-self: start; margin-top: 0; }
+  main.container.panelled .action-button { height: 48px; }
+  main.container.panelled .bookmark-button,
+  main.container.panelled .action-pair .bookmark-button { height: 48px; min-height: 48px; }
+
+  /*
+   * The panel is dissolved into the two columns. Everything it drew as a box is gone with it,
+   * so the list below draws that box instead and the foot is a row under it.
+   */
+  main.container.panelled .recent-section { display: contents; }
+  main.container.panelled .recent-list {
+    grid-column: 2;
+    grid-row: 1 / 4;
+    margin: 0;
+    padding: 8px 6px 8px 8px;
+    border: 1px solid var(--lithic-line);
+    border-radius: 8px;
+    background: var(--lithic-surface-panel);
+    box-shadow: 0 4px 6px var(--lithic-shadow-wash-30);
+  }
+  main.container.panelled .recent-foot { grid-column: 2; grid-row: 4; }
+  /* A mode notice takes a line of its own under both columns. */
+  main.container.panelled .offline-banner { grid-column: 1 / -1; grid-row: 5; margin: 0; }
+  /*
+   * The mark above carries the project link, and the footer's copy would land on the left
+   * column's foot row, so it goes the way it goes on a portrait phone.
+   */
+  main.container.panelled .github-link { display: none; }
+}
+
+/*
+ * The action row, on the landscape widths where it no longer fits on one line.
+ *
+ * "New Blank Lith", "Mount a Lith" and the bookmark tile measure 351px together, and the
+ * left column reaches that at a window about 842px wide, which the 844px phones clear by
+ * a single pixel. At anything narrower the tile is what overflows: the two labelled buttons
+ * hold their own width (they are `max-content`), so the last item hangs off the column's
+ * edge. Wrapped, the tile takes a line of its own at full width, which is the shape the
+ * portrait layout already gives it below 350px. The bound is a round number above the
+ * measured 842, so the row is never a pixel away from spilling.
+ */
+@media (orientation: landscape) and (max-height: 560px) and (max-width: 880px) {
+  main.container.panelled .action-pair { flex-wrap: wrap; }
+  main.container.panelled .action-pair .bookmark-button { flex: 1 1 100%; }
+}
+
 
 /* --- PENDING IMPORTS WINDOW (legacy parity) --- */
 .pending-imports {
