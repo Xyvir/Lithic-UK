@@ -1436,17 +1436,22 @@ footer > * { pointer-events: auto; }
  * is left, which is nothing.
  *
  * So the page lays itself out as two columns while the window is landscape and short. The left
- * column is the controls, in the order they are reached for: the heading, then the search box,
- * then the pair of action buttons. The right column is the recent list, which now takes the full
- * height of the row, with the rebuild/reset control at its bottom. Only a launcher whose panel
- * is on screen is laid out this way (`panelled`, set by `recentPanelShown` in the template):
- * with no rows to show there is no second column to fill.
+ * column is every control, in the order they are reached for: the heading, the search box, the
+ * action card, and the rebuild/reset control in the foot. The right column is the recent list,
+ * which takes the full height of the page now that the foot has left it. Only a launcher whose
+ * panel is on screen is laid out this way (`panelled`, set by `recentPanelShown` in the
+ * template): with no rows to show there is no second column to fill.
  *
- * The search box belongs to the recent panel in the markup, and moving it to the other column
- * is what `display: contents` on `.recent-section` buys: the panel stops drawing a box of its
- * own and its three children (the search wrap, the list, the foot) become grid items the page
- * can place. The list carries the panel's border and background, since it is now the box the
- * eye reads as "the recent panel" on this screen.
+ * The search box and the foot belong to the recent panel in the markup, and moving them to the
+ * other column is what `display: contents` on `.recent-section` buys: the panel stops drawing a
+ * box of its own and its three children (the search wrap, the list, the foot) become grid items
+ * the page can place. The list carries the panel's border and background, since it is now the
+ * box the eye reads as "the recent panel" on this screen.
+ *
+ * The left column is what has height to spare, and the header band is what takes it: the mark
+ * and the title sit centred in a row that stretches to fill whatever the search box, the action
+ * card and the foot do not. The actions keep their natural height instead, so New Blank Lith and
+ * Mount a Lith read at the same 52px as the recent rows beside them.
  *
  * The height is the trigger rather than the width: a landscape tablet is 1024 by 768 and has
  * no such problem, and the largest phone is about 415 tall. 560 leaves room for a browser's
@@ -1457,8 +1462,8 @@ footer > * { pointer-events: auto; }
   main.container.panelled {
     display: grid;
     grid-template-columns: minmax(0, 1fr) minmax(0, 1.15fr);
-    /* heading, search box, then the rest for the actions; a last row for the foot. */
-    grid-template-rows: auto auto 1fr auto;
+    /* The header takes the slack; search box, actions and foot keep their own height. */
+    grid-template-rows: 1fr auto auto auto;
     column-gap: 12px;
     row-gap: 10px;
     width: 100%;
@@ -1466,32 +1471,78 @@ footer > * { pointer-events: auto; }
     min-height: 0;
     padding: 10px 12px;
   }
-  /* The left column: the controls, in reach order. */
+  /*
+   * The left column: the controls, in reach order. The title band is the row that grows, so the
+   * mark and the title sit centred in whatever vertical room the controls leave. The type is
+   * smaller than on a page with height to spend: at 1.15rem beside a 36px mark the band reads as
+   * a heading rather than as a squashed block of type.
+   */
   main.container.panelled .heading {
     grid-column: 1;
     grid-row: 1;
+    align-self: stretch;
     min-height: 0;
     margin-bottom: 0;
-    padding-bottom: 8px;
+    padding-bottom: 6px;
   }
-  main.container.panelled h1 { font-size: 1.35rem; }
-  main.container.panelled .brand-icon-wrap { flex-basis: 42px; width: 42px; height: 42px; margin-right: 10px; }
-  main.container.panelled .brand-icon { width: 42px; height: 42px; }
+  main.container.panelled h1 { font-size: 1.15rem; line-height: 1.15; }
+  /*
+   * The mark grows with the band rather than sitting at a fixed size inside it, so a taller
+   * header reads as a hero rather than as a small mark adrift in empty surface. It is capped so
+   * a very short window, where the band is thinner than the mark's own size, shrinks it instead
+   * of letting it spill past the row it belongs to.
+   */
+  main.container.panelled .brand-icon-wrap {
+    flex: 0 0 auto;
+    align-self: stretch;
+    display: flex;
+    align-items: center;
+    width: auto;
+    height: auto;
+    margin-right: 12px;
+  }
+  main.container.panelled .brand-icon {
+    width: auto;
+    height: 100%;
+    max-height: 56px;
+    aspect-ratio: 1 / 1;
+    border-width: 2px;
+  }
   main.container.panelled .recent-search-wrap { grid-column: 1; grid-row: 2; }
   main.container.panelled .recent-search { height: 44px; }
-  main.container.panelled .launcher-actions { grid-column: 1; grid-row: 3; align-self: start; margin-top: 0; }
-  main.container.panelled .action-button { height: 48px; }
-  main.container.panelled .bookmark-button,
-  main.container.panelled .action-pair .bookmark-button { height: 48px; min-height: 48px; }
+  /*
+   * The action card keeps its own height rather than stretching: the buttons are 52px, the same
+   * as a recent row, so the two columns share one rhythm down the screen.
+   */
+  main.container.panelled .launcher-actions { grid-column: 1; grid-row: 3; align-self: start; display: flex; margin-top: 0; }
+  main.container.panelled .action-pair { flex: 1 1 auto; flex-wrap: wrap; }
+  main.container.panelled .action-pair .action-button { height: 52px; min-height: 52px; }
+  /*
+   * New Blank Lith takes the first row alone, whatever shape it is in (a button, or the inline
+   * field that replaces it while a name is being typed). Mount a Lith and a narrow bookmark tile
+   * then share the second row, the tile as tall as the button beside it.
+   */
+  main.container.panelled .action-pair .action-button:not(.mount-button),
+  main.container.panelled .action-pair .new-lith-inline { flex: 1 1 100%; }
+  main.container.panelled .action-pair .new-lith-inline { min-height: 52px; }
+  main.container.panelled .action-pair .mount-button { flex: 1 1 auto; }
+  main.container.panelled .action-pair .bookmark-button {
+    flex: 0 0 40px;
+    width: 40px;
+    align-self: stretch;
+    height: auto;
+    min-height: 0;
+  }
+  main.container.panelled .action-pair .bookmark-button svg { width: 16px; height: 18px; }
 
   /*
    * The panel is dissolved into the two columns. Everything it drew as a box is gone with it,
-   * so the list below draws that box instead and the foot is a row under it.
+   * so the list below draws that box instead and the foot is the left column's last row.
    */
   main.container.panelled .recent-section { display: contents; }
   main.container.panelled .recent-list {
     grid-column: 2;
-    grid-row: 1 / 4;
+    grid-row: 1 / 5;
     margin: 0;
     padding: 8px 6px 8px 8px;
     border: 1px solid var(--lithic-line);
@@ -1499,7 +1550,7 @@ footer > * { pointer-events: auto; }
     background: var(--lithic-surface-panel);
     box-shadow: 0 4px 6px var(--lithic-shadow-wash-30);
   }
-  main.container.panelled .recent-foot { grid-column: 2; grid-row: 4; }
+  main.container.panelled .recent-foot { grid-column: 1; grid-row: 4; margin: 0; }
   /* A mode notice takes a line of its own under both columns. */
   main.container.panelled .offline-banner { grid-column: 1 / -1; grid-row: 5; margin: 0; }
   /*
@@ -1508,23 +1559,6 @@ footer > * { pointer-events: auto; }
    */
   main.container.panelled .github-link { display: none; }
 }
-
-/*
- * The action row, on the landscape widths where it no longer fits on one line.
- *
- * "New Blank Lith", "Mount a Lith" and the bookmark tile measure 351px together, and the
- * left column reaches that at a window about 842px wide, which the 844px phones clear by
- * a single pixel. At anything narrower the tile is what overflows: the two labelled buttons
- * hold their own width (they are `max-content`), so the last item hangs off the column's
- * edge. Wrapped, the tile takes a line of its own at full width, which is the shape the
- * portrait layout already gives it below 350px. The bound is a round number above the
- * measured 842, so the row is never a pixel away from spilling.
- */
-@media (orientation: landscape) and (max-height: 560px) and (max-width: 880px) {
-  main.container.panelled .action-pair { flex-wrap: wrap; }
-  main.container.panelled .action-pair .bookmark-button { flex: 1 1 100%; }
-}
-
 
 /* --- PENDING IMPORTS WINDOW (legacy parity) --- */
 .pending-imports {
