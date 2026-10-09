@@ -97,6 +97,12 @@ let stub;
  */
 const VIEW = {
   phone: { width: 390, height: 800, deviceScaleFactor: 2 },
+  // The one viewport whose layout is triggered by its height rather than its width,
+  // and the size it was drawn for: a phone held sideways, short enough that the launcher
+  // lays itself out in two columns (see `launcher-ui/src/styles.css`, `orientation: landscape`).
+  // 390 tall is the window with the browser's own bar gone, which is the smaller of the
+  // two heights a visitor's browser will report; the bar's arrival is what `dvh` follows.
+  landscape: { width: 844, height: 390, deviceScaleFactor: 2 },
   wide: { width: 1000, height: 820, deviceScaleFactor: 2 },
   // Tall enough that a dialog never hits its own `max-height: 80vh`, so a pane is
   // the whole dialog rather than a window onto a scrolled one.
@@ -745,6 +751,69 @@ const SHEETS = [
           await settle(page, 300);
         },
         expect: '.reset-cache'
+      }
+    ]
+  },
+  {
+    /*
+     * The sideways phone, which is a layout of its own rather than a narrow window: the page
+     * turns into two columns, the action card takes the reset control as its last button, and
+     * the header band is the row that gives when the height is tight.
+     *
+     * It has panes for the reason every other sheet does, and one of its own: the trigger is the
+     * window's HEIGHT, so the states below cannot be reached by a viewport anyone would think to
+     * shoot on the phone sheet, and until this existed the layout was reviewed by hand each time
+     * it changed. What a pane cannot assert is geometry, since a pane proves only that the state
+     * arrived and a person reads the rest, so what each picture is here to show is written down: the
+     * reset control sitting inside the card at the same 52px and the same inset as the buttons
+     * above it (`110`), that same card while a title is being typed (`120`), and the card with no
+     * control in it at all, where the strip it would have occupied must not be left empty (`130`).
+     * The list's bottom edge is the last thing to check in any of them: it has to end level with
+     * the card, inside the window, with a browser's own bar over the top of the page.
+     */
+    id: 'launcher-landscape',
+    title: 'Launcher, phone landscape',
+    tile: '2x',
+    panes: [
+      {
+        name: '110-webapp-recents',
+        view: 'landscape',
+        seed: {
+          recents: [handleRow('notes.lith'), handleRow('ideas.lith'), handleRow('recipes.lith')],
+          caches: { 'search_cache_notes.lith': cache([{ title: 'A', text: 'note text' }]) },
+          meta: { 'search_cache_meta_notes.lith': history() }
+        },
+        expect: '.recent-row'
+      },
+      {
+        // The inline title field is the state the card's geometry is least like its own:
+        // the field takes the first row alone, so the two text rows the reset control is
+        // measured against become one, and the control has to follow them down.
+        name: '120-new-lith-entry',
+        view: 'landscape',
+        modal: 'Enter a title',
+        seed: { recents: [handleRow('notes.lith')] },
+        drive: async (page) => {
+          await page.evaluate(() => {
+            [...document.querySelectorAll('button')].find((node) => node.textContent.includes('New Blank Lith')).click();
+          });
+          await page.waitForSelector('.new-lith-inline');
+        },
+        expect: '.new-lith-inline'
+      },
+      {
+        // The browser-only store draws no reset control at all, so this is the picture of
+        // the card with nothing under its buttons: whatever room the control takes when it
+        // is there has to be gone from the card when it is not.
+        name: '130-fallback-no-control',
+        view: 'landscape',
+        storage: 'index-db',
+        seed: {
+          recents: [browserRow('fallback.lith'), browserRow('second.lith'), browserRow('third.lith')],
+          caches: { 'search_cache_fallback.lith': cache([{ title: 'A', text: 'text' }]) },
+          meta: { 'search_cache_meta_fallback.lith': history() }
+        },
+        expect: '.recent-row'
       }
     ]
   },
