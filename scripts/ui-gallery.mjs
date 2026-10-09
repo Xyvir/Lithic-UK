@@ -18,14 +18,18 @@
  * state: those are page-shape checks, not judgements about how a picture looks. The
  * rest of each pane is for a human to review.
  *
- * Dialogs are the exception, because there are now enough of them to lose one. A pane
- * that photographs a dialog says which one (`modal:`), which makes the run a walk as
- * well as a contact sheet: the claim is checked against the DOM before the shot, and the
- * run ends with every `role="dialog"` in `launcher-ui/src/App.svelte` — read out of the
- * source, since a dialog only exists in the DOM while it is open — next to the panes that
- * draw it. One that no pane draws is reported, with the reason or without one, and the
- * report is written to `ui-gallery/modal-coverage.md`. It never fails a run: the report
- * is the point, and a missing picture is not a broken launcher.
+ * Dialogs and windows are the exception, because there are now enough of them to lose one. A
+ * pane that photographs one says which (`modal:`), which makes the run a walk as well as a
+ * contact sheet: the claim is checked against the DOM before the shot, and the run ends with
+ * every dialog and every named live region in `launcher-ui/src/App.svelte` — read out of the
+ * source, since one only exists in the DOM while it is open — next to the panes that draw it.
+ * One that no pane draws is reported, with the reason or without one, and the report is written
+ * to `ui-gallery/modal-coverage.md`. It never fails a run: the report is the point, and a
+ * missing picture is not a broken launcher.
+ *
+ * What a pane asserts is a separate question, and `verify` is the answer to it: a pane is a
+ * photograph unless it carries one, and those are the claims a picture cannot show (a label
+ * column, a height that has to hold, two controls that must not overlap).
  *
  *   npm run gallery                     # every sheet
  *   node scripts/ui-gallery.mjs vault        # only sheets whose id contains "vault"
@@ -571,6 +575,67 @@ async function openBookmark(page, label) {
   }, label);
 }
 
+/**
+ * Queue a pending import, which is the state the corner window is drawn for: a note cut out of
+ * a cached Lith, waiting for the next mount.
+ *
+ * The sequence is the one the smoke test's live self-host leg drives, and it is the only route
+ * to this window. Nothing here is planted: the row exists because the store answers with it,
+ * the panel beside it exists because a pass read that Lith onto this device, and the query is
+ * the store's own filler body, so what the pane photographs is the read-through path rather
+ * than a cache the pane wrote for itself.
+ *
+ * The rebuild control is what runs that pass here. It is the one control in the launcher that
+ * re-lists an instance's store and indexes what it finds, and indexing is what fills this
+ * device's cache of the Lith (`Re-indexed 1 lith`, and the row's history icon arrives with it).
+ * The other route is a whole GitHub setup, which is not a photograph's business.
+ *
+ * The Lith is then taken out of the store before the panel is clicked, and that is load rather
+ * than decoration: the same click also opens the Lith, and a launcher that opened would be a
+ * launcher with no window left on screen. A failed open is what leaves the queue visible, and
+ * it is the state the smoke test asserts on as well.
+ */
+async function queuePendingImport(page, name) {
+  stub.addLith(name, new Date('2026-09-20T09:00:00Z'), 204800);
+  await page.reload({ waitUntil: 'domcontentloaded' });
+  await page.waitForSelector('.recent-row.remote-row');
+  // The row's own history icon is the receipt for the read that fills the cache, so waiting
+  // for it is waiting for this window's reason to exist rather than for a sleep. In self-host
+  // the rebuild asks nothing first: there are no orphaned rows to warn about.
+  await page.click('.reset-cache');
+  // Every wait and every click below is scoped to THIS Lith's own row, because the store is one
+  // per run and the panes before this one have their own Liths in it: a document-wide
+  // `waitForSelector('.cache-preview')` is satisfied by a neighbour's row, and a
+  // document-wide click would then open that neighbour's Lith, which is still in the store.
+  await page.waitForFunction(
+    (lith) =>
+      [...document.querySelectorAll('.recent-row.remote-row')].some(
+        (row) => row.textContent.includes(lith) && row.querySelector('.cache-history-button')
+      ),
+    { timeout: 20000 },
+    name
+  );
+  await page.type('input.recent-search', 'instance');
+  await page.waitForFunction(
+    (lith) =>
+      [...document.querySelectorAll('.recent-row.remote-row')].some(
+        (row) => row.textContent.includes(lith) && row.querySelector('.cache-preview')
+      ),
+    { timeout: 20000 },
+    name
+  );
+  const index = stub.state.liths.findIndex((lith) => lith.name === name);
+  if (index < 0) throw new Error(`the store never held ${name} for the panel to cut a note from`);
+  stub.state.liths.splice(index, 1);
+  await page.evaluate((lith) => {
+    const row = [...document.querySelectorAll('.recent-row.remote-row')].find((node) => node.textContent.includes(lith));
+    if (!row) throw new Error(`no row for ${lith} to click the panel on`);
+    row.querySelector('.cache-preview').click();
+  }, name);
+  await page.waitForSelector('.pending-imports li', { timeout: 20000 });
+  await settle(page, 300);
+}
+
 // --- the sheets -------------------------------------------------------------
 
 /**
@@ -584,16 +649,27 @@ async function openBookmark(page, label) {
  *   drive   what a person would do to get here.
  *   expect  the selector that proves the state arrived. If this never appears the
  *           pane fails loudly, so a sheet cannot show an empty pane silently.
+ *   verify  what the picture cannot say: a callback run once the state has arrived and
+ *           before the shot, given `{ evaluate, query }` and throwing on a claim that
+ *           does not hold. This is what makes a pane a test rather than a photograph,
+ *           and it is read-only by design — a pane's state is the `drive`'s business,
+ *           so nothing here clicks anything, and the pane is framed as the `drive` left
+ *           it. Six panes of the deck carry one; the rest are pictures, which is fine
+ *           until a number in a comment is the only thing holding a layout together.
+ *           Where a claim is about a second state (the buttons coming back when a dialog
+ *           closes), it belongs in the smoke test, which drives a page rather than
+ *           photographing it.
  *   clip    crop to this element (plus `pad`) instead of the whole viewport, which
  *           is how the dialog panes stay comparable at a readable size.
  *   scale   device pixels per CSS pixel, over the viewport's own. For the few
  *           controls whose whole subject is smaller than a sheet's thumbnail, and
  *           where a crop would otherwise be a smudge: the window is still laid out
  *           at `view`'s size, so nothing but the resolution changes.
- *   modal   the dialog this pane photographs, named by its `aria-labelledby` id — or its
- *           own `aria-label`, for the one entry that has no heading to point at. The
- *           walk asserts the dialog is in the DOM before the shot, and every claim is
- *           what the coverage report at the end of the run is built from.
+ *   modal   the dialog or named window this pane photographs, named by its
+ *           `aria-labelledby` id — or its own `aria-label`, for the entries that have no
+ *           heading to point at (the inline title field, and the queued-imports window).
+ *           The walk asserts it is in the DOM before the shot, and every claim is what
+ *           the coverage report at the end of the run is built from.
  *   locale  read this pane in another language the deck carries (`es`), which it asks for
  *           as `?lang=`. That is the review path, and the reason a translation can be
  *           looked at before it ships: one artifact, every language in it. A deployment
@@ -731,6 +807,265 @@ async function assertLandscapeCard(page, { placeholder = false } = {}) {
   }
   return measured;
 }
+
+/**
+ * Every dialog, defined once and shot at every viewport.
+ *
+ * The deck had each dialog at exactly one size before this, and that size was a preset rather
+ * than a device: `dialog` is 900 by 1700, tall enough that no dialog ever meets its own
+ * `max-height: 80vh`, which is what makes those pictures comparable and also why none of them
+ * says anything about the window a person is holding. A dialog at 390 by 800 is the other half
+ * of that question, and the half with the failures in it.
+ *
+ * So a state is written once here and instantiated three times below, at the phone, the sideways
+ * phone and the wide window. One definition is the point: a fixture cannot drift between the
+ * three, and the only thing that differs between the pictures is how much room the window gives
+ * the dialog. None of these is a second copy of a pane above with a different clip.
+ *
+ * A drive that plants a Lith in the stand-in store names it after the pane it is running in
+ * (`paneName`), and that is load rather than tidiness: the three panes of one state run against
+ * one store in one process, and two Liths under one name are two rows of one file, which the
+ * list draws as a duplicate.
+ */
+const DIALOG_STATES = [
+  {
+    // How a server enters the list at all, and the only dialog that owns an address.
+    slug: 'bookmark',
+    modal: 'bookmark-title',
+    mode: 'tauri',
+    seed: { bookmarks: BOOKMARKS },
+    rust: { exists: true, pin: PIN, entries: [{ origin: 'https://personal.lithic.uk', user: 'keeper' }], path: VAULT_PATH },
+    drive: async (page) => {
+      await page.click('.action-pair .bookmark-button');
+      await page.waitForSelector('.bookmark-modal');
+      await settle(page, 300);
+    },
+    clip: '.bookmark-modal',
+    expect: '.bookmark-modal'
+  },
+  {
+    // The PIN one instance asks for, which is a different dialog from the manager's: this one
+    // carries no list, no Forget Everything and no way past it.
+    slug: 'instance-unlock',
+    modal: 'instance-unlock-title',
+    mode: 'tauri',
+    seed: { bookmarks: BOOKMARKS },
+    rust: { exists: true, pin: PIN, entries: [{ origin: 'https://personal.lithic.uk', user: 'keeper' }], path: VAULT_PATH },
+    drive: async (page) => {
+      await openBookmark(page, 'personal.lithic.uk');
+      await page.waitForSelector('.instance-unlock-pin');
+      await settle(page, 300);
+    },
+    clip: '.vault-modal',
+    expect: '.instance-unlock-pin'
+  },
+  {
+    // The icon this deployment is known by: the only dialog in the launcher that exists for
+    // one mode, and the one whose grid is a different number of columns at every width.
+    slug: 'instance-icon',
+    modal: 'emoji-title',
+    mode: 'self-host',
+    drive: async (page) => {
+      await page.click('.brand-icon-wrap.pickable');
+      await page.waitForSelector('.emoji-modal');
+      await settle(page, 300);
+    },
+    clip: '.emoji-modal',
+    expect: '.emoji-grid'
+  },
+  {
+    // The backup dialog on an instance, which is the state that proves the instance cannot be
+    // asked anything when the page is on disk (`file://`, so there is no server behind it).
+    slug: 'github-sync',
+    modal: 'gitsync-title',
+    mode: 'self-host',
+    drive: async (page) => {
+      await page.click('.heading .sync-button');
+      await page.waitForSelector('.git-sync-modal');
+      await settle(page, 300);
+    },
+    clip: '.git-sync-modal',
+    expect: '.git-sync-modal .modal-action'
+  },
+  {
+    // What the store's x asks before it deletes on an instance, which is the launcher's own
+    // dialog rather than the browser's.
+    slug: 'delete-confirm',
+    modal: 'confirm-title',
+    mode: 'self-host',
+    server: true,
+    drive: async (page, paneName) => {
+      stub.addLith(`${paneName}.lith`, new Date('2026-09-16T09:00:00Z'), 12288);
+      await page.reload({ waitUntil: 'domcontentloaded' });
+      await page.waitForSelector('.recent-row.remote-row .remove-remote');
+      await page.click('.recent-row.remote-row .remove-remote');
+      await page.waitForSelector('.confirm-modal');
+      await settle(page, 300);
+    },
+    clip: '.confirm-modal',
+    expect: '.confirm-modal .modal-action.danger'
+  },
+  {
+    // What a rebuild asks before it drops what it cannot find: a cached Lith the store does not
+    // hold, which search can find and nothing can open.
+    slug: 'rebuild-orphan',
+    modal: 'orphan-title',
+    mode: 'self-host',
+    server: true,
+    seed: {
+      caches: { 'search_cache_ghost.lith': cache([{ title: 'Ghost', text: 'a copy the server does not hold' }]) }
+    },
+    drive: async (page, paneName) => {
+      stub.addLith(`${paneName}.lith`, new Date('2026-09-16T09:00:00Z'), 12288);
+      await page.reload({ waitUntil: 'domcontentloaded' });
+      await page.waitForSelector('.recent-row.remote-row');
+      await page.click('.reset-cache');
+      await page.waitForSelector('.orphan-modal');
+      await settle(page, 300);
+    },
+    clip: '.orphan-modal',
+    expect: '.orphan-modal .modal-action.danger'
+  },
+  {
+    // Edits the launcher captured and never saw saved, asked about before the Lith mounts.
+    slug: 'unsaved-edits',
+    modal: 'dirty-title',
+    storage: 'index-db',
+    seed: {
+      recents: [browserRow('notes.lith')],
+      caches: { 'search_cache_notes.lith': cache([{ title: 'A', text: 'note text' }]) },
+      meta: {
+        'dirty_state_notes.lith': {
+          ts: SAVED_AT,
+          tiddlers: Array.from({ length: 10 }, (_, index) => ({
+            title: `Scratch ${index + 1}`,
+            text: `edit ${index + 1}`
+          }))
+        }
+      }
+    },
+    drive: async (page) => {
+      await page.click('.recent-row .recent-name');
+      await page.waitForSelector('.dirty-modal');
+      await settle(page, 300);
+    },
+    clip: '.dirty-modal',
+    expect: '.dirty-tiddler-list li'
+  },
+  {
+    // A Lith's own versions, which is the longest list the launcher draws and the one that has
+    // to stay usable when there is no height to scroll in.
+    slug: 'version-history',
+    modal: 'history-title',
+    seed: {
+      recents: [handleRow('notes.lith'), handleRow('ideas.lith'), handleRow('recipes.lith')],
+      caches: { 'search_cache_notes.lith': cache([{ title: 'A', text: 'note text' }]) },
+      meta: { 'search_cache_meta_notes.lith': versionChain() }
+    },
+    drive: async (page) => {
+      await page.click('.cache-history-button');
+      await page.waitForSelector('.history-list li');
+      await settle(page, 300);
+    },
+    clip: '.history-modal',
+    expect: '.history-badge.delta'
+  },
+  {
+    // The saved logins, opened: the longest list of rows in any dialog, and so the first one to
+    // run out of height on a phone held sideways.
+    slug: 'vault-manager',
+    modal: 'vault-title',
+    mode: 'tauri',
+    seed: { bookmarks: BOOKMARKS },
+    rust: {
+      exists: true,
+      pin: PIN,
+      entries: [
+        { origin: 'https://personal.lithic.uk', user: 'keeper' },
+        { origin: 'https://www.foobar.com', user: 'keeper' }
+      ],
+      path: VAULT_PATH
+    },
+    drive: async (page) => {
+      await openVaultManager(page);
+      await typePin(page, '.vault-unlock-pin', PIN);
+      await settle(page, 500);
+    },
+    clip: '.vault-modal',
+    expect: '.vault-list li'
+  },
+  {
+    // The offer an instance makes while it opens, before anything is typed: both answers, and
+    // no PIN, because half of them write nothing.
+    slug: 'login-offer',
+    modal: 'credential-offer-title',
+    mode: 'tauri',
+    seed: { bookmarks: BOOKMARKS },
+    rust: {
+      exists: true,
+      pin: PIN,
+      entries: [{ origin: 'https://personal.lithic.uk', user: 'keeper' }],
+      path: VAULT_PATH,
+      details: LOGIN_DETAILS
+    },
+    drive: async (page) => {
+      await openBookmark(page, 'www.foobar.com');
+      await page.waitForSelector('#credential-offer-title');
+      await settle(page, 300);
+    },
+    clip: '.vault-modal',
+    expect: '.credential-offer-pin'
+  },
+  {
+    // The inline title field, which is not a `.launcher-modal` at all: it is the action card
+    // wearing a dialog, and the one dialog whose claim is its own `aria-label`.
+    slug: 'new-lith-title',
+    modal: 'Enter a title',
+    drive: async (page) => {
+      await page.evaluate(() => {
+        [...document.querySelectorAll('button')].find((node) => node.textContent.includes('New Blank Lith')).click();
+      });
+      await page.waitForSelector('.new-lith-inline');
+      await settle(page, 300);
+    },
+    clip: '.action-card',
+    expect: '.new-lith-inline'
+  }
+];
+
+/**
+ * The three sheets those states are laid out on, one per viewport.
+ *
+ * A sheet per viewport rather than per dialog, because the question a person asks of a deck is
+ * "does this hold on the device I am looking at", and 11 dialogs side by side at one width
+ * answers it in one look. The pane numbers are allocated in blocks (`820`, `835`, `850`) so the
+ * reading order of the deck survives the next state being added in the middle of a sheet.
+ */
+const DIALOG_SHEETS = [
+  { id: 'dialogs-phone', view: 'phone', from: 820, title: 'Every dialog on a phone — 390 by 800' },
+  { id: 'dialogs-landscape', view: 'landscape', from: 835, title: 'Every dialog on a sideways phone — 844 by 390' },
+  { id: 'dialogs-desktop', view: 'wide', from: 850, title: 'Every dialog on a desktop window — 1000 by 820' }
+].map((preset) => ({
+  id: preset.id,
+  title: preset.title,
+  tile: '3x',
+  panes: DIALOG_STATES.map((state, index) => {
+    const name = `${preset.from + index}-${state.slug}`;
+    return {
+      name,
+      view: preset.view,
+      modal: state.modal,
+      ...(state.mode ? { mode: state.mode } : {}),
+      ...(state.rust ? { rust: state.rust } : {}),
+      ...(state.seed ? { seed: state.seed } : {}),
+      ...(state.storage ? { storage: state.storage } : {}),
+      ...(state.server ? { server: state.server } : {}),
+      drive: (page) => state.drive(page, name),
+      clip: state.clip,
+      expect: state.expect
+    };
+  })
+}));
 
 const SHEETS = [
   {
@@ -885,7 +1220,7 @@ const SHEETS = [
           await settle(page, 300);
         },
         expect: '.reset-cache'
-      }
+      },
     ]
   },
   {
@@ -1024,7 +1359,7 @@ const SHEETS = [
           meta: { 'search_cache_meta_fallback.lith': history() }
         },
         expect: '.recent-row'
-      }
+      },
     ]
   },
   {
@@ -1285,6 +1620,22 @@ const SHEETS = [
         seed: { caches: OFFLINE_CACHES },
         drive: goOffline,
         expect: '.offline-banner'
+      },
+      {
+        // The window that queues imports, and a state that has ONE width rather than three:
+        // it is filled by the panel a cached body match draws beside a row, and that panel is
+        // `display: none` below 950px (`launcher-ui/src/styles.css`, the `max-width: 950px`
+        // block), so a phone and a sideways phone have no route to this window through the
+        // gesture at all. Shot where it can be reached, cropped to itself: at this width the
+        // corner is a corner, and the window is a small box in it.
+        name: '271-instance-pending-imports',
+        view: 'wide',
+        mode: 'self-host',
+        server: true,
+        drive: (page) => queuePendingImport(page, 'desktop-pending-note.lith'),
+        modal: 'Pending imports',
+        clip: '.pending-imports',
+        expect: '.pending-imports li'
       }
     ]
   },
@@ -2245,6 +2596,10 @@ const SHEETS = [
       }
     ]
   },
+  // The same dialogs again, on the three windows a person actually has. These sit after the
+  // sheets that shoot a dialog at its own size and before the translation, so the deck reads:
+  // the launcher, the dialogs as objects, then the dialogs on a device, then the language.
+  ...DIALOG_SHEETS,
   {
     /*
      * The launcher in Spanish, which is the point of the deck in `launcher-ui/src/copy.ts`.
@@ -2707,27 +3062,36 @@ const UNPHOTOGRAPHED = {
  */
 
 /**
- * Every dialog the launcher declares, read out of `App.svelte`.
+ * Every dialog and named live region the launcher declares, read out of `App.svelte`.
  *
- * The source is the only complete list: a dialog is in the DOM only while it is open, so
- * nothing at runtime can enumerate them, and a check that asked a page would see exactly
- * the dialogs the panes had already opened.
+ * The source is the only complete list: one of these is in the DOM only while it is open, so
+ * nothing at runtime can enumerate them, and a check that asked a page would see exactly the
+ * ones the panes had already opened.
  *
- * A dialog is named by its `aria-labelledby` id — or, for the one inline entry that has no
- * heading to point at, its own `aria-label`. Either way the name is what a pane's `modal`
- * claim has to say, which is what makes the two halves of this comparable.
+ * A region is named by its `aria-labelledby` id — or, for the entries that have no heading to
+ * point at, its own `aria-label`. Either way the name is what a pane's `modal` claim has to say,
+ * which is what makes the two halves of this comparable.
+ *
+ * Dialogs are what this started as. The second half is the windows that are NOT dialogs and can
+ * still go missing from the deck unseen: the queued-imports window was in no pane at all, and
+ * nothing said so, because it is a `role="status"` rather than a dialog. What divides the two
+ * kinds of live region is the name — the status *lines* are unnamed sentences on the page, while
+ * a named one is an object that floats and can be claimed — so only the named ones are listed.
  */
-async function dialogsInSource() {
+async function namedRegions() {
   const source = await readFile(resolve('launcher-ui/src/App.svelte'), 'utf8');
   const english = englishLeaves(await readFile(resolve('launcher-ui/src/copy.ts'), 'utf8'));
   const found = new Map();
   source.split('\n').forEach((line, index) => {
-    if (!line.includes('role="dialog"')) return;
+    const dialog = line.includes('role="dialog"');
+    const namedStatus = line.includes('role="status"') && line.includes('aria-label');
+    if (!dialog && !namedStatus) return;
+    const role = dialog ? 'dialog' : 'status';
     // An id is the name that matters: it is what `aria-labelledby` points at, no language
     // touches it, and a Spanish pane can claim it as readily as an English one.
     const literal = /aria-labelledby="([^"]+)"/.exec(line) ?? /aria-label="([^"]+)"/.exec(line);
     if (literal) {
-      if (!found.has(literal[1])) found.set(literal[1], index + 1);
+      if (!found.has(literal[1])) found.set(literal[1], { role, line: index + 1 });
       return;
     }
     // One dialog is named by its own label instead of a heading, and since the copy moved
@@ -2739,7 +3103,7 @@ async function dialogsInSource() {
     const reference = /aria-label=\{copy\.([A-Za-z0-9_.]+)\}/.exec(line);
     if (!reference) return;
     const value = english.get(reference[1]);
-    if (value && !found.has(value)) found.set(value, index + 1);
+    if (value && !found.has(value)) found.set(value, { role, line: index + 1 });
   });
   return found;
 }
@@ -2777,36 +3141,66 @@ function englishLeaves(source) {
   return leaves;
 }
 
-/** Who draws what, and what nothing draws. */
-function dialogCoverage(dialogs, drawn, kept) {
-  const entries = [...dialogs].map(([id, line]) => {
+/**
+ * Who draws what, and what nothing draws.
+ *
+ * Reported in two groups, because the two are inventoried the same way and read differently: a
+ * dialog is a decision in front of the user, and a named window is an object that floats over the
+ * page. What is counted is the same either way — a pane claims a name, and a name in the source
+ * with no pane is a state nobody has looked at.
+ */
+function coverageReport(regions, drawn, kept) {
+  const entries = [...regions].map(([id, region]) => {
     const panes = drawn.get(id) ?? [];
-    return panes.length > 0 ? { id, panes } : { id, panes, gap: UNPHOTOGRAPHED[id] ?? null, line };
+    return panes.length > 0
+      ? { id, role: region.role, panes }
+      : { id, role: region.role, panes, gap: UNPHOTOGRAPHED[id] ?? null, line: region.line };
   });
-  // The other half of the same mistake: a claim for a dialog the source no longer
+  // The other half of the same mistake: a claim for a dialog or window the source no longer
   // declares, which is a pane photographing something that has been renamed or removed.
   const stale = [...drawn]
-    .filter(([id]) => !dialogs.has(id))
+    .filter(([id]) => !regions.has(id))
     .map(([id, panes]) => ({ id, panes }));
-  const unexplained = entries.filter((entry) => entry.panes.length === 0 && !entry.gap).map((entry) => entry.id);
-  const width = entries.filter((entry) => entry.panes.length > 0).length;
+  const groups = [
+    { role: 'dialog', label: 'Dialogs', one: 'dialog', many: 'dialogs', heading: '## Dialogs' },
+    { role: 'status', label: 'Named windows', one: 'named window', many: 'named windows', heading: '## Named windows' }
+  ]
+    .map((group) => {
+      const mine = entries.filter((entry) => entry.role === group.role);
+      return {
+        ...group,
+        entries: mine,
+        drawn: mine.filter((entry) => entry.panes.length > 0).length,
+        total: mine.length,
+        gaps: mine.filter((entry) => entry.gap).length,
+        unexplained: mine.filter((entry) => entry.panes.length === 0 && !entry.gap).map((entry) => entry.id)
+      };
+    })
+    .filter((group) => group.total > 0);
+  const counts = groups.map((group) => `${group.total} ${group.total === 1 ? group.one : group.many}`).join(' and ');
   const lines = [
-    '# Dialog coverage',
+    '# Dialog and window coverage',
     '',
-    `${dialogs.size} dialogs in \`launcher-ui/src/App.svelte\`, and the pane that draws each.`,
+    `${counts} in \`launcher-ui/src/App.svelte\`, and the pane that draws each.`,
     'Written by `npm run gallery`, where the walk is the sheet: a pane that claims a',
-    'dialog has to find it in the DOM before it takes its picture.',
+    'dialog or a window has to find it in the DOM before it takes its picture.',
     ''
   ];
-  for (const entry of entries) {
-    if (entry.panes.length > 0) lines.push(`- \`${entry.id}\` — ${entry.panes.join(', ')}`);
-    else if (entry.gap) lines.push(`- \`${entry.id}\` — no pane: ${entry.gap}`);
-    else lines.push(`- \`${entry.id}\` (App.svelte:${entry.line}) — **no pane, and no reason given**`);
+  for (const group of groups) {
+    lines.push(group.heading, '');
+    for (const entry of group.entries) {
+      if (entry.panes.length > 0) lines.push(`- \`${entry.id}\` — ${entry.panes.join(', ')}`);
+      else if (entry.gap) lines.push(`- \`${entry.id}\` — no pane: ${entry.gap}`);
+      else lines.push(`- \`${entry.id}\` (App.svelte:${entry.line}) — **no pane, and no reason given**`);
+    }
+    lines.push('');
   }
   for (const entry of stale) {
-    lines.push(`- \`${entry.id}\` — claimed by ${entry.panes.join(', ')}, but no such dialog in the source`);
+    lines.push(`- \`${entry.id}\` — claimed by ${entry.panes.join(', ')}, but no such dialog or window in the source`);
   }
-  lines.push('', `${width} of ${dialogs.size} drawn by a pane.`);
+  for (const group of groups) {
+    lines.push(`${group.drawn} of ${group.total} ${group.total === 1 ? group.one : group.many} drawn by a pane.`);
+  }
   lines.push(
     '',
     kept.length === 0
@@ -2815,8 +3209,16 @@ function dialogCoverage(dialogs, drawn, kept) {
           .map((entry) => entry.sheet.id)
           .join(', ')} were walked when their own sheet was last shot.`
   );
-  const gaps = entries.filter((entry) => entry.gap).length;
-  return { text: `${lines.join('\n')}\n`, entries, stale, unexplained, gaps, drawn: width, total: dialogs.size };
+  return {
+    text: `${lines.join('\n')}\n`,
+    entries,
+    stale,
+    groups,
+    unexplained: groups.flatMap((group) => group.unexplained),
+    gaps: groups.reduce((total, group) => total + group.gaps, 0),
+    drawn: groups.reduce((total, group) => total + group.drawn, 0),
+    total: groups.reduce((total, group) => total + group.total, 0)
+  };
 }
 
 // --- tiling -----------------------------------------------------------------
@@ -3023,8 +3425,7 @@ function contactPage(sheets, kept, results, artifact, coverage) {
     </style>
   </head>
   <body>
-    <h1>Lithic launcher — UI gallery</h1>
-    <p class="artifact">Shooting <code>${artifact}</code> — the words are in <a href="copy-deck.md">copy-deck.md</a>, the dialog list in <a href="modal-coverage.md">modal-coverage.md</a></p>
+    <h1>Lithic launcher — UI gallery</h1>      <p class="artifact">Shooting <code>${artifact}</code> — the words are in <a href="copy-deck.md">copy-deck.md</a>, the dialog and window list in <a href="modal-coverage.md">modal-coverage.md</a></p>
 ${paletteDeck()}
 ${kept.length > 0 ? `    <p class="kept">This run re-shot ${scope}. ${kept.length} sheet${kept.length === 1 ? '' : 's'} below kept the picture from the run before it.</p>\n` : ''}
   <section>
@@ -3160,10 +3561,37 @@ try {
   await stub.close();
 }
 
-const coverage = dialogCoverage(await dialogsInSource(), claimedDialogs, kept);
+const coverage = coverageReport(await namedRegions(), claimedDialogs, kept);
 await writeFile(join(OUT_DIR, 'index.html'), contactPage(sheets, kept, results, ARTIFACT, coverage), 'utf8');
 await writeFile(join(OUT_DIR, 'copy-deck.md'), copyDeck(sheets, results, kept), 'utf8');
 await writeFile(join(OUT_DIR, 'modal-coverage.md'), coverage.text, 'utf8');
+/*
+ * The same deck as data, for the one reader that is not a person: the release
+ * pipeline composes a pull request body out of this, and it needs the sheets in
+ * reading order with the panes that landed on each. In reading order rather than
+ * run order (a filtered run draws a subset), and only the sheets that have a
+ * picture now, so the file describes what exists instead of what was planned.
+ */
+const indexable = SHEETS.filter(
+  (sheet) => results[sheet.id] !== undefined || kept.some((entry) => entry.sheet === sheet)
+);
+await writeFile(
+  join(OUT_DIR, 'sheets.json'),
+  `${JSON.stringify(
+    {
+      artifact: ARTIFACT,
+      sheets: indexable.map((sheet) => ({
+        id: sheet.id,
+        title: sheet.title,
+        file: `sheet-${sheet.id}.png`,
+        panes: (results[sheet.id] ?? []).map((entry) => entry.pane.name)
+      }))
+    },
+    null,
+    2
+  )}\n`,
+  'utf8'
+);
 console.log(`\n${drawn} pane${drawn === 1 ? '' : 's'} drawn across ${sheets.length} sheet${sheets.length === 1 ? '' : 's'}.`);
 if (kept.length > 0) {
   const names = kept.map((entry) => entry.sheet.id).join(', ');
@@ -3172,10 +3600,12 @@ if (kept.length > 0) {
   console.log(`A bare \`npm run gallery\` re-shoots all ${SHEETS.length} sheets.`);
   for (const entry of missing) console.error(`! ${entry.sheet.id} has no picture at all yet — run the gallery whole.`);
 }
-console.log(
-  `Dialogs: ${coverage.drawn} of ${coverage.total} drawn by a pane — ` +
-    `${coverage.gaps} with a reason, ${coverage.unexplained.length} with none.`
-);
+for (const group of coverage.groups) {
+  console.log(
+    `${group.label}: ${group.drawn} of ${group.total} drawn by a pane — ` +
+      `${group.gaps} with a reason, ${group.unexplained.length} with none.`
+  );
+}
 for (const id of coverage.unexplained) {
   console.error(`! ${id} is in the launcher, in no pane, and explained nowhere — add a pane, or say why in UNPHOTOGRAPHED`);
 }
