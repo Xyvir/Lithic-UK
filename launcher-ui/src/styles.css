@@ -1448,9 +1448,10 @@ footer > * { pointer-events: auto; }
  * column is every control, in the order they are reached for: the heading, the search box, the
  * action card, and the rebuild/reset control, which joins the card as its last button (the
  * card's own box is stretched over it, see `.recent-foot`). The right column is the recent list,
- * which takes the full height of the page now that the foot has left it. Only a launcher whose
- * panel is on screen is laid out this way (`panelled`, set by `recentPanelShown` in the
- * template): with no rows to show there is no second column to fill.
+ * which takes the full height of the page now that the foot has left it. A launcher with nothing
+ * to list yet is laid out this way too, so a first visit has a shape to land in: its panel is
+ * replaced by the empty placeholder, which is the one thing in the right column until the first
+ * Lith arrives (and the one thing the placeholder does anywhere, see below).
  *
  * The search box and the foot belong to the recent panel in the markup, and moving them to the
  * other column is what `display: contents` on `.recent-section` buys: the panel stops drawing a
@@ -1461,16 +1462,28 @@ footer > * { pointer-events: auto; }
  * The left column is what has height to spare, and the header band is what takes it: the mark
  * and the title sit centred in a row that stretches to fill whatever the search box and the
  * action card do not. The header is the ONLY row that gives, because it is the only one whose
- * content reads the same at any height: everything below it keeps a fixed 52px, New Blank Lith
- * and Mount a Lith at the same size as the recent rows beside them, and the mark keeps a floor
- * of its own (36px) so a short window spends the band's type before it spends the icon.
+ * content reads the same at any height: everything below it is sized for the short window rather
+ * than for comfort, New Blank Lith and Mount a Lith at 34px against the 52px they keep elsewhere,
+ * the recent rows and the search box scaled with them, and the mark keeps a floor of its own
+ * (36px) so a short window spends the band's type before it spends the icon. Only the band is
+ * movable because the band is the only row whose content reads the same at any height; every
+ * other row is a control at the size a finger needs.
  *
  * The height is the trigger rather than the width: a landscape tablet is 1024 by 768 and has
  * no such problem, and the largest phone is about 415 tall. 560 leaves room for a browser's
  * own chrome eating the top of the viewport, and any desktop window short enough to be caught
- * is a window that wants this layout too.
+ * is a window that wants this layout too. The width cap is the placeholder's requirement rather
+ * than the layout's: 1024 by 768 already fits the page in one column, and the empty state it
+ * would otherwise be handed belongs to a phone held sideways.
  */
-@media (orientation: landscape) and (max-height: 560px) {
+/*
+ * The empty placeholder is a landscape-only state, never a second panel on another screen: on a
+ * launcher tall enough to have room, an empty panel says nothing the action card above it has not
+ * already said, so it is hidden rather than drawn.
+ */
+.recent-section-empty { display: none; }
+
+@media (orientation: landscape) and (max-height: 560px) and (max-width: 950px) {
   main.container {
     display: grid;
     grid-template-columns: minmax(0, 1fr) minmax(0, 1.15fr);
@@ -1494,7 +1507,7 @@ footer > * { pointer-events: auto; }
    * smaller than on a page with height to spend: at 1.15rem beside a 36px mark the band reads as
    * a heading rather than as a squashed block of type.
    */
-  main.container.panelled .heading {
+  main.container .heading {
     grid-column: 1;
     grid-row: 1;
     align-self: stretch;
@@ -1502,14 +1515,14 @@ footer > * { pointer-events: auto; }
     margin-bottom: 0;
     padding-bottom: 6px;
   }
-  main.container.panelled h1 { font-size: 1.15rem; line-height: 1.15; }
+  main.container h1 { font-size: 1.15rem; line-height: 1.15; }
   /*
    * The mark grows with the band rather than sitting at a fixed size inside it, so a taller
    * header reads as a hero rather than as a small mark adrift in empty surface. It is capped so
    * a very short window, where the band is thinner than the mark's own size, shrinks it instead
    * of letting it spill past the row it belongs to.
    */
-  main.container.panelled .brand-icon-wrap {
+  main.container .brand-icon-wrap {
     flex: 0 0 auto;
     align-self: stretch;
     display: flex;
@@ -1526,7 +1539,7 @@ footer > * { pointer-events: auto; }
     min-height: 36px;
     margin-right: 12px;
   }
-  main.container.panelled .brand-icon {
+  main.container .brand-icon {
     width: auto;
     height: 100%;
     max-height: 56px;
@@ -1534,43 +1547,48 @@ footer > * { pointer-events: auto; }
     border-width: 2px;
   }
   main.container.panelled .recent-search-wrap { grid-column: 1; grid-row: 2; }
-  main.container.panelled .recent-search { height: 44px; }
+  /* The search box scales with the rows it filters, and its icon with it: the field and the
+   * rows have to read as one list rather than as a full-size control over a shrunken one. */
+  main.container.panelled .recent-search {
+    height: 34px;
+    min-height: 34px;
+    padding: 4px 34px;
+    font-size: 0.78rem;
+  }
+  main.container.panelled .recent-list .empty { padding: 8px; font-size: 0.78rem; }
+  main.container.panelled .recent-search-icon { width: 16px; height: 16px; left: 10px; }
   /*
    * The action card now holds the reset control too, so its box has to cover the row that
    * control sits in: `stretch` here and on the card itself, and the wrapped lines packed to
    * the top rather than distributed, which is what keeps New Blank Lith and Mount a Lith at
-   * their own 52px instead of sharing the extra height out between them.
+   * their own 34px instead of sharing the extra height out between them. 34 rather than 52 is
+   * where the header's own room comes from: this block runs before the band does.
+   *
+   * The two labels are aligned rather than both centered. Mount a Lith keeps its label in the
+   * middle of its button; New Blank Lith's label starts where that centered label starts, which
+   * is the only alignment two buttons of different widths can hold together, and it takes a
+   * measurement rather than a number because the mount button's width is whatever its share of
+   * the row comes to (see `alignNewLithLabel` in the template, which writes the offset).
    */
-  main.container.panelled .launcher-actions { grid-column: 1; grid-row: 3; align-self: stretch; display: flex; margin-top: 0; }
-  main.container.panelled .action-card { margin-bottom: 0; }
-  main.container.panelled .action-pair { flex: 1 1 auto; flex-wrap: wrap; align-content: flex-start; }
-  main.container.panelled .action-pair .action-button { height: 52px; min-height: 52px; }
-  /*
-   * The two labels start at the same place rather than each being centred in its own box,
-   * because the boxes are staggered (New Blank Lith has the row to itself, Mount a Lith shares
-   * the next one with the bookmark tile) and two centred labels in different widths read as a
-   * column that missed. Left-aligned, they line up exactly, at the buttons' own 10px of side
-   * padding. The cost is the one the request accepted: New Blank Lith's label is no longer
-   * centred in its button.
-   */
-  main.container.panelled .action-pair .action-button { text-align: left; }
-  /*
-   * New Blank Lith takes the first row alone, whatever shape it is in (a button, or the inline
-   * field that replaces it while a name is being typed). Mount a Lith and a narrow bookmark tile
-   * then share the second row, the tile as tall as the button beside it.
-   */
-  main.container.panelled .action-pair .action-button:not(.mount-button),
-  main.container.panelled .action-pair .new-lith-inline { flex: 1 1 100%; }
-  main.container.panelled .action-pair .new-lith-inline { min-height: 52px; }
-  main.container.panelled .action-pair .mount-button { flex: 1 1 auto; }
-  main.container.panelled .action-pair .bookmark-button {
-    flex: 0 0 40px;
-    width: 40px;
+  main.container .launcher-actions { grid-column: 1; grid-row: 3; align-self: stretch; display: flex; margin-top: 0; }
+  main.container .action-card { gap: 7px; margin-bottom: 0; padding: 8px; }
+  main.container .action-pair { flex: 1 1 auto; flex-wrap: wrap; align-content: flex-start; }
+  main.container .action-pair .action-button { height: 34px; min-height: 34px; padding: 4px 8px; font-size: 0.72rem; }
+  main.container .action-pair .action-button:not(.mount-button),
+  main.container .action-pair .new-lith-inline { flex: 1 1 100%; }
+  main.container .action-pair .new-lith-inline { min-height: 34px; }
+  main.container .action-pair .mount-button { flex: 1 1 auto; text-align: center; }
+  main.container .action-pair .new-blank-button { text-align: left; }
+  main.container .action-pair .new-blank-label { display: block; width: 100%; box-sizing: border-box; padding-left: var(--mount-label-offset, 0px); }
+  main.container .action-pair .mount-label { display: inline-block; }
+  main.container .action-pair .bookmark-button {
+    flex: 0 0 32px;
+    width: 32px;
     align-self: stretch;
     height: auto;
-    min-height: 0;
+    min-height: 34px;
   }
-  main.container.panelled .action-pair .bookmark-button svg { width: 16px; height: 18px; }
+  main.container .action-pair .bookmark-button svg { width: 14px; height: 16px; }
 
   /*
    * The panel is dissolved into the two columns. Everything it drew as a box is gone with it,
@@ -1581,7 +1599,7 @@ footer > * { pointer-events: auto; }
     grid-column: 2;
     grid-row: 1 / 4;
     margin: 0;
-    padding: 8px 6px 8px 8px;
+    padding: 8px 6px 12px 8px;
     border: 1px solid var(--lithic-line);
     border-radius: 8px;
     background: var(--lithic-surface-panel);
@@ -1603,9 +1621,14 @@ footer > * { pointer-events: auto; }
    * from the card's bottom edge travels on the button rather than on the row, for the same
    * reason.
    */
-  main.container.panelled .recent-foot { grid-column: 1; grid-row: 3; align-self: end; margin: 136px 12px 0; }
-  main.container.panelled .recent-foot .reset-cache { height: 52px; min-height: 52px; padding: 0 10px; margin-bottom: 12px; }
-  /* A launcher with no rows still owns the right column, ready for the first Lith. */
+  main.container.panelled .recent-list { padding-bottom: 12px; }
+  main.container.panelled .recent-row { min-height: 32px; margin-bottom: 4px; }
+  main.container.panelled .recent-name { padding: 5px 8px; font-size: 0.75rem; }
+  main.container.panelled .recent-icon-button { flex-basis: 26px; }
+  main.container.panelled .recent-icon-button svg { width: 17px; height: 17px; }
+  main.container.panelled .recent-foot { grid-column: 1; grid-row: 3; align-self: end; margin: 90px 8px 0; gap: 7px; }
+  main.container.panelled .recent-foot .reset-cache { height: 34px; min-height: 34px; padding: 0 8px; margin-bottom: 8px; font-size: 0.72rem; }
+  /* The placeholder takes the right column on a launcher with no rows to put there. */
   main.container .recent-section-empty { display: contents; }
   main.container .recent-list-empty {
     grid-column: 2;
@@ -1620,14 +1643,15 @@ footer > * { pointer-events: auto; }
     place-items: center;
     text-align: center;
   }
-  main.container .recent-list-empty .empty { max-width: 22ch; margin: 0; }
+  main.container .recent-list-empty .empty { max-width: 22ch; margin: 0; padding: 12px; font-size: 0.85rem; }
+  /*
+   * The mark above carries the project link, and the footer's copy would land on the card's foot
+   * row, so it goes on every launcher this short. Unscoped on purpose: the empty state has no
+   * panel, and that is where the link was left sitting over the action card.
+   */
+  main.container .github-link { display: none; }
   /* A mode notice takes a line of its own under both columns. */
   main.container.panelled .offline-banner { grid-column: 1 / -1; grid-row: 4; margin: 0; }
-  /*
-   * The mark above carries the project link, and the footer's copy would land on the left
-   * column's foot row, so it goes the way it goes on a portrait phone.
-   */
-  main.container.panelled .github-link { display: none; }
 }
 
 /* --- PENDING IMPORTS WINDOW (legacy parity) --- */

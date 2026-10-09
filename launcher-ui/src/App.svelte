@@ -2263,6 +2263,49 @@
     };
   }
 
+  /** Align the new-document label with the centered mount label in the landscape layout. */
+  function alignNewLithLabel(node: HTMLButtonElement) {
+    const card = node.parentElement;
+    let frame = 0;
+    const update = () => {
+      frame = 0;
+      if (!window.matchMedia('(orientation: landscape) and (max-height: 560px) and (max-width: 950px)').matches) {
+        node.style.removeProperty('--mount-label-offset');
+        return;
+      }
+      const mount = card?.querySelector<HTMLButtonElement>('.mount-button');
+      const label = mount?.querySelector<HTMLElement>('.mount-label');
+      if (!mount || !label) return;
+      const newRect = node.getBoundingClientRect();
+      const mountRect = mount.getBoundingClientRect();
+      const labelRect = label.getBoundingClientRect();
+      if (!newRect.width || !mountRect.width || !labelRect.width) return;
+      const style = getComputedStyle(node);
+      const inset =
+        (Number.parseFloat(style.borderLeftWidth) || 0) + (Number.parseFloat(style.paddingLeft) || 0);
+      node.style.setProperty('--mount-label-offset', `${Math.max(0, labelRect.left - newRect.left - inset)}px`);
+    };
+    const schedule = () => {
+      if (!frame) frame = requestAnimationFrame(update);
+    };
+    const observer = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(schedule);
+    observer?.observe(node);
+    if (card) observer?.observe(card);
+    const mount = card?.querySelector('.mount-button');
+    if (mount) observer?.observe(mount);
+    const label = mount?.querySelector('.mount-label');
+    if (label) observer?.observe(label);
+    window.addEventListener('resize', schedule);
+    schedule();
+    return {
+      destroy() {
+        if (frame) cancelAnimationFrame(frame);
+        observer?.disconnect();
+        window.removeEventListener('resize', schedule);
+      }
+    };
+  }
+
   function getEntryName(entry: RecentEntry | { name?: string; handle?: any }): string {
     if (entry.handle && entry.handle.name) return entry.handle.name;
     return (entry as any).name || 'untitled.lith';
@@ -5901,9 +5944,9 @@
           </div>
         </div>
       {:else}
-        <button class="action-button" on:click={openNewLithModal} disabled={busy}>{copy.actions.newBlank}</button>
+        <button class="action-button new-blank-button" use:alignNewLithLabel on:click={openNewLithModal} disabled={busy}><span class="new-blank-label">{copy.actions.newBlank}</span></button>
       {/if}
-      <button class="action-button mount-button" on:click={mountFromDisk} disabled={busy}>{mode === 'self-host' ? copy.actions.upload : copy.actions.mount}</button>
+      <button class="action-button mount-button" on:click={mountFromDisk} disabled={busy}><span class="mount-label">{mode === 'self-host' ? copy.actions.upload : copy.actions.mount}</span></button>
       {#if mode !== 'self-host'}
       <button class="bookmark-button" aria-label={copy.actions.bookmarkAria} title={copy.actions.bookmarkTitle} on:click={openBookmarkModal}><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 21V5a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v16l-6-4z" /></svg></button>
       {/if}
@@ -6256,7 +6299,7 @@
     </section>
   {:else}
     <section class="recent-section recent-section-empty" aria-label={copy.recent.aria}>
-      <div class="recent-list recent-list-empty">
+      <div class="recent-list recent-list-empty" aria-hidden="true">
         <p class="empty">{copy.recent.empty.landscape}</p>
       </div>
     </section>

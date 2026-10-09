@@ -14,10 +14,9 @@
  * answers the CGI the deployment routes. The copy they draw is the launcher's, so
  * they belong on a sheet like any other.
  *
- * It is a *review* tool, not a test. It asserts exactly one thing per pane — that
- * the state it asked for actually appeared — so a sheet can never quietly show a
- * blank pane and call it a design. Everything else about the picture is for a
- * human to look at.
+ * It is a *review* tool with a few explicit invariants in addition to the requested
+ * state: those are page-shape checks, not judgements about how a picture looks. The
+ * rest of each pane is for a human to review.
  *
  * Dialogs are the exception, because there are now enough of them to lose one. A pane
  * that photographs a dialog says which one (`modal:`), which makes the run a walk as
@@ -615,7 +614,15 @@ const SHEETS = [
       {
         name: '010-webapp-empty',
         view: 'phone',
-        expect: '.action-pair'
+        expect: '.action-pair',
+        verify: async (page) => {
+          const empty = await page.query('.recent-section-empty');
+          if (empty.count !== 1) throw new Error('the empty placeholder element should exist on the page');
+          if (empty.visibleCount) throw new Error('the empty placeholder must be hidden in portrait');
+          if ((await page.query('.recent-section-empty .empty')).count !== 1) {
+            throw new Error('the hidden empty placeholder must keep its copy for landscape');
+          }
+        }
       },
       {
         name: '020-webapp-recents',
@@ -778,7 +785,16 @@ const SHEETS = [
       {
         name: '100-webapp-empty',
         view: 'landscape',
-        expect: '.recent-list-empty'
+        expect: '.recent-list-empty',
+        verify: async (page) => {
+          // The section itself is `display: contents` here, so it has no box to measure: the
+          // panel it lets through is the element that has to be on screen.
+          if ((await page.query('.recent-list-empty')).visibleCount !== 1) {
+            throw new Error('the empty placeholder should be visible in phone landscape');
+          }
+          if ((await page.query('.recent-row')).count) throw new Error('the empty placeholder must not replace recent rows');
+          if ((await page.query('.github-link')).visibleCount) throw new Error('the GitHub button must be hidden in the empty landscape view');
+        }
       },
       {
         name: '110-webapp-recents',
@@ -788,7 +804,52 @@ const SHEETS = [
           caches: { 'search_cache_notes.lith': cache([{ title: 'A', text: 'note text' }]) },
           meta: { 'search_cache_meta_notes.lith': history() }
         },
-        expect: '.recent-row'
+        expect: '.recent-row',
+        verify: async (page) => {
+          if ((await page.query('.recent-list-empty')).count) {
+            throw new Error('recent entries must not render the empty placeholder');
+          }
+          const labels = await page.evaluate(() => {
+            const rect = (element) => element.getBoundingClientRect();
+            const nodes = {
+              mountLabel: document.querySelector('.mount-label'),
+              newLabel: document.querySelector('.new-blank-label'),
+              mountButton: document.querySelector('.mount-button'),
+              newButton: document.querySelector('.new-blank-button')
+            };
+            if (Object.values(nodes).some((node) => !node)) return null;
+            const box = Object.fromEntries(Object.entries(nodes).map(([key, node]) => [key, rect(node)]));
+            // Where the type starts rather than where the span starts: New Blank Lith carries the
+            // offset as its own padding, so its box's left edge never moves.
+            const ink = (node) =>
+              rect(node).left + (Number.parseFloat(getComputedStyle(node).paddingLeft) || 0);
+            return {
+              mountLabelInk: ink(nodes.mountLabel),
+              mountLabelCenter: box.mountLabel.left + box.mountLabel.width / 2,
+              mountButtonCenter: box.mountButton.left + box.mountButton.width / 2,
+              mountButtonSlack: box.mountButton.left + box.mountButton.width - box.mountLabel.right,
+              newLabelInk: ink(nodes.newLabel)
+            };
+          });
+          if (!labels) throw new Error('the action label geometry could not be measured');
+          // Mount a Lith stays centered in its own button...
+          if (Math.abs(labels.mountLabelCenter - labels.mountButtonCenter) > 1) {
+            throw new Error('Mount a Lith label is not centered in its button');
+          }
+          // A button no wider than its own label cannot be centered, so there is nothing for the
+          // other label to align to and the check below would pass on a layout that had none.
+          if (labels.mountButtonSlack < 2) {
+            throw new Error('Mount a Lith fills its button, so the two labels have no alignment to hold');
+          }
+          // ...and New Blank Lith's type starts where that centered label's type does, which is
+          // the alignment a card of two different widths cannot get from centering both.
+          if (Math.abs(labels.newLabelInk - labels.mountLabelInk) > 1) {
+            throw new Error(
+              `New Blank Lith starts at ${Math.round(labels.newLabelInk)}px; the centered Mount a Lith label starts at ${Math.round(labels.mountLabelInk)}px`
+            );
+          }
+          if ((await page.query('.github-link')).visibleCount) throw new Error('the GitHub button must be hidden in the populated landscape view');
+        }
       },
       {
         // The inline title field is the state the card's geometry is least like its own:
@@ -830,7 +891,12 @@ const SHEETS = [
       {
         name: '210-webapp-empty',
         view: 'wide',
-        expect: '.action-pair'
+        expect: '.action-pair',
+        verify: async (page) => {
+          if ((await page.query('.recent-list-empty')).visibleCount) {
+            throw new Error('the empty placeholder must stay hidden in desktop mode');
+          }
+        }
       },
       {
         name: '220-webapp-recents',
@@ -2383,6 +2449,22 @@ async function runPane(browser, pane) {
           .join(' | ') || 'no verdict element at all'
       )}\n      asked Rust for: ${asked || 'nothing'}\n      console: ${errors.join(' | ') || 'clean'}`
       );
+    }
+    if (pane.verify) {
+      await pane.verify({
+        evaluate: (fn, ...args) => page.evaluate(fn, ...args),
+        query: async (selector) => page.evaluate((css) => {
+          const elements = [...document.querySelectorAll(css)];
+          return {
+            count: elements.length,
+            visibleCount: elements.filter((element) => {
+              const style = getComputedStyle(element);
+              const rect = element.getBoundingClientRect();
+              return style.display !== 'none' && style.visibility !== 'hidden' && rect.width > 0 && rect.height > 0;
+            }).length
+          };
+        }, selector)
+      });
     }
     // Only now is the pane framed: its state is on screen and anything that arrived with
     // a motion has landed, so the crop is the settled box rather than a moving one.
