@@ -52,15 +52,19 @@ jobs:
       - name: Checkout Code
         uses: actions/checkout@v5
 
+      # Optional by design. Chained from publish-release.yml this artifact belongs to a
+      # different run, so the download finds nothing; the committed src/lithic.html is then
+      # the release's own bytes, because that is what the merged pull request carried.
       - name: Download Built Wiki Artifact
         if: ${{ inputs.tag_name != '' }}
+        continue-on-error: true
         uses: actions/download-artifact@v5
         with:
           name: built-wiki
           path: src
 
       - name: Rename Downloaded Wiki
-        if: ${{ inputs.tag_name != '' }}
+        if: ${{ inputs.tag_name != '' && hashFiles('src/lith.html') != '' }}
         run: Move-Item -Force src/lith.html src/lithic.html
 
       - name: Setup Node.js
@@ -222,15 +226,19 @@ jobs:
       - name: Checkout Code
         uses: actions/checkout@v5
 
+      # Optional by design. Chained from publish-release.yml this artifact belongs to a
+      # different run, so the download finds nothing; the committed src/lithic.html is then
+      # the release's own bytes, because that is what the merged pull request carried.
       - name: Download Built Wiki Artifact
         if: ${{ inputs.tag_name != '' }}
+        continue-on-error: true
         uses: actions/download-artifact@v5
         with:
           name: built-wiki
           path: src
 
       - name: Rename Downloaded Wiki
-        if: ${{ inputs.tag_name != '' }}
+        if: ${{ inputs.tag_name != '' && hashFiles('src/lith.html') != '' }}
         run: mv src/lith.html src/lithic.html
 
       - name: Setup Node.js
@@ -403,15 +411,19 @@ jobs:
       - name: Checkout Code
         uses: actions/checkout@v5
 
+      # Optional by design. Chained from publish-release.yml this artifact belongs to a
+      # different run, so the download finds nothing; the committed src/lithic.html is then
+      # the release's own bytes, because that is what the merged pull request carried.
       - name: Download Built Wiki Artifact
         if: ${{ inputs.tag_name != '' }}
+        continue-on-error: true
         uses: actions/download-artifact@v5
         with:
           name: built-wiki
           path: src
 
       - name: Rename Downloaded Wiki
-        if: ${{ inputs.tag_name != '' }}
+        if: ${{ inputs.tag_name != '' && hashFiles('src/lith.html') != '' }}
         run: mv src/lith.html src/lithic.html
 
       - name: Setup Node.js
@@ -554,15 +566,19 @@ jobs:
       - name: Checkout Code
         uses: actions/checkout@v5
 
+      # Optional by design. Chained from publish-release.yml this artifact belongs to a
+      # different run, so the download finds nothing; the committed src/lithic.html is then
+      # the release's own bytes, because that is what the merged pull request carried.
       - name: Download Built Wiki Artifact
         if: ${{ inputs.tag_name != '' }}
+        continue-on-error: true
         uses: actions/download-artifact@v5
         with:
           name: built-wiki
           path: src
 
       - name: Rename Downloaded Wiki
-        if: ${{ inputs.tag_name != '' }}
+        if: ${{ inputs.tag_name != '' && hashFiles('src/lith.html') != '' }}
         run: mv src/lith.html src/lithic.html
 
       - name: Setup Node.js

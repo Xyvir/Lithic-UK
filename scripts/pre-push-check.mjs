@@ -102,17 +102,24 @@ function checkShimBuildTag() {
  * would then resolve is a separate question from whether it will even try.
  */
 /**
- * A push to main runs the release now (.github/workflows/build-wiki.yml,
- * `on.push`). That run COMMITS the artifacts it just built, so any path it
- * stages has to be excluded from the trigger that started it: otherwise its own
- * commit starts another run, which commits the same files again, forever.
+ * A push to main runs the build (.github/workflows/build-wiki.yml, `on.push`).
+ * What that run then does with what it built is what this guards, and that
+ * changed on 2026-10-09: a PROD release stages its commit on a `release/<stamp>`
+ * branch and opens a review pull request, so it does not touch main at all and
+ * cannot loop, while a non-prod variant built by dispatch still commits straight
+ * to main. A run whose own commit starts another run commits the same files
+ * again, forever, so any path a pushing step stages has to be excluded from the
+ * trigger that started it.
  *
  * The trigger is a blacklist over `**`, so a path is live unless it is named in
- * `on.push.paths` — adding one line to the release's `git add` is all it takes
- * to start the loop. That is what this checks, from the two sides that matter:
- * every staged path is excluded (by name or by `dir/**`), and the filter still
- * has a positive pattern (GitHub runs nothing for a filter of exclusions only,
- * so the release would silently never fire on push at all).
+ * `on.push.paths` — adding one line to a `git add` is all it takes to start the
+ * loop. That is what this checks, from the three sides that matter: every staged
+ * path is excluded (by name or by `dir/**`, with a path built from a variable
+ * allowed only when the directory before the variable is excluded wholesale), the
+ * filter still has a positive pattern (GitHub runs nothing for a filter of
+ * exclusions only, so the build would silently never fire on push at all), and
+ * the prod release still stages a branch rather than pushing to main, which is
+ * what review-before-publish rests on.
  *
  * Returns null when the trigger is safe, else the failure message.
  */
@@ -134,30 +141,74 @@ function checkReleaseTrigger() {
     return `${file}: on.push.paths is exclusions only — GitHub will not run the workflow for a filter without a positive pattern`;
   }
   const steps = (doc.jobs && doc.jobs.build && doc.jobs.build.steps) || [];
-  const prodCommit = steps.find((step) => /Commit Built Wiki and Bump PWA/.test(step.name || ''));
-  if (!prodCommit) {
-    return `${file}: the prod commit step ("Commit Built Wiki and Bump PWA") is gone — point this check at whatever replaced it`;
-  }
-  const addLine = String(prodCommit.run || '')
-    .split(/\r?\n/)
-    .map((line) => line.trim())
-    .find((line) => line.startsWith('git add '));
-  if (!addLine) {
-    return `${file}: no \`git add\` in the prod commit step — point this check at whatever replaced it`;
-  }
-  const staged = addLine.slice('git add '.length).trim().split(/\s+/);
-  const unresolved = staged.filter((entry) => entry.includes('$'));
-  if (unresolved.length > 0) {
-    return `${file}: the prod commit stages ${unresolved.join(', ')}, which this check cannot resolve — keep that path list literal`;
-  }
   const excluded = paths
     .filter((entry) => String(entry).startsWith('!'))
     .map((entry) => String(entry).slice(1));
-  const uncovered = staged.filter(
-    (entry) => !excluded.some((pattern) => pattern === entry || (pattern.endsWith('/**') && entry.startsWith(pattern.slice(0, -2)))),
+  /**
+   * Is this staged path kept out of the trigger? A path built from a variable
+   * (`variants/$BUILD_CONFIG.html`) cannot be compared literally, so it counts as safe
+   * only when the directory before the variable is excluded wholesale — which it is, and
+   * which is the only reason that path is allowed to be dynamic at all.
+   */
+  const covered = (entry) => {
+    if (entry.includes('$')) {
+      const prefix = entry.slice(0, entry.indexOf('$'));
+      return excluded.some((pattern) => pattern.endsWith('/**') && prefix.startsWith(pattern.slice(0, -2)));
+    }
+    return excluded.some(
+      (pattern) => pattern === entry || (pattern.endsWith('/**') && entry.startsWith(pattern.slice(0, -2))),
+    );
+  };
+
+  // This deliberately does not look for a step by NAME. It used to look for "Commit Built
+  // Wiki and Bump PWA", and when a prod release stopped pushing to main and started staging
+  // a review branch, that name changed and the check failed on a rename rather than on a
+  // loop. What it follows is the push: `git push`, and `ci-push-main.sh`, which pushes
+  // without saying so. A prod release stages src/lithic.html, src/launcher.html, the
+  // variants, manifest.json and the service worker on a branch; the non-prod variant
+  // committed by dispatch is the one that still reaches main, and its staged path is what
+  // this is really guarding.
+  /**
+   * A step's shell with its comments removed. A comment that names a command is not that
+   * command, and this check would otherwise read its own explanation as evidence: the step
+   * that stages a review branch explains in one of its comments why it no longer calls
+   * `ci-push-main.sh`, and a check that counted that sentence would report the script as
+   * being called by the very step that stopped calling it.
+   */
+  const shell = (step) =>
+    String(step.run || '')
+      .split(/\r?\n/)
+      .filter((line) => !line.trim().startsWith('#'))
+      .join('\n');
+  const pushers = steps.filter((step) => /\bgit\s+push\b|ci-push-main\.sh/.test(shell(step)));
+  if (pushers.length === 0) {
+    return `${file}: no step pushes anything — point this check at whatever replaced the release commit`;
+  }
+  const staged = pushers.flatMap((step) =>
+    shell(step)
+      .split(/\r?\n/)
+      .map((line) => line.trim())
+      .filter((line) => line.startsWith('git add '))
+      .flatMap((line) => line.slice('git add '.length).trim().split(/\s+/)),
   );
+  if (staged.length === 0) {
+    return `${file}: the steps that push stage nothing with \`git add\` — point this check at whatever replaced them`;
+  }
+  const uncovered = staged.filter((entry) => !covered(entry));
   if (uncovered.length > 0) {
     return `${file}: the release commits ${uncovered.join(', ')}, which on.push.paths does not exclude — the run's own commit would start another run, forever`;
+  }
+
+  // The other half of the guard, and the newer half: a prod release must not reach main at
+  // all. If it ever does, review-before-publish is gone and every artifact it stages becomes
+  // a path the trigger has to exclude, which is the arrangement this check exists to keep
+  // honest.
+  const prodStage = steps.find((step) => /Stage the release on a branch/.test(step.name || ''));
+  if (!prodStage) {
+    return `${file}: the prod release step ("Stage the release on a branch") is gone — point this check at whatever replaced it`;
+  }
+  if (/ci-push-main\.sh/.test(shell(prodStage))) {
+    return `${file}: the prod release pushes to main again — it must stage a review branch, so that nothing publishes before it is merged`;
   }
   return null;
 }

@@ -1,0 +1,143 @@
+name: Publish Release
+
+# The second half of a release.
+#
+# build-wiki.yml builds, stages the result on a branch and opens a pull request. This
+# workflow runs when that pull request is MERGED, and only then does a build get a tag, a
+# download page, a container image and four desktop installers. Closing the pull request
+# instead leaves none of that behind: there is no draft release and no tag to clean up,
+# because neither was ever made. That is the whole point of splitting the release in two,
+# and it is why the cleanup path is nothing at all rather than a step that deletes things.
+#
+# The trigger is the merge itself, which reaches main as a push touching src/lithic.html.
+# That file is written by the release and by nothing else, which is what makes it the
+# signal: build-wiki.yml deliberately ignores it (it is an output, and ignoring it is what
+# stops a merge from starting another build), and bump-pwa-version.yml touches only
+# manifest.json and the service worker. A human pushing a wiki artifact by hand also
+# lands here, and that is the right answer for the same reason.
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - 'src/lithic.html'
+  workflow_dispatch:
+    inputs:
+      tag_name:
+        description: 'Tag to publish, e.g. build-2026.10.09-1200'
+        required: true
+        type: string
+
+permissions:
+  contents: write
+  packages: write
+
+# Two merges can be minutes apart and each publishes a tag, so they are serialized the way
+# two writers to main are. The group is its own rather than `main-writers`, because this
+# workflow writes no commit: it adds a tag, a release and container images.
+concurrency:
+  group: release-publishers
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    outputs:
+      tag_name: ${{ steps.stamp.outputs.tag }}
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v5
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v5
+        with:
+          node-version: '20'
+          cache: npm
+          cache-dependency-path: package-lock.json
+
+      - name: Resolve the tag
+        id: stamp
+        run: |
+          STAMP="${{ inputs.tag_name }}"
+          if [ -n "$STAMP" ]; then
+            # A dispatch names the tag it wants; accept it with or without the prefix.
+            STAMP="${STAMP#build-}"
+          else
+            STAMP=$(date +'%Y.%m.%d-%H%M')
+          fi
+          echo "date=$STAMP" >> "$GITHUB_OUTPUT"
+          echo "tag=build-$STAMP" >> "$GITHUB_OUTPUT"
+          echo "Publishing build-$STAMP"
+
+      # Four of the six assets are files the merge just landed, and they are published as
+      # they are: src/lithic.html, src/launcher.html and variants/lithic-light.html came
+      # through the review, so the download is exactly the bytes that were looked at. The
+      # other two are derived rather than committed and are rebuilt here from that same
+      # tree, which is the only reason this job installs anything.
+      - name: Check the released files are there
+        run: |
+          fail() { echo "::error::$1"; exit 1; }
+          [ -f src/lithic.html ] || fail "src/lithic.html is missing from the merge; this is not a release commit"
+          [ -f src/launcher.html ] || fail "src/launcher.html is missing from the merge"
+          [ -f variants/lithic-light.html ] || fail "variants/lithic-light.html is missing from the merge"
+          ls -la src/lithic.html src/launcher.html variants/lithic-light.html
+
+      - name: Install Dependencies
+        run: npm ci
+
+      - name: Mirror External Plugins
+        run: npm run mirror
+
+      - name: Flatten Plugins
+        run: node scripts/flatten-plugins.js
+
+      - name: Gzip the light artifact
+        run: |
+          gzip -9 -c variants/lithic-light.html > variants/lithic-light.html.gz
+          ls -la variants/lithic-light.html.gz
+          # The flash budget the light build exists to meet, restated here because this is
+          # now the last place it can be checked before somebody downloads it.
+          GZ=$(stat -c%s variants/lithic-light.html.gz)
+          [ "$GZ" -lt 1048576 ] || { echo "::error::the light artifact gzips to $GZ bytes, over the 1 MB budget"; exit 1; }
+
+      - name: Archive Wiki Folder
+        run: zip -r wiki.zip wiki
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v3
+        with:
+          tag_name: ${{ steps.stamp.outputs.tag }}
+          name: Build ${{ steps.stamp.outputs.date }}
+          draft: false
+          prerelease: false
+          # One asset per artifact. The flagship used to be attached twice, as
+          # wiki/output/lith.html and as the identical copy committed to
+          # variants/prod.html, which reads as two releases of the same file.
+          # src/lithic.html is those same bytes and already carries the name the release
+          # publishes, so the download matches the file the desktop app embeds.
+          files: |
+            src/lithic.html
+            src/launcher.html
+            variants/lithic-light.html
+            variants/lithic-light.html.gz
+            wiki.zip
+            wiki/flatten-manifest.log
+
+  # The four desktop distributions, chained once the release exists so the installers are
+  # added to a download page that is already there. Each of these downloads the
+  # `built-wiki` artifact when one is present in the run and falls back to the committed
+  # src/lithic.html when it is not, which is the case here: the bytes came through the
+  # merge, so the checkout is the artifact.
+  build-desktop:
+    needs: publish
+    uses: ./.github/workflows/desktop-release.yaml
+    with:
+      tag_name: ${{ needs.publish.outputs.tag_name }}
+    secrets: inherit
+
+  build-server:
+    needs: publish
+    uses: ./.github/workflows/build-server.yml
+    with:
+      tag_name: ${{ needs.publish.outputs.tag_name }}
+    secrets: inherit
