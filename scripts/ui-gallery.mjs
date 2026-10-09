@@ -605,6 +605,133 @@ async function openBookmark(page, label) {
  *           its own, launched with `--lang`, since the shared one speaks this machine's
  *           language: a browser preference cannot be set from a page.
  */
+/**
+ * The landscape card's own geometry, asserted rather than looked at.
+ *
+ * Two of the three controls in the card are full width and Mount a Lith shares its row with the
+ * bookmark tile, so the edge they can all hold is where that button's centered label starts. A
+ * box's own left edge says nothing about where its type begins, so each control is read as ink:
+ * its border box's edge plus its own border and padding, which is where the offset is carried.
+ *
+ * It is one helper for both panes because the two are supposed to be one card. `placeholder`
+ * asks for the empty state's extra claim: the rows are there, they are disabled, and they are
+ * out of the accessibility tree, since there is nothing for them to do yet.
+ */
+async function assertLandscapeCard(page, { placeholder = false } = {}) {
+  const measured = await page.evaluate(() => {
+    const box = (node) => {
+      const rect = node.getBoundingClientRect();
+      return {
+        top: rect.top,
+        bottom: rect.bottom,
+        left: rect.left,
+        right: rect.right,
+        width: rect.width,
+        height: rect.height,
+        middle: rect.left + rect.width / 2
+      };
+    };
+    const ink = (node) => {
+      const style = getComputedStyle(node);
+      return (
+        box(node).left +
+        (Number.parseFloat(style.borderLeftWidth) || 0) +
+        (Number.parseFloat(style.paddingLeft) || 0)
+      );
+    };
+    const nodes = {
+      mountLabel: document.querySelector('.mount-label'),
+      mountButton: document.querySelector('.mount-button'),
+      newButton: document.querySelector('.new-blank-button'),
+      newLabel: document.querySelector('.new-blank-label'),
+      reset: document.querySelector('.recent-foot .reset-cache'),
+      search: document.querySelector('.recent-search'),
+      card: document.querySelector('.action-card')
+    };
+    if (Object.values(nodes).some((node) => !node)) return null;
+    return {
+      mountInk: ink(nodes.mountLabel),
+      newInk: ink(nodes.newLabel),
+      resetInk: ink(nodes.reset),
+      mountMiddle: box(nodes.mountLabel).middle,
+      mountButtonMiddle: box(nodes.mountButton).middle,
+      mountSlack: box(nodes.mountButton).right - box(nodes.mountLabel).right,
+      mountButton: box(nodes.mountButton),
+      newButton: box(nodes.newButton),
+      reset: box(nodes.reset),
+      search: box(nodes.search),
+      card: box(nodes.card),
+      insetTop: box(nodes.newButton).top - box(nodes.card).top,
+      insetBottom: box(nodes.card).bottom - box(nodes.reset).bottom,
+      gapAbove: box(nodes.mountButton).top - box(nodes.newButton).bottom,
+      gapBelow: box(nodes.reset).top - box(nodes.mountButton).bottom,
+      resetCount: document.querySelectorAll('.recent-foot .reset-cache').length,
+      resetDisabled: nodes.reset.disabled,
+      dimmed: nodes.reset.closest('[aria-hidden="true"]') !== null,
+      searchDisabled: nodes.search.disabled
+    };
+  });
+  if (!measured) throw new Error('the landscape card could not be measured');
+
+  // Mount a Lith stays centered in its own button...
+  if (Math.abs(measured.mountMiddle - measured.mountButtonMiddle) > 1) {
+    throw new Error('Mount a Lith label is not centered in its button');
+  }
+  // A button no wider than its own label cannot be centered, so there is nothing for the
+  // other labels to align to and the checks below would pass on a layout that had none.
+  if (measured.mountSlack < 2) {
+    throw new Error('Mount a Lith fills its button, so the labels have no alignment to hold');
+  }
+  // ...and the other two controls' type starts on that same column, which is the alignment
+  // three boxes of two different widths cannot get from centering them.
+  const column = Math.round(measured.mountInk);
+  for (const [what, where] of [
+    ['New Blank Lith', measured.newInk],
+    ['the reset control', measured.resetInk]
+  ]) {
+    if (Math.abs(where - measured.mountInk) > 1) {
+      throw new Error(`${what} starts at ${Math.round(where)}px; the label column is at ${column}px`);
+    }
+  }
+  // The reset control is the card's own last button, not a control that happens to be near it:
+  // the same width as New Blank Lith (so it spans the card's content box, which is a fact about
+  // the foot's margin and the card's border), the same gap above it as the two rows above have
+  // between them, and the same inset from the card's bottom edge as they have from its top.
+  if (Math.abs(measured.reset.left - measured.newButton.left) > 1 || Math.abs(measured.reset.right - measured.newButton.right) > 1) {
+    throw new Error(
+      `the reset control spans ${Math.round(measured.reset.left)} to ${Math.round(measured.reset.right)}px; the card's buttons span ${Math.round(measured.newButton.left)} to ${Math.round(measured.newButton.right)}px`
+    );
+  }
+  if (Math.abs(measured.reset.height - measured.newButton.height) > 1) {
+    throw new Error('the reset control is not the height of the card\u2019s own buttons');
+  }
+  if (Math.abs(measured.gapAbove - measured.gapBelow) > 1 || measured.gapBelow < 2) {
+    throw new Error(
+      `the reset control sits ${measured.gapBelow.toFixed(1)}px under Mount a Lith, which the row above it is not (${measured.gapAbove.toFixed(1)}px)`
+    );
+  }
+  if (Math.abs(measured.insetTop - measured.insetBottom) > 1) {
+    throw new Error(
+      `the card's buttons start ${measured.insetTop.toFixed(1)}px inside its top edge and the reset control ends ${measured.insetBottom.toFixed(1)}px inside its bottom one`
+    );
+  }
+  // The search row is what the header band is measured against, so the placeholder keeps its
+  // size: the field and the card's own rows are the same height, in both states.
+  if (Math.abs(measured.search.height - measured.reset.height) > 1) {
+    throw new Error(
+      `the search box is ${measured.search.height.toFixed(1)}px tall beside a ${measured.reset.height.toFixed(1)}px row under the card`
+    );
+  }
+  if (placeholder) {
+    if (measured.resetCount !== 1) throw new Error(`the empty card draws ${measured.resetCount} reset controls, not one`);
+    if (!measured.resetDisabled || !measured.searchDisabled) {
+      throw new Error('the empty state\u2019s search box and reset control are live, so a tap does nothing');
+    }
+    if (!measured.dimmed) throw new Error('the empty state\u2019s reset control is not out of the accessibility tree');
+  }
+  return measured;
+}
+
 const SHEETS = [
   {
     id: 'launcher-phone',
@@ -770,11 +897,17 @@ const SHEETS = [
      * It has panes for the reason every other sheet does, and one of its own: the trigger is the
      * window's HEIGHT, so the states below cannot be reached by a viewport anyone would think to
      * shoot on the phone sheet, and until this existed the layout was reviewed by hand each time
-     * it changed. What a pane cannot assert is geometry, since a pane proves only that the state
-     * arrived and a person reads the rest, so what each picture is here to show is written down: the
-     * reset control sitting inside the card at the same 52px and the same inset as the buttons
-     * above it (`110`), the empty list in its own right column (`100`), that same card while a
-     * title is being typed (`120`), and the card with no control in it at all (`130`).
+     * it changed. Each picture is here for something a person reads at a glance: the reset control
+     * sitting inside the card at the same 34px and the same inset as the buttons above it (`110`),
+     * the empty list in its own right column (`100`), that same card while a title is being typed
+     * (`120`), and the card with no control in it at all (`130`).
+     *
+     * The two states of the left column are also asserted, because they are the same card and a
+     * pane that only photographed one of them could not tell: `assertLandscapeCard` holds the
+     * label column the three controls share, the reset control as the card's own last button, and
+     * in `100` the disabled search box and reset control that stand in the rows a first Lith will
+     * fill. Those two are what keeps the header band from being a row taller in the empty state, so
+     * the mark and the title do not drop 17px the moment anything is added to the list.
      * The list's bottom edge is the last thing to check in any of them: it has to end level with
      * the card, inside the window, with a browser's own bar over the top of the page.
      */
@@ -794,6 +927,10 @@ const SHEETS = [
           }
           if ((await page.query('.recent-row')).count) throw new Error('the empty placeholder must not replace recent rows');
           if ((await page.query('.github-link')).visibleCount) throw new Error('the GitHub button must be hidden in the empty landscape view');
+          // The left column is whole here, which is the point of the placeholders: the search
+          // box and the reset control stand in the rows the first Lith will fill, disabled, so
+          // the card and the header band above it are the shape the populated pane photographs.
+          await assertLandscapeCard(page, { placeholder: true });
         }
       },
       {
@@ -809,45 +946,7 @@ const SHEETS = [
           if ((await page.query('.recent-list-empty')).count) {
             throw new Error('recent entries must not render the empty placeholder');
           }
-          const labels = await page.evaluate(() => {
-            const rect = (element) => element.getBoundingClientRect();
-            const nodes = {
-              mountLabel: document.querySelector('.mount-label'),
-              newLabel: document.querySelector('.new-blank-label'),
-              mountButton: document.querySelector('.mount-button'),
-              newButton: document.querySelector('.new-blank-button')
-            };
-            if (Object.values(nodes).some((node) => !node)) return null;
-            const box = Object.fromEntries(Object.entries(nodes).map(([key, node]) => [key, rect(node)]));
-            // Where the type starts rather than where the span starts: New Blank Lith carries the
-            // offset as its own padding, so its box's left edge never moves.
-            const ink = (node) =>
-              rect(node).left + (Number.parseFloat(getComputedStyle(node).paddingLeft) || 0);
-            return {
-              mountLabelInk: ink(nodes.mountLabel),
-              mountLabelCenter: box.mountLabel.left + box.mountLabel.width / 2,
-              mountButtonCenter: box.mountButton.left + box.mountButton.width / 2,
-              mountButtonSlack: box.mountButton.left + box.mountButton.width - box.mountLabel.right,
-              newLabelInk: ink(nodes.newLabel)
-            };
-          });
-          if (!labels) throw new Error('the action label geometry could not be measured');
-          // Mount a Lith stays centered in its own button...
-          if (Math.abs(labels.mountLabelCenter - labels.mountButtonCenter) > 1) {
-            throw new Error('Mount a Lith label is not centered in its button');
-          }
-          // A button no wider than its own label cannot be centered, so there is nothing for the
-          // other label to align to and the check below would pass on a layout that had none.
-          if (labels.mountButtonSlack < 2) {
-            throw new Error('Mount a Lith fills its button, so the two labels have no alignment to hold');
-          }
-          // ...and New Blank Lith's type starts where that centered label's type does, which is
-          // the alignment a card of two different widths cannot get from centering both.
-          if (Math.abs(labels.newLabelInk - labels.mountLabelInk) > 1) {
-            throw new Error(
-              `New Blank Lith starts at ${Math.round(labels.newLabelInk)}px; the centered Mount a Lith label starts at ${Math.round(labels.mountLabelInk)}px`
-            );
-          }
+          await assertLandscapeCard(page);
           if ((await page.query('.github-link')).visibleCount) throw new Error('the GitHub button must be hidden in the populated landscape view');
         }
       },
@@ -2026,7 +2125,43 @@ const SHEETS = [
           await offerPwaInstall(page);
         },
         clip: '.recent-foot',
-        expect: '.recent-foot .install-button'
+        expect: '.recent-foot .install-button',
+        verify: async (page) => {
+          // The word this pane is here to show, and the reason it is asserted rather than left to
+          // the eye: the offer clips its own overflow while it widens into the row, so a label the
+          // row cannot fit would be clipped away rather than overflowing somewhere a person would
+          // notice it. This is the only pane at the width that changes the word.
+          //
+          // The width is only a claim about the settled row, and a pane's verify runs before the
+          // runner settles the page (it frames the crop after the motion has landed), so the wait
+          // for that one animation is spelled out here. Mid-flight the button really is wider than
+          // the box drawing it, because that clip is what makes the row travel instead of snap.
+          for (let attempt = 0; attempt < 60; attempt += 1) {
+            const moving = await page.evaluate(() =>
+              document
+                .getAnimations()
+                .some((entry) => entry.animationName === 'install-offer-in-row' && entry.playState === 'running')
+            );
+            if (!moving) break;
+            await new Promise((resolve) => setTimeout(resolve, 25));
+          }
+          const offer = await page.evaluate(() => {
+            const box = document.querySelector('.recent-foot .install-offer');
+            const button = document.querySelector('.recent-foot .install-button');
+            if (!box || !button) return null;
+            const rect = (node) => node.getBoundingClientRect().width;
+            return { label: button.textContent.trim(), offerWidth: rect(box), buttonWidth: rect(button) };
+          });
+          if (!offer) throw new Error('the phone row install offer could not be measured');
+          if (offer.label !== 'Install') {
+            throw new Error(`the phone row's install button reads "${offer.label}", not the word the row fits`);
+          }
+          if (offer.buttonWidth > offer.offerWidth + 1) {
+            throw new Error(
+              `the phone row leaves its install button ${offer.buttonWidth}px wide in a ${offer.offerWidth}px box`
+            );
+          }
+        }
       },
       {
         // And the same arrival caught halfway, which is the only way this pane can exist: the

@@ -418,6 +418,28 @@
       : null;
 
   /**
+   * Whether the window is the width at which the install offer leaves the window's corner for
+   * the panel's foot row. The number is the stylesheet's own, the `@media (max-width: 600px)`
+   * block that moves the offer into that row, mirrored because the button's word changes with
+   * it: the row is shared with the control the list is rebuilt from, so the button is about two
+   * thirds of the width it has in the corner.
+   *
+   * A fact about the width rather than about which of the offer's two homes is in play, because
+   * a launcher with a panel and one without are both phone width at phone width, and the corner
+   * it falls back to there is the same narrow control.
+   */
+  const phoneRowQuery = typeof window === 'undefined' ? null : window.matchMedia('(max-width: 600px)');
+  let phoneRow = phoneRowQuery ? phoneRowQuery.matches : false;
+  phoneRowQuery?.addEventListener('change', (event) => (phoneRow = event.matches));
+
+  /**
+   * The word this button wears for the browser's own install offer: the full one where the
+   * button has the corner to itself, and the plain one in the phone's foot row, where the
+   * rebuild control beside it owns the rest of the line.
+   */
+  $: installWord = phoneRow ? copy.install.label.plain : copy.install.label.install;
+
+  /**
    * The offer button's label, and what it promises on hover.
    *
    * Reactive statements rather than functions the template calls: Svelte reads a
@@ -428,7 +450,7 @@
   $: installOfferLabel = installBusy
     ? copy.install.label.installing
     : installOffer === 'pwa'
-      ? copy.install.label.install
+      ? installWord
       : installOffer === 'update'
         ? copy.install.label.updateAvailable
         : installState === 'update'
@@ -2263,14 +2285,29 @@
     };
   }
 
-  /** Align the new-document label with the centered mount label in the landscape layout. */
+  /**
+   * Align the new-document label, and the reset control under the card, with the centered
+   * mount label in the landscape layout.
+   *
+   * The measurement is published on the page's container rather than on the button it was
+   * taken from, because two controls in two subtrees read it: the label inside New Blank
+   * Lith, and the reset control in the panel's foot, which is a sibling of the action card
+   * rather than a child of it. The number is the distance from the card's own content edge
+   * to the type the two of them are matching, so each turns it into the padding its own box
+   * needs (see the landscape block in the stylesheet).
+   *
+   * The property outlives the button it was measured against. When the inline title field
+   * takes that button's row the field is the same full width, so the mount label does not
+   * move and the reset control below stays where it was while a title is typed.
+   */
   function alignNewLithLabel(node: HTMLButtonElement) {
     const card = node.parentElement;
+    const page = node.closest<HTMLElement>('main.container');
     let frame = 0;
     const update = () => {
       frame = 0;
       if (!window.matchMedia('(orientation: landscape) and (max-height: 560px) and (max-width: 950px)').matches) {
-        node.style.removeProperty('--mount-label-offset');
+        page?.style.removeProperty('--mount-label-offset');
         return;
       }
       const mount = card?.querySelector<HTMLButtonElement>('.mount-button');
@@ -2283,7 +2320,7 @@
       const style = getComputedStyle(node);
       const inset =
         (Number.parseFloat(style.borderLeftWidth) || 0) + (Number.parseFloat(style.paddingLeft) || 0);
-      node.style.setProperty('--mount-label-offset', `${Math.max(0, labelRect.left - newRect.left - inset)}px`);
+      page?.style.setProperty('--mount-label-offset', `${Math.max(0, labelRect.left - newRect.left - inset)}px`);
     };
     const schedule = () => {
       if (!frame) frame = requestAnimationFrame(update);
@@ -5093,6 +5130,30 @@
   {#snippet installOfferControl()}
     <span class="install-offer"><button class="install-button" class:update-available={installState === 'update'} on:click={installOfferAction} disabled={installBusy} title={installOfferTitle}>{installOfferLabel}</button><button class="install-dismiss" on:click={dismissInstallOffer} title={copy.install.dismissTitle} aria-label={copy.install.dismissAria}><span class="install-dismiss-label">{copy.install.dismissText}</span>✕</button></span>
   {/snippet}
+  <!--
+    The panel's rebuild/reset control, written once because it is drawn twice: at the foot of
+    the panel, and as the placeholder the landscape layout keeps under the action card while
+    the list is still empty. The placeholder is the same control in the same place with
+    `disabled`, so the card's geometry does not change the moment the first Lith arrives, and
+    its label greys out through the `:disabled` rule the busy state already uses.
+
+    One mode has neither: in the index-db-only fallback neither control means what it says.
+    Nothing on disk can be re-listed, and Reset there is not "clear a list, your files stay".
+    The cache is the files, so one click would take every Lith on the device with it. Site
+    data is the browser's own way to do that, and its friction is the point: it is worth
+    requiring a deliberate trip through the browser's settings to erase everything the
+    launcher holds. Offline mode gets neither, and there the rebuild is not merely unhelpful:
+    reading the server again is the very thing that just failed.
+  -->
+  {#snippet recentFootControl(placeholder: boolean)}
+    {#if !indexDbOnly && !offlineLauncher}
+      {#if showRebuildControl}
+        <button class="reset-cache" disabled={placeholder || rebuildBusy} on:click={rebuildRecents} title={isSelfHost() ? copy.foot.rebuildServerTitle : copy.foot.rebuildDiskTitle}>{rebuildBusy ? copy.foot.reindexing : copy.foot.rebuild}</button>
+      {:else}
+        <button class="reset-cache" disabled={placeholder} on:click={clearRecent} title={copy.foot.resetTitle}>{copy.foot.reset}</button>
+      {/if}
+    {/if}
+  {/snippet}
   <header class="heading">
     <!--
       The way back out of a handed-over instance, in the margin left of the mark rather
@@ -6254,24 +6315,6 @@
         {/if}
       </div>
       <!--
-        One mode has neither control: in the index-db-only fallback neither means what it
-        says. Nothing on disk can be re-listed, and "Reset" there is not "clear a list,
-        your files stay". The cache *is* the files, so one click would take every Lith on
-        the device with it. Site data is the browser's own way to do that, and its friction
-        is the point: it is worth requiring a deliberate trip through the browser's
-        settings to erase everything the launcher holds.
-
-        Self-host keeps the rebuild, because the caches it repairs are this device's even
-        though the list is the server's: re-reading the store is also what indexes each of
-        its Liths here, and that index is what search reads. Reset is not kept. The list
-        is not this device's to clear, and re-reading it is the rebuild it already has.
-
-        Offline mode gets neither, and there the rebuild is not merely unhelpful: reading
-        the server again is the very thing that just failed, so a click could only repaint
-        an error beside the banner that already explains it. The rows it would index are
-        the ones on screen, which is the whole of what this mode is.
-      -->
-      <!--
         The panel's foot row, and with it the phone layout's answer to horizontal space.
         The control the panel's list is rebuilt from ends the panel, and at phone width the
         install offer joins it here instead of hovering in the window's corner: the corner
@@ -6280,28 +6323,37 @@
         room for a second. Anything wider than a phone the offer goes back to that corner,
         which is where it is pinned. See `.install-offer`.
 
-        The row is the panel's last element and exists whether or not it has anything in
-        it, so a launcher that rebuilds nothing (offline mode, the browser-only store)
-        simply draws an empty row of no height rather than a second layout.
+        The control in the row comes from `recentFootControl`, which owns which modes draw
+        one and which operation each of them keeps. The row itself is the panel's last
+        element and exists whether or not it has anything in it, so a launcher that rebuilds
+        nothing (offline mode, the browser-only store) simply draws an empty row of no height
+        rather than a second layout.
       -->
       <div class="recent-foot">
-        {#if !indexDbOnly && !offlineLauncher}
-          {#if showRebuildControl}
-            <button class="reset-cache" on:click={rebuildRecents} disabled={rebuildBusy} title={isSelfHost() ? copy.foot.rebuildServerTitle : copy.foot.rebuildDiskTitle}>{
-              rebuildBusy ? copy.foot.reindexing : copy.foot.rebuild
-            }</button>
-          {:else}
-            <button class="reset-cache" on:click={clearRecent} title={copy.foot.resetTitle}>{copy.foot.reset}</button>
-          {/if}
-        {/if}
+        {@render recentFootControl(false)}
         {#if installOffer}{@render installOfferControl()}{/if}
       </div>
     </section>
   {:else}
+    <!--
+      The landscape layout keeps its left column whole here: the search box and the reset
+      control both stand where they will stand once the first Lith arrives, disabled and out of
+      the accessibility tree, and the panel's copy takes the right column. They are what fixes
+      the shape of the page a first visit lands in: the header band is the row that gives, and
+      these are the rows it gives to, so without them the band is 34px taller (the mark and the
+      title 17px lower with it) and the card is 40px shorter than the card the first Lith lands
+      in. Neither draws anywhere else, because the whole section is hidden outside phone
+      landscape.
+    -->
     <section class="recent-section recent-section-empty" aria-label={copy.recent.aria}>
+      <div class="recent-search-wrap" aria-hidden="true">
+        <svg class="recent-search-icon" viewBox="0 0 24 24"><circle cx="11" cy="11" r="7.5"></circle><path d="m16.5 16.5 4 4"></path></svg>
+        <input class="recent-search" placeholder={copy.recent.searchPlaceholder} disabled />
+      </div>
       <div class="recent-list recent-list-empty" aria-hidden="true">
         <p class="empty">{copy.recent.empty.landscape}</p>
       </div>
+      <div class="recent-foot" aria-hidden="true">{@render recentFootControl(true)}</div>
     </section>
   {/if}
   <!--

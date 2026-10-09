@@ -1546,17 +1546,24 @@ footer > * { pointer-events: auto; }
     aspect-ratio: 1 / 1;
     border-width: 2px;
   }
-  main.container.panelled .recent-search-wrap { grid-column: 1; grid-row: 2; }
+  /*
+   * Unscoped like the foot below, and for the same reason: this row is drawn twice, as the box
+   * that takes a query and as the disabled one the empty placeholder keeps in its place. The
+   * row's own height is what the header band is measured against, so a left column that is a
+   * search box shorter before the first Lith is a title that sits half of it lower than it will
+   * once one arrives.
+   */
+  main.container .recent-search-wrap { grid-column: 1; grid-row: 2; }
   /* The search box scales with the rows it filters, and its icon with it: the field and the
    * rows have to read as one list rather than as a full-size control over a shrunken one. */
-  main.container.panelled .recent-search {
+  main.container .recent-search {
     height: 34px;
     min-height: 34px;
     padding: 4px 34px;
     font-size: 0.78rem;
   }
-  main.container.panelled .recent-list .empty { padding: 8px; font-size: 0.78rem; }
-  main.container.panelled .recent-search-icon { width: 16px; height: 16px; left: 10px; }
+  main.container .recent-list .empty { padding: 8px; font-size: 0.78rem; }
+  main.container .recent-search-icon { width: 16px; height: 16px; left: 10px; }
   /*
    * The action card now holds the reset control too, so its box has to cover the row that
    * control sits in: `stretch` here and on the card itself, and the wrapped lines packed to
@@ -1608,26 +1615,53 @@ footer > * { pointer-events: auto; }
   /*
    * The reset control joins the card rather than standing under it: the foot's row is the
    * card's row and the card is stretched over it, so the control reads as the card's own last
-   * button, at the same 52px as the two above it, the same 12px inset from the card's edges, and
-   * still a dashed border, which is the one thing that says it clears a list rather than opening
-   * something. Its own background stays transparent so the card's surface shows through, exactly
-   * as it does in the panel's foot on the layouts with height to spare.
+   * button, at the same 34px as the two above it and still a dashed border, which is the one
+   * thing that says it clears a list rather than opening something. Its own background stays
+   * transparent so the card's surface shows through, exactly as it does in the panel's foot on
+   * the layouts with height to spare.
    *
-   * The card makes the room, and the foot reserves it with its own margin-top, because a margin
-   * is what an empty row does not pay for: a launcher with no such control to draw (the
-   * browser-only store, offline mode) contributes 136px of margin and no height, the row falls
-   * back to the card's own 138px, and no blank strip is left at the card's bottom. The 136px is
-   * the two button rows and the gaps between them: 12 + 52 + 10 + 52 + 10. The control's inset
-   * from the card's bottom edge travels on the button rather than on the row, for the same
-   * reason.
+   * The foot's top margin is where the card's second button row ends plus one gap (8 + 34 + 7 +
+   * 34 + 7), which is what puts the control on the card's own line for a third button row. A
+   * margin is also what an empty row does not pay for: the foot of a launcher with no such
+   * control to draw (the browser-only store, offline mode) is 90px of margin and no height,
+   * which is under the card's own 93px, so that row falls back to the card and no blank strip is
+   * left at its bottom. The control's inset from the card's bottom edge travels on the button
+   * rather than on the row, for the same reason.
+   *
+   * The foot is a sibling of the card rather than a child of it, and the card carries a 1px
+   * border the foot does not, so the inset that lines the two up is the card's padding and its
+   * border added: 9px. Leaving the border out of the arithmetic stands the control 2px wider
+   * than the buttons it is reading as the last of, and takes its label 1px off the column those
+   * buttons share (see below).
    */
   main.container.panelled .recent-list { padding-bottom: 12px; }
   main.container.panelled .recent-row { min-height: 32px; margin-bottom: 4px; }
   main.container.panelled .recent-name { padding: 5px 8px; font-size: 0.75rem; }
   main.container.panelled .recent-icon-button { flex-basis: 26px; }
   main.container.panelled .recent-icon-button svg { width: 17px; height: 17px; }
-  main.container.panelled .recent-foot { grid-column: 1; grid-row: 3; align-self: end; margin: 90px 8px 0; gap: 7px; }
-  main.container.panelled .recent-foot .reset-cache { height: 34px; min-height: 34px; padding: 0 8px; margin-bottom: 8px; font-size: 0.72rem; }
+  /*
+   * Unscoped, because the foot is drawn twice: at the panel's foot, and in the empty
+   * placeholder as the disabled control that keeps the card's height from changing when the
+   * first Lith arrives. Unscoped rather than duplicated because the two are the same row in the
+   * same place, and a second copy of these numbers is a second thing to keep in step.
+   */
+  main.container .recent-foot { grid-column: 1; grid-row: 3; align-self: end; margin: 90px 9px 0; gap: 7px; }
+  /*
+   * The label starts on the column New Blank Lith and Mount a Lith share rather than in the
+   * middle of a button of its own width. `--mount-label-offset` is the measurement
+   * `alignNewLithLabel` publishes, the distance from the card's own content edge to the centered
+   * Mount a Lith label, and the 8px ahead of it is the same side padding the two buttons above
+   * carry. The control's own box is lined up with theirs by the margins above, which is what
+   * makes the same number mean the same place on both.
+   */
+  main.container .recent-foot .reset-cache {
+    height: 34px;
+    min-height: 34px;
+    padding: 0 8px 0 calc(8px + var(--mount-label-offset, 0px));
+    margin-bottom: 9px;
+    font-size: 0.72rem;
+    text-align: left;
+  }
   /* The placeholder takes the right column on a launcher with no rows to put there. */
   main.container .recent-section-empty { display: contents; }
   main.container .recent-list-empty {

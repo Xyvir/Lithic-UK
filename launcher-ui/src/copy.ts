@@ -70,7 +70,11 @@ const en = {
     label: {
       installing: 'Installing…',
       install: 'Install App',
-      /** The word before any status has been read, for a button that only installs. */
+      /**
+       * The plain word. Read before any status has been read, for a button that only
+       * installs, and at phone width, where this offer shares the panel's foot row with the
+       * rebuild control and `install` is wider than the button it would land in.
+       */
       plain: 'Install',
       updateAvailable: 'Update Available',
       updateInstall: 'Update Install'

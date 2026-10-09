@@ -2045,6 +2045,14 @@ try {
     window.dispatchEvent(new Event('beforeinstallprompt', { cancelable: true }));
   });
   await page.waitForSelector('.install-offer');
+  // The app wears a different word at this width (see `phoneRow` in App.svelte, which mirrors
+  // the stylesheet's `@media (max-width: 600px)`, the block that moves the offer into the panel's
+  // foot row). The width the page is at arrives as a media query change, and a change lands a
+  // task after the layout it belongs to, so the read waits for the word rather than racing it:
+  // for one frame the offer can be standing in the row wearing the corner's own label.
+  await page.waitForFunction(
+    () => document.querySelector('.install-offer .install-button')?.textContent.trim() === 'Install'
+  );
   const browserOffer = await page.evaluate(() => {
     const offer = document.querySelector('.install-offer');
     return {
@@ -2054,7 +2062,10 @@ try {
       link: document.querySelector('.github-link')?.textContent.trim() ?? null
     };
   });
-  assert.equal(browserOffer.label, 'Install App', 'The browser offers the install in its own words');
+  // The word is keyed on this width. 600px is where the offer leaves the window's corner for the
+  // panel's own foot row, and the row it lands in is shared with the rebuild control, so the
+  // label the corner has room for is more than the row is willing to give it.
+  assert.equal(browserOffer.label, 'Install', 'At phone width the browser offers the install in the word that fits the row');
   assert.equal(
     browserOffer.animation,
     'install-offer-in-row',
@@ -2104,6 +2115,9 @@ try {
       resetRight: resetBox ? round(resetBox.right) : null,
       resetHeight: resetBox ? round(resetBox.height) : null,
       offerHeight: round(offerBox.height),
+      offerWidth: round(offerBox.width),
+      buttonWidth: round(box(offer.querySelector('.install-button')).width),
+      label: offer.querySelector('.install-button')?.textContent.trim(),
       gapBelowPanel: round(window.innerHeight - box(panel).bottom),
       containerPaddingBottom: parseFloat(getComputedStyle(container).paddingBottom)
     };
@@ -2117,9 +2131,13 @@ try {
   assert.deepEqual(phoneOffer.footChildren, ['reset-cache', 'install-offer'], '...beside the rebuild/reset control, and after it');
   assert.equal(phoneOffer.sameLineAsReset, true, '...on the same line as that control');
   assert.ok((phoneOffer.gapFromReset ?? 0) > 0, '...to its right, clear of it');
+  // The offer is not crowded: the control beside it gives up the room the offer takes rather than
+  // the two sharing a line too narrow for both, and a line that narrow shows up here first, as an
+  // offer clipped under its own label (the offer's box is the clip). That the width taken is the
+  // control's own loss, rather than slack the row had, is measured mid-travel further down.
   assert.ok(
-    phoneOffer.panelContentRight - (phoneOffer.resetRight ?? 0) >= 100,
-    '...and the rebuild control gives up the room the offer takes, rather than the two sharing a line they cannot both fit on'
+    phoneOffer.offerWidth + 1 >= phoneOffer.buttonWidth,
+    '...and the offer keeps the width of its own label rather than being squeezed onto the line'
   );
   assert.equal(phoneOffer.resetHeight, phoneOffer.offerHeight, '...both stretched to the row’s height, so the row reads as one control strip');
   assert.ok((phoneOffer.offeredRight ?? 0) <= phoneOffer.panelRight + 0.5, '...with the offer inside the panel’s right edge');
@@ -2207,10 +2225,15 @@ try {
   // so the corner the offer returns to reaches over the column's own edge — which is why
   // the band under the panel is reserved rather than left to the panel.
   await page.setViewport({ width: 800, height: 700 });
+  // And the word goes back with it, on the same asynchronous change.
+  await page.waitForFunction(
+    () => document.querySelector('.install-button')?.textContent.trim() === 'Install App'
+  );
   const wideOffer = await readOfferPlacement();
   assert.equal(wideOffer.position, 'fixed', 'Wider than a phone the offer goes back to the window’s corner');
   assert.equal(wideOffer.animation, 'install-offer-in', '...and arrives there on the plain reveal again, with no row to make room in');
   assert.equal(wideOffer.paintedWhere, 'install-button', '...and is painted there, outside the panel it is rendered inside');
+  assert.equal(wideOffer.label, 'Install App', '...wearing the full word again, which the corner has room for');
   assert.ok(
     Math.abs(wideOffer.resetRight - wideOffer.panelContentRight) <= 1,
     '...and the panel’s last control spans the row again, all the way to the panel’s edge'
