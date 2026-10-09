@@ -2224,6 +2224,15 @@ try {
   await page.click('.install-offer .install-dismiss');
   await page.waitForFunction(() => document.querySelector('.install-offer') === null);
   assert.equal(await page.$('.install-offer'), null, 'Dismissing the browser offer takes it away');
+  // Browser modes deliberately make Reset Recents the restore path for the offer too;
+  // Tauri keeps this choice in recents.txt and has its own restore path.
+  await page.evaluate(async () => {
+    const button = document.querySelector('.reset-cache');
+    if (!button) throw new Error('Browser recent panel has no Reset Recents control');
+    button.click();
+  });
+  await page.waitForFunction(() => document.querySelector('.install-offer') !== null);
+  assert.ok(await page.$('.install-offer'), 'Reset Recents restores the browser install offer');
   // The cursor parked clear of the footer again, because that click left it on the spot the
   // injected markup below lands in — and the reveal there picks up a pointer that is already
   // on the control, which would look exactly like the reveal that section is measuring.

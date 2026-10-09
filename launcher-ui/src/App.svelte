@@ -6,7 +6,7 @@
   import { createFileBridge, tauriInvoke, tauriListen, saveTextVerifiably } from './file-bridge';
   import { orphanPill, orphanDownloadNote, type OrphanDownloadState } from './orphan-download';
   import { isScratchFileName, isHtmlMonolithName, tracksUnsavedEdits, resolveMountName, resolveScratchKind, type ScratchKind } from './scratch-editor';
-  import { pwaInstall, promptPwaInstall } from './pwa-install';
+  import { pwaInstall, promptPwaInstall, shouldRestoreInstallOfferOnReset } from './pwa-install';
   import { RELEASES_LATEST_PAGE, latestReleaseTag, readBuildTag, updateOffered } from './update-notice';
   import { readShimToken, shimCommand } from './shim-command';
   import { shimCapabilities, shimInstall, shimInstallStatus, shimRead, shimStartupPath, shimTakeOpen } from './shim-files';
@@ -3781,6 +3781,11 @@
     cachedEntries = {};
     cacheSearchMatches = {};
     localStorage.removeItem(RECENT_KEY);
+    if (shouldRestoreInstallOfferOnReset(mode)) {
+      // Tauri keeps that choice in recents.txt and must not reset it here.
+      installDismissed = false;
+      await setInstallDismissed(false);
+    }
     persistRecentsSidecar();
     void refreshBackupCoverage();
   }

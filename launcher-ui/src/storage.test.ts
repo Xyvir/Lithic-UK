@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { KeyvalStore, setRecentRows, mergeRecentRow, mergeRecentLists, sameRecentRow, isAnonymousRow, getRecentFiles, recentRowName, clearAllRecentFiles, forgetWikiCache, saveSearchCache, purgeOldestCachesIfNeeded, isWikiDriftedFromHead, recentDiskPath, isFlatCacheKey, cachedWikiNames, type CacheStore } from './storage.ts';
+import { KeyvalStore, setRecentRows, mergeRecentRow, mergeRecentLists, sameRecentRow, isAnonymousRow, getRecentFiles, recentRowName, clearAllRecentFiles, forgetWikiCache, saveSearchCache, purgeOldestCachesIfNeeded, isWikiDriftedFromHead, recentDiskPath, isFlatCacheKey, cachedWikiNames, isInstallDismissed, setInstallDismissed, INSTALL_DISMISS_KEY, type CacheStore } from './storage.ts';
 import { KeyvalWikiHistory } from './wiki-history.ts';
 
 // In Node environment without native indexedDB, we mock indexedDB or test logic
@@ -41,6 +41,17 @@ class MemoryIdb implements CacheStore {
     return Promise.resolve();
   }
 }
+
+test('the install offer dismissal can be restored independently of recents storage', async () => {
+  const store = new MemoryIdb();
+  await setInstallDismissed(true, store);
+  assert.equal(await isInstallDismissed(store), true);
+  assert.equal((await store.get(INSTALL_DISMISS_KEY)), true);
+
+  await setInstallDismissed(false, store);
+  assert.equal(await isInstallDismissed(store), false);
+  assert.equal(await store.get(INSTALL_DISMISS_KEY), undefined);
+});
 
 function cacheEntry(text: string, lastModified: string) {
   return { text, lastModified, backupTimestamp: 0 };
