@@ -1596,6 +1596,23 @@ footer > * { pointer-events: auto; }
     min-height: 34px;
   }
   main.container .action-pair .bookmark-button svg { width: 14px; height: 16px; }
+  /*
+   * A title being typed takes the card's rows here, and on this layout that is not only about
+   * width. The card is stretched over the foot control (see `.recent-foot`), and the foot's own
+   * 90px of top margin is what holds the reset control clear of the two rows above it: it is the
+   * height of two 34px rows plus their gap plus the card's 8px inset, computed once, in the
+   * margin. A third row's worth of buttons in a card that only budgets for two puts the mount
+   * button through the reset control, which is 15px of overlap on the 844 by 390 window this
+   * layout was drawn for. So the mount button and the bookmark tile stand down while the field is
+   * up, the same as they do on a phone in portrait (see the 600px block above); the field takes
+   * their width as well, which is what the dialog is asking for. Both come back the moment it
+   * closes, and it always has a way out of its own (the × inside the field, or Escape), so the
+   * vault the tile reaches is never more than that one dismiss away. The card's box does not
+   * change: it is the same 133px in all three states, so nothing below it moves when the field
+   * arrives, which is why the reset control stays where it is rather than following the row up.
+   */
+  main.container .action-pair.new-lith-open .mount-button,
+  main.container .action-pair.new-lith-open .bookmark-button { display: none; }
 
   /*
    * The panel is dissolved into the two columns. Everything it drew as a box is gone with it,

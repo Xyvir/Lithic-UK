@@ -951,9 +951,16 @@ const SHEETS = [
         }
       },
       {
-        // The inline title field is the state the card's geometry is least like its own:
-        // the field takes the first row alone, so the two text rows the reset control is
-        // measured against become one, and the control has to follow them down.
+        // The inline title field is the state the card's geometry is least like its own, and the
+        // one where two of its three controls leave: the field takes the row to itself, so the
+        // mount button and the bookmark tile stand down (see the landscape block in styles.css),
+        // and what is left is the field above the reset control. The card's own box is the fact
+        // the rest of the left column is built on, because it is stretched over the foot row
+        // whose 90px of top margin is the height of the two rows it no longer has. The room the
+        // field keeps clear of the reset control is the thing that was wrong, so it is asserted
+        // here, along with the control still ending inside the card's own bottom edge: that the
+        // two buttons come back when the dialog closes belongs to the smoke test, which can drive
+        // the row at more than one width rather than only photographing this one.
         name: '120-new-lith-entry',
         view: 'landscape',
         modal: 'Enter a title',
@@ -964,7 +971,45 @@ const SHEETS = [
           });
           await page.waitForSelector('.new-lith-inline');
         },
-        expect: '.new-lith-inline'
+        expect: '.new-lith-inline',
+        verify: async (page) => {
+          if ((await page.query('.mount-button')).visibleCount) {
+            throw new Error('the mount button has to stand down while a title is being typed');
+          }
+          if ((await page.query('.bookmark-button')).visibleCount) {
+            throw new Error('...and the bookmark tile with it, which reaches the same vault from the same row');
+          }
+          // Read as boxes, and read from the state this pane photographs: the field is the row
+          // that grows while that dialog is up (its own input is taller than the 34px the rows
+          // around it keep), which is the 21px that used to push the mount button under it
+          // through the reset control. The reset control is the card's own last row rather than a
+          // control that happens to be near it, so the same 9px inset from the card's bottom edge
+          // the two buttons keep from its top is read here as well.
+          const typed = await page.evaluate(() => {
+            const box = (selector) => {
+              const node = document.querySelector(selector);
+              if (!node) return null;
+              const rect = node.getBoundingClientRect();
+              return { top: rect.top, bottom: rect.bottom, height: rect.height };
+            };
+            return {
+              card: box('.action-card'),
+              field: box('.new-lith-inline'),
+              reset: box('.recent-foot .reset-cache')
+            };
+          });
+          if (!typed.card || !typed.field || !typed.reset) {
+            throw new Error('the landscape card could not be measured while a title is being typed');
+          }
+          const clearance = typed.reset.top - typed.field.bottom;
+          if (clearance < 2) {
+            throw new Error(`the field ends ${clearance.toFixed(1)}px from the reset control, so the two overlap`);
+          }
+          const inset = typed.card.bottom - typed.reset.bottom;
+          if (inset < 0 || inset > 10) {
+            throw new Error(`the reset control ends ${inset.toFixed(1)}px inside the card's bottom edge, which is not the card's own row`);
+          }
+        }
       },
       {
         // The browser-only store draws no reset control at all, so this is the picture of

@@ -470,8 +470,8 @@ try {
   // the row. They are not dropped from the app, only lent out for the length of that
   // dialog, and the dialog has a way out of its own (the × inside the field, or
   // Escape), so the vault the tile opens is never more than one dismiss away.
-  const readTypingRow = async (width) => {
-    await page.setViewport({ width, height: 700 });
+  const readTypingRow = async (width, height = 700) => {
+    await page.setViewport({ width, height });
     await page.evaluate(() => {
       [...document.querySelectorAll('button')].find((button) => button.textContent?.includes('New Blank Lith'))?.click();
     });
@@ -493,7 +493,14 @@ try {
         inlineWidth: Math.round(inline.getBoundingClientRect().width),
         fieldWidth: Math.round(field.getBoundingClientRect().width),
         mountShown: shown(card?.querySelector('.mount-button')),
-        tileShown: shown(card?.querySelector('.bookmark-button'))
+        tileShown: shown(card?.querySelector('.bookmark-button')),
+        // The row under the field, for the landscape layout below, where the card is only as tall
+        // as the two rows it keeps there and the field is taller than either of them.
+        fieldBottom: field ? Math.round(field.getBoundingClientRect().bottom) : null,
+        resetTop: (() => {
+          const reset = document.querySelector('.recent-foot .reset-cache');
+          return reset ? Math.round(reset.getBoundingClientRect().top) : null;
+        })()
       };
     });
   };
@@ -532,6 +539,21 @@ try {
   assert.ok(
     wideTypingRow.fieldWidth < wideTypingRow.contentWidth * 0.7,
     `...where the field shares the row rather than taking it (${wideTypingRow.fieldWidth} of ${wideTypingRow.contentWidth})`
+  );
+  await closeTypingRow();
+
+  // The same dialog on the landscape layout, where the rule stops being about width. The card is
+  // stretched over the reset control's row there and the foot's 90px of top margin is the height
+  // of the two rows it keeps, so a third row's worth of buttons has nowhere to go: measured with
+  // the two still drawn on an 844 by 390 window, Mount a Lith and the reset control overlapped by
+  // 15px, which is the smushing this checks for. So the same two controls stand down, and what is
+  // left is the field above the control below it rather than on top of it.
+  const landscapeTypingRow = await readTypingRow(844, 390);
+  assert.equal(landscapeTypingRow?.mountShown, false, 'The landscape card stands the mount button down while a title is typed');
+  assert.equal(landscapeTypingRow?.tileShown, false, '...and the bookmark tile with it');
+  assert.ok(
+    landscapeTypingRow.fieldBottom + 2 <= landscapeTypingRow.resetTop,
+    `...leaving the field clear of the reset control under it (the field ends at ${landscapeTypingRow.fieldBottom}, the control starts at ${landscapeTypingRow.resetTop})`
   );
   await closeTypingRow();
 
