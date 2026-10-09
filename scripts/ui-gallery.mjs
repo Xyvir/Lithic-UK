@@ -766,8 +766,8 @@ const SHEETS = [
      * it changed. What a pane cannot assert is geometry, since a pane proves only that the state
      * arrived and a person reads the rest, so what each picture is here to show is written down: the
      * reset control sitting inside the card at the same 52px and the same inset as the buttons
-     * above it (`110`), that same card while a title is being typed (`120`), and the card with no
-     * control in it at all, where the strip it would have occupied must not be left empty (`130`).
+     * above it (`110`), the empty list in its own right column (`100`), that same card while a
+     * title is being typed (`120`), and the card with no control in it at all (`130`).
      * The list's bottom edge is the last thing to check in any of them: it has to end level with
      * the card, inside the window, with a browser's own bar over the top of the page.
      */
@@ -775,6 +775,11 @@ const SHEETS = [
     title: 'Launcher, phone landscape',
     tile: '2x',
     panes: [
+      {
+        name: '100-webapp-empty',
+        view: 'landscape',
+        expect: '.recent-list-empty'
+      },
       {
         name: '110-webapp-recents',
         view: 'landscape',

@@ -1471,7 +1471,7 @@ footer > * { pointer-events: auto; }
  * is a window that wants this layout too.
  */
 @media (orientation: landscape) and (max-height: 560px) {
-  main.container.panelled {
+  main.container {
     display: grid;
     grid-template-columns: minmax(0, 1fr) minmax(0, 1.15fr);
     /*
@@ -1605,6 +1605,22 @@ footer > * { pointer-events: auto; }
    */
   main.container.panelled .recent-foot { grid-column: 1; grid-row: 3; align-self: end; margin: 136px 12px 0; }
   main.container.panelled .recent-foot .reset-cache { height: 52px; min-height: 52px; padding: 0 10px; margin-bottom: 12px; }
+  /* A launcher with no rows still owns the right column, ready for the first Lith. */
+  main.container .recent-section-empty { display: contents; }
+  main.container .recent-list-empty {
+    grid-column: 2;
+    grid-row: 1 / 4;
+    margin: 0;
+    padding: 8px;
+    border: 1px solid var(--lithic-line);
+    border-radius: 8px;
+    background: var(--lithic-surface-panel);
+    box-shadow: 0 4px 6px var(--lithic-shadow-wash-30);
+    display: grid;
+    place-items: center;
+    text-align: center;
+  }
+  main.container .recent-list-empty .empty { max-width: 22ch; margin: 0; }
   /* A mode notice takes a line of its own under both columns. */
   main.container.panelled .offline-banner { grid-column: 1 / -1; grid-row: 4; margin: 0; }
   /*

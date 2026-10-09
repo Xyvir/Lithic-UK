@@ -399,7 +399,8 @@ const en = {
       noMatch: 'No matching Liths.',
       instanceHere: 'No Liths from this instance on this device yet.',
       server: 'No Liths on this server yet.',
-      recents: 'No recent Liths.'
+      recents: 'No recent Liths.',
+      landscape: 'Your recent Liths will appear here.'
     }
   },
 
@@ -952,7 +953,8 @@ const es: Copy = {
       noMatch: 'Ningún Lith coincide.',
       instanceHere: 'Todavía no hay Liths de esta instancia en este dispositivo.',
       server: 'Todavía no hay Liths en este servidor.',
-      recents: 'No hay Liths recientes.'
+      recents: 'No hay Liths recientes.',
+      landscape: 'Tus Liths recientes aparecerán aquí.'
     }
   },
 
@@ -1484,7 +1486,8 @@ const fr: Copy = {
       noMatch: 'Aucun Lith ne correspond.',
       instanceHere: 'Aucun Lith de cette instance sur cet appareil pour l’instant.',
       server: 'Aucun Lith sur ce serveur pour l’instant.',
-      recents: 'Aucun Lith récent.'
+      recents: 'Aucun Lith récent.',
+      landscape: 'Vos Liths récents apparaîtront ici.'
     }
   },
 
@@ -2013,7 +2016,8 @@ const de: Copy = {
       noMatch: 'Kein passender Lith.',
       instanceHere: 'Noch keine Liths dieser Instanz auf diesem Gerät.',
       server: 'Noch keine Liths auf diesem Server.',
-      recents: 'Keine letzten Liths.'
+      recents: 'Keine letzten Liths.',
+      landscape: 'Deine letzten Liths erscheinen hier.'
     }
   },
 

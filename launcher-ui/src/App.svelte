@@ -6254,6 +6254,12 @@
         {#if installOffer}{@render installOfferControl()}{/if}
       </div>
     </section>
+  {:else}
+    <section class="recent-section recent-section-empty" aria-label={copy.recent.aria}>
+      <div class="recent-list recent-list-empty">
+        <p class="empty">{copy.recent.empty.landscape}</p>
+      </div>
+    </section>
   {/if}
   <!--
     The footer band is the one control this launcher keeps in the window's corner, and it
