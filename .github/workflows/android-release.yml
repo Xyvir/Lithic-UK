@@ -273,7 +273,11 @@ jobs:
             echo "::error::the APK is not signed by the debug key, so the name it is published under is not true of it."
             exit 1
           }
-          abis=$(unzip -l "${{ steps.tag.outputs.apk }}" | grep -oE 'lib/[a-z0-9_]+/' | sed 's|^lib/||; s|/$||' | sort -u)
+          # The character class carries the hyphen because the two slices that matter are the two
+          # whose directories have one: `arm64-v8a` and `armeabi-v7a`. A class without it matches
+          # `lib/x86/` and `lib/x86_64/` and nothing else, which is how an APK carrying all four
+          # slices was reported as one carrying two.
+          abis=$(unzip -l "${{ steps.tag.outputs.apk }}" | grep -oE 'lib/[A-Za-z0-9_.-]+/' | sed 's|^lib/||; s|/$||' | sort -u)
           echo "--- native slices ---"
           echo "${abis:-none}"
           echo "${abis:-}" | grep -qx 'arm64-v8a' || {
