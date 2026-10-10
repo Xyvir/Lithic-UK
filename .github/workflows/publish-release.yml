@@ -30,6 +30,20 @@ name: Publish Release
 # the release writes (a human pushing src/lithic.html by hand, which is right for the same
 # reason), and stays quiet otherwise. The tag is taken from the release commit's own subject, so
 # the release somebody reviewed is the release that is tagged, whatever minute the merge landed.
+#
+# THE GATE READS HISTORY, SO THE CHECKOUT HAS TO CARRY IT (2026-10-10). The gate decides from
+# `github.event.before..HEAD` and from the files that range changed. `actions/checkout` fetches
+# ONE commit by default, so neither `before` nor `HEAD~1` is in that clone: both halves of the
+# gate died on a bad revision, the fallbacks could see only the merge commit's own subject
+# ("Merge pull request #10 ...", which is never a release), and the gate answered "not a
+# release" for every merge. So the paths and the gate added after the two release pull requests
+# of 2026-10-10 were right and still could not judge one: PR #10 (`release/2026.10.10-2303`,
+# merged as 4f57a31) landed `manifest.json`, `offline-service-worker.js` and `src/launcher.html`
+# - two of them triggers - and published no tag, no release, no desktop downloads and no APK,
+# with every job in the run reading green. That release had to be published by hand. The
+# checkout below fetches the whole history (44 MiB of pack for this repository, one job, once
+# per release-shaped push) and the gate fails rather than answering "no" if it is ever handed a
+# shallow clone again.
 on:
   push:
     branches:
@@ -70,6 +84,12 @@ jobs:
     steps:
       - name: Checkout Code
         uses: actions/checkout@v5
+        with:
+          # Depth 0, and it is load-bearing rather than cautious: the gate below ranges over
+          # the push's own commits and diffs against `github.event.before`, neither of which
+          # exists in the one-commit clone this action fetches by default. See the header note
+          # about 2026-10-10 and PR #10.
+          fetch-depth: 0
 
       - name: Decide whether this push is a release
         id: decide
@@ -78,6 +98,13 @@ jobs:
             echo "publish=true" >> "$GITHUB_OUTPUT"
             echo "A dispatch names the tag it wants, so it publishes."
             exit 0
+          fi
+          # A shallow clone cannot answer any of this, and answering anyway is how a release
+          # goes unpublished with a green run: that is what happened on 2026-10-10. Fail here
+          # instead, because a gate that cannot decide must not decide "no".
+          if [ "$(git rev-parse --is-shallow-repository)" = 'true' ]; then
+            echo "::error::the checkout is shallower than the history the gate reads; the gate step needs fetch-depth: 0"
+            exit 1
           fi
           # The push's own commits: a merge commit's subject says "Merge pull request #6", so
           # reading HEAD's subject alone would miss every release. The release commit is the
