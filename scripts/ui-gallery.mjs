@@ -696,6 +696,18 @@ async function queuePendingImport(page, name) {
  * It is one helper for both panes because the two are supposed to be one card. `placeholder`
  * asks for the empty state's extra claim: the rows are there, they are disabled, and they are
  * out of the accessibility tree, since there is nothing for them to do yet.
+ *
+ * Two facts about the layout are measured off the page rather than read off the stylesheet,
+ * because both are arithmetic done in CSS and arithmetic is where a layout drifts:
+ *
+ *   * the title band is CAPPED at a quarter of the column. The band is the one row that gives,
+ *     so a band taller than its quarter is room taken from the rows below it. Everything under
+ *     it is one height (`--landscape-row`, derived from the window at `main.container` in
+ *     styles.css): the search box, the action card's three rows and the recent rows.
+ *   * a recent row is the height of the card's own buttons, which is what makes the left
+ *     column's controls and the right column's rows read as one set of rows rather than as two
+ *     lists that happen to sit side by side. There is no row to read in the empty pane, which is
+ *     why this one is checked when there is one.
  */
 async function assertLandscapeCard(page, { placeholder = false } = {}) {
   const measured = await page.evaluate(() => {
@@ -726,9 +738,20 @@ async function assertLandscapeCard(page, { placeholder = false } = {}) {
       newLabel: document.querySelector('.new-blank-label'),
       reset: document.querySelector('.recent-foot .reset-cache'),
       search: document.querySelector('.recent-search'),
-      card: document.querySelector('.action-card')
+      card: document.querySelector('.action-card'),
+      heading: document.querySelector('.heading'),
+      container: document.querySelector('main.container')
     };
     if (Object.values(nodes).some((node) => !node)) return null;
+    // The column is the container's content box: the window less its own padding, which is what
+    // the title band's quarter is a quarter OF.
+    const containerStyle = getComputedStyle(nodes.container);
+    const column =
+      nodes.container.clientHeight -
+      (Number.parseFloat(containerStyle.paddingTop) || 0) -
+      (Number.parseFloat(containerStyle.paddingBottom) || 0);
+    const recentRow = document.querySelector('.recent-row');
+    const panel = document.querySelector('.recent-list, .recent-list-empty');
     return {
       mountInk: ink(nodes.mountLabel),
       newInk: ink(nodes.newLabel),
@@ -748,7 +771,11 @@ async function assertLandscapeCard(page, { placeholder = false } = {}) {
       resetCount: document.querySelectorAll('.recent-foot .reset-cache').length,
       resetDisabled: nodes.reset.disabled,
       dimmed: nodes.reset.closest('[aria-hidden="true"]') !== null,
-      searchDisabled: nodes.search.disabled
+      searchDisabled: nodes.search.disabled,
+      band: box(nodes.heading).height,
+      column,
+      row: recentRow ? box(recentRow).height : null,
+      panelBottom: panel ? box(panel).bottom : null
     };
   });
   if (!measured) throw new Error('the landscape card could not be measured');
@@ -802,6 +829,24 @@ async function assertLandscapeCard(page, { placeholder = false } = {}) {
       `the search box is ${measured.search.height.toFixed(1)}px tall beside a ${measured.reset.height.toFixed(1)}px row under the card`
     );
   }
+  // The band gives its room to the rows under it, so a band past its quarter is a band being
+  // taller than this layout allows rather than a column that is too short. This is the rule for
+  // the card in its full shape, which is the shape every pane that calls this draws: the two-row
+  // card of pane 130 is the one state that pays for a missing control out of the band, and it
+  // asserts its own geometry (see `assertColumnsLevel`).
+  if (measured.band > measured.column * 0.25 + 1) {
+    throw new Error(
+      `the title band is ${measured.band.toFixed(1)}px of a ${measured.column.toFixed(1)}px column, which is more than the quarter it is capped at`
+    );
+  }
+  // The two columns draw one height, which is what makes them symmetrical: the card's buttons and
+  // a recent row are the same box, and so is the search box above them (checked above).
+  if (measured.row !== null && Math.abs(measured.row - measured.newButton.height) > 1) {
+    throw new Error(
+      `a recent row is ${measured.row.toFixed(1)}px tall beside the card's ${measured.newButton.height.toFixed(1)}px rows`
+    );
+  }
+  assertColumnsLevel(measured);
   if (placeholder) {
     if (measured.resetCount !== 1) throw new Error(`the empty card draws ${measured.resetCount} reset controls, not one`);
     if (!measured.resetDisabled || !measured.searchDisabled) {
@@ -810,6 +855,26 @@ async function assertLandscapeCard(page, { placeholder = false } = {}) {
     if (!measured.dimmed) throw new Error('the empty state\u2019s reset control is not out of the accessibility tree');
   }
   return measured;
+}
+
+/**
+ * The two columns end level, which is the one thing that holds in every landscape state: the
+ * list's panel and the action card are the same three grid rows, so a state that draws fewer rows
+ * in the card is a card that stops higher with the title band above it taking the room, and never
+ * a card that leaves a strip of empty column under itself.
+ *
+ * It is its own helper because `assertLandscapeCard` cannot read the state that needs it most:
+ * the browser-only store draws no reset control at all (there is nothing there to rebuild or
+ * clear), so there is no card to read as three rows and none of that helper's other checks mean
+ * anything. This one asks a question both states can answer.
+ */
+function assertColumnsLevel({ card, panelBottom }) {
+  if (panelBottom === null) return;
+  if (Math.abs(panelBottom - card.bottom) > 1) {
+    throw new Error(
+      `the recent list ends at ${panelBottom.toFixed(1)}px and the action card at ${card.bottom.toFixed(1)}px, so the two columns are not level`
+    );
+  }
 }
 
 /**
@@ -1237,15 +1302,16 @@ const SHEETS = [
      * window's HEIGHT, so the states below cannot be reached by a viewport anyone would think to
      * shoot on the phone sheet, and until this existed the layout was reviewed by hand each time
      * it changed. Each picture is here for something a person reads at a glance: the reset control
-     * sitting inside the card at the same 34px and the same inset as the buttons above it (`110`),
+     * sitting inside the card at the same height and the same inset as the buttons above it (`110`),
      * the empty list in its own right column (`100`), that same card while a title is being typed
      * (`120`), and the card with no control in it at all (`130`).
      *
      * The two states of the left column are also asserted, because they are the same card and a
      * pane that only photographed one of them could not tell: `assertLandscapeCard` holds the
-     * label column the three controls share, the reset control as the card's own last button, and
-     * in `100` the disabled search box and reset control that stand in the rows a first Lith will
-     * fill. Those two are what keeps the header band from being a row taller in the empty state, so
+     * label column the three controls share, the reset control as the card's own last button, the
+     * title band's quarter of the column that every row under it is sized against, and the recent
+     * rows being the height of the card's own buttons. In `100` it holds the disabled search box
+     * and reset control that stand in the rows a first Lith will fill. Those two are what keeps the header band from being a row taller in the empty state, so
      * the mark and the title do not drop 17px the moment anything is added to the list.
      * The list's bottom edge is the last thing to check in any of them: it has to end level with
      * the card, inside the window, with a browser's own bar over the top of the page.
@@ -1318,12 +1384,12 @@ const SHEETS = [
           if ((await page.query('.bookmark-button')).visibleCount) {
             throw new Error('...and the bookmark tile with it, which reaches the same vault from the same row');
           }
-          // Read as boxes, and read from the state this pane photographs: the field is the row
-          // that grows while that dialog is up (its own input is taller than the 34px the rows
-          // around it keep), which is the 21px that used to push the mount button under it
-          // through the reset control. The reset control is the card's own last row rather than a
-          // control that happens to be near it, so the same 9px inset from the card's bottom edge
-          // the two buttons keep from its top is read here as well.
+        // Read as boxes, and read from the state this pane photographs: the field is the row
+        // that grows while that dialog is up (its own input is taller than the rows it keeps
+        // company with), which is the room that used to push the mount button under it through
+        // the reset control. The reset control is the card's own last row rather than a control
+        // that happens to be near it, so the same 9px inset from the card's bottom edge the two
+        // buttons keep from its top is read here as well.
           const typed = await page.evaluate(() => {
             const box = (selector) => {
               const node = document.querySelector(selector);
@@ -1362,7 +1428,41 @@ const SHEETS = [
           caches: { 'search_cache_fallback.lith': cache([{ title: 'A', text: 'text' }]) },
           meta: { 'search_cache_meta_fallback.lith': history() }
         },
-        expect: '.recent-row'
+        expect: '.recent-row',
+        verify: async (page) => {
+          // This is the one landscape state with no reset control, so it is the one the quarter
+          // above does not describe: the card draws two rows, and the title band above it takes
+          // the room the missing one would have had. What it must not do is drift away from the
+          // column beside it, and the rows must still be one height, so those two are asserted
+          // here rather than left to the picture.
+          const measured = await page.evaluate(() => {
+            const box = (selector) => {
+              const node = document.querySelector(selector);
+              if (!node) return null;
+              const rect = node.getBoundingClientRect();
+              return { bottom: rect.bottom, height: rect.height };
+            };
+            return {
+              card: box('.action-card'),
+              panelBottom: box('.recent-list, .recent-list-empty')?.bottom ?? null,
+              button: box('.new-blank-button'),
+              row: box('.recent-row'),
+              resetCount: document.querySelectorAll('.recent-foot .reset-cache').length
+            };
+          });
+          if (measured.resetCount !== 0) {
+            throw new Error(`the browser-only store draws ${measured.resetCount} reset controls; it has nothing to reset`);
+          }
+          if (!measured.card || !measured.button || !measured.row) {
+            throw new Error('the fallback landscape card could not be measured');
+          }
+          if (Math.abs(measured.row.height - measured.button.height) > 1) {
+            throw new Error(
+              `a recent row is ${measured.row.height.toFixed(1)}px tall beside the card's ${measured.button.height.toFixed(1)}px rows`
+            );
+          }
+          assertColumnsLevel(measured);
+        }
       },
     ]
   },

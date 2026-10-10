@@ -494,8 +494,8 @@ try {
         fieldWidth: Math.round(field.getBoundingClientRect().width),
         mountShown: shown(card?.querySelector('.mount-button')),
         tileShown: shown(card?.querySelector('.bookmark-button')),
-        // The row under the field, for the landscape layout below, where the card is only as tall
-        // as the two rows it keeps there and the field is taller than either of them.
+        // The row under the field, for the landscape layout below, where the card keeps only the
+        // two rows that dialog leaves it and the field takes one of them.
         fieldBottom: field ? Math.round(field.getBoundingClientRect().bottom) : null,
         resetTop: (() => {
           const reset = document.querySelector('.recent-foot .reset-cache');
@@ -543,10 +543,10 @@ try {
   await closeTypingRow();
 
   // The same dialog on the landscape layout, where the rule stops being about width. The card is
-  // stretched over the reset control's row there and the foot's 90px of top margin is the height
-  // of the two rows it keeps, so a third row's worth of buttons has nowhere to go: measured with
-  // the two still drawn on an 844 by 390 window, Mount a Lith and the reset control overlapped by
-  // 15px, which is the smushing this checks for. So the same two controls stand down, and what is
+  // stretched over the reset control's row there and the foot's top margin is the height of the
+  // two rows it keeps, so a third row's worth of buttons has nowhere to go: measured with the two
+  // still drawn on an 844 by 390 window, Mount a Lith and the reset control overlapped by 15px,
+  // which is the smushing this checks for. So the same two controls stand down, and what is
   // left is the field above the control below it rather than on top of it.
   const landscapeTypingRow = await readTypingRow(844, 390);
   assert.equal(landscapeTypingRow?.mountShown, false, 'The landscape card stands the mount button down while a title is typed');

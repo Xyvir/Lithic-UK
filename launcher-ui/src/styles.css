@@ -1459,15 +1459,22 @@ footer > * { pointer-events: auto; }
  * the page can place. The list carries the panel's border and background, since it is now the
  * box the eye reads as "the recent panel" on this screen.
  *
- * The left column is what has height to spare, and the header band is what takes it: the mark
- * and the title sit centred in a row that stretches to fill whatever the search box and the
- * action card do not. The header is the ONLY row that gives, because it is the only one whose
- * content reads the same at any height: everything below it is sized for the short window rather
- * than for comfort, New Blank Lith and Mount a Lith at 34px against the 52px they keep elsewhere,
- * the recent rows and the search box scaled with them, and the mark keeps a floor of its own
- * (36px) so a short window spends the band's type before it spends the icon. Only the band is
- * movable because the band is the only row whose content reads the same at any height; every
- * other row is a control at the size a finger needs.
+ * The title band is CAPPED at a quarter of the column and everything below it takes the rest,
+ * which is what makes the controls the size they are: the band is the only row that gives,
+ * because it is the only one whose content reads the same at any height, so the room it does not
+ * need goes to the rows under it rather than to a taller band. Those rows are one height, worked
+ * out once as `--landscape-row` (see the derivation at `main.container` below) and shared by the
+ * search box, the action card's rows and the recent rows, so the two columns read as one set of
+ * rows rather than as a full-size control over shrunken ones. The mark keeps a floor of its own
+ * (36px) so a short window spends the band's type before it spends the icon.
+ *
+ * One state is short of a row and pays for it out of the band, because a row height is a fact
+ * about the window rather than about which control happens to be drawn: the browser-only store
+ * and offline mode draw no rebuild or reset control at all (nothing there to rebuild, and the
+ * server is the very thing that just failed), so their card is two rows and their band is a
+ * quarter plus the missing row's worth. The alternative was a card the height of a control it
+ * does not draw, which reads as a button that failed to arrive, or a mode with a row height of
+ * its own, which would make the same phone draw different rows depending on its browser.
  *
  * The height is the trigger rather than the width: a landscape tablet is 1024 by 768 and has
  * no such problem, and the largest phone is about 415 tall. 560 leaves room for a browser's
@@ -1488,10 +1495,35 @@ footer > * { pointer-events: auto; }
     display: grid;
     grid-template-columns: minmax(0, 1fr) minmax(0, 1.15fr);
     /*
-     * The header takes the slack; the search box and the action card keep their own height.
-     * Three rows rather than four: the foot used to have a row of its own under the card, and
-     * it now shares the card's (see `.recent-foot` below), so a fourth row would be an empty
-     * track whose gap still showed up under the card as a drift between the two columns.
+     * One height for every row under the title, derived rather than chosen, so that the title
+     * band and the controls can be added up and land exactly on the column. Every number below
+     * is a fact about another rule in this block, which is why they are written out:
+     *
+     *   the column  is the window less the container's own 10px of top and bottom padding
+     *               (`100dvh - 20px`; `#app` is `100dvh`).
+     *   the title   is capped at a quarter of that column (`25dvh - 5px`), which is the band the
+     *               grid row below hands its slack to. Where a mode draws no reset control the
+     *               card is one row shorter than this and the band takes that shortfall instead,
+     *               which is the one place the quarter does not have to hold: it is a cap on the
+     *               band, not a row height that anything else is measured against.
+     *   the gaps    are the two 10px row gaps between the three grid rows (20px).
+     *   the card    holds 1px of border, 8px of padding and two 7px gaps around its three rows
+     *               (32px).
+     *
+     * What is left is four rows: the search box, and the card's New Blank Lith, Mount a Lith and
+     * reset rows. So each is `((100dvh - 20) - (25dvh - 5) - 20 - 32) / 4`, which comes to
+     * `18.75dvh - 16.75px`: 56.4px on the 844 by 390 window this layout is drawn for, against
+     * the 34px these rows used to keep here. The floor keeps a finger's worth of height in a
+     * window too short to pay for the quarter, and the band takes that shortfall because it is
+     * the row that gives.
+     */
+    --landscape-row: max(34px, calc(18.75dvh - 16.75px));
+    /*
+     * The title band takes the slack, which by the arithmetic above is exactly its quarter; the
+     * search box and the action card are the height their own rows are. Three rows rather than
+     * four: the foot used to have a row of its own under the card, and it now shares the card's
+     * (see `.recent-foot` below), so a fourth row would be an empty track whose gap still showed
+     * up under the card as a drift between the two columns.
      */
     grid-template-rows: 1fr auto auto;
     column-gap: 12px;
@@ -1557,8 +1589,8 @@ footer > * { pointer-events: auto; }
   /* The search box scales with the rows it filters, and its icon with it: the field and the
    * rows have to read as one list rather than as a full-size control over a shrunken one. */
   main.container .recent-search {
-    height: 34px;
-    min-height: 34px;
+    height: var(--landscape-row);
+    min-height: var(--landscape-row);
     padding: 4px 34px;
     font-size: 0.78rem;
   }
@@ -1568,8 +1600,8 @@ footer > * { pointer-events: auto; }
    * The action card now holds the reset control too, so its box has to cover the row that
    * control sits in: `stretch` here and on the card itself, and the wrapped lines packed to
    * the top rather than distributed, which is what keeps New Blank Lith and Mount a Lith at
-   * their own 34px instead of sharing the extra height out between them. 34 rather than 52 is
-   * where the header's own room comes from: this block runs before the band does.
+   * `--landscape-row` instead of sharing the extra height out between them. That row rather
+   * than the 52px these buttons keep elsewhere is where the title band's own room comes from.
    *
    * The two labels are aligned rather than both centered. Mount a Lith keeps its label in the
    * middle of its button; New Blank Lith's label starts where that centered label starts, which
@@ -1580,10 +1612,10 @@ footer > * { pointer-events: auto; }
   main.container .launcher-actions { grid-column: 1; grid-row: 3; align-self: stretch; display: flex; margin-top: 0; }
   main.container .action-card { gap: 7px; margin-bottom: 0; padding: 8px; }
   main.container .action-pair { flex: 1 1 auto; flex-wrap: wrap; align-content: flex-start; }
-  main.container .action-pair .action-button { height: 34px; min-height: 34px; padding: 4px 8px; font-size: 0.72rem; }
+  main.container .action-pair .action-button { height: var(--landscape-row); min-height: var(--landscape-row); padding: 4px 8px; font-size: 0.72rem; }
   main.container .action-pair .action-button:not(.mount-button),
   main.container .action-pair .new-lith-inline { flex: 1 1 100%; }
-  main.container .action-pair .new-lith-inline { min-height: 34px; }
+  main.container .action-pair .new-lith-inline { min-height: var(--landscape-row); }
   main.container .action-pair .mount-button { flex: 1 1 auto; text-align: center; }
   main.container .action-pair .new-blank-button { text-align: left; }
   main.container .action-pair .new-blank-label { display: block; width: 100%; box-sizing: border-box; padding-left: var(--mount-label-offset, 0px); }
@@ -1593,23 +1625,24 @@ footer > * { pointer-events: auto; }
     width: 32px;
     align-self: stretch;
     height: auto;
-    min-height: 34px;
+    min-height: var(--landscape-row);
   }
   main.container .action-pair .bookmark-button svg { width: 14px; height: 16px; }
   /*
    * A title being typed takes the card's rows here, and on this layout that is not only about
    * width. The card is stretched over the foot control (see `.recent-foot`), and the foot's own
-   * 90px of top margin is what holds the reset control clear of the two rows above it: it is the
-   * height of two 34px rows plus their gap plus the card's 8px inset, computed once, in the
-   * margin. A third row's worth of buttons in a card that only budgets for two puts the mount
-   * button through the reset control, which is 15px of overlap on the 844 by 390 window this
-   * layout was drawn for. So the mount button and the bookmark tile stand down while the field is
+   * top margin is what holds the reset control clear of the two rows above it: it is the height
+   * of two rows plus their gaps plus the card's own inset, computed once, in the margin. A third
+   * row's worth of buttons in a card that only budgets for two puts the mount button through the
+   * reset control, which is 15px of overlap on the 844 by 390 window this layout was drawn for.
+   * So the mount button and the bookmark tile stand down while the field is
    * up, the same as they do on a phone in portrait (see the 600px block above); the field takes
    * their width as well, which is what the dialog is asking for. Both come back the moment it
    * closes, and it always has a way out of its own (the × inside the field, or Escape), so the
    * vault the tile reaches is never more than that one dismiss away. The card's box does not
-   * change: it is the same 133px in all three states, so nothing below it moves when the field
-   * arrives, which is why the reset control stays where it is rather than following the row up.
+   * change: it is the height of its own three rows in all three states, so nothing below it moves
+   * when the field arrives, which is why the reset control stays where it is rather than
+   * following the row up.
    */
   main.container .action-pair.new-lith-open .mount-button,
   main.container .action-pair.new-lith-open .bookmark-button { display: none; }
@@ -1632,18 +1665,18 @@ footer > * { pointer-events: auto; }
   /*
    * The reset control joins the card rather than standing under it: the foot's row is the
    * card's row and the card is stretched over it, so the control reads as the card's own last
-   * button, at the same 34px as the two above it and still a dashed border, which is the one
-   * thing that says it clears a list rather than opening something. Its own background stays
-   * transparent so the card's surface shows through, exactly as it does in the panel's foot on
-   * the layouts with height to spare.
+   * button, at the same `--landscape-row` as the two above it and still a dashed border, which is
+   * the one thing that says it clears a list rather than opening something. Its own background
+   * stays transparent so the card's surface shows through, exactly as it does in the panel's foot
+   * on the layouts with height to spare.
    *
-   * The foot's top margin is where the card's second button row ends plus one gap (8 + 34 + 7 +
-   * 34 + 7), which is what puts the control on the card's own line for a third button row. A
-   * margin is also what an empty row does not pay for: the foot of a launcher with no such
-   * control to draw (the browser-only store, offline mode) is 90px of margin and no height,
-   * which is under the card's own 93px, so that row falls back to the card and no blank strip is
-   * left at its bottom. The control's inset from the card's bottom edge travels on the button
-   * rather than on the row, for the same reason.
+   * The foot's top margin is where the card's second row ends plus one gap, which is what puts the
+   * control on the card's own line for a third row. A margin is also what an empty row does not
+   * pay for: the foot of a launcher with no such control to draw (the browser-only store, offline
+   * mode) is that margin and no height, and the margin stops one row short of the card's own
+   * height, so that row falls back to the card and no blank strip is left at its bottom. The
+   * control's inset from the card's bottom edge travels on the button rather than on the row, for
+   * the same reason.
    *
    * The foot is a sibling of the card rather than a child of it, and the card carries a 1px
    * border the foot does not, so the inset that lines the two up is the card's padding and its
@@ -1652,8 +1685,15 @@ footer > * { pointer-events: auto; }
    * buttons share (see below).
    */
   main.container.panelled .recent-list { padding-bottom: 12px; }
-  main.container.panelled .recent-row { min-height: 32px; margin-bottom: 4px; }
-  main.container.panelled .recent-name { padding: 5px 8px; font-size: 0.75rem; }
+  /*
+   * The rows are the same height as the card's, which is the point of the variable: the two
+   * columns are one set of rows. A row is a flex line of two children that both fill it, so a
+   * name left alone in a taller row would sit at the top of it; `center` puts the type in the
+   * middle of the box it fills, on this layout only, because a row on a page with height to
+   * spare is the height of its own text.
+   */
+  main.container.panelled .recent-row { min-height: var(--landscape-row); margin-bottom: 4px; }
+  main.container.panelled .recent-name { display: flex; align-items: center; padding: 5px 8px; font-size: 0.75rem; }
   main.container.panelled .recent-icon-button { flex-basis: 26px; }
   main.container.panelled .recent-icon-button svg { width: 17px; height: 17px; }
   /*
@@ -1662,7 +1702,14 @@ footer > * { pointer-events: auto; }
    * first Lith arrives. Unscoped rather than duplicated because the two are the same row in the
    * same place, and a second copy of these numbers is a second thing to keep in step.
    */
-  main.container .recent-foot { grid-column: 1; grid-row: 3; align-self: end; margin: 90px 9px 0; gap: 7px; }
+  /*
+   * The top margin is where the card's own third row starts, so the control lands on the card's
+   * last row rather than under the card: the card's 1px border, its 8px of padding, the two rows
+   * above (2 x `--landscape-row`) and the two 7px gaps between them. It is the same arithmetic
+   * as the variable's, one row shorter, which is what keeps the reset control level with the
+   * rows in the other column when either number moves.
+   */
+  main.container .recent-foot { grid-column: 1; grid-row: 3; align-self: end; margin: calc(2 * var(--landscape-row) + 23px) 9px 0; gap: 7px; }
   /*
    * The label starts on the column New Blank Lith and Mount a Lith share rather than in the
    * middle of a button of its own width. `--mount-label-offset` is the measurement
@@ -1672,8 +1719,8 @@ footer > * { pointer-events: auto; }
    * makes the same number mean the same place on both.
    */
   main.container .recent-foot .reset-cache {
-    height: 34px;
-    min-height: 34px;
+    height: var(--landscape-row);
+    min-height: var(--landscape-row);
     padding: 0 8px 0 calc(8px + var(--mount-label-offset, 0px));
     margin-bottom: 9px;
     font-size: 0.72rem;
