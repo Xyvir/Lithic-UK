@@ -358,12 +358,15 @@ jobs:
 
   # The launcher UI gallery, as the review material for the pull request below.
   #
-  # This is the only place the deck runs outside a developer's machine, and it needs three
+  # This is the only place the deck runs outside a developer's machine, and it needs four
   # things the build job's own environment does not have: Node 24 (the deck reads
   # `launcher-ui/src/color-palette.ts` directly, which is type stripping, and the launcher
-  # build itself is pinned to 24 for the same reason), a Chrome for Puppeteer, and
-  # ImageMagick 7 for the tiling (see scripts/install-imagemagick7.sh, which explains why
-  # the distro's packages cannot supply the `magick` the deck invokes).
+  # build itself is pinned to 24 for the same reason), a Chrome for Puppeteer, ImageMagick 7
+  # for the tiling (see scripts/install-imagemagick7.sh, which explains why the distro's
+  # packages cannot supply the `magick` the deck invokes), and a text font, because montage
+  # asks freetype for its label's metrics before it lays anything out and so needs one even
+  # for a sheet with no names on it. This image has only an emoji face; the script adds
+  # fonts-dejavu-core, and scripts/sheet-tile.mjs tiles without any text if it cannot.
   #
   # `continue-on-error` is the design rather than a softener. The deck is review material:
   # a pane that cannot reach its state fails `ui-gallery.mjs` on purpose, and that failure

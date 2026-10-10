@@ -48,8 +48,12 @@
  *
  * Output lands in `ui-gallery/` (gitignored): `raw/` holds one PNG per state and
  * each sheet is a montage of its states, labelled with their names. Tiling needs
- * ImageMagick 7 (`magick`) — everything else is already a devDependency, because
- * the smoke test this borrows its environment from needs the same things.
+ * ImageMagick 7 (`magick`) *and* a font to draw the names with, because montage asks
+ * freetype for metrics before it lays anything out and so needs one even for an empty
+ * label; `scripts/install-imagemagick7.sh` supplies both on a runner, and
+ * `scripts/sheet-tile.mjs` tiles without any text if the font is still missing.
+ * Everything else is already a devDependency, because the smoke test this borrows its
+ * environment from needs the same things.
  *
  * On the stand-in for Rust: the desktop app's states (the credential vault, the
  * per-instance keys) only render in `mode === 'tauri'`, so this page is given the
@@ -61,11 +65,9 @@
  * its own would produce a sheet full of text that ships nowhere.
  */
 
-import { execFile } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import { mkdir, readdir, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
-import { promisify } from 'node:util';
 import puppeteer from 'puppeteer';
 
 import { SECRET_SENTENCES } from './vault-copy.mjs';
@@ -78,8 +80,10 @@ import { PALETTE, WASHES, paletteTokens, paletteValue, variableName } from '../l
 // point below, because it has to be listening before the first pane is driven; the
 // panes reach it through `paneUrl` and through this handle.
 import { startSelfHostStub } from './self-host-stub.mjs';
-
-const run = promisify(execFile);
+// Tiling, and the font a sheet's names are drawn with. Its own module because it is the
+// one part of a run that needs something a machine may not have, and because that is
+// what it is tested against (see the module).
+import { SHEET_FONT, tileSheet } from './sheet-tile.mjs';
 
 const artifactArg = process.argv.find((arg) => arg.startsWith('--artifact='));
 const ARTIFACT = resolve(artifactArg ? artifactArg.slice('--artifact='.length) : (process.env.GALLERY_ARTIFACT ?? 'src/launcher.html'));
@@ -3223,22 +3227,9 @@ function coverageReport(regions, drawn, kept) {
 
 // --- tiling -----------------------------------------------------------------
 
-/**
- * Tile one sheet. Labels are attempted first and dropped if ImageMagick has no
- * font it can draw with — a sheet without names is still worth looking at, and a
- * hard failure here would throw away the whole run.
- */
+/** Tile one sheet at the path this run keeps sheets at. See `scripts/sheet-tile.mjs`. */
 async function montage(sheet, files) {
-  const out = join(OUT_DIR, `sheet-${sheet.id}.png`);
-  const base = ['montage', '-background', '#121212', '-tile', sheet.tile, '-geometry', '+14+14'];
-  const labelled = ['-label', '%t', '-pointsize', '15', '-fill', '#cfc7bb'];
-  try {
-    await run('magick', [...base, ...labelled, ...files, out], { maxBuffer: 1 << 28 });
-  } catch (error) {
-    console.warn(`  ! montage could not draw labels (${error.message.split('\n')[0]}); tiling without them`);
-    await run('magick', [...base, ...files, out], { maxBuffer: 1 << 28 });
-  }
-  return out;
+  return tileSheet(sheet, files, join(OUT_DIR, `sheet-${sheet.id}.png`));
 }
 
 /**
@@ -3454,6 +3445,11 @@ if (sheets.length === 0) {
   console.error(`No sheet matches ${filter.join(', ')}. Sheets: ${SHEETS.map((sheet) => sheet.id).join(', ')}`);
   process.exit(1);
 }
+
+// Which font the sheets' names will be drawn with, said once here rather than only in the
+// warning a failed label attempt prints: a deck with no names is worth looking at, but the
+// reason should be in the log rather than in somebody's reading of ImageMagick's error.
+console.log(SHEET_FONT ? `Sheet labels: ${SHEET_FONT}` : 'Sheet labels: none found, so sheets will be tiled without names.');
 
 /*
  * Only the panes this run is about to redraw are deleted, and a sheet that does not run
