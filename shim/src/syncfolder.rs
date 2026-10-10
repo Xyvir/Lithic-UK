@@ -408,8 +408,19 @@ mod tests {
     /// The proposal is the folder the app installs into, and that rule has one owner
     /// (`install.rs`). What this pins is that the folder the dialog is offered is that one,
     /// rather than a second folder invented here that would drift from it.
+    ///
+    /// The lock is the whole of the test being about one moment rather than two, and this test
+    /// did not take it until 2026-10-10: both calls read `$XDG_DATA_HOME` (and `$HOME`) as they
+    /// are at that instant, so a `Scratch` that existed between them - its holder sets and then
+    /// removes the variable - made the two answers come from different machines. Seen twice on
+    /// 2026-10-10, once in a `check:push` run and once in three direct runs of this module:
+    /// `proposed()` answered `~/.local/share/Lithic` while `install_dir()` answered the scratch
+    /// data home of whichever test held the lock at that instant. The rule does not vary, so
+    /// the two reads have to happen with nothing able to move the variable, exactly as
+    /// `Scratch` reads it.
     #[test]
     fn the_proposal_is_the_folder_the_shim_installs_into() {
+        let _guard = data_lock();
         assert_eq!(proposed(), install_dir());
     }
 
