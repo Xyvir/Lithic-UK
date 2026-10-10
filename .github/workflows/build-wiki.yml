@@ -373,9 +373,18 @@ jobs:
   # must not stop a release from being reviewable at all. The pull request still opens and
   # its description says the pictures are missing, which is a worse description than one
   # carrying twelve sheets and a much better outcome than no pull request.
+  #
+  # It runs on any prod build and not only on a release, which is what makes the gallery
+  # itself reviewable rather than only its release output: a dispatch with
+  # `create_release: false` and the prod config shoots every sheet and publishes the
+  # pictures as this run's own artifact. Without that, the one way to see a gallery change
+  # was to mint a release candidate for it, because `.github/**` and the deck's own scripts
+  # are all off the push trigger (see the path filter above) and so cannot start a run by
+  # themselves. Only the branch publish and the pull request are release business, and they
+  # stay behind `CREATE_RELEASE` where they belong.
   deck:
     needs: build
-    if: needs.build.outputs.release == 'true' && needs.build.outputs.config == 'prod'
+    if: needs.build.outputs.config == 'prod'
     continue-on-error: true
     runs-on: ubuntu-latest
     permissions:
@@ -427,11 +436,20 @@ jobs:
       # an accumulating history keeps that branch the size of the newest deck. The stamp is
       # in the path because the raw host caches by URL, so a path that changes every build
       # is a URL that can never serve the previous build's sheet.
+      # Only a release puts the sheets on the branch, because that branch exists to serve
+      # the pull request's description. A dry run keeps them as the artifact below — and it
+      # gets them even when the gallery failed, because the sheets drawn before the pane
+      # that failed are still worth looking at (`always()`), as long as there are any.
       - name: Publish the sheets
+        if: always() && env.CREATE_RELEASE == 'true'
         env:
           STAMP: ${{ needs.build.outputs.stamp }}
         run: |
           [ -n "$STAMP" ] || { echo "::error::no build stamp to publish sheets under"; exit 1; }
+          if ! ls ui-gallery/sheet-*.png >/dev/null 2>&1; then
+            echo "::warning::the gallery drew no sheet, so there is nothing to publish"
+            exit 0
+          fi
           mkdir -p "deck/$STAMP"
           cp ui-gallery/sheet-*.png "deck/$STAMP/"
           git config user.name "github-actions[bot]"
@@ -444,7 +462,9 @@ jobs:
 
       # `always()` because this is the run's only record of what the deck did: a deck that
       # died at pane 40 has still drawn the sheets it got through, and the coverage report
-      # is written either way.
+      # is written either way. The sheets themselves are here too: a release publishes them
+      # to the `ui-deck` branch for its pull request to embed, and a dry run has no branch
+      # and no pull request, so this artifact is how its pictures are looked at.
       - name: Upload the deck report
         if: always()
         uses: actions/upload-artifact@v5
@@ -453,6 +473,7 @@ jobs:
           path: |-
             ui-gallery/sheets.json
             ui-gallery/modal-coverage.md
+            ui-gallery/sheet-*.png
           retention-days: 3
           if-no-files-found: warn
 
@@ -508,6 +529,11 @@ jobs:
       # therefore carries the diff and the sheets and not a set of checks, which is fine
       # here because nothing PR-triggered has anything to add to a build that just passed
       # its own gates. Merging is a person's action, so publish-release.yml does run.
+      # The message is captured and re-said as an annotation rather than left on stderr,
+      # because this is the one step a repository setting can refuse — Actions-created pull
+      # requests are off by default on a repository whose settings were never touched — and
+      # an annotation is readable by anybody who can see the run, where a log needs the
+      # job's own output opened. It goes out as a single line, since a newline would end it.
       - name: Open the pull request
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -515,8 +541,12 @@ jobs:
           STAMP: ${{ needs.build.outputs.stamp }}
         run: |
           [ -n "$BRANCH" ] || { echo "::error::the build staged no release branch"; exit 1; }
-          gh pr create \
+          if ! MESSAGE=$(gh pr create \
             --base main \
             --head "$BRANCH" \
             --title "Release build-$STAMP" \
-            --body-file pr-body.md
+            --body-file pr-body.md 2>&1); then
+            echo "::error::opening the pull request failed: $(printf '%s' "$MESSAGE" | tr '\n' ' ' | cut -c1-600)"
+            exit 1
+          fi
+          echo "$MESSAGE"
