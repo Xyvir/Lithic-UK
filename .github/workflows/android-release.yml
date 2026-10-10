@@ -35,8 +35,22 @@ name: Android Manual Release
 #
 # It only ever ADDS a file to a release that already exists, like every other job in this
 # chain, so it cannot blank another platform's work.
+#
+# A HAND-RUN NAMES THE RELEASE IT ADDS TO, and the input is declared for the dispatch for the
+# same reason it is declared for the chain: the tag is what the two half-hour jobs of this
+# workflow are for, and the fallback below (today's date, when no tag is given) is a build that
+# has nothing to add to and would mint a release of its own from the stamp. That is against the
+# rule in the paragraph above, so the dispatch asks for the tag rather than letting a hand-run
+# discover the difference on the release page. It is also what makes the note higher up true:
+# this job can be dispatched on its own while the platform is being brought up, aimed at the
+# release whose APK is missing.
 on:
   workflow_dispatch:
+    inputs:
+      tag_name:
+        description: 'Release tag to add the APK to, e.g. build-2026.10.10-1817'
+        required: true
+        type: string
   workflow_call:
     inputs:
       tag_name:
