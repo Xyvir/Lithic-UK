@@ -2452,6 +2452,13 @@ fn set_sync_folder_in(dir: &Path, picked: Option<&Path>) -> Result<(), String> {
 /// Async, and that is load-bearing: a command runs on the main thread, and Tauri 2's
 /// blocking pickers must not be called there. This one parks on a channel while the
 /// dialog's own callback (which fires on the main thread) delivers the chosen folder.
+///
+/// DESKTOP ONLY, and the split is the plugin's rather than the platform's: `pick_folder` is the
+/// desktop half of `tauri-plugin-dialog`, which is the `Cargo.toml` Android table's own reason
+/// for the phone build carrying no sync ("no folder picker that reaches one"). The other
+/// definition below is what Android gets, so the launcher's invoke list is the same on every
+/// target and a caller there is answered rather than told the command does not exist.
+#[cfg(not(any(target_os = "android", test)))]
 #[tauri::command]
 async fn pick_sync_folder(app: tauri::AppHandle, current: Option<String>) -> Result<Option<String>, String> {
     let (sender, receiver) = std::sync::mpsc::channel();
@@ -2478,6 +2485,22 @@ async fn pick_sync_folder(app: tauri::AppHandle, current: Option<String>) -> Res
         set_sync_folder_in(&dir, Some(&path))?;
     }
     Ok(Some(path.to_string_lossy().into_owned()))
+}
+
+/// The same command where there is no picker to open, which is every phone and this crate's own
+/// test build on every platform. The second half is this crate's usual rule for an answer the
+/// target decides (`gitcore`/`gitcore_unsupported` above): the local gate runs on Windows, so a
+/// body behind `cfg(target_os = "android")` alone is a body `cargo check`, `clippy` and
+/// `cargo test` on that machine never look at.
+///
+/// `None` rather than an error, because it is the answer the page already handles: it is what the
+/// picker itself sends back when the dialog is dismissed, and the folder line then keeps the
+/// folder it was showing. Nothing on a phone asks for it either way, since the capability table
+/// turns the whole sync half off there.
+#[cfg(any(target_os = "android", test))]
+#[tauri::command]
+async fn pick_sync_folder(_app: tauri::AppHandle, _current: Option<String>) -> Result<Option<String>, String> {
+    Ok(None)
 }
 
 /// Go back to the folder Lithic works out for itself. The recents and the install-offer
