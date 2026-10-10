@@ -682,8 +682,8 @@ async function queuePendingImport(page, name) {
  *   detect  run this pane in a browser whose own language is this tag (`es-ES`), with no
  *           `lang=` on the URL, so the language arrives the way it reaches a visitor,
  *           through the environment rather than through the address. It needs a browser of
- *           its own, launched with `--lang`, since the shared one speaks this machine's
- *           language: a browser preference cannot be set from a page.
+ *           its own, launched with both `--lang` and `--accept-lang`, since the shared one
+ *           speaks this machine's language: a browser preference cannot be set from a page.
  */
 /**
  * The landscape card's own geometry, asserted rather than looked at.
@@ -3492,6 +3492,21 @@ const browser = await puppeteer.launch(LAUNCH);
  * asking for it on the URL. `navigator.languages` is the browser's own setting and no page
  * can reach it, so the only honest way to photograph detection is to launch a browser that
  * is already speaking the language. One per tag, since a sheet may want more than one.
+ *
+ * Two flags, because one is not enough and which one moves what is not obvious:
+ *
+ *   --lang          the browser's own UI locale. It is what Windows Chrome also reads
+ *                   `navigator.languages` from, which is why a single `--lang` looked
+ *                   sufficient while the deck only ran on the developer's machine.
+ *   --accept-lang   the language list a *page* is told, which is the one the launcher
+ *                   reads. On Linux headless Chrome this is the only one of the two that
+ *                   moves `navigator.languages` at all: measured on Chrome 148 with the
+ *                   launcher's own artifact, `--lang=es-ES` alone leaves the page reading
+ *                   `en-US` — which is exactly how the Spanish sheet failed on a runner
+ *                   while passing here.
+ *
+ * Both are passed rather than only the second, so the two halves of "a browser that speaks
+ * Spanish" stay in step on every platform. One tag per browser, keyed by the tag.
  */
 const detectedBrowsers = new Map();
 async function browserFor(pane) {
@@ -3499,7 +3514,10 @@ async function browserFor(pane) {
   if (!detectedBrowsers.has(pane.detect)) {
     detectedBrowsers.set(
       pane.detect,
-      await puppeteer.launch({ ...LAUNCH, args: [...LAUNCH.args, `--lang=${pane.detect}`] })
+      await puppeteer.launch({
+        ...LAUNCH,
+        args: [...LAUNCH.args, `--lang=${pane.detect}`, `--accept-lang=${pane.detect}`]
+      })
     );
   }
   return detectedBrowsers.get(pane.detect);
