@@ -238,10 +238,17 @@ jobs:
       # than inferred from the build having exited zero. Two things are checked because two
       # things have gone wrong for other projects: an unsigned APK is refused by Android
       # outright, and an APK with no native code for the phone holding it installs and then
-      # fails to start. `apksigner` is the platform's own answer to the first; for the second
-      # this requires the slice that every Android phone made this decade has and reports the
-      # rest, because the universal flavor is what is supposed to carry all four and a list
-      # printed in the summary is how that gets noticed rather than assumed.
+      # fails to start. `apksigner` is the platform's own answer to the first, and its exit
+      # status is what the step turns on; for the second this requires the slice that every
+      # Android phone made this decade has and reports the rest, because the universal flavor is
+      # what is supposed to carry all four and a list printed in the summary is how that gets
+      # noticed rather than assumed.
+      #
+      # The signer is read off the CERTIFICATE rather than off one of apksigner's own labels,
+      # and both its output and its silence are printed before either check: the label for a
+      # signer's distinguished name is apksigner's wording and moves with its version, while
+      # what has to be behind a file called `_debug.apk` is the debug key's own `CN`, and a step
+      # that grepped for the wording once failed on a file apksigner had already accepted.
       - name: Verify the APK
         run: |
           sdk="${ANDROID_SDK_ROOT}"
@@ -257,8 +264,13 @@ jobs:
             exit 1
           fi
           echo "--- signer ---"
-          grep -i "Signer #1 certificate DN" apk-certs.txt || {
-            echo "::error::apksigner reported no signer for a file it accepted."
+          cat apk-certs.txt
+          if [ ! -s apk-certs.txt ]; then
+            echo "::error::apksigner accepted the APK and named no signer, so there is nothing to read here."
+            exit 1
+          fi
+          grep -qi 'android debug' apk-certs.txt || {
+            echo "::error::the APK is not signed by the debug key, so the name it is published under is not true of it."
             exit 1
           }
           abis=$(unzip -l "${{ steps.tag.outputs.apk }}" | grep -oE 'lib/[a-z0-9_]+/' | sed 's|^lib/||; s|/$||' | sort -u)
