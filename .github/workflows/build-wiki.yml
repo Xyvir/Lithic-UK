@@ -455,7 +455,14 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git checkout --orphan ui-deck-staging
-          git rm -r --cached . >/dev/null
+          # `read-tree --empty` rather than `git rm -r --cached .`, and the difference is
+          # the step above: the deck overwrites `src/launcher.html` with the artifact it
+          # photographed, so a tracked file differs from both the index and HEAD, and
+          # `git rm --cached` refuses to unstage exactly that case ("staged content
+          # different from both the file and the HEAD"). Emptying the index says the same
+          # thing without asking about a working tree it leaves alone, and the commit below
+          # still holds the deck and nothing else.
+          git read-tree --empty
           git add -f "deck/$STAMP"
           git commit -m "Deck for build-$STAMP"
           git push --force origin HEAD:ui-deck
@@ -511,7 +518,11 @@ jobs:
       - name: Compose the description
         env:
           STAMP: ${{ needs.build.outputs.stamp }}
-          BASE: https://raw.githubusercontent.com/${{ github.repository }}/ui-deck/${{ needs.build.outputs.stamp }}
+          # `deck/` belongs in the base because it is in the published path: the sheets go
+          # to `deck/<stamp>/` on the `ui-deck` branch (see "Publish the sheets" above),
+          # and the composer appends a sheet's file name to this, so a base one segment
+          # short points every image at a 404 that only shows up as a broken picture.
+          BASE: https://raw.githubusercontent.com/${{ github.repository }}/ui-deck/deck/${{ needs.build.outputs.stamp }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: |
           node scripts/gallery-pr-body.mjs \
