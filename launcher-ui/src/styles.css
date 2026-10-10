@@ -197,6 +197,16 @@ body { overflow: hidden; background: var(--lithic-surface-app); }
      left edge and drawn in the margin outside it. */
   position: relative;
 }
+/*
+ * The heading and any notice that belongs under it, as one band.
+ *
+ * A box of its own because the sideways-phone layout has a grid row for the heading and no
+ * row to spare: there the band is the grid item and the notice sits under the heading inside
+ * it, in the row the heading already had (see the landscape block below). Everywhere else it
+ * draws nothing of its own, and the two keep the spacing they had as siblings: this is a flex
+ * column, so their margins cannot collapse into each other either way.
+ */
+.heading-band { display: flex; flex-direction: column; }
 /* The heading's trailing control, which is the mode's own button. The way back out of
    a handed-over page is not in here, because it may not take room from the mark. The
    wrapper stays so the free space is claimed in one place rather than by whichever
@@ -1535,10 +1545,29 @@ footer > * { pointer-events: auto; }
    * smaller than on a page with height to spend: at 1.15rem beside a 36px mark the band reads as
    * a heading rather than as a squashed block of type.
    */
-  main.container .heading {
+  /*
+   * The band takes the row here rather than the heading, and the offline notice goes under
+   * the title inside it. That row is the one that gives, and it is also the notice's only
+   * honest home: every row below it is a fixed height (the search box, and the card's own
+   * rows), so a line with a track of its own would be taken out of the controls rather than
+   * out of the slack. In an instance that cannot be reached the mode draws no reset control
+   * either (nothing there to rebuild), which is exactly the row's worth of slack the notice
+   * spends, the same trade the band already makes for that missing row.
+   *
+   * The alternative, which this replaces, was a strip of its own across both columns at an
+   * implicit fourth row: measured at 844 by 390 it landed at the window's bottom edge under
+   * the action card, a mode's explanation drawn as far as possible from the thing it explains.
+   */
+  main.container .heading-band {
     grid-column: 1;
     grid-row: 1;
-    align-self: stretch;
+    min-height: 0;
+    margin-bottom: 0;
+  }
+  main.container .heading {
+    /* The heading keeps the row it had (the band's own height), because the mark and the
+       title are measured against it; the notice takes its own height off the bottom. */
+    flex: 1 1 auto;
     min-height: 0;
     margin-bottom: 0;
     padding-bottom: 6px;
@@ -1744,8 +1773,14 @@ footer > * { pointer-events: auto; }
    * panel, and that is where the link was left sitting over the action card.
    */
   main.container .github-link { display: none; }
-  /* A mode notice takes a line of its own under both columns. */
-  main.container.panelled .offline-banner { grid-column: 1 / -1; grid-row: 4; margin: 0; }
+  /*
+   * A mode notice sits under the title inside the heading's band, so it is not a grid item
+   * of the page at all here: it is drawn at the bottom of the row the heading already has,
+   * inside the band (see `.heading-band` above). No margin, because the heading's own rule
+   * line is what separates it from the title. Offline mode always has the panel (an instance
+   * is enough to show one), so there is no second placement to state.
+   */
+  main.container .offline-banner { margin: 0; }
 }
 
 /* --- PENDING IMPORTS WINDOW (legacy parity) --- */
@@ -1933,7 +1968,8 @@ body.drag-over::after {
  *
  * Drawn as a sibling of the heading rather than inside it, so it cannot move the mark, the
  * title or the heading's own buttons, which are the same three things in every mode. It
- * takes a line off the list on a phone, which is the trade a mode notice is worth.
+ * takes a line off the list on a phone, which is the trade a mode notice is worth, and on
+ * the sideways phone it is the heading's band that pays for it instead (see `.heading-band`).
  */
 .offline-banner {
   display: flex;

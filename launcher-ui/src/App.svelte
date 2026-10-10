@@ -5173,6 +5173,15 @@
       {/if}
     {/if}
   {/snippet}
+  <!--
+    The heading and the one notice that can belong under it, in a band of their own.
+    A box rather than a loose pair, because the sideways-phone layout has a row for the
+    heading and a row for nothing else: the notice has to sit in the heading's own row
+    rather than take one of its own, and the row is the one that gives (see the landscape
+    block in styles.css). It is a wrapper and not a nesting: the notice is still a sibling
+    of the heading, so it cannot move the mark, the title or the heading's own buttons.
+  -->
+  <div class="heading-band">
   <header class="heading">
     <!--
       The way back out of a handed-over instance, in the margin left of the mark rather
@@ -5276,10 +5285,11 @@
     </div>
   </header>
   <!--
-    Offline mode's global line, above everything the mode changes rather than inside the
-    list it replaces: "the rows below are this device's copies, not the server's" is a fact
-    about the launcher, and one line covering the whole screen is what stops it having to
-    be said again on every row. The rows still carry their own mark (the exclamation
+    Offline mode's global line, under the heading rather than inside the list it replaces:
+    "the rows below are this device's copies, not the server's" is a fact about the
+    launcher, and one line covering the screen is what stops it having to be said again on
+    every row. It shares the heading's band so that the sideways-phone layout can draw it
+    in the row the heading already has. The rows still carry their own mark (the exclamation
     the unfinished states already use) because which Lith is currently local-only is a
     per-row answer; only the reason is global. Only a cached self-host launcher reaches
     this (see offline-mode.ts).
@@ -5293,6 +5303,7 @@
       </div>
     </div>
   {/if}
+  </div>
   {#if pendingImports.length > 0}
     <div class="pending-imports" role="status" aria-label={copy.pending.aria}>
       <div class="pending-imports-header">

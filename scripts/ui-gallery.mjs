@@ -1440,7 +1440,8 @@ const SHEETS = [
      * it changed. Each picture is here for something a person reads at a glance: the reset control
      * sitting inside the card at the same height and the same inset as the buttons above it (`110`),
      * the empty list in its own right column (`100`), that same card while a title is being typed
-     * (`120`), and the card with no control in it at all (`130`).
+     * (`120`), the card with no control in it at all (`130`), and the offline notice under the
+     * title in an instance that cannot be reached (`140`).
      *
      * The two states of the left column are also asserted, because they are the same card and a
      * pane that only photographed one of them could not tell: `assertLandscapeCard` holds the
@@ -1598,6 +1599,80 @@ const SHEETS = [
             );
           }
           assertColumnsLevel(measured);
+        }
+      },
+      {
+        /*
+         * The mode notice on the layout that used to draw it worst. This is a cached
+         * self-host launcher whose instance cannot be reached, which is the one state whose
+         * whole list has changed under the reader, and the one line that says so has to be
+         * beside the title rather than at the foot of the window.
+         *
+         * It shares the heading's own row here (see `.heading-band` in styles.css), which is
+         * a claim a picture can make but not prove: the notice could be the bottom strip it
+         * used to be and still look like a notice. So the geometry is asserted — under the
+         * title, inside the left column, above the search box, and nothing pushed off the
+         * bottom of a window this short.
+         */
+        name: '140-offline-cached',
+        view: 'landscape',
+        mode: 'self-host',
+        server: true,
+        seed: { caches: OFFLINE_CACHES },
+        drive: goOffline,
+        expect: '.offline-banner',
+        verify: async (page) => {
+          const measured = await page.evaluate(() => {
+            const box = (selector) => {
+              const node = document.querySelector(selector);
+              if (!node) return null;
+              const rect = node.getBoundingClientRect();
+              return { top: rect.top, bottom: rect.bottom, left: rect.left, right: rect.right };
+            };
+            return {
+              title: box('.heading h1'),
+              banner: box('.offline-banner'),
+              search: box('.recent-search-wrap'),
+              card: box('.action-card'),
+              list: box('.recent-list'),
+              windowHeight: window.innerHeight,
+              documentHeight: document.documentElement.scrollHeight,
+              offlineRows: document.querySelectorAll('.recent-row.offline-row').length,
+              marks: document.querySelectorAll('.recent-row.offline-row .cache-history-button.modified').length
+            };
+          });
+          if (!measured.title || !measured.banner || !measured.search || !measured.card || !measured.list) {
+            throw new Error('the offline landscape state did not draw the boxes this pane asserts on');
+          }
+          if (measured.banner.top < measured.title.bottom) {
+            throw new Error(
+              `the notice starts at ${measured.banner.top.toFixed(1)}px, above the title's own bottom at ${measured.title.bottom.toFixed(1)}px`
+            );
+          }
+          if (measured.banner.bottom > measured.search.top) {
+            throw new Error(
+              `the notice ends at ${measured.banner.bottom.toFixed(1)}px, past the search box at ${measured.search.top.toFixed(1)}px`
+            );
+          }
+          if (measured.banner.right > measured.list.left) {
+            throw new Error(
+              `the notice reaches ${measured.banner.right.toFixed(1)}px, into the list column at ${measured.list.left.toFixed(1)}px`
+            );
+          }
+          if (measured.documentHeight > measured.windowHeight) {
+            throw new Error(
+              `the page is ${measured.documentHeight}px tall in a ${measured.windowHeight}px window, so the notice pushed something off the bottom`
+            );
+          }
+          if (measured.card.bottom > measured.windowHeight) {
+            throw new Error(`the card's foot is at ${measured.card.bottom.toFixed(1)}px, outside the window`);
+          }
+          if (measured.offlineRows === 0) {
+            throw new Error('the notice is drawn over no offline rows, so this is not the state it explains');
+          }
+          if (measured.marks !== measured.offlineRows) {
+            throw new Error(`only ${measured.marks} of ${measured.offlineRows} offline rows carry the local-only mark`);
+          }
         }
       },
     ]
