@@ -444,6 +444,11 @@ jobs:
         if: always() && env.CREATE_RELEASE == 'true'
         env:
           STAMP: ${{ needs.build.outputs.stamp }}
+          # How many builds' sheets the branch holds. A pull request embeds its sheets by raw
+          # URL, and every stamp is a copy of the same twelve PNGs, so keeping the last few
+          # costs a few tens of megabytes on a branch nothing else uses while keeping the
+          # pictures of the releases still being reviewed alive.
+          KEEP_STAMPS: '3'
         run: |
           [ -n "$STAMP" ] || { echo "::error::no build stamp to publish sheets under"; exit 1; }
           if ! ls ui-gallery/sheet-*.png >/dev/null 2>&1; then
@@ -454,6 +459,16 @@ jobs:
           cp ui-gallery/sheet-*.png "deck/$STAMP/"
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
+          # WHICH STAMPS THE BRANCH HOLDS, and why it holds more than one. It held exactly
+          # one for a day, and the cost showed up the first time somebody re-read an older
+          # pull request: every one of its twelve images answered 404, because the next
+          # deck's publish had replaced the branch with its own stamp. A pull request is
+          # read for longer than one release cycle, so the previous stamps travel with the
+          # new one and only the oldest few fall off (see the prune below). `--depth=1`
+          # because the tree is all that is wanted, and the branch may not exist yet: that
+          # is the first ever run, which publishes into an empty branch.
+          PUBLISHED="origin/ui-deck"
+          git fetch --depth=1 origin "ui-deck:refs/remotes/origin/ui-deck" 2>/dev/null || PUBLISHED=""
           git checkout --orphan ui-deck-staging
           # `read-tree --empty` rather than `git rm -r --cached .`, and the difference is
           # the step above: the deck overwrites `src/launcher.html` with the artifact it
@@ -463,7 +478,19 @@ jobs:
           # thing without asking about a working tree it leaves alone, and the commit below
           # still holds the deck and nothing else.
           git read-tree --empty
+          # Then the published deck's own files come back into the index. Into the INDEX
+          # rather than onto disk: those sheets are blobs the fetch already has, the branch
+          # under review is left exactly as the build left it, and the commit is the index.
+          [ -z "$PUBLISHED" ] || git read-tree "$PUBLISHED"
           git add -f "deck/$STAMP"
+          # Newest first, and everything past the ceiling goes. This build's own stamp is
+          # skipped even when the branch already holds it, which is what a re-run of one
+          # stamp looks like, and the prune touches the index only, like the lines above.
+          git ls-files "deck" | cut -d/ -f2 | sort -u | sort -r | tail -n +$((KEEP_STAMPS + 1)) | while read -r OLD; do
+            [ "$OLD" = "$STAMP" ] && continue
+            echo "dropping deck/$OLD, past the last $KEEP_STAMPS stamps"
+            git rm -q --cached -r "deck/$OLD"
+          done
           git commit -m "Deck for build-$STAMP"
           git push --force origin HEAD:ui-deck
 
