@@ -279,6 +279,21 @@
    * the control.
    */
   let platformGitSync = true;
+  /**
+   * Whether this build carries the credential vault at all.
+   *
+   * Asked of the platform like the flag above it, and answered no on Android alone: a
+   * phone has its own place for a password. Its WebView asks for the instance's Basic
+   * credentials itself and keeps what was typed, which is the arrangement the published
+   * PWA has through the browser, so the manager dialog, the PIN prompt and the key on a
+   * bookmark row are none of them drawn there. Same reason in both cases: a platform that
+   * keeps credentials already is not helped by a second copy under an app.
+   *
+   * True until something says otherwise, exactly like the git flag beside it, so a desktop
+   * copy whose capability report could not be read keeps the vault it has always had
+   * rather than losing it to a failure that says nothing about the platform.
+   */
+  let platformCredentials = true;
 
   async function refreshInstallState() {
     if (mode !== 'tauri') {
@@ -305,16 +320,31 @@
     }
     let launchedFromInstall = false;
     try {
-      const capabilities = await tauriInvoke<{ install: boolean; launch_entry: LaunchEntry | null; git_sync?: boolean }>('platform_capabilities');
+      const capabilities = await tauriInvoke<{ install: boolean; launch_entry: LaunchEntry | null; git_sync?: boolean; credentials?: boolean }>('platform_capabilities');
       platformInstallable = capabilities.install;
       platformEntry = capabilities.launch_entry;
       // A build with no git in it says so, and the backup control is then not drawn at
       // all. Read as `!== false` rather than for truth: a Rust side older than this field
       // sends nothing, and a missing answer must not be read as a refusal.
       platformGitSync = capabilities.git_sync !== false;
+      // The same reading, of the same kind of answer, about the vault.
+      platformCredentials = capabilities.credentials !== false;
+      // The vault does not stay unlocked between visits: an instance load asks for the
+      // secret again, every time. Opening the launcher is therefore the moment to drop
+      // whatever the last load was holding, and the status that comes back is what the
+      // rows and the manager control are drawn from. Touched only where this build has a
+      // vault, so a platform that answered no never has the file opened at all.
+      if (platformCredentials) {
+        void tauriInvoke('lock_credentials')
+          .catch(() => { /* a build without the vault: nothing to lock */ })
+          .then(() => Promise.all([refreshVaultStatus(), refreshVaultCoverage()]));
+      }
     } catch {
       // A capability report that could not be read is not an install. The offer stays
-      // hidden rather than promising something this platform may not do.
+      // hidden rather than promising something this platform may not do. The two
+      // permissive flags above are deliberately left alone: a report that did not arrive
+      // says nothing about the platform, and turning that into a refusal would take the
+      // vault away from every desktop copy the moment one read failed.
       platformInstallable = false;
       platformEntry = null;
     }
@@ -4470,13 +4500,9 @@
     // --- Tauri startup file (CLI arg / "Open with" association) ---
     if (mode === 'tauri') {
       void refreshInstallState();
-      // The vault does not stay unlocked between visits: an instance load asks for
-      // the secret again, every time. Opening the launcher is therefore the moment
-      // to drop whatever the last load was holding, and the status that comes back
-      // is what the rows and the manager control show.
-      void tauriInvoke('lock_credentials')
-        .catch(() => { /* a build without the vault: nothing to lock */ })
-        .then(() => Promise.all([refreshVaultStatus(), refreshVaultCoverage()]));
+      // The vault's own boot work (locking it, and reading the status the rows and the
+      // manager control are drawn from) travels with the platform read above, because it
+      // is that answer which decides whether this build has a vault to lock.
       void tauriInvoke<string | null>('get_startup_file')
         .then((startupPath) => { if (startupPath) void openTauriPath(startupPath); })
         .catch(() => { /* command missing or no startup file; stay on launcher */ });
@@ -4680,6 +4706,13 @@
     : copy.dialogs.bookmark.manageEmpty;
 
   async function refreshVaultStatus() {
+    // A build with no vault has no status to answer with, so nothing is asked. This is
+    // also what keeps a platform that will never draw the manager from opening a
+    // credential file at all.
+    if (!platformCredentials) {
+      vaultStatus = null;
+      return;
+    }
     try {
       vaultStatus = await tauriInvoke<VaultStatus>('credentials_status');
     } catch {
@@ -4696,6 +4729,12 @@
    * list.
    */
   async function refreshVaultCoverage() {
+    // The same guard as the status read above, and the same reason: where there is no
+    // vault, every control that would have read this is absent anyway.
+    if (!platformCredentials) {
+      vaultCoverage = new Set();
+      return;
+    }
     const origins = bookmarks.map((entry) => vaultOriginOf(entry.url)).filter(Boolean);
     if (origins.length === 0) {
       vaultCoverage = new Set();
@@ -4890,7 +4929,10 @@
 
   async function openBookmarkedInstance(url: string, query = '') {
     const origin = vaultOriginOf(url);
-    if (mode === 'tauri' && vaultStatus && origin) {
+    // On a platform with no vault this is the whole of the opening: the window is handed
+    // to the instance and the platform's own WebView asks for the password, which is what
+    // the PWA does through its browser.
+    if (mode === 'tauri' && platformCredentials && vaultStatus && origin) {
       if (vaultCoverage.has(origin)) {
         instanceUnlock = { origin, address: url, query };
         instanceSecret = '';
@@ -5555,7 +5597,7 @@
         {#if bookmarkError}<p class="status-line error" role="alert">{bookmarkError}</p>{/if}
         <div class="modal-actions">
           <button class="modal-action" on:click={addInstanceBookmark}>{copy.dialogs.bookmark.save}</button>
-          {#if mode === 'tauri' && vaultStatus}
+          {#if mode === 'tauri' && platformCredentials && vaultStatus}
           <!--
             The vault, from the dialog that owns the same thing it does: an
             instance's address. It used to be a tile in the launcher's own row.
@@ -6195,7 +6237,7 @@
               -->
               <span class="bookmark-label">{@html matchMarkup(entry.label, search)}</span>
             </button>
-            {#if mode === 'tauri' && vaultStatus}
+            {#if mode === 'tauri' && platformCredentials && vaultStatus}
               {@const origin = vaultOriginOf(entry.url)}
               <!--
                 One key per bookmark, and the only way a login is ever written. Grey

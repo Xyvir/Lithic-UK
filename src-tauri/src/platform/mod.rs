@@ -107,6 +107,22 @@ pub struct Capabilities {
     /// before it offers a backup, the same way it asks `install` before it offers an
     /// install.
     pub git_sync: bool,
+    /// This build carries the credential vault: an instance login can be saved, listed,
+    /// and lent to an instance load.
+    ///
+    /// False on Android alone, and this time the reason is the platform rather than a
+    /// dependency. A phone already has somewhere a password goes: the WebView asks for
+    /// HTTP Basic credentials itself and keeps what was typed in its own store for the
+    /// rest of the session, which is the arrangement the published PWA has through the
+    /// browser. What is left of the vault's purpose on a phone is the cross-origin probe
+    /// of a protected instance, and that is not worth a second, app-owned copy of a
+    /// secret the platform is already holding. So the launcher draws none of it there:
+    /// no manager, no PIN prompt, and no key on a bookmark row.
+    ///
+    /// Stated as this flag rather than as an `android` test in the page, for the reason
+    /// the three webview flags above are: the launcher asks what this build can do
+    /// instead of guessing about a platform it cannot see.
+    pub credentials: bool,
     /// Opening a `.lith` from the file manager can reach this app.
     pub file_associations: bool,
     /// The folder a file was installed into can be opened in the platform's own file
@@ -137,6 +153,10 @@ pub fn capabilities() -> Capabilities {
         // it reports is whether libgit2 is in this build, and on every target but Android
         // it is.
         git_sync: cfg!(not(target_os = "android")),
+        // The second of the two answers that follow a target rather than a platform name.
+        // Unlike `git_sync` the code is in this build either way: what the flag decides is
+        // what the launcher offers, which is why it is the same shape as the flag above.
+        credentials: cfg!(not(target_os = "android")),
         // The three webview capabilities below are the flag side of the `#[cfg(windows)]`
         // implementations in their own modules. They are written as the same condition
         // rather than as a bare `true` so that implementing one on Linux is a change in
@@ -675,6 +695,7 @@ mod tests {
         // the git half can be left out, and it is written the same way the three above are
         // so that putting libgit2 back on Android is a change in two visible places.
         assert_eq!(caps.git_sync, cfg!(not(target_os = "android")), "the git half follows git2, which Android does not link");
+        assert_eq!(caps.credentials, cfg!(not(target_os = "android")), "the vault follows the platform's own password store, which the phone has");
     }
 
     /// The offer exists on the two platforms that install, and loses to a package manager

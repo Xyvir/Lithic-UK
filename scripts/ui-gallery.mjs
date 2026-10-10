@@ -415,7 +415,16 @@ const installRust = (page, config) =>
           // read that fails is no install: with this silent the install-offer panes had no
           // offer to photograph, however uninstalled the fixture was. Answered as a platform
           // that has an install does, which is the one these panes are about.
-          return { install: true, launch_entry: 'application-menu' };
+          //
+          // `credentials` is answered too, and it is the one field here a pane ever wants the
+          // other way round: the vault is drawn from this flag, and the phone is the build
+          // that is told no. A pane that says nothing gets the desktop's answer, which is
+          // also what the app reads out of a field a Rust side older than it never sent.
+          return {
+            install: true,
+            launch_entry: 'application-menu',
+            credentials: cfg.credentials !== false
+          };
         case 'install_status':
           // The footer's own question: is there a copy on disk, and is it this build's?
           // `cfg.install` is the answer, and its default is the state every other tauri
@@ -2148,6 +2157,60 @@ const SHEETS = [
         },
         clip: '.vault-modal',
         expect: '.vault-unlock-pin .vault-reveal input:checked'
+      },
+      {
+        /*
+         * The one state in which none of the above exists, which is the phone's. The
+         * launcher is one bundle on every platform, so what a platform without a vault
+         * changes is not a drawing but a capability: the page asks, is told no, and draws no
+         * manager, no PIN prompt and no key on a bookmark row. That is the shape the
+         * published PWA already has, for the same reason: a platform that keeps credentials
+         * itself (Android's WebView asks for the instance's Basic challenge and keeps what
+         * was typed) is not helped by a second copy under an app.
+         *
+         * A dialog missing a button proves nothing in a picture, so the claims are asserted:
+         * the dialog is up and still carries its Save action, and the vault's two controls
+         * are absent from the whole page rather than merely out of shot. The panes above are
+         * the other half of the comparison, drawn by this same build with the platform
+         * answering yes.
+         */
+        name: '350-no-vault-on-this-platform',
+        view: 'dialog',
+        modal: 'bookmark-title',
+        mode: 'tauri',
+        seed: { bookmarks: BOOKMARKS },
+        rust: {
+          exists: true,
+          pin: PIN,
+          entries: [{ origin: 'https://personal.lithic.uk', user: 'keeper' }],
+          path: VAULT_PATH,
+          credentials: false
+        },
+        drive: async (page) => {
+          await page.click('.action-pair .bookmark-button');
+          await page.waitForSelector('.bookmark-modal');
+          await settle(page, 300);
+        },
+        clip: '.bookmark-modal',
+        expect: '.bookmark-modal .modal-action',
+        verify: async (page) => {
+          const save = await page.query('.bookmark-modal .modal-action');
+          if (save.count === 0) {
+            throw new Error('the dialog is not drawn at all, so a control missing from it would say nothing');
+          }
+          const manager = await page.query('.vault-manager-button');
+          if (manager.count > 0) {
+            throw new Error('the vault manager control is drawn on a platform that answered it has no vault');
+          }
+          const keys = await page.query('.vault-row-button');
+          if (keys.count > 0) {
+            throw new Error(`${keys.count} bookmark rows carry a login key on a platform with no vault`);
+          }
+          const dialogs = await page.query('.vault-modal');
+          if (dialogs.count > 0) {
+            throw new Error('a vault dialog is mounted on a platform with no vault');
+          }
+        }
       }
     ]
   },
