@@ -10,24 +10,26 @@ name: Publish Release
 # release in two, and it is why the cleanup path is nothing at all rather than a step that
 # deletes things.
 #
-# The trigger is the merge itself, which reaches main as a push touching src/lithic.html or
-# src/launcher.html. Both are written by the release and by nothing else, which is what makes
-# them the signal: build-wiki.yml deliberately ignores them (they are outputs, and ignoring them
-# is what stops a merge from starting another build), and bump-pwa-version.yml touches only
-# manifest.json and the service worker. A human pushing a wiki artifact by hand also lands here,
-# and that is the right answer for the same reason.
+# THE TRIGGER PATHS ARE A SUPERSET OF THE PUSHES THAT ARE RELEASES, and the gate job below
+# narrows it back down. Path triggers cannot see why a file changed, and a release does not
+# touch one fixed set of files:
 #
-# THE WIKI ALONE WAS THE SIGNAL, and it stopped being enough the first time a release landed
-# that changed nothing in it. That is not an edge case: a release that changes only the launcher,
-# or only the app's Rust half, rebuilds the wiki to the same bytes, so its merge arrives with no
-# change to src/lithic.html, and this workflow never runs. Measured on the two release pull
-# requests of 2026-10-10, whose diffs were `manifest.json`, `offline-service-worker.js` and
-# `src/launcher.html` and nothing else: the merged one (build-2026.10.10-1858) published no tag,
-# no release, no desktop downloads and no APK, and the open one (build-2026.10.10-1830) would have
-# done the same. Nothing said so; the pull request read as merged either way. The launcher is the
-# file that cannot go missing, because the release bakes its own stamp into it
-# (`LITHIC_BUILD_TAG`), so it differs on every release the same way the manifest's version does,
-# and it is the one of the two that a light or other variant build never writes.
+#   * the wiki bytes differ only when a wiki source changed, and the launcher bytes only when
+#     launcher-ui/ did. A release that changes nothing but the app's Rust half (`src-tauri/`,
+#     `shim/`) rebuilds BOTH to the same bytes, so its merge would carry no artifact at all.
+#     Measured on 2026-10-10: the two release pull requests of that day (build-2026.10.10-1830
+#     and -1858) each changed `manifest.json`, `offline-service-worker.js` and
+#     `src/launcher.html` and nothing else, and the merged one published no tag, no release, no
+#     desktop downloads and no APK. Nothing said so; the pull request read as merged either way.
+#   * what a release ALWAYS writes is the PWA version bump, in `manifest.json` and
+#     `offline-service-worker.js`, which is why those two are the paths that cannot go missing.
+#
+# The cost of leaning on the bump is that bump-pwa-version.yml writes the same two files to main
+# without a release behind them, and that push must publish nothing. Hence the gate: a push
+# publishes when the commits it landed contain a release commit, or when it touched an artifact
+# the release writes (a human pushing src/lithic.html by hand, which is right for the same
+# reason), and stays quiet otherwise. The tag is taken from the release commit's own subject, so
+# the release somebody reviewed is the release that is tagged, whatever minute the merge landed.
 on:
   push:
     branches:
@@ -35,6 +37,8 @@ on:
     paths:
       - 'src/lithic.html'
       - 'src/launcher.html'
+      - 'manifest.json'
+      - 'offline-service-worker.js'
   workflow_dispatch:
     inputs:
       tag_name:
@@ -54,7 +58,63 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  # Is this push a release at all? The paths above are a superset, and this is the part that
+  # reads the commit rather than its file list. It runs on every event and answers for a
+  # dispatch too, rather than being skipped there, so `publish` depends on a job that always
+  # succeeds and never has to reason about a skipped dependency.
+  gate:
+    runs-on: ubuntu-latest
+    outputs:
+      publish: ${{ steps.decide.outputs.publish }}
+      stamp: ${{ steps.decide.outputs.stamp }}
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v5
+
+      - name: Decide whether this push is a release
+        id: decide
+        run: |
+          if [ '${{ github.event_name }}' != 'push' ]; then
+            echo "publish=true" >> "$GITHUB_OUTPUT"
+            echo "A dispatch names the tag it wants, so it publishes."
+            exit 0
+          fi
+          # The push's own commits: a merge commit's subject says "Merge pull request #6", so
+          # reading HEAD's subject alone would miss every release. The release commit is the
+          # branch tip that was merged, and it is in this range. A range GitHub cannot resolve
+          # (a branch creation, where it sends all zeroes) falls back to the tip's own subject
+          # and never to a wider range: five commits of history would find the PREVIOUS release
+          # commit and publish it a second time. The file half below falls back the same way, to
+          # the tip's own change set, which decides on that push and lands on a dated tag.
+          SUBJECTS=$(git log --format=%s "${{ github.event.before }}..HEAD" 2>/dev/null) \
+            || SUBJECTS=$(git log --format=%s -n 1)
+          # `|| true` because the runner's shell is `bash -eo pipefail`: `head` closing the pipe
+          # early can surface as a 141 from `sed`, and a step that fails on its own success
+          # would publish nothing at all.
+          STAMP=$(printf '%s\n' "$SUBJECTS" | sed -n 's/^Release build-\([0-9][0-9.]*-[0-9][0-9]*\):.*$/\1/p' | head -n 1 || true)
+          if [ -n "$STAMP" ]; then
+            echo "publish=true" >> "$GITHUB_OUTPUT"
+            echo "stamp=$STAMP" >> "$GITHUB_OUTPUT"
+            echo "Publishing the release commit's own stamp, build-$STAMP"
+            exit 0
+          fi
+          # No release commit here: a hand-push of an artifact still publishes, because those
+          # paths are written by the release and by nothing else.
+          CHANGED=$(git diff --name-only "${{ github.event.before }}" HEAD 2>/dev/null \
+            || git diff --name-only HEAD~1 HEAD 2>/dev/null || true)
+          if printf '%s\n' "$CHANGED" | grep -qxE 'src/(lithic|launcher)\.html'; then
+            echo "publish=true" >> "$GITHUB_OUTPUT"
+            echo "A release artifact was pushed by hand"
+            exit 0
+          fi
+          # The version bump pushed by hand. It names the same two files a release does and has
+          # no wiki, launcher, installer or APK behind it, so it publishes nothing.
+          echo "publish=false" >> "$GITHUB_OUTPUT"
+          echo "::notice::Not a release commit and no release artifact changed, so nothing publishes."
+
   publish:
+    needs: gate
+    if: needs.gate.outputs.publish == 'true'
     runs-on: ubuntu-latest
     outputs:
       tag_name: ${{ steps.stamp.outputs.tag }}
@@ -76,6 +136,10 @@ jobs:
           if [ -n "$STAMP" ]; then
             # A dispatch names the tag it wants; accept it with or without the prefix.
             STAMP="${STAMP#build-}"
+          elif [ -n "${{ needs.gate.outputs.stamp }}" ]; then
+            # The stamp the release commit carries, so the tag names the build that was
+            # reviewed rather than the minute the merge happened to land.
+            STAMP="${{ needs.gate.outputs.stamp }}"
           else
             STAMP=$(date +'%Y.%m.%d-%H%M')
           fi
