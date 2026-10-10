@@ -264,6 +264,21 @@
   // work. `platformEntry` is only for the sentence, never for deciding anything.
   let platformInstallable = false;
   let platformEntry: LaunchEntry | null = null;
+  /**
+   * Whether this build can back a folder up to GitHub at all.
+   *
+   * A separate question from `hasLocalSync` above, and asked of the platform rather
+   * than of the distribution: the desktop app and a shim both have a process behind
+   * them, but only some builds carry the git half. The Android app links no git, so its
+   * commands refuse, and the answer comes from the side that knows through
+   * `platform_capabilities`.
+   *
+   * True until something says otherwise, and the default is deliberate: it is what keeps
+   * every distribution that has always had a backup, including a shim, which never
+   * answers this question at all, exactly as it was. Only a platform that says no loses
+   * the control.
+   */
+  let platformGitSync = true;
 
   async function refreshInstallState() {
     if (mode !== 'tauri') {
@@ -290,9 +305,13 @@
     }
     let launchedFromInstall = false;
     try {
-      const capabilities = await tauriInvoke<{ install: boolean; launch_entry: LaunchEntry | null }>('platform_capabilities');
+      const capabilities = await tauriInvoke<{ install: boolean; launch_entry: LaunchEntry | null; git_sync?: boolean }>('platform_capabilities');
       platformInstallable = capabilities.install;
       platformEntry = capabilities.launch_entry;
+      // A build with no git in it says so, and the backup control is then not drawn at
+      // all. Read as `!== false` rather than for truth: a Rust side older than this field
+      // sends nothing, and a missing answer must not be read as a refusal.
+      platformGitSync = capabilities.git_sync !== false;
     } catch {
       // A capability report that could not be read is not an install. The offer stays
       // hidden rather than promising something this platform may not do.
@@ -5253,7 +5272,7 @@
       button alone, matching the desktop app it is the Linux half of, and its header carries
       no way into the intro even though the shim still ships the payload for it.
     -->
-    {#if hasLocalSync || isSelfHost()}<button class="sync-button {headingSyncState}" aria-label={copy.dialogs.gitSync.title} title={headingSyncTitle} on:click={openGitSyncModal}><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 17.6A5 5 0 0 0 18 8h-1.3A8 8 0 1 0 4 16.3"/><path d="M12 12v9"/><path d="m8.5 15.5 3.5-3.5 3.5 3.5"/></svg>{#if headingSyncState === 'checking'}<span class="sync-glyph ring" aria-hidden="true"></span>{:else if headingSyncState === 'error'}<span class="sync-glyph alert" aria-hidden="true">!</span>{:else if headingSyncState === 'connected'}<span class="sync-glyph dot" aria-hidden="true"></span>{/if}</button>{/if}
+    {#if (hasLocalSync && platformGitSync) || isSelfHost()}<button class="sync-button {headingSyncState}" aria-label={copy.dialogs.gitSync.title} title={headingSyncTitle} on:click={openGitSyncModal}><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 17.6A5 5 0 0 0 18 8h-1.3A8 8 0 1 0 4 16.3"/><path d="M12 12v9"/><path d="m8.5 15.5 3.5-3.5 3.5 3.5"/></svg>{#if headingSyncState === 'checking'}<span class="sync-glyph ring" aria-hidden="true"></span>{:else if headingSyncState === 'error'}<span class="sync-glyph alert" aria-hidden="true">!</span>{:else if headingSyncState === 'connected'}<span class="sync-glyph dot" aria-hidden="true"></span>{/if}</button>{/if}
     </div>
   </header>
   <!--

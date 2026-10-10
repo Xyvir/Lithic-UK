@@ -4,10 +4,11 @@ name: Publish Release
 #
 # build-wiki.yml builds, stages the result on a branch and opens a pull request. This
 # workflow runs when that pull request is MERGED, and only then does a build get a tag, a
-# download page, a container image and four desktop installers. Closing the pull request
-# instead leaves none of that behind: there is no draft release and no tag to clean up,
-# because neither was ever made. That is the whole point of splitting the release in two,
-# and it is why the cleanup path is nothing at all rather than a step that deletes things.
+# download page, a container image, four desktop installers and one Android APK. Closing
+# the pull request instead leaves none of that behind: there is no draft release and no
+# tag to clean up, because neither was ever made. That is the whole point of splitting the
+# release in two, and it is why the cleanup path is nothing at all rather than a step that
+# deletes things.
 #
 # The trigger is the merge itself, which reaches main as a push touching src/lithic.html.
 # That file is written by the release and by nothing else, which is what makes it the
@@ -131,6 +132,17 @@ jobs:
   build-desktop:
     needs: publish
     uses: ./.github/workflows/desktop-release.yaml
+    with:
+      tag_name: ${{ needs.publish.outputs.tag_name }}
+    secrets: inherit
+
+  # The phone build, chained the same way and for the same reason: an APK added to a
+  # download page that already exists. It is a workflow of its own rather than a fifth job
+  # in the desktop one (see the header of `android-release.yml` for why), and like every
+  # job in this chain it only ever adds a file to the release.
+  build-android:
+    needs: publish
+    uses: ./.github/workflows/android-release.yml
     with:
       tag_name: ${{ needs.publish.outputs.tag_name }}
     secrets: inherit

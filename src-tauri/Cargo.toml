@@ -40,11 +40,6 @@ tauri-plugin-dialog = "2"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 dirs = "5"
-# Outbound HTTP: the GitHub device flow and API, the instance manifest probe, and
-# the instance icon fetch. `default-tls` is the platform stack (SChannel on
-# Windows, OpenSSL elsewhere), which is what git2's `https` transport uses too, so
-# the app ships one TLS implementation rather than two.
-reqwest = { version = "0.12", features = ["json"] }
 # The credential vault. RustCrypto, pure Rust: no C, no OpenSSL, nothing to
 # install, and it cross-compiles unchanged to the macOS, AppImage and mobile
 # targets this app is headed for. `zeroize` was already in the tree via tauri.
@@ -58,12 +53,44 @@ base64 = "0.22"
 sha2 = "0.10"
 # OsRng for the vault's salt and nonce. Already in the tree at this major.
 getrandom = "0.2"
+
+# Outbound HTTP and in-process git, and the one place where which crate answers a
+# question is decided by the target rather than by the whole build.
+#
+# Android is why these are not in `[dependencies]`. Both of them reach for a TLS
+# implementation a phone does not have, and a crate named in both `[dependencies]`
+# and a target table is the *union* of the two entries rather than the target's own,
+# so an Android entry up there would still drag OpenSSL into the build. Hence the
+# desktop pair below and the phone's answer beside it.
+[target.'cfg(not(target_os = "android"))'.dependencies]
+# Outbound HTTP: the GitHub device flow and API, the instance manifest probe, and
+# the instance icon fetch. `default-tls` is the platform stack (SChannel on
+# Windows, OpenSSL elsewhere), which is what git2's `https` transport uses too, so
+# the app ships one TLS implementation rather than two.
+reqwest = { version = "0.12", features = ["json"] }
 # In-process git for the GitHub sync. `https` maps to the platform TLS stack
 # (WinHTTP on Windows, SecureTransport on macOS, OpenSSL elsewhere); the default
 # features are empty, so it has to be requested explicitly. `vendored-libgit2`
 # compiles the vendored C sources with the `cc` crate and links them statically —
 # no cmake, no system libgit2, nothing for a user to install.
 git2 = { version = "0.21.0", default-features = false, features = ["https", "vendored-libgit2"] }
+
+# Android, and the build is smaller than the desktop one on purpose rather than for
+# want of an implementation.
+#
+# No git: `git2`'s `https` feature asks for OpenSSL on every unix, so carrying the
+# sync here would mean cross-compiling OpenSSL for each of the phone's four ABIs. What
+# that sync *does* has no meaning on a phone anyway — there is no `Documents\Lithic` to
+# keep a repository in, no folder picker that reaches one, and no exe to copy beside your
+# liths — so the answer is the one the published PWA already gives: your wiki and your
+# files, synced by whatever you point at them. `gitcore_unsupported` is where that is
+# said to the rest of the crate.
+#
+# `rustls` rather than the platform stack, and it is the only TLS the Android build
+# links: pure Rust, so there is nothing to cross-compile and nothing that has to find a
+# system library on a phone.
+[target.'cfg(target_os = "android")'.dependencies]
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
 
 # The one thing a macOS build has to have that it does not use, and the only reason
 # this table exists. `git2`'s `https` feature enables `openssl-sys` on every unix, and on
@@ -79,6 +106,7 @@ git2 = { version = "0.21.0", default-features = false, features = ["https", "ven
 # from the binary. Linux and Windows are untouched: this dependency is only in the graph for
 # the macOS target, so the AppImage and the executable keep the system OpenSSL and WinHTTP
 # they already link.
+
 [target.'cfg(target_os = "macos")'.dependencies]
 openssl-sys = { version = "0.9", features = ["vendored"] }
 

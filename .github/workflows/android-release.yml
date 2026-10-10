@@ -1,0 +1,281 @@
+name: Android Manual Release
+
+# The phone build: one debug-signed, universal APK, added to the same release the wiki
+# artifacts and the four desktop installers land on. Chained from publish-release.yml
+# once the release exists, so a build's download page carries every platform a Lithic
+# can be installed on.
+#
+# WHY THIS IS A WORKFLOW OF ITS OWN rather than a fifth job beside the four in
+# `desktop-release.yaml`: those four are one subject (a machine that installs by putting a
+# file somewhere) and this is another (a package a store or a phone's own installer
+# places). The two also disagree about every tool they need. Keeping them apart means
+# "Desktop Manual Release" keeps meaning that, and it means this job can be dispatched on
+# its own while the platform is being brought up, which is the state it is in.
+#
+# WHY THE APK IS A DEBUG ONE, and it is the whole of the signing story rather than a first
+# shot at it. Android refuses an unsigned APK outright and refuses an APK whose signature
+# does not match the installed copy, so there are exactly two honest options: generate a
+# keystore and keep it, or use the debug key that `--debug` brings with it. A generated
+# keystore cannot live in the repository and nobody has put one in the secrets yet, and a
+# key generated fresh on each run would be worse than none: every release would be
+# uninstallable-over, with a "signatures do not match" the user has to work out for
+# themselves. So this build is debug-signed on purpose, the name says so, and a
+# release-signed APK (or an AAB for Play) is a follow-up that needs the two secrets and
+# nothing else in here. What that costs today is a debug Rust profile, which is slower
+# than a release one; what it buys is an artifact that installs, today, with no key
+# anywhere.
+#
+# WHY THE GRADLE PROJECT IS NOT IN THE REPOSITORY: `tauri android init` writes
+# `src-tauri/gen/android/`, and `src-tauri/gen/` is gitignored because everything in it is
+# derived from `tauri.conf.json` and `capabilities/`, both of which are tracked. Running
+# init here rather than committing its output keeps that rule whole and keeps the build
+# reproducible from the sources. The cost is one init per run (seconds), and the follow-up
+# if anyone wants Android Studio on the project is to commit the generated tree and
+# delete this step.
+#
+# It only ever ADDS a file to a release that already exists, like every other job in this
+# chain, so it cannot blank another platform's work.
+on:
+  workflow_dispatch:
+  workflow_call:
+    inputs:
+      tag_name:
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+jobs:
+  build-android:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v5
+
+      # Optional by design. Chained from publish-release.yml this artifact belongs to a
+      # different run, so the download finds nothing; the committed src/lithic.html is then
+      # the release's own bytes, because that is what the merged pull request carried.
+      - name: Download Built Wiki Artifact
+        if: ${{ inputs.tag_name != '' }}
+        continue-on-error: true
+        uses: actions/download-artifact@v5
+        with:
+          name: built-wiki
+          path: src
+
+      - name: Rename Downloaded Wiki
+        if: ${{ inputs.tag_name != '' && hashFiles('src/lith.html') != '' }}
+        run: mv src/lith.html src/lithic.html
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v5
+        with:
+          node-version: 22
+
+      # Gradle runs on a JVM and the Android Gradle plugin is fussy about which. 17 is what
+      # Tauri's own Android template targets, and pinning it here is the same decision as
+      # pinning the Linux jobs to 22.04: the toolchain that produces a release should not
+      # change because a runner image was rolled forward.
+      - name: Setup Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - name: Cache NPM dependencies
+        uses: actions/cache@v5
+        with:
+          path: ~/.npm
+          key: ${{ runner.os }}-node-${{ hashFiles('package-lock.json', 'launcher-ui/package-lock.json') }}
+          restore-keys: |
+            ${{ runner.os }}-node-
+
+      - name: Rust Cache
+        uses: swatinem/rust-cache@v2
+        with:
+          workspaces: 'src-tauri -> target'
+
+      # All four phone ABIs, named rather than left to `android build` to install for
+      # itself: a universal APK is the four of them in one file, and a target that is not
+      # installed is a build that fails rather than a download that quietly carries fewer
+      # architectures than its name claims.
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-linux-android,armv7-linux-androideabi,i686-linux-android,x86_64-linux-android
+
+      # The SDK is on the runner image; the NDK is what has to be found rather than
+      # assumed. Both variables are exported because they answer different questions:
+      # `ANDROID_HOME` is where the SDK is, which Gradle reads, and `NDK_HOME` is which
+      # toolchain Tauri's CLI hands cargo, which is the cross-linker and the C compiler that
+      # `rustls`' ring and the JNI glue are built with. A runner image that carries no NDK
+      # gets the pinned one installed here, so this step cannot be the thing that makes the
+      # job fail on a future image.
+      - name: Set up the Android SDK and NDK
+        run: |
+          sdk="${ANDROID_SDK_ROOT:-${ANDROID_HOME:-/usr/local/lib/android/sdk}}"
+          if [ ! -d "$sdk" ]; then
+            echo "::error::no Android SDK at $sdk. This job needs a runner image that carries one."
+            exit 1
+          fi
+          echo "ANDROID_HOME=$sdk" >> "$GITHUB_ENV"
+          echo "ANDROID_SDK_ROOT=$sdk" >> "$GITHUB_ENV"
+          ndk="$(ls -1 "$sdk/ndk" 2>/dev/null | sort -V | tail -1 || true)"
+          if [ -z "$ndk" ]; then
+            echo "No NDK on the image; installing the pinned one."
+            yes | "$sdk/cmdline-tools/latest/bin/sdkmanager" --install "ndk;27.0.12077973" > /dev/null
+            ndk="27.0.12077973"
+          fi
+          if [ ! -d "$sdk/ndk/$ndk" ]; then
+            echo "::error::$sdk/ndk/$ndk is not there after setup."
+            exit 1
+          fi
+          echo "NDK_HOME=$sdk/ndk/$ndk" >> "$GITHUB_ENV"
+          echo "Using NDK $ndk"
+
+      - name: Install Dependencies
+        run: |
+          npm ci
+          npm --prefix launcher-ui ci
+
+      - name: Run Launcher UI Tests
+        run: npm --prefix launcher-ui test
+
+      - name: Build Launcher (Svelte Launcher Bundle)
+        run: node scripts/build-launcher.mjs
+
+      # Same rule as the desktop jobs: regenerate the icon set from the one source image, so
+      # the launcher icon on the phone is the same drawing as the one in the taskbar. This
+      # has to run before `android init`, which copies the generated set into the Gradle
+      # project's resources.
+      - name: Generate Icons
+        run: |
+          if [ -f src/app-icon.png ]; then
+            npm run tauri icon src/app-icon.png
+          else
+            echo "Icon file 'src/app-icon.png' not found, skipping icon generation."
+          fi
+
+      - name: Generate Date-Based Tag
+        id: tag
+        run: |
+          tag="${{ inputs.tag_name }}"
+          if [ -z "$tag" ]; then
+            tag="v$(date +'%Y.%m.%d-%H%M')"
+          fi
+          echo "date=$tag" >> "$GITHUB_OUTPUT"
+          # The same stamp rule as the exe and the four downloads beside it
+          # (MM.DD.YY-HHMM), so one release's files still read as one set rather than as a
+          # fifth naming scheme. `_debug` is part of the name and not a detail: the name is
+          # the only thing a person sees before downloading, and it is the difference
+          # between an APK that sideloads over the last one and an artifact somebody will
+          # try to update from a store build it has no signature in common with. Anything
+          # unparseable falls back to the whole tag, so a build never fails here.
+          if [[ "$tag" =~ ([0-9]{4})\.([0-9]{2})\.([0-9]{2})-([0-9]{4}) ]]; then
+            apk="Lithic_${BASH_REMATCH[2]}.${BASH_REMATCH[3]}.${BASH_REMATCH[1]:2:2}-${BASH_REMATCH[4]}_debug.apk"
+          else
+            apk="Lithic_${tag}_debug.apk"
+          fi
+          echo "apk=$apk" >> "$GITHUB_OUTPUT"
+          # Semver for the APK's versionName, patched through TAURI_CONFIG the way the
+          # desktop jobs patch the exe's file version, with leading zeros stripped and the
+          # config's version as the fallback. Not cosmetic on Android: a leading zero is
+          # rejected outright, so an unpadded stamp is the difference between an APK and a
+          # Gradle failure.
+          if [[ "$tag" =~ ([0-9]+)\.([0-9]+)\.([0-9]+) ]]; then
+            ver="${BASH_REMATCH[1]}.$((10#${BASH_REMATCH[2]})).$((10#${BASH_REMATCH[3]}))"
+          else
+            ver="0.2.0"
+          fi
+          echo "version=$ver" >> "$GITHUB_OUTPUT"
+          echo "tauri_config={\"version\":\"$ver\"}" >> "$GITHUB_OUTPUT"
+
+      # Generated here rather than committed (see the header). `--ci` is what stops it asking
+      # whether to overwrite anything.
+      - name: Initialize the Android Project
+        run: npm run tauri android init -- --ci
+
+      # `--apk` and not `--aab`: an AAB is a Play upload, not something a person can install,
+      # and there is no Play listing to upload to yet. No `--split-per-abi` either, because
+      # one download that opens on whichever phone fetched it is the whole point of a
+      # universal build; that flag is for the day the size matters more than the confusion.
+      - name: Build the APK
+        env:
+          TAURI_CONFIG: ${{ steps.tag.outputs.tauri_config }}
+          # Baked in for the same reason the desktop jobs bake it: the launcher compares it
+          # against the newest release and offers the download page when they differ. A build
+          # without it offers nothing.
+          LITHIC_BUILD_TAG: ${{ steps.tag.outputs.date }}
+        run: npm run tauri android build -- --debug --apk --ci
+
+      - name: Rename Artifact
+        run: |
+          apk=$(find src-tauri/gen/android/app/build/outputs/apk -name '*.apk' | head -n 1)
+          if [ -z "$apk" ]; then
+            echo "::error::Build failed: no .apk found under src-tauri/gen/android/app/build/outputs/apk."
+            exit 1
+          fi
+          cp "$apk" "${{ steps.tag.outputs.apk }}"
+          echo "Created ${{ steps.tag.outputs.apk }}"
+
+      # A file that exists is not an APK a phone will install, so it is asked directly rather
+      # than inferred from the build having exited zero. Two things are checked because two
+      # things have gone wrong for other projects: an unsigned APK is refused by Android
+      # outright, and an APK with no native code for the phone holding it installs and then
+      # fails to start. `apksigner` is the platform's own answer to the first; for the second
+      # this requires the slice that every Android phone made this decade has and reports the
+      # rest, because the universal flavor is what is supposed to carry all four and a list
+      # printed in the summary is how that gets noticed rather than assumed.
+      - name: Verify the APK
+        run: |
+          sdk="${ANDROID_SDK_ROOT}"
+          build_tools="$(ls -1 "$sdk/build-tools" | sort -V | tail -1)"
+          apksigner="$sdk/build-tools/$build_tools/apksigner"
+          if [ ! -x "$apksigner" ]; then
+            echo "::error::no apksigner at $apksigner."
+            exit 1
+          fi
+          if ! "$apksigner" verify --print-certs "${{ steps.tag.outputs.apk }}" > apk-certs.txt 2>&1; then
+            echo "::error::the APK is not signed, so Android will refuse to install it."
+            cat apk-certs.txt
+            exit 1
+          fi
+          echo "--- signer ---"
+          grep -i "Signer #1 certificate DN" apk-certs.txt || {
+            echo "::error::apksigner reported no signer for a file it accepted."
+            exit 1
+          }
+          abis=$(unzip -l "${{ steps.tag.outputs.apk }}" | grep -oE 'lib/[a-z0-9_]+/' | sed 's|^lib/||; s|/$||' | sort -u)
+          echo "--- native slices ---"
+          echo "${abis:-none}"
+          echo "${abis:-}" | grep -qx 'arm64-v8a' || {
+            echo "::error::the APK carries no arm64-v8a slice, so it will not start on a modern phone."
+            exit 1
+          }
+
+      # Sizes in the run summary, the same way every other job reports them: the APK carries
+      # the launcher and the whole wiki, so a stray file in src/ shows up here as a jump
+      # rather than as a surprise months later.
+      - name: Report Artifact Sizes
+        run: |
+          echo "### Android artifact" >> "$GITHUB_STEP_SUMMARY"
+          echo "| artifact | size |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| --- | --- |" >> "$GITHUB_STEP_SUMMARY"
+          mb=$(awk -v bytes="$(stat -c%s "${{ steps.tag.outputs.apk }}")" 'BEGIN { printf "%.2f", bytes / 1048576 }')
+          echo "$mb MB  ${{ steps.tag.outputs.apk }}"
+          echo "| ${{ steps.tag.outputs.apk }} | $mb MB |" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "Debug-signed, so it sideloads and cannot be updated by a store build." >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Add to Release
+        uses: softprops/action-gh-release@v3
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tag_name: ${{ steps.tag.outputs.date }}
+          draft: false
+          prerelease: false
+          files: |
+            ${{ steps.tag.outputs.apk }}

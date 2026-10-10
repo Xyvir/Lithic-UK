@@ -46,6 +46,13 @@ pub enum Os {
     Windows,
     Linux,
     Macos,
+    /// Android, which is a platform with answers of its own rather than a desktop one
+    /// under another name: the folder model is the phone's, there is no copy of the
+    /// program to place beside the user's liths, and the app's own folder is a fact about
+    /// the installed package rather than a path a person can be shown. Named rather than
+    /// left to `Other` for the same reason the other three are: the launcher asks what a
+    /// platform can do, and "the Android build" is one of the answers it can be given.
+    Android,
     /// A platform with no implementation here yet. Named rather than refused, so a build
     /// for one still compiles and the launcher says what it can and cannot do.
     Other,
@@ -58,6 +65,7 @@ pub fn from_name(name: &str) -> Os {
         "windows" => Os::Windows,
         "linux" => Os::Linux,
         "macos" => Os::Macos,
+        "android" => Os::Android,
         _ => Os::Other,
     }
 }
@@ -88,6 +96,17 @@ pub struct Capabilities {
     /// translation, and this side cannot know the language any more than the page can know
     /// the platform. `None` where installing creates no entry at all.
     pub launch_entry: Option<&'static str>,
+    /// A folder on this machine can be backed up to GitHub by this build: the git half
+    /// of the sync is compiled in and the commands behind it work.
+    ///
+    /// False on Android alone, and the reason is a dependency rather than a platform:
+    /// `git2`'s `https` feature asks for OpenSSL on every unix, so carrying the sync
+    /// there would mean cross-compiling OpenSSL once per phone ABI, and the folder model
+    /// it backs up is not one a phone has (see the `android` table in `Cargo.toml`, and
+    /// `gitcore_unsupported` for what the crate says instead). The launcher asks this
+    /// before it offers a backup, the same way it asks `install` before it offers an
+    /// install.
+    pub git_sync: bool,
     /// Opening a `.lith` from the file manager can reach this app.
     pub file_associations: bool,
     /// The folder a file was installed into can be opened in the platform's own file
@@ -114,6 +133,10 @@ pub fn capabilities() -> Capabilities {
         launch_entry: launch_entry_kind(os),
         file_associations: cfg!(any(windows, target_os = "linux")),
         reveal: cfg!(any(windows, target_os = "linux", target_os = "macos")),
+        // The one flag here read from a dependency rather than from the platform name: what
+        // it reports is whether libgit2 is in this build, and on every target but Android
+        // it is.
+        git_sync: cfg!(not(target_os = "android")),
         // The three webview capabilities below are the flag side of the `#[cfg(windows)]`
         // implementations in their own modules. They are written as the same condition
         // rather than as a bare `true` so that implementing one on Linux is a change in
@@ -197,7 +220,10 @@ fn system_roots(os: Os) -> Vec<PathBuf> {
             .iter()
             .map(PathBuf::from)
             .collect(),
-        Os::Other => Vec::new(),
+        // Android has no such root, and needs none: an app arrives as a package rather
+        // than as a file somebody placed, so there is nothing here that a distribution or
+        // an installer could be said to own.
+        Os::Android | Os::Other => Vec::new(),
     }
 }
 
@@ -248,7 +274,11 @@ fn launch_entry_kind(os: Os) -> Option<&'static str> {
     match os {
         Os::Windows => Some("start-menu"),
         Os::Linux => Some("application-menu"),
-        Os::Macos | Os::Other => None,
+        // Android is `None` for macOS' reason and a simpler one: what makes an app
+        // launchable on a phone is the installed package itself, written by the store or
+        // by the phone's installer, so an app that also placed a copy would be a second
+        // install of an app the platform already owns.
+        Os::Macos | Os::Android | Os::Other => None,
     }
 }
 
@@ -284,6 +314,12 @@ fn install_dir_on(
     let fallback = match os {
         Os::Windows => data_local.map(|local| local.join("Programs")),
         Os::Linux | Os::Macos | Os::Other => data_local,
+        // Android is handed the documents folder first like everyone else and ignores it:
+        // a phone's Documents is a shared folder an app reaches a file at a time through
+        // the platform's own picker, never a folder a program writes in, so the library is
+        // the app's own data folder or it is nowhere. A machine with nothing to name
+        // answers `None` rather than a home folder that would not be writable either.
+        Os::Android => return data_local.map(|data| data.join("Lithic")),
     };
     documents
         .or(fallback)
@@ -310,7 +346,9 @@ fn install_target_on(os: Os, dir: PathBuf, appimage: Option<PathBuf>) -> Option<
             dir.join("Lithic")
         }),
         Os::Macos => Some(dir.join("Lithic.app")),
-        Os::Other => None,
+        // Nothing to copy on a phone, and nowhere to copy it to: an app is placed by the
+        // package the platform installed, and the code that runs lives inside it.
+        Os::Android | Os::Other => None,
     }
 }
 
@@ -426,6 +464,15 @@ fn state_dir_on(
     app_data: Option<PathBuf>,
     beside_writable: bool,
 ) -> Option<PathBuf> {
+    // Android is the second platform where "beside the program" is not a folder the user
+    // is shown, and the more severe case of it: a phone app's executable lives inside the
+    // installed package, which the next update replaces and which the app may not write in
+    // at all. So it keeps its state where the platform says an app keeps it, and answers
+    // `None` when the process cannot name that folder, which every caller already reads as
+    // "there is no sidecar and no vault on this machine" rather than as an error.
+    if matches!(os, Os::Android) {
+        return app_data.map(|dir| dir.join("Lithic"));
+    }
     if !matches!(os, Os::Macos) {
         return beside;
     }
@@ -565,6 +612,12 @@ mod tests {
         assert_eq!(install_dir_on(Os::Windows, docs.clone(), local.clone(), home.clone()), Some(PathBuf::from("/docs/Lithic")));
         assert_eq!(install_dir_on(Os::Linux, docs.clone(), local.clone(), home.clone()), Some(PathBuf::from("/docs/Lithic")));
         assert_eq!(install_dir_on(Os::Macos, docs.clone(), local.clone(), home.clone()), Some(PathBuf::from("/docs/Lithic")));
+        // Android is offered the same Documents folder and does not use it: a phone hands
+        // an app a shared folder through its own picker, one file at a time, never as a
+        // folder to write a library into. So the app's own data folder is the answer, and
+        // nothing is the answer when the process cannot name one.
+        assert_eq!(install_dir_on(Os::Android, docs.clone(), local.clone(), home.clone()), Some(PathBuf::from("/local/Lithic")));
+        assert_eq!(install_dir_on(Os::Android, docs.clone(), None, home.clone()), None, "a home folder is not a folder a phone app may write in");
 
         // No Documents folder: Windows keeps user programs under Programs, and the
         // other two use the local data folder itself rather than inventing one.
@@ -599,6 +652,11 @@ mod tests {
             install_target_on(Os::Macos, dir.clone(), None),
             Some(PathBuf::from("/apps/Lithic/Lithic.app"))
         );
+        assert_eq!(
+            install_target_on(Os::Android, dir.clone(), None),
+            None,
+            "the phone's installer places the app, so there is nothing to copy beside it"
+        );
         assert_eq!(install_target_on(Os::Other, dir, None), None);
     }
 
@@ -612,6 +670,11 @@ mod tests {
         assert_eq!(caps.webview_auth, cfg!(windows), "webview_auth::install is cfg(windows)");
         assert_eq!(caps.instance_storage_read, cfg!(windows), "instance_search::read_caches is cfg(windows)");
         assert_eq!(caps.instance_storage_clear, cfg!(windows), "instance_copy::forget is cfg(windows)");
+        // The odd one out among these flags: a dependency rather than a platform. The
+        // pairing asserted is with `Cargo.toml`'s Android table, which is the only place
+        // the git half can be left out, and it is written the same way the three above are
+        // so that putting libgit2 back on Android is a change in two visible places.
+        assert_eq!(caps.git_sync, cfg!(not(target_os = "android")), "the git half follows git2, which Android does not link");
     }
 
     /// The offer exists on the two platforms that install, and loses to a package manager
@@ -624,6 +687,7 @@ mod tests {
         assert!(!install_supported(Os::Windows, true), "a winget copy must not offer to install itself again");
         assert!(!install_supported(Os::Linux, true), "a deb copy must not offer to install itself again");
         assert!(!install_supported(Os::Macos, false), "a Mac installs by drag, manager or not");
+        assert!(!install_supported(Os::Android, false), "the phone's installer places the app, so there is no second install to offer");
         assert!(!install_supported(Os::Other, false));
     }
 
@@ -767,6 +831,20 @@ mod tests {
         );
         // And with no app data folder to name at all, the answer is honestly nothing.
         assert_eq!(state_dir_on(Os::Macos, Some(PathBuf::from("/Volumes/Lithic")), None, false), None);
+
+        // Android takes the installed branch too, for a related reason: the executable's
+        // folder is inside the installed package, which is not writable and does not
+        // survive the next update, so the state belongs to the user's app data folder.
+        assert_eq!(
+            state_dir_on(Os::Android, Some(PathBuf::from("/data/app/lib/arm64")), data.clone(), true),
+            Some(installed.clone()),
+            "a phone's program folder is inside the installed package"
+        );
+        assert_eq!(
+            state_dir_on(Os::Android, Some(PathBuf::from("/data/app/lib/arm64")), None, true),
+            None,
+            "with no folder to name, a phone build has no sidecar rather than an unwritable one"
+        );
     }
 
     /// What each platform can do, stated once so a change to one of these has to be a
@@ -776,9 +854,11 @@ mod tests {
         assert_eq!(launch_entry_kind(Os::Windows), Some("start-menu"));
         assert_eq!(launch_entry_kind(Os::Linux), Some("application-menu"));
         assert_eq!(launch_entry_kind(Os::Macos), None, "a dmg drag is the macOS install");
+        assert_eq!(launch_entry_kind(Os::Android), None, "the installed package is the phone's launch entry");
         assert_eq!(from_name("windows"), Os::Windows);
         assert_eq!(from_name("linux"), Os::Linux);
         assert_eq!(from_name("macos"), Os::Macos);
+        assert_eq!(from_name("android"), Os::Android);
         assert_eq!(from_name("freebsd"), Os::Other);
         assert_eq!(current(), from_name(std::env::consts::OS));
     }

@@ -6,7 +6,22 @@ use tauri_plugin_dialog::DialogExt;
 
 mod credentials;
 mod webview_auth;
+// The GitHub sync's git half, and the one place in this crate where which module answers
+// is decided by the target rather than at runtime. `gitcore` is libgit2, which only the
+// desktop builds link (`Cargo.toml`); Android answers the same questions from
+// `gitcore_unsupported`, whose doc comment says what it refuses and why.
+//
+// The unsupported half is compiled for the test build on every platform as well as for
+// Android, which is what puts it in front of the local gate: that gate runs on Windows,
+// so a module behind `cfg(target_os = "android")` alone is a module `cargo check`,
+// `clippy` and `cargo test` on this machine never look at. Same reasoning as the Linux
+// and macOS answers in `platform/mod.rs`, which are compiled on Windows for exactly it.
+#[cfg(not(target_os = "android"))]
 mod gitcore;
+#[cfg(any(target_os = "android", test))]
+mod gitcore_unsupported;
+#[cfg(target_os = "android")]
+use gitcore_unsupported as gitcore;
 mod instance_search;
 mod instance_copy;
 mod cdp;

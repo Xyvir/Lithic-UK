@@ -123,6 +123,40 @@ LITHIC_BUILD_TAG=v2026.01.01-0000 npm run tauri build -- --target universal-appl
 
 The first build compiles OpenSSL once, and that is expected rather than something to fix: `git2`'s `https` feature asks for it on every unix, macOS's libgit2 uses the system's SecureTransport instead and never references it, and the crate vendors it for this target rather than looking for one on the machine or linking a Homebrew dylib into a distributed app. The bundle lands in `src-tauri/target/universal-apple-darwin/release/bundle/macos/` and the disk image in the `dmg` folder beside it. Leave off `--target universal-apple-darwin` to build for this Mac alone, which is faster and is what `cargo run` does while you work. `LITHIC_BUILD_TAG` is the release stamp the build belongs to, the same as on Linux: unset, the app offers no update notice. Nothing signs or notarizes the result — the Mach-O is ad-hoc signed by the linker, which is the minimum Apple Silicon requires for any binary to run at all.
 
+## Android: One Debug-Signed APK
+
+An Android release carries one file, `Lithic_<stamp>_debug.apk`, and it holds every phone ABI, so the download is the same whichever phone fetches it.
+
+**It is signed with the debug key, and that is the whole of the signing story rather than an oversight.** Android refuses an unsigned package outright and refuses one whose signature does not match the copy already installed, so there are two honest options and no third: a keystore generated once and kept, or the debug key a debug build brings with it. A keystore cannot live in the repository and none has been put in the release secrets yet, and a key generated fresh on each build would be worse than none, because every release would then refuse to install over the last one with a signature mismatch the user has to work out for themselves. So the name says `_debug` instead of hiding it, and a release-signed APK, or an `.aab` for the Play Store, is a follow-up that needs those secrets and nothing else. What it costs today is a debug Rust profile, which is slower than a release one; what it buys is a file that installs today.
+
+**To install it**, download it on the phone and open it. The browser will ask you to allow installs from that app, and the phone's own installer takes it from there. Over `adb` it is one command:
+
+```bash
+adb install -r Lithic_<stamp>_debug.apk
+```
+
+**What is here.** The launcher and the whole wiki engine are inside the APK, so this is the app rather than a wrapper for a website: instances you have bookmarked, instance storage, your wikis, and the launcher's phone layouts, all shipped in the package. State lives in the app's own storage folder rather than beside the program, because there is no beside: an Android executable lives inside the installed package, which the next update replaces and the app may not write in. The portable neighbourhood the other builds keep, a folder of liths with `recents.txt` next to the program, is the one thing Android cannot have.
+
+**What is not here.** The folder-based GitHub backup is not built into the Android target at all, and the launcher does not offer it, because the platform says so. The reason is a dependency before it is a design decision: `git2` asks for OpenSSL on every unix, so carrying the sync would mean cross-compiling OpenSSL once per phone ABI, and what the sync backs up, a folder of your own that a program writes files into, is not a folder Android hands an app. See [GitHub Sync (Desktop App)](#github-sync-desktop-app) for what the desktop builds do. There is also no Install offer and no "open with" registration, for a simpler reason: on a phone the installed package *is* the install and the file associations are the package's own manifest.
+
+**What is still being settled.** Mounting and saving a `.lith` through the phone's own file picker is the part that can only be judged on a device, because Android hands back a document reference rather than a path, and how much of the desktop flow survives that is an open question rather than a claim. Everything above is what the current build certainly does.
+
+### Building the APK yourself
+
+You need the Android SDK and NDK (`ANDROID_HOME` and `NDK_HOME`), a JDK 17, Rust (stable) with the four phone targets, and Node 22 or newer:
+
+```bash
+rustup target add aarch64-linux-android armv7-linux-androideabi i686-linux-android x86_64-linux-android
+npm ci
+npm --prefix launcher-ui ci
+node scripts/build-launcher.mjs
+npm run tauri icon src/app-icon.png
+npm run tauri android init -- --ci
+LITHIC_BUILD_TAG=v2026.01.01-0000 npm run tauri android build -- --debug --apk --ci
+```
+
+`android init` writes the Gradle project into `src-tauri/gen/android/`, which is gitignored and regenerated rather than committed, so it is generated here the same way the release does it. The APK lands in `src-tauri/gen/android/app/build/outputs/apk/`. `LITHIC_BUILD_TAG` is the release stamp this build belongs to, the same as on Linux and macOS: unset, the app offers no update notice. The release job that produces this artifact is [.github/workflows/android-release.yml](.github/workflows/android-release.yml), and it is chained from the same publish step as the four desktop installers.
+
 ## Companion Project: Ephemeral.exe
 
 If you are interested in running codeblocks from Lithic or any other text-based PKMS, check out [**Ephemeral.exe**](https://github.com/Xyvir/Ephemeral.exe). It is a lightweight, daemonless utility that instantly executes code snippets directly from your clipboard inside isolated Podman containers. This allows you to run dozens of programming languages seamlessly from your notes without polluting your host system with local installations or complex dependencies.
