@@ -222,6 +222,36 @@ jobs:
           # against the newest release and offers the download page when they differ. A build
           # without it offers nothing.
           LITHIC_BUILD_TAG: ${{ steps.tag.outputs.date }}
+          # WHY THE DEBUG PROFILE IS TUNED FROM HERE RATHER THAN IN CARGO.TOML.
+          #
+          # `--debug` is what makes this APK installable at all: Android refuses an unsigned
+          # package, no keystore is in the secrets, and the debug key is the one thing this
+          # build can be signed with today. What arrives with it is cargo's `dev` profile,
+          # which is the wrong profile for a file a person downloads: full debug info, no
+          # optimisation, no dead-code elimination, and all of it inside each of the four
+          # ABIs' libraries, because an ELF keeps its DWARF in the shared object rather than
+          # beside it the way a Windows build keeps a PDB.
+          #
+          # Measured on this crate's desktop build, same source, before and after the three
+          # settings below: the executable 24 MB to 13 MB, its debug information 162 MB to
+          # 9 MB, and the library target's own debug information 317 MB to 3 MB. For scale,
+          # the whole program in `release`, with the LTO and strip `Cargo.toml` already asks
+          # for, is 14 MB. The APK pays that difference once per ABI, four times over, and
+          # that is where most of its size comes from.
+          #
+          # An environment override rather than a `[profile.dev]` table, because that profile
+          # is also how the developer and the local gate iterate: `cargo check`, clippy and the
+          # test run all use it, and none of them should pay for an optimisation pass or lose
+          # the symbols a failing test's backtrace is read from. This is the one place the
+          # profile is built for a download, so this is the one place it is tuned.
+          #
+          # `debug = 0` is the whole of the size story, since the debug information is the
+          # bulk and nobody steps through a build they downloaded. The other two make what is
+          # left smaller rather than faster. No LTO: that would be paid for on all four ABIs of
+          # a job that is already long, for a fraction of what the first line saves.
+          CARGO_PROFILE_DEV_DEBUG: '0'
+          CARGO_PROFILE_DEV_OPT_LEVEL: 's'
+          CARGO_PROFILE_DEV_STRIP: 'symbols'
         run: npm run tauri android build -- --debug --apk --ci
 
       - name: Rename Artifact
