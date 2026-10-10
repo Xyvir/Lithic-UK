@@ -5638,8 +5638,11 @@
             complete={(pin) => void offerPinComplete(pin)}
           />
           <!--
-            The band word, in the empty end of the boxes' own row: it is about the PIN
-            those boxes hold, and it is the whole of what this dialog says about it. The
+            The band word, at the end of the boxes' own label line: it is about the PIN
+            those boxes hold, and it is the whole of what this dialog says about it. That
+            end of that line is where the password field below puts its own Show toggle,
+            and the two are never drawn together, because this word exists only while a
+            PIN is being chosen, which is the mode that draws no toggle. The
             arithmetic behind the word rides in the word's title, so the estimate is
             still there to be read without a paragraph standing in the dialog. It
             describes a complete candidate, so it goes when the boxes no longer hold one:

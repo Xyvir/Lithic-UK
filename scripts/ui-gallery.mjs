@@ -878,6 +878,124 @@ function assertColumnsLevel({ card, panelBottom }) {
 }
 
 /**
+ * The PIN row is centred in the dialog that carries it, and two rows in one dialog line up.
+ *
+ * The same boxes are drawn in four dialogs (the manager's unlock, the per-instance prompt and
+ * the two rows of the one that writes a credential), and they are the same width in each, so the
+ * row reads as the same object wherever it appears. Whether it is CENTRED is the part a picture
+ * cannot settle: a row hugging the left edge of a dialog looks plausible on its own, and only
+ * the sheet, read side by side, shows that the others sit in the middle.
+ *
+ * The reference is the dialog's content box (its rect less its padding and border), because that
+ * is the space the row is centred in, and the boxes are measured off the `.pin-entry` the four
+ * dialogs share rather than off the row: the strength word rides in the same grid row, and a row
+ * centred on its own ink would be pushed left by the length of a word about the PIN.
+ *
+ * The second claim is the one that needs the pair. The dialog that chooses a PIN and asks for it
+ * again draws two of these rows, and their boxes have to start at the same place; two rows
+ * centred independently do not, because only one of them carries the word.
+ *
+ * The word is the third claim, and it is the reason this cannot be left to the eye: it rides on
+ * the entry's label line, at the far end of a row that is only as wide as the boxes, so on a
+ * narrow dialog it is the first thing to meet the label and the last thing to have room. A word
+ * that overlaps the label or reaches past the dialog's padding is a word nobody can read, and
+ * neither shows up in a screenshot of a desktop dialog.
+ */
+async function assertPinsCentred(page) {
+  const rows = await page.evaluate(() => {
+    const visible = (node) => {
+      const style = getComputedStyle(node);
+      const rect = node.getBoundingClientRect();
+      return (
+        style.display !== 'none' && style.visibility !== 'hidden' && rect.width > 0 && rect.height > 0
+      );
+    };
+    const inset = (node) => {
+      const style = getComputedStyle(node);
+      const rect = node.getBoundingClientRect();
+      const num = (value) => Number.parseFloat(value) || 0;
+      return {
+        left: rect.left + num(style.borderLeftWidth) + num(style.paddingLeft),
+        right: rect.right - num(style.borderRightWidth) - num(style.paddingRight)
+      };
+    };
+    return [...document.querySelectorAll('.vault-pin')].filter(visible).map((row) => {
+      const dialog = row.closest('.launcher-modal');
+      const entry = row.querySelector('.pin-entry');
+      const label = row.className;
+      if (!dialog) return { label, error: 'has no .launcher-modal above it' };
+      if (!entry || !visible(entry)) return { label, error: 'draws no visible .pin-entry' };
+      // The boxes themselves rather than the entry above them, which carries the label row too:
+      // what is centred is the boxes, and what the strength word has to clear is their top edge.
+      const boxRow = row.querySelector('.pin-boxes');
+      if (!boxRow || !visible(boxRow)) return { label, error: 'draws no visible .pin-boxes' };
+      const boxes = boxRow.getBoundingClientRect();
+      const content = inset(dialog);
+      const span = (node) => {
+        if (!node || !visible(node)) return null;
+        const rect = node.getBoundingClientRect();
+        return { left: rect.left, right: rect.right, top: rect.top, bottom: rect.bottom };
+      };
+      return {
+        label,
+        dialog: dialog.className,
+        boxes: { left: boxes.left, right: boxes.right, top: boxes.top, bottom: boxes.bottom },
+        boxesLeft: boxes.left,
+        boxesRight: boxes.right,
+        boxesCentre: boxes.left + boxes.width / 2,
+        contentLeft: content.left,
+        contentRight: content.right,
+        contentCentre: (content.left + content.right) / 2,
+        band: span(row.querySelector('.vault-band')),
+        labelText: span(row.querySelector('.pin-label'))
+      };
+    });
+  });
+  const byDialog = new Map();
+  for (const row of rows) {
+    if (row.error) throw new Error(`a PIN row (.${row.label}) ${row.error}`);
+    const off = row.boxesCentre - row.contentCentre;
+    if (Math.abs(off) > 1) {
+      throw new Error(
+        `the PIN boxes in .${row.label} sit ${off > 0 ? '+' : ''}${off.toFixed(1)}px off the centre of ` +
+          `${row.dialog.split(' ')[0]}'s content box (boxes ${row.boxesLeft.toFixed(1)}..${row.boxesRight.toFixed(1)} ` +
+          `against ${row.contentLeft.toFixed(1)}..${row.contentRight.toFixed(1)})`
+      );
+    }
+    if (row.band) {
+      if (row.band.bottom > row.boxes.top + 1) {
+        throw new Error(
+          `the strength word in .${row.label} runs ${(row.band.bottom - row.boxes.top).toFixed(1)}px into the boxes below it`
+        );
+      }
+      if (row.band.right > row.contentRight + 1 || row.band.left < row.contentLeft - 1) {
+        throw new Error(
+          `the strength word in .${row.label} spans ${row.band.left.toFixed(1)}..${row.band.right.toFixed(1)}, outside the ` +
+            `${row.contentLeft.toFixed(1)}..${row.contentRight.toFixed(1)} the dialog gives it`
+        );
+      }
+      if (row.labelText && row.band.left < row.labelText.right + 4) {
+        throw new Error(
+          `the strength word in .${row.label} starts ${(row.band.left - row.labelText.right).toFixed(1)}px from the end of ` +
+            `the label beside it, so the two meet on the line`
+        );
+      }
+    }
+    byDialog.set(row.dialog, [...(byDialog.get(row.dialog) ?? []), row]);
+  }
+  for (const [dialog, group] of byDialog) {
+    if (group.length < 2) continue;
+    const lefts = group.map((row) => row.boxesLeft);
+    const spread = Math.max(...lefts) - Math.min(...lefts);
+    if (spread > 1) {
+      throw new Error(
+        `the ${group.length} PIN rows of ${dialog.split(' ')[0]} start ${spread.toFixed(1)}px apart, so their boxes do not line up`
+      );
+    }
+  }
+}
+
+/**
  * Every dialog, defined once and shot at every viewport.
  *
  * The deck had each dialog at exactly one size before this, and that size was a preset rather
@@ -1084,6 +1202,24 @@ const DIALOG_STATES = [
     },
     clip: '.vault-modal',
     expect: '.credential-offer-pin'
+  },
+  {
+    // The same dialog writing a first credential: a PIN being chosen rather than entered, so
+    // both rows are drawn and the strength word is on the label line of the first one. It is
+    // here at every viewport because the word is the last thing that has room on a phone.
+    slug: 'login-offer-first-run',
+    modal: 'credential-offer-title',
+    mode: 'tauri',
+    seed: { bookmarks: BOOKMARKS },
+    rust: { exists: false, pin: PIN, entries: [], path: VAULT_PATH, details: LOGIN_DETAILS },
+    drive: async (page) => {
+      await openBookmark(page, 'www.foobar.com');
+      await page.waitForSelector('#credential-offer-title');
+      await typePin(page, '.credential-offer-pin', 'LITHIC');
+      await settle(page, 400);
+    },
+    clip: '.vault-modal',
+    expect: '.vault-band.average'
   },
   {
     // The inline title field, which is not a `.launcher-modal` at all: it is the action card
@@ -3089,6 +3225,10 @@ async function runPane(browser, pane) {
       )}\n      asked Rust for: ${asked || 'nothing'}\n      console: ${errors.join(' | ') || 'clean'}`
       );
     }
+    // A page-shape invariant rather than a claim about one pane: every dialog draws the same
+    // PIN row, so every pane that draws one is where the centring is checked, without a list of
+    // panes to keep in step. It is a no-op in the panes that draw no PIN at all.
+    await assertPinsCentred(page);
     if (pane.verify) {
       await pane.verify({
         evaluate: (fn, ...args) => page.evaluate(fn, ...args),
