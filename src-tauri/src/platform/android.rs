@@ -34,7 +34,7 @@
 #![cfg_attr(not(target_os = "android"), allow(dead_code))]
 
 use tauri::plugin::{Builder, TauriPlugin};
-use tauri::{AppHandle, Runtime};
+use tauri::{AppHandle, Manager, Runtime};
 use tauri_plugin_fs::FilePath;
 
 /// The Kotlin plugin's package and class, which the patch script writes into the project.
@@ -77,7 +77,6 @@ pub struct Bridge<R: Runtime>(Option<tauri::plugin::PluginHandle<R>>);
 /// own wording for a missing class.
 #[cfg(target_os = "android")]
 fn bridge<R: Runtime>(app: &AppHandle<R>) -> Result<tauri::plugin::PluginHandle<R>, String> {
-    use tauri::Manager;
     app.state::<Bridge<R>>()
         .0
         .clone()
@@ -218,7 +217,6 @@ pub fn write(app: &AppHandle, document: &str, text: &str) -> Result<(), String> 
 /// every platform (it falls back to the last path component), so this body needs no `cfg`; on
 /// Android it is the plugin call that finds `_display_name`.
 pub fn name(app: &AppHandle, document: &str) -> String {
-    use tauri::Manager;
     app.path()
         .file_name(document)
         .unwrap_or_else(|| document.to_string())
