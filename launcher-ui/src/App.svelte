@@ -4978,8 +4978,15 @@
     // navigation at all: the address goes to the platform's browser, which is where that login
     // already lives. Asked first, because a vault that cannot be lent to a window this platform
     // will not use must not be unlocked on the way to nothing. See `opensInstanceInBrowser`.
-    const addressed = withLauncherHandoff(url, window.location.href, query);
-    if (opensInstanceInBrowser(mode, platformCapabilities)) {
+    //
+    // That same answer decides whether the handoff carries a way back. A page opened in another
+    // application's browser cannot be returned to this one, so a marker written there would draw
+    // a back button on an instance whose launcher is not on the other end of it. The marker is
+    // the whole of what draws that button (see `launcherReturn`), so a handoff that cannot be
+    // returned from writes none.
+    const opensInBrowser = opensInstanceInBrowser(mode, platformCapabilities);
+    const addressed = withLauncherHandoff(url, window.location.href, query, !opensInBrowser);
+    if (opensInBrowser) {
       try {
         await tauriInvoke('open_external', { url: addressed });
       } catch (error) {

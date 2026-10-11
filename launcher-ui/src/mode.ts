@@ -82,17 +82,26 @@ export const LAUNCHER_QUERY_PARAM = 'q';
  *   `lithic-from=<launcher>`. The address to come back to. It has to travel
  *   with the navigation: a document outside the app's URL may not invoke Rust
  *   (see `hostedInApp`) and cannot guess the app's origin, which differs per
- *   platform (`tauri://localhost` vs `https://tauri.localhost`).
+ *   platform (`tauri://localhost` vs `https://tauri.localhost`). Written only
+ *   where there is somewhere to come back to (`returnable`): a document opened
+ *   in another application's browser cannot return to this one, and the marker
+ *   is the whole of what draws the way back, so a handoff that cannot return
+ *   writes no marker at all rather than one that leads nowhere.
  *
  *   `q=<words>`. Only when the handover is a search. The launcher's global search shows
  *   one hit per instance and no more, so the instance's own launcher is where the rest of
  *   them are read; arriving already searching is what makes that a step rather than a
  *   retyping. An instance running an older build ignores it and simply opens.
  */
-export function withLauncherHandoff(instanceUrl: string, launcherHref: string, query = ''): string {
+export function withLauncherHandoff(
+  instanceUrl: string,
+  launcherHref: string,
+  query = '',
+  returnable = true
+): string {
   try {
     const url = new URL(instanceUrl);
-    url.searchParams.set(LAUNCHER_ORIGIN_PARAM, launcherHref);
+    if (returnable) url.searchParams.set(LAUNCHER_ORIGIN_PARAM, launcherHref);
     url.searchParams.set('mode', 'self-host');
     if (query.trim()) url.searchParams.set(LAUNCHER_QUERY_PARAM, query.trim());
     return url.href;

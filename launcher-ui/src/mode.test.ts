@@ -188,6 +188,23 @@ test('a way back exists only where there is somewhere to go back to', () => {
   );
 });
 
+test('a handoff opened where it cannot be returned from carries no marker', () => {
+  // The phone's app cannot host an instance behind a login, so a bookmark opens in the
+  // platform's own browser (see `opensInstanceInBrowser`). That browser cannot hand the
+  // window back, and the marker is the whole of what draws the back button, so one written
+  // there would point at an app the browser cannot reach.
+  const plain = withLauncherHandoff('https://personal.example.uk', 'https://tauri.localhost/', '', false);
+  assert.equal(plain, 'https://personal.example.uk/?mode=self-host');
+  // The destination is still declared an instance: only the way back is dropped.
+  assert.equal(resolveMode(location(plain), doc(false), { __TAURI__: {} }), 'self-host');
+  // A browser with no app behind it reads no way back at all, which is what hides the button.
+  assert.equal(launcherReturn(location(plain), undefined, store()), null);
+  // A search still travels: arriving already searching is a gesture of its own.
+  const searched = withLauncherHandoff('https://personal.example.uk', 'https://tauri.localhost/', 'archive box', false);
+  assert.equal(searched, 'https://personal.example.uk/?mode=self-host&q=archive+box');
+  assert.equal(handoffQuery(location(searched)), 'archive box');
+});
+
 test('the way back outlives the instance’s own links', () => {
   const session = store();
   // The handoff lands on the instance's own page and records the address…
