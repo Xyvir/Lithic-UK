@@ -7,12 +7,30 @@ import {
   documentMimetype,
   documentPickerTypes,
   documentStem,
+  inputAcceptTypes,
   isDocumentFormat,
   normalizeDocumentName,
+  pickerFiltersByMimeType,
   resolveDocumentFormat,
   serverDocumentName,
   writesLith
 } from './document-format.ts';
+
+test('a chooser that filters by MIME type is not given a list it would drop .lith out of', () => {
+  // Android, where the WebView maps each extension through the platform's MIME table and keeps
+  // only the ones it knows: `.lith`, `.tid` and `.md` are not among them, so the extension list
+  // is what greyed out every `.lith` in the folder.
+  assert.equal(pickerFiltersByMimeType('Mozilla/5.0 (Linux; Android 15; Pixel 8) AppleWebKit/537.36'), true);
+  assert.equal(pickerFiltersByMimeType('Mozilla/5.0 (Windows NT 10.0; Win64; x64) Firefox/141.0'), false);
+  assert.equal(pickerFiltersByMimeType(''), false, 'a page with no user agent keeps the useful filter');
+  assert.equal(inputAcceptTypes(true), '*/*');
+  // Every kind this launcher opens, by extension as well as by media type, is still named where
+  // the platform honours extensions.
+  const filtered = inputAcceptTypes(false);
+  for (const type of ['.lith', '.html', '.json', '.md', '.tid', '.ipynb', 'text/plain', 'text/html']) {
+    assert.ok(filtered.split(',').includes(type), `${type} is offered to the picker`);
+  }
+});
 
 test('the format pin defaults to lith and refuses a value that names nothing', () => {
   assert.equal(resolveDocumentFormat(undefined), 'lith');

@@ -4,7 +4,7 @@
   import { LOCALE_TAG, copy, type LaunchEntry } from './copy';
   import { declaresBrowserOnly, handoffQuery, LAUNCHER_QUERY_PARAM, launcherReturn, withLauncherHandoff, type LauncherMode } from './mode';
   import { createFileBridge, tauriInvoke, tauriListen, saveTextVerifiably } from './file-bridge';
-  import type { PlatformCapabilities } from './platform-capabilities';
+  import { opensInstanceInBrowser, type PlatformCapabilities } from './platform-capabilities';
   import { orphanPill, orphanDownloadNote, type OrphanDownloadState } from './orphan-download';
   import { isScratchFileName, isHtmlMonolithName, tracksUnsavedEdits, resolveMountName, resolveScratchKind, type ScratchKind } from './scratch-editor';
   import { pwaInstall, promptPwaInstall, shouldRestoreInstallOfferOnReset } from './pwa-install';
@@ -73,13 +73,17 @@
    */
   export let platformCapabilities: PlatformCapabilities | null = null;
   /**
-   * Whether this platform has files for the launcher to open and write. False on Android
-   * alone (`Capabilities::local_files`), where the picker returns a document reference
-   * rather than a path: the browser's own file input and download are the file powers that
-   * platform grants, and the document itself lives in the app's own storage.
+   * Whether this app has documents of its own to open and write (`Capabilities::local_files`),
+   * which is what decides whether the launcher uses its own process or the browser's file powers.
+   *
+   * True on every platform this app ships to, Android included: a phone's picker answers with a
+   * granted `content://` reference rather than a path, but the app can still read and write it,
+   * so the reference is what a recents row carries and what a save is aimed at. Read as
+   * `!== false` because a report that did not arrive must leave the behaviour that has always
+   * been rather than move a desktop into browser storage.
    */
-  const localFiles = platformCapabilities?.local_files !== false;
-  const files = createFileBridge(localFiles);
+  const documents = platformCapabilities?.local_files !== false;
+  const files = createFileBridge(documents);
   /**
    * Where this page's saves can land: a real file, or (on a platform with no
    * File System Access API (Safari and Firefox, which is the whole of macOS
@@ -160,10 +164,10 @@
         mode,
         typeof window === 'undefined' ? undefined : (window as unknown as { showSaveFilePicker?: unknown }),
         typeof window === 'undefined' ? null : storageModeOverride(window.location.search),
-        // A process with no files of its own gets the storage fallback, which is the phone:
-        // the app's storage holds the document, the version history is the copy that can be
-        // taken off it, and no save is ever routed to a path this platform cannot produce.
-        localFiles
+        // A process that cannot hold a document of its own gets the storage fallback, so the
+        // version history is the copy that can be taken off the device. Every platform this app
+        // ships to can hold one, the phone included; the branch is kept for a build that cannot.
+        documents
       );
   /**
    * The index-db-only fallback: no Lith mounted here has a file behind it, so
@@ -3841,7 +3845,16 @@
     historyError = '';
   }
 
-  /** Download one materialized version; history is never modified. */
+  /**
+   * Download one materialized version; history is never modified.
+   *
+   * Through this app's own save wherever it has one, which is every platform it ships to. The
+   * browser anchor below is what this used, and on a phone it writes nothing at all: wry's
+   * Android client installs no `DownloadListener`, so the same press that reported success left
+   * no file and no error (see `Capabilities::downloads`). The app's own bridge puts the version
+   * in the folder the save dialog names, which is also the only route that reports whether the
+   * write actually landed.
+   */
   async function downloadHistoryVersion(id: string) {
     try {
       const version = await downloadWikiVersion(historyName, id);
@@ -3849,7 +3862,14 @@
         historyError = copy.status.noHistoryVersion;
         return;
       }
-      saveBlobAs(version.fileName, version.text);
+      const lith = version.text.trim().startsWith('[') ? serializeJsonToLith(version.text) : version.text;
+      if (documents) {
+        const outcome = await saveTextVerifiably(version.fileName, lith, documents);
+        // The user backed out of the save dialog: no file, no notice, and no error.
+        if (outcome === 'cancelled') return;
+      } else {
+        saveBlobAs(version.fileName, version.text);
+      }
       status = copy.status.recovered(version.fileName);
     } catch (error) {
       historyError = error instanceof Error ? error.message : String(error);
@@ -3857,9 +3877,12 @@
   }
 
   /**
-   * Write cached tiddler text out as a `.lith` the user can keep. Cached text is
-   * the serialized tiddler array, not the on-disk format, so it is converted
-   * back the same way a version download is.
+   * Write cached tiddler text out as a `.lith` the user can keep, as a browser download.
+   *
+   * The fallback for a process that cannot write a document of its own (`Capabilities::local_files`);
+   * every platform this app ships to can, so the app's own save above is the route
+   * that is taken. Cached text is the serialized tiddler array, not the on-disk format, so it is
+   * converted back first.
    */
   function saveBlobAs(fileName: string, text: string) {
     const lith = text.trim().startsWith('[') ? serializeJsonToLith(text) : text;
@@ -3896,7 +3919,7 @@
         return;
       }
       const fileName = `${name.replace(/\.lith$/i, '')}_cached.lith`;
-      const outcome = await saveTextVerifiably(fileName, cached, localFiles);
+      const outcome = await saveTextVerifiably(fileName, cached, documents);
       if (outcome === 'cancelled') {
         // The user backed out of the save dialog: leave the row as they found it.
         setOrphanDownload(name, 'idle');
@@ -4951,6 +4974,19 @@
     : (search.trim() ? copy.recent.empty.noMatch : copy.recent.empty.recents);
 
   async function openBookmarkedInstance(url: string, query = '') {
+    // A platform whose webview cannot answer an instance's own login challenge does not get the
+    // navigation at all: the address goes to the platform's browser, which is where that login
+    // already lives. Asked first, because a vault that cannot be lent to a window this platform
+    // will not use must not be unlocked on the way to nothing. See `opensInstanceInBrowser`.
+    const addressed = withLauncherHandoff(url, window.location.href, query);
+    if (opensInstanceInBrowser(mode, platformCapabilities)) {
+      try {
+        await tauriInvoke('open_external', { url: addressed });
+      } catch (error) {
+        status = copy.status.openFailed(error instanceof Error ? error.message : String(error));
+      }
+      return;
+    }
     const origin = vaultOriginOf(url);
     // On a platform with no vault this is the whole of the opening: the window is handed
     // to the instance and the platform's own WebView asks for the password, which is what
@@ -4968,7 +5004,7 @@
         return;
       }
     }
-    window.location.href = withLauncherHandoff(url, window.location.href, query);
+    window.location.href = addressed;
   }
 
   /**

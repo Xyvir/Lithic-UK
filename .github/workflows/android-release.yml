@@ -206,7 +206,7 @@ jobs:
       - name: Generate Icons
         run: |
           if [ -f src/app-icon.png ]; then
-            npm run tauri icon src/app-icon.png
+            npm run tauri icon src/app-icon.json
           else
             echo "Icon file 'src/app-icon.png' not found, skipping icon generation."
           fi

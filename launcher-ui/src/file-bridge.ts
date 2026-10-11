@@ -10,7 +10,7 @@
  * nobody has opened, and each one is a whole wiki.
  */
 import { copy } from './copy.ts';
-import { documentMimetype, documentPickerTypes, normalizeDocumentName } from './document-format.ts';
+import { documentMimetype, documentPickerTypes, inputAcceptTypes, normalizeDocumentName } from './document-format.ts';
 import { basename, hasShimBackend, shimPick, shimRead, shimWrite } from './shim-files.ts';
 
 export interface PickedLith {
@@ -123,13 +123,13 @@ interface FilePickerHandle {
  * whether a download finished) so it reports `started`, and callers must not
  * present that as a file that exists.
  *
- * `localFiles` is the process's own answer (`Capabilities::local_files`), passed in by the
- * caller because this function is also reached from the app's own page: on a platform with
- * no file paths there is no Rust write to confirm, and the browser's download is the only
- * copy that can leave at all.
+ * `documents` is the process's own answer (`Capabilities::local_files`), passed in by the caller
+ * because this function is also reached from the app's own page: an app whose own process cannot
+ * hold a document has no write to confirm, and the browser's download is the only copy that can
+ * leave at all.
  */
-export async function saveTextVerifiably(fileName: string, text: string, localFiles = true): Promise<SaveOutcome> {
-  const api = localFiles ? tauriApi() : null;
+export async function saveTextVerifiably(fileName: string, text: string, documents = true): Promise<SaveOutcome> {
+  const api = documents ? tauriApi() : null;
   if (api) {
     try {
       // The native dialog *and* the write happen in Rust, so a returned path is
@@ -238,7 +238,9 @@ async function browserPicks(): Promise<PickedLith[]> {
   return new Promise((resolve, reject) => {
     const input = document.createElement('input');
     input.type = 'file';
-    input.accept = '.lith,.html,.htm,.json,.md,.txt,.tid,.ipynb,text/plain,text/html';
+    // The extension list, except where the platform's chooser resolves extensions to MIME
+    // types and would drop this project's own type on the floor: see `inputAcceptTypes`.
+    input.accept = inputAcceptTypes();
     input.onchange = () => {
       const file = input.files?.[0];
       if (!file) return resolve([]);
@@ -341,14 +343,14 @@ function shimBridge(): FileBridge {
   };
 }
 
-export function createFileBridge(localFiles = true): FileBridge {
-  const invoke = localFiles ? tauriApi()?.invoke : undefined;
-  // A platform with no file paths (Android) uses the browser's bridge even inside the app,
-  // for the reason `Capabilities::local_files` records: the Rust commands behind the app
-  // bridge need a path the picker there never returns, so opening goes through the
-  // browser's own file input and a download through its own download, which are the two
-  // file powers the platform does grant. The shim check below is unaffected: it is the
-  // secret in the document that decides, and an app page never carries one.
+export function createFileBridge(documents = true): FileBridge {
+  const invoke = documents ? tauriApi()?.invoke : undefined;
+  // A process that cannot hold a document of its own uses the browser's bridge even inside an
+  // app, for the reason `Capabilities::local_files` records: its Rust commands would have nothing
+  // to write to, so opening goes through the browser's own file input and a download through its
+  // own download. No platform this app ships to answers that, the phone included, whose picker
+  // returns a granted reference its own process can read and write. The shim check below is
+  // unaffected: it is the secret in the document that decides, and an app page never carries one.
   if (!invoke) return hasShimBackend() ? shimBridge() : browserBridge();
   return {
     loadUrl: fetchText,

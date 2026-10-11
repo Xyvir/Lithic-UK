@@ -8,12 +8,10 @@ import type { LauncherMode } from './mode.ts';
  *              written back in place. Chromium on every desktop platform.
  *   'index-db' it is not, which is every browser on macOS except Chrome (Safari
  *              is the only browser a PWA can be installed from there, and
- *              Firefox has never shipped the API either) and the Android app,
- *              whose picker answers with a document reference rather than a
- *              path. No file is ever opened or written: the browser's own
- *              storage *is* the document, and the launcher's existing cache,
- *              version history and download flows are the only copies that
- *              exist.
+ *              Firefox has never shipped the API either). No file is ever opened
+ *              or written: the browser's own storage *is* the document, and the
+ *              launcher's existing cache, version history and download flows are
+ *              the only copies that exist.
  *
  * The distinction is not a preference. It is the platform's answer to "can
  * this tab write a file it was not given".
@@ -46,21 +44,20 @@ export function supportsFileAccessApi(host: PickerHost | null | undefined): bool
  * they have everywhere else. Forcing the store on a capable browser would make the shim the
  * one launcher that ignores the platform it is running on, so it does not.
  *
- * `localFiles` is the process's own answer, and the reason an app mode can be storage-only
- * too: Android hands an app no path to write (`Capabilities::local_files` in
- * `src-tauri/src/platform/mod.rs`), so its picker answers with a document reference and the
- * desktop app's own save route has nothing to write to. That platform keeps this fallback
- * instead, and with it the version history as the copy that can leave the device. Every
- * platform that has files answers true, which is why the parameter defaults to the old
- * behaviour rather than to the new one.
+ * `documents` is the process's own answer (`Capabilities::local_files` in
+ * `src-tauri/src/platform/mod.rs`), and it is what makes an app mode able to be storage-only at
+ * all: an app whose own process cannot hold a document has no save route of its own, so this
+ * fallback is the only place a save can land. No platform this app ships to answers that any
+ * more, which is why the parameter defaults to the old behaviour: a report that did not arrive
+ * must not put a desktop into browser storage.
  */
 export function resolveStorageMode(
   mode: LauncherMode,
   host: PickerHost | null | undefined = typeof window === 'undefined' ? undefined : (window as PickerHost),
   forced?: string | null,
-  localFiles = true
+  documents = true
 ): StorageMode {
-  if (mode !== 'webapp') return localFiles ? 'file' : 'index-db';
+  if (mode !== 'webapp') return documents ? 'file' : 'index-db';
   const override = forced?.trim().toLowerCase();
   if (override === 'index-db' || override === 'indexdb' || override === 'browser') return 'index-db';
   if (override === 'file') return 'file';

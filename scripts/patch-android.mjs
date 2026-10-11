@@ -9,6 +9,9 @@
  *      `mipmap-anydpi-v26/ic_launcher.xml` and no `values/ic_launcher_background.xml` at all,
  *      which is the template's set and not ours. `android init` does not copy
  *      `src-tauri/icons/android/` into the project, whatever the workflow's icon step believed.
+ *      `tauri icon` writes no `ic_launcher_round.xml` either, so the round definition is written
+ *      here as a copy of ours: see the round block below for why deleting the template's is not
+ *      the answer.
  *
  *   2. The activity draws the page under the system bars with nothing reserving their space
  *      (`src-tauri/android/MainActivity.kt` carries the reasoning and the fix).
@@ -40,7 +43,8 @@ function layout(root) {
   return {
     generated: join(root, 'src-tauri', 'gen', 'android'),
     icons: join(root, 'src-tauri', 'icons', 'android'),
-    activity: join(root, 'src-tauri', 'android', 'MainActivity.kt')
+    activity: join(root, 'src-tauri', 'android', 'MainActivity.kt'),
+    bridge: join(root, 'src-tauri', 'android', 'LithicBridge.kt')
   };
 }
 
@@ -116,11 +120,19 @@ export function patchAndroid(root = REPO) {
     fail(`no generated Android project at ${paths.generated}. Run \`npm run tauri android init -- --ci\` first.`);
   }
   if (!existsSync(paths.icons)) {
-    fail(`no generated icon set at ${paths.icons}. Run \`npm run tauri icon src/app-icon.png\` first.`);
+    fail(`no generated icon set at ${paths.icons}. Run \`npm run tauri icon src/app-icon.json\` first.`);
   }
   if (!existsSync(paths.activity)) {
     fail(`no tracked activity at ${paths.activity}.`);
   }
+  if (!existsSync(paths.bridge)) {
+    fail(`no tracked document bridge at ${paths.bridge}.`);
+  }
+
+  // Line endings are folded before any text comparison in this file, because the tracked files
+  // are CRLF and a template's may be LF: the comparison is about content, and a "change" that is
+  // one line ending is not a change.
+  const sameText = (a, b) => a.replace(/\r\n/g, '\n') === b.replace(/\r\n/g, '\n');
 
   // The two things about the generated project this patch has to know are read off the project
   // rather than assumed: the activity init wrote (which fixes the package), and the resource
@@ -149,15 +161,28 @@ export function patchAndroid(root = REPO) {
   }
   if (icons === 0) fail(`${paths.icons} holds no icons to copy`);
 
-  // The template's round adaptive icon points at the template's own drawables, and our generated
-  // set has no `ic_launcher_round.xml`, so leaving it in place would make the round icon a mixed
-  // pair: our PNG on the densities with one and the placeholder's vector behind the definition.
-  // Removing the definition lets the round icon resolve to our PNG everywhere.
-  let removedRound = 0;
-  const templateRound = join(res, 'mipmap-anydpi-v26', 'ic_launcher_round.xml');
-  if (existsSync(templateRound) && !existsSync(join(paths.icons, 'mipmap-anydpi-v26', 'ic_launcher_round.xml'))) {
-    rmSync(templateRound);
-    removedRound = 1;
+  // The round definition, which the generated set does not carry.
+  //
+  // Tauri writes `mipmap-anydpi-v26/ic_launcher.xml` and no `ic_launcher_round.xml`, while the
+  // template's own round definition points at the template's drawables: left in place it is a
+  // mixed pair, our foreground behind the placeholder's file. Deleting it (what this did first)
+  // is worse than it looks, because the manifest's `android:roundIcon` then resolves to the
+  // LEGACY `mipmap-*/ic_launcher_round.png` on every launcher that asks for a round icon: a
+  // circle holding the uncropped artwork, which is the masked-and-cut icon this project kept
+  // shipping. So the round path gets its own copy of the adaptive definition, read from ours
+  // rather than spelled out here so the two cannot drift apart.
+  const launcherXml = join(res, 'mipmap-anydpi-v26', 'ic_launcher.xml');
+  if (!existsSync(launcherXml)) {
+    fail(`the icon set has no ${launcherXml}, so there is no adaptive definition to copy.`);
+  }
+  const roundXml = join(res, 'mipmap-anydpi-v26', 'ic_launcher_round.xml');
+  const adaptive = readFileSync(launcherXml, 'utf8');
+  const roundIcon = !existsSync(roundXml) || !sameText(readFileSync(roundXml, 'utf8'), adaptive);
+  if (roundIcon) {
+    writeFileSync(roundXml, adaptive);
+    if (!sameText(readFileSync(roundXml, 'utf8'), adaptive)) {
+      fail(`the round definition at ${roundXml} did not survive the write`);
+    }
   }
 
   // 2. The activity. The tracked file is the authority; the generated one is only checked for the
@@ -176,14 +201,36 @@ export function patchAndroid(root = REPO) {
   // "Already patched" means the generated file IS the tracked file, compared as text: the
   // template's own file never matches, and neither would a future template that grew insets of
   // its own, which is the right answer either way because this project's file is the authority.
-  const sameText = (a, b) => a.replace(/\r\n/g, '\n') === b.replace(/\r\n/g, '\n');
   const replaced = !sameText(current, wanted);
   if (replaced) {
     writeFileSync(activityFile, wanted);
     if (readFileSync(activityFile, 'utf8') !== wanted) fail(`the activity at ${activityFile} did not survive the copy`);
   }
 
-  return { icons, bytes, removedRound, activity: relative(root, activityFile), replaced };
+  // 3. The document bridge. Its package has to be the one the Rust side names when it registers
+  // the plugin (`platform::android` holds the same two constants), so the file is installed
+  // beside the activity -- whatever package path `init` chose -- with that package rewritten to
+  // the generated one. Writing it next to the activity is what makes the two packages the same
+  // file's fact rather than two places that must agree.
+  const wantedBridge = readFileSync(paths.bridge, 'utf8');
+  const bridgePackage = kotlinPackage(wantedBridge);
+  if (bridgePackage === null) fail(`${paths.bridge} declares no package`);
+  if (bridgePackage !== wantedPackage) {
+    fail(
+      `${paths.bridge} is package ${bridgePackage} and the app is ${wantedPackage}. ` +
+        `The app identifier changed: update src-tauri/android/LithicBridge.kt to match.`
+    );
+  }
+  const bridgeFile = join(dirname(activityFile), 'LithicBridge.kt');
+  const bridgeReplaced = !existsSync(bridgeFile) || !sameText(readFileSync(bridgeFile, 'utf8'), wantedBridge);
+  if (bridgeReplaced) {
+    writeFileSync(bridgeFile, wantedBridge);
+    if (!sameText(readFileSync(bridgeFile, 'utf8'), wantedBridge)) {
+      fail(`the bridge at ${bridgeFile} did not survive the copy`);
+    }
+  }
+
+  return { icons, bytes, roundIcon, activity: relative(root, activityFile), replaced, bridge: relative(root, bridgeFile), bridgeReplaced };
 }
 
 /**
@@ -202,16 +249,24 @@ function selfTest() {
     console.log(`  ${ok ? 'ok  ' : 'FAIL'} ${name}${detail ? ` — ${detail}` : ''}`);
   };
 
+  // The two definitions, distinct on purpose so "was the round one overwritten" is answerable:
+  // ours is what the icon set carries, the template's is the shape `android init` writes.
+  const ADAPTIVE_ICON =
+    '<?xml version="1.0" encoding="utf-8"?>\n<adaptive-icon xmlns:android="http://schemas.android.com/apk/res/android">\n  <foreground android:drawable="@mipmap/ic_launcher_foreground"/>\n  <background android:drawable="@color/ic_launcher_background"/>\n</adaptive-icon>';
+  const TEMPLATE_ROUND =
+    '<?xml version="1.0" encoding="utf-8"?>\n<adaptive-icon xmlns:android="http://schemas.android.com/apk/res/android">\n  <background android:drawable="@drawable/ic_launcher_background"/>\n  <foreground android:drawable="@drawable/ic_launcher_foreground"/>\n</adaptive-icon>';
+
   const seed = () => {
     rmSync(base, { recursive: true, force: true });
     const templateActivity = 'package com.lithic.app\n\nimport android.os.Bundle\nimport androidx.activity.enableEdgeToEdge\n\nclass MainActivity : TauriActivity() {\n  override fun onCreate(savedInstanceState: Bundle?) {\n    enableEdgeToEdge()\n    super.onCreate(savedInstanceState)\n  }\n}\n';
     write(join(base, 'src-tauri/icons/android/mipmap-mdpi/ic_launcher.png'), 'ours-mdpi');
-    write(join(base, 'src-tauri/icons/android/mipmap-anydpi-v26/ic_launcher.xml'), '<adaptive-icon/>');
+    write(join(base, 'src-tauri/icons/android/mipmap-anydpi-v26/ic_launcher.xml'), ADAPTIVE_ICON);
     write(join(base, 'src-tauri/icons/android/values/ic_launcher_background.xml'), '<resources/>');
     write(join(base, 'src-tauri/gen/android/app/src/main/res/mipmap-mdpi/ic_launcher.png'), 'template-placeholder');
-    write(join(base, 'src-tauri/gen/android/app/src/main/res/mipmap-anydpi-v26/ic_launcher_round.xml'), '<adaptive-icon/>');
+    write(join(base, 'src-tauri/gen/android/app/src/main/res/mipmap-anydpi-v26/ic_launcher_round.xml'), TEMPLATE_ROUND);
     write(join(base, 'src-tauri/gen/android/app/src/main/java/com/lithic/app/MainActivity.kt'), templateActivity);
     write(join(base, 'src-tauri/android/MainActivity.kt'), readFileSync(join(REPO, 'src-tauri/android/MainActivity.kt'), 'utf8'));
+    write(join(base, 'src-tauri/android/LithicBridge.kt'), readFileSync(join(REPO, 'src-tauri/android/LithicBridge.kt'), 'utf8'));
   };
   const write = (path, text) => {
     mkdirSync(dirname(path), { recursive: true });
@@ -230,13 +285,26 @@ function selfTest() {
   const first = patchAndroid(base);
   check('copies the icon set over the template', readFileSync(join(base, 'src-tauri/gen/android/app/src/main/res/mipmap-mdpi/ic_launcher.png'), 'utf8') === 'ours-mdpi');
   check('brings the files the template does not have', existsSync(join(base, 'src-tauri/gen/android/app/src/main/res/values/ic_launcher_background.xml')));
-  check('drops the template round definition so the round icon resolves to ours', first.removedRound === 1 && !existsSync(join(base, 'src-tauri/gen/android/app/src/main/res/mipmap-anydpi-v26/ic_launcher_round.xml')));
+  check(
+    'gives the round path our adaptive definition instead of the template placeholder',
+    first.roundIcon === true &&
+      readFileSync(join(base, 'src-tauri/gen/android/app/src/main/res/mipmap-anydpi-v26/ic_launcher_round.xml'), 'utf8') ===
+        ADAPTIVE_ICON
+  );
   check('installs the tracked activity', readFileSync(join(base, 'src-tauri/gen/android/app/src/main/java/com/lithic/app/MainActivity.kt'), 'utf8').includes('setOnApplyWindowInsetsListener'));
   check('reports replacing the activity', first.replaced === true);
+  check(
+    'installs the document bridge beside the activity',
+    first.bridgeReplaced === true &&
+      readFileSync(join(base, 'src-tauri/gen/android/app/src/main/java/com/lithic/app/LithicBridge.kt'), 'utf8').includes(
+        'pickDocuments'
+      )
+  );
 
   const second = patchAndroid(base);
   check('is idempotent for the activity', second.replaced === false);
-  check('is idempotent for the round definition', second.removedRound === 0);
+  check('is idempotent for the round definition', second.roundIcon === false);
+  check('is idempotent for the bridge', second.bridgeReplaced === false);
 
   // The layout this patch must not assume: a project whose packages and source set differ from
   // the one this file was written against still gets its icons and its activity, because both
@@ -264,6 +332,23 @@ function selfTest() {
   write(join(base, 'src-tauri/android/MainActivity.kt'), 'package com.other.app\n\nclass MainActivity : TauriActivity()\n');
   const mismatch = throws(() => patchAndroid(base));
   check('refuses an identifier that no longer matches', mismatch !== null && mismatch.includes('com.lithic.app'), mismatch ?? '');
+
+  // The bridge's package and the app's are one fact, checked rather than assumed: the Rust side
+  // registers the plugin by a package it holds as a constant, so a bridge left in the old
+  // package after an identifier change would be a class nothing can find.
+  seed();
+  write(join(base, 'src-tauri/android/LithicBridge.kt'), 'package com.other.app\n\nclass LithicBridge\n');
+  const bridgeMismatch = throws(() => patchAndroid(base));
+  check(
+    'refuses a bridge in a package the app is not in',
+    bridgeMismatch !== null && bridgeMismatch.includes('LithicBridge.kt'),
+    bridgeMismatch ?? ''
+  );
+
+  seed();
+  rmSync(join(base, 'src-tauri/android/LithicBridge.kt'), { force: true });
+  const noBridge = throws(() => patchAndroid(base));
+  check('refuses a run with no tracked bridge', noBridge !== null && noBridge.includes('document bridge'), noBridge ?? '');
 
   seed();
   rmSync(join(base, 'src-tauri/icons'), { recursive: true, force: true });
@@ -294,8 +379,9 @@ function main() {
     const done = patchAndroid(root);
     console.log(
       `Android project patched: ${done.icons} icon files (${done.bytes} bytes), ` +
-        `activity ${done.replaced ? 'replaced' : 'already current'}` +
-        (done.removedRound ? ', template round icon dropped' : '')
+        `activity ${done.replaced ? 'replaced' : 'already current'}, ` +
+        `bridge ${done.bridgeReplaced ? 'installed' : 'already current'}` +
+        (done.roundIcon ? ', round adaptive icon written' : '')
     );
     return 0;
   } catch (error) {

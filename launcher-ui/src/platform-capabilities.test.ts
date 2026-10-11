@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { readPlatformCapabilities } from './platform-capabilities.ts';
+import { opensInstanceInBrowser, readPlatformCapabilities } from './platform-capabilities.ts';
 
 /**
  * Run with a Tauri bridge in place, and take it away again.
@@ -42,6 +42,22 @@ test('the app asks the platform, and reads every answer it gives', async () => {
       assert.equal(capabilities?.local_files, false);
     }
   );
+});
+
+test('a platform whose webview cannot answer a login gets the browser instead of the window', () => {
+  // The phone: no vault, no challenge handling, so the address goes to the platform's own
+  // browser rather than into a window that would end on an error page.
+  assert.equal(opensInstanceInBrowser('tauri', { install: false, launch_entry: null, instance_auth: false }), true);
+  // Every desktop the app ships to hosts the instance in its own window, which is the whole
+  // point of the bookmark list there.
+  assert.equal(opensInstanceInBrowser('tauri', { install: true, launch_entry: 'start-menu', instance_auth: true }), false);
+  // An app that did not answer keeps the behaviour it has always had.
+  assert.equal(opensInstanceInBrowser('tauri', { install: false, launch_entry: null }), false);
+  assert.equal(opensInstanceInBrowser('tauri', null), false);
+  // Nothing but the app has a window to host an instance in: a page navigates its own tab,
+  // and the flag is not even asked of it.
+  assert.equal(opensInstanceInBrowser('webapp', { install: false, launch_entry: null, instance_auth: false }), false);
+  assert.equal(opensInstanceInBrowser('self-host', { install: false, launch_entry: null, instance_auth: false }), false);
 });
 
 test('every page with no process behind it is never asked', async () => {

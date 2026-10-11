@@ -27,6 +27,11 @@
 //! so nothing offers a capability this platform does not have, and a unit test fails if
 //! a flag and its implementation ever disagree.
 
+// Public because `lib.rs` names it when it registers the bridge plugin: the plugin is this
+// module's Kotlin half, and registering it is the one call that cannot be routed by platform
+// name (it exists everywhere, and owns nothing off Android).
+pub mod android;
+mod documents;
 mod linux;
 mod macos;
 #[cfg(windows)]
@@ -39,6 +44,16 @@ mod windows;
 pub(crate) use windows::write_shell_link;
 
 use std::path::{Path, PathBuf};
+
+use tauri_plugin_fs::FilePath;
+
+/// A document this app may read and write, named the way the platform names it.
+///
+/// A path on every desktop, and a `content://` reference on Android, where the platform's own
+/// chooser is asked for the file and the app keeps that grant across restarts. The launcher
+/// treats it as an opaque string either way: it is what a recents row carries and what a save is
+/// aimed at, and only this module knows which shape it is.
+pub type Document = FilePath;
 
 /// The operating system this build is running on.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -107,39 +122,48 @@ pub struct Capabilities {
     /// before it offers a backup, the same way it asks `install` before it offers an
     /// install.
     pub git_sync: bool,
-    /// This build carries the credential vault: an instance login can be saved, listed,
-    /// and lent to an instance load.
+    /// This build carries the credential vault: an instance login can be saved, listed, and
+    /// lent to an instance load.
     ///
-    /// False on Android alone, and this time the reason is the platform rather than a
-    /// dependency. A phone already has somewhere a password goes: the WebView asks for
-    /// HTTP Basic credentials itself and keeps what was typed in its own store for the
-    /// rest of the session, which is the arrangement the published PWA has through the
-    /// browser. What is left of the vault's purpose on a phone is the cross-origin probe
-    /// of a protected instance, and that is not worth a second, app-owned copy of a
-    /// secret the platform is already holding. So the launcher draws none of it there:
-    /// no manager, no PIN prompt, and no key on a bookmark row.
+    /// False on Android alone, and the reason is where an instance is opened there rather than
+    /// what the phone can do. A bookmarked instance is handed to the platform's own browser on
+    /// Android (`instance_auth`), because the webview implements no `onReceivedHttpAuthRequest`
+    /// and cancels the challenge: that browser has its own password manager, which is where a
+    /// login for a page the app does not host belongs. Offering the vault there too would be a
+    /// second, app-owned copy of a secret for a page the app never shows, with its own PIN to
+    /// set and forget. Windows keeps the vault because there the app *is* the window the
+    /// instance is opened in (`webview_auth.rs` answers its challenges).
     ///
-    /// Stated as this flag rather than as an `android` test in the page, for the reason
-    /// the three webview flags above are: the launcher asks what this build can do
-    /// instead of guessing about a platform it cannot see.
+    /// Stated as this flag rather than as an `android` test in the page, for the reason the
+    /// three webview flags above are: the launcher asks what this build can do instead of
+    /// guessing about a platform it cannot see.
     pub credentials: bool,
-    /// This platform hands the app real files: a path it can read and write, and a picker
-    /// that answers with one.
+    /// This app has documents of its own: the picker hands one over and the app can read and
+    /// write it.
     ///
-    /// False on Android alone, and it is the phone's file model rather than a missing
-    /// feature. The picker there does not hand back a path: the Storage Access Framework
-    /// returns a document reference (`content://...`), which `tauri-plugin-dialog` carries
-    /// as `FilePath::Url` and `into_path()` refuses with "URL is not a valid path"
-    /// (`tauri-plugin-fs`, `error.rs`) -- the message a phone user saw when the launcher
-    /// asked the app for a save path this platform cannot produce.
-    ///
-    /// So the launcher asks this before it settles where a save lands, and on Android the
-    /// answer is the app's own storage: the same fallback a browser without the File
-    /// System Access API uses (`browser-storage.ts`), with the version history as the copy
-    /// that can be taken off the device, and the browser's own file input as the way a
-    /// `.lith` comes in. What Android gains from it is a save that works; what it does not
-    /// have yet is a `.lith` written to a folder the user picks.
+    /// True on every platform this app ships to, and the flag is kept because the two halves it
+    /// used to bundle have come apart. It once meant "a path": false on Android, whose chooser
+    /// answers with a `content://` document reference rather than a path, which left the launcher
+    /// storing the document in the app's own browser storage instead. A phone now opens and saves
+    /// a real document the same way a desktop does, through this app's own picker and its own
+    /// write, so what the launcher asks is whether there is anywhere for a document to go at all.
+    /// Whether that document is a path or a granted reference is `references_not_paths`, which is
+    /// the question the two commands that touch the file system actually need answered.
     pub local_files: bool,
+    /// This platform's own webview can answer a bookmarked instance's login challenge, so the
+    /// app's window can host one.
+    ///
+    /// False on Android alone, and it is the webview rather than a missing feature: the
+    /// Android webview implements no `onReceivedHttpAuthRequest` (wry's own client says the
+    /// same), so a challenge from an instance behind a login is cancelled, and the window
+    /// lands on Chromium's own error page with the launcher that handed it over already gone.
+    ///
+    /// The launcher reads this before it hands a bookmarked address to its own window, and
+    /// where it is false the address goes to the platform's browser instead
+    /// (`platform::open_in_browser`), which is where the login already lives and where the
+    /// instance can be kept as an app of its own. Stated as a flag so the page asks rather
+    /// than tests for a platform, like every other row of this table.
+    pub instance_auth: bool,
     /// Opening a `.lith` from the file manager can reach this app.
     pub file_associations: bool,
     /// The folder a file was installed into can be opened in the platform's own file
@@ -170,13 +194,15 @@ pub fn capabilities() -> Capabilities {
         // it reports is whether libgit2 is in this build, and on every target but Android
         // it is.
         git_sync: cfg!(not(target_os = "android")),
-        // The second of the two answers that follow a target rather than a platform name.
-        // Unlike `git_sync` the code is in this build either way: what the flag decides is
-        // what the launcher offers, which is why it is the same shape as the flag above.
+        // The two answers that follow where a document can go. See `Capabilities::credentials`
+        // for why the vault stops at the platform that hands instances to a browser, and
+        // `Capabilities::local_files` for why the document flag no longer stops at Android.
         credentials: cfg!(not(target_os = "android")),
-        // The third answer that follows a target, and the one the launcher acts on before
-        // any file is written. See `Capabilities::local_files` for what Android does instead.
-        local_files: local_files_for(os),
+        local_files: true,
+        // A phone's webview cannot answer a Basic challenge (see `Capabilities::instance_auth`),
+        // so an instance behind a login is handed to the platform's browser there instead of
+        // being opened in this app's own window.
+        instance_auth: cfg!(not(target_os = "android")),
         // The three webview capabilities below are the flag side of the `#[cfg(windows)]`
         // implementations in their own modules. They are written as the same condition
         // rather than as a bare `true` so that implementing one on Linux is a change in
@@ -187,28 +213,72 @@ pub fn capabilities() -> Capabilities {
     }
 }
 
-/// Whether the process's own platform hands the app real file paths.
-///
-/// The one answer the file commands ask before they reach for a path, so a command Android
-/// cannot satisfy says what is true rather than surfacing a plugin's own wording (see
-/// `Capabilities::local_files`).
-pub fn local_files() -> bool {
-    local_files_for(current())
-}
-
 /// Whether the install offer applies on this platform, for this copy.
 ///
 /// Separate from `capabilities()` so the pairing is a function a test can drive: the offer
 /// answers the platform's question and the placement question, and a copy a package manager
 /// owns must lose it even on a platform where the offer exists.
-/// Whether this platform hands the app real file paths.
+/// Which documents the user chose, or `None` where the picker was dismissed.
 ///
-/// Android alone says no, and the reason is the platform's (`Capabilities::local_files`).
-/// Stated as a function of the platform rather than as a `cfg` so a test on any machine can
-/// ask what Android would answer.
-fn local_files_for(os: Os) -> bool {
-    !matches!(os, Os::Android)
+/// Android's answer is `android.rs` -- the platform's own chooser, whose grant this app keeps --
+/// and every desktop reaches the dialog plugin, which is a native panel on each of them
+/// (`documents.rs`). The answer is a reference rather than a path on the phone and a path on
+/// every desktop, which is what `Document` means.
+pub fn pick_documents(app: &tauri::AppHandle, multiple: bool) -> Result<Option<Vec<Document>>, String> {
+    match current() {
+        Os::Android => android::pick(app, multiple),
+        _ => documents::pick(app, multiple),
+    }
 }
+
+/// Ask where a new document should go, and answer with the one that was made.
+pub fn pick_save_document(
+    app: &tauri::AppHandle,
+    suggested_name: &str,
+) -> Result<Option<Document>, String> {
+    match current() {
+        Os::Android => android::pick_save(app, suggested_name),
+        _ => documents::pick_save(app, suggested_name),
+    }
+}
+
+/// A document's text, read by whichever side of this table can reach it.
+pub fn read_document(app: &tauri::AppHandle, document: &str) -> Result<String, String> {
+    match current() {
+        Os::Android => android::read(app, document),
+        _ => documents::read(document),
+    }
+}
+
+/// Replace a document's text.
+pub fn write_document(app: &tauri::AppHandle, document: &str, text: &str) -> Result<(), String> {
+    match current() {
+        Os::Android => android::write(app, document, text),
+        _ => documents::write(document, text),
+    }
+}
+
+/// The name a row shows for a document.
+pub fn document_name(app: &tauri::AppHandle, document: &str) -> String {
+    match current() {
+        Os::Android => android::name(app, document),
+        _ => documents::name(document),
+    }
+}
+
+/// Whether a pick on this platform answers with a reference rather than a path.
+///
+/// True on Android alone, where the platform's chooser hands over a `content://` URI whose grant
+/// this app keeps, and false everywhere a document is a path. `lib.rs` reads it before it treats
+/// a document as a file on disk, which is a test a reference would always fail.
+pub fn references_not_paths() -> bool {
+    match current() {
+        Os::Android => android::references_not_paths(),
+        _ => false,
+    }
+}
+
+
 
 fn install_supported(os: Os, package_managed: bool) -> bool {
     matches!(os, Os::Windows | Os::Linux) && !package_managed
@@ -566,14 +636,21 @@ pub fn launched_from_install() -> bool {
 }
 
 /// Open an http(s) address in the platform's own browser.
-pub fn open_in_browser(url: &str) -> Result<(), String> {
+///
+/// The app handle is a parameter because one platform has nothing to spawn for this: Android's
+/// browser is an activity the platform starts on the app's behalf, which is a plugin call rather
+/// than a shell command (`tauri-plugin-opener`).
+pub fn open_in_browser(app: &tauri::AppHandle, url: &str) -> Result<(), String> {
     #[cfg(windows)]
     {
+        // Android's answer is the only one that reads the handle: every desktop spawns.
+        let _ = app;
         windows::open_in_browser(url)
     }
     #[cfg(not(windows))]
     {
         match current() {
+            Os::Android => android::open_in_browser(app, url),
             Os::Macos => macos::open_in_browser(url),
             _ => linux::open_in_browser(url),
         }
@@ -733,7 +810,22 @@ mod tests {
         // the git half can be left out, and it is written the same way the three above are
         // so that putting libgit2 back on Android is a change in two visible places.
         assert_eq!(caps.git_sync, cfg!(not(target_os = "android")), "the git half follows git2, which Android does not link");
-        assert_eq!(caps.credentials, cfg!(not(target_os = "android")), "the vault follows the platform's own password store, which the phone has");
+        // The vault stops at the platform that hands an instance to a browser rather than
+        // hosting it: see `Capabilities::credentials`. Its two companions below are the flags
+        // that make that handoff work.
+        assert_eq!(
+            caps.credentials,
+            cfg!(not(target_os = "android")),
+            "the vault is offered where this app is the window an instance is opened in"
+        );
+        assert_eq!(
+            caps.instance_auth,
+            cfg!(not(target_os = "android")),
+            "the phone's webview cancels a Basic challenge rather than answering it"
+        );
+        // And the flag that no longer stops at the phone: a document can go somewhere on every
+        // platform this app ships to, whether it is a path or a granted reference.
+        assert!(caps.local_files, "every platform this app ships to can open and save a document");
     }
 
     /// The offer exists on the two platforms that install, and loses to a package manager
@@ -914,14 +1006,6 @@ mod tests {
         assert_eq!(launch_entry_kind(Os::Linux), Some("application-menu"));
         assert_eq!(launch_entry_kind(Os::Macos), None, "a dmg drag is the macOS install");
         assert_eq!(launch_entry_kind(Os::Android), None, "the installed package is the phone's launch entry");
-        assert!(local_files_for(Os::Windows));
-        assert!(local_files_for(Os::Linux));
-        assert!(local_files_for(Os::Macos));
-        assert!(local_files_for(Os::Other), "an unknown platform keeps the file behaviour rather than losing it");
-        assert!(
-            !local_files_for(Os::Android),
-            "a phone picker answers with a document, not a path, so the launcher saves into the app's own storage there"
-        );
         assert_eq!(from_name("windows"), Os::Windows);
         assert_eq!(from_name("linux"), Os::Linux);
         assert_eq!(from_name("macos"), Os::Macos);

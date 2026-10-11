@@ -2,7 +2,6 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::{Mutex, OnceLock};
 use tauri::Emitter;
-use tauri_plugin_dialog::DialogExt;
 
 mod credentials;
 mod webview_auth;
@@ -53,24 +52,17 @@ fn get_cli_args() -> Vec<String> {
 }
 
 #[tauri::command]
-fn read_lith_path(path: String) -> Result<LithFile, String> {
-    let path = PathBuf::from(path);
-    let text = fs::read_to_string(&path).map_err(|error| error.to_string())?;
+fn read_lith_path(app: tauri::AppHandle, path: String) -> Result<LithFile, String> {
+    // Through the platform table rather than `fs::read_to_string`, because on a phone the string
+    // is a granted `content://` reference rather than a path, and reading one means asking the
+    // platform's own resolver for a descriptor (`platform::read_document`). The reference is
+    // carried back out unchanged: it is what a recents row holds and what a save is aimed at.
+    let text = platform::read_document(&app, &path)?;
     Ok(LithFile {
-        name: path.file_name().unwrap_or_default().to_string_lossy().into_owned(),
-        path: path.to_string_lossy().into_owned(),
+        name: platform::document_name(&app, &path),
+        path,
         text,
     })
-}
-
-/// Default dialog starting point: the installed bundle folder when the app
-/// has been installed (Documents\Lithic), else the program's own folder (the
-/// folder holding the bundle on macOS) so thumb-drive bundles start where the
-/// liths live.
-fn dialog_start_dir() -> Option<PathBuf> {
-    platform::install_dir()
-        .filter(|dir| dir.is_dir())
-        .or_else(platform::program_dir)
 }
 
 // The dialog commands are async, and that is load-bearing: a sync command runs
@@ -86,25 +78,14 @@ fn dialog_start_dir() -> Option<PathBuf> {
 // for the minutes in between.
 #[tauri::command]
 async fn open_lith_file(app: tauri::AppHandle) -> Result<Option<LithFile>, String> {
-    let (sender, receiver) = std::sync::mpsc::channel();
-    let mut picker = app
-        .dialog()
-        .file()
-        .add_filter("Lithic files", &["lith"])
-        .add_filter("Text & data files", &["md", "txt", "tid", "json", "ipynb", "html", "htm"])
-        .add_filter("All files", &["*"]);
-    if let Some(dir) = dialog_start_dir() {
-        picker = picker.set_directory(dir);
-    }
-    picker.pick_file(move |file| {
-        let _ = sender.send(file);
-    });
-    let Some(file) = receiver.recv().ok().flatten() else { return Ok(None); };
-    let path = file.into_path().map_err(|error| error.to_string())?;
-    let text = fs::read_to_string(&path).map_err(|error| error.to_string())?;
+    let Some(pick) = platform::pick_documents(&app, false)?.and_then(|mut picks| picks.pop()) else {
+        return Ok(None);
+    };
+    let path = pick.to_string();
+    let text = platform::read_document(&app, &path)?;
     Ok(Some(LithFile {
-        name: path.file_name().unwrap_or_default().to_string_lossy().into_owned(),
-        path: path.to_string_lossy().into_owned(),
+        name: platform::document_name(&app, &path),
+        path,
         text,
     }))
 }
@@ -124,36 +105,21 @@ struct LithPick {
 /// Multi-select mount: several liths in one trip through the dialog.
 #[tauri::command]
 async fn open_lith_files(app: tauri::AppHandle) -> Result<Option<Vec<LithPick>>, String> {
-    // A platform with no file paths cannot answer this at all: the picker returns a document
-    // reference rather than a path (`platform::Capabilities::local_files`). The launcher reads
-    // that capability and opens through the browser's own file input on such a platform, so
-    // this guard is the second half of the answer and not the only one.
-    if !platform::local_files() {
-        return Err("Android has no file path to open from.".to_string());
-    }
-    let (sender, receiver) = std::sync::mpsc::channel();
-    let mut picker = app
-        .dialog()
-        .file()
-        .add_filter("Lithic files", &["lith"])
-        .add_filter("Text & data files", &["md", "txt", "tid", "json", "ipynb", "html", "htm"])
-        .add_filter("All files", &["*"]);
-    if let Some(dir) = dialog_start_dir() {
-        picker = picker.set_directory(dir);
-    }
-    picker.pick_files(move |files| {
-        let _ = sender.send(files);
-    });
-    let Some(files) = receiver.recv().ok().flatten() else { return Ok(None); };
-    let mut picks = Vec::with_capacity(files.len());
-    for file in files {
-        let path = file.into_path().map_err(|error| error.to_string())?;
-        picks.push(LithPick {
-            name: path.file_name().unwrap_or_default().to_string_lossy().into_owned(),
-            path: path.to_string_lossy().into_owned(),
-        });
-    }
-    Ok(Some(picks))
+    let Some(picks) = platform::pick_documents(&app, true)? else {
+        return Ok(None);
+    };
+    Ok(Some(
+        picks
+            .into_iter()
+            .map(|pick| {
+                let path = pick.to_string();
+                LithPick {
+                    name: platform::document_name(&app, &path),
+                    path,
+                }
+            })
+            .collect(),
+    ))
 }
 
 #[tauri::command]
@@ -163,46 +129,20 @@ async fn save_lith_file(
     suggested_name: String,
     path: Option<String>,
 ) -> Result<SavedLithFile, String> {
-    // Same reason as the picker above: there is no path to save into on a platform whose
-    // picker answers with a document reference, and the launcher saves into the app's own
-    // storage there instead of asking. Without this the failure would be the plugin's own
-    // wording for a path that cannot exist ("URL is not a valid path"), which is what a
-    // phone user saw before the capability existed.
-    if !platform::local_files() {
-        return Err("Android has no file path to save into.".to_string());
-    }
-
-    // An explicit path skips the dialog entirely (a wiki saving over itself).
-    let selected = match path {
-        Some(path) => Some(PathBuf::from(path)),
+    // An explicit reference skips the picker entirely (a wiki saving over itself).
+    let document = match path {
+        Some(path) => path,
         None => {
-            let (sender, receiver) = std::sync::mpsc::channel();
-            let mut picker = app
-                .dialog()
-                .file()
-                .set_file_name(&suggested_name)
-                .add_filter("Lithic files", &["lith"]);
-            if let Some(dir) = dialog_start_dir() {
-                picker = picker.set_directory(dir);
-            }
-            picker.save_file(move |file| {
-                let _ = sender.send(file);
-            });
-            receiver
-                .recv()
-                .ok()
-                .flatten()
-                .map(|file| file.into_path())
-                .transpose()
-                .map_err(|error| error.to_string())?
+            let Some(picked) = platform::pick_save_document(&app, &suggested_name)? else {
+                return Err("Save cancelled".to_string());
+            };
+            picked.to_string()
         }
     };
-
-    let Some(path) = selected else { return Err("Save cancelled".to_string()); };
-    fs::write(&path, text).map_err(|error| error.to_string())?;
+    platform::write_document(&app, &document, &text)?;
     Ok(SavedLithFile {
-        name: path.file_name().unwrap_or_default().to_string_lossy().into_owned(),
-        path: path.to_string_lossy().into_owned(),
+        name: platform::document_name(&app, &document),
+        path: document,
     })
 }
 
@@ -210,12 +150,14 @@ async fn save_lith_file(
 /// the scratch file types: .md/.txt/.tid/.json/.ipynb). Only existing paths may be
 /// overwritten — new files go through save_lith_file's dialog.
 #[tauri::command]
-fn write_text_path(path: String, text: String) -> Result<(), String> {
-    let path = PathBuf::from(&path);
-    if !path.is_file() {
-        return Err(format!("Refusing to overwrite non-file path: {}", path.display()));
+fn write_text_path(app: tauri::AppHandle, path: String, text: String) -> Result<(), String> {
+    // Only where the reference is a path this process can look at. A phone hands over a document
+    // the platform has already granted, which is one that exists by definition, and `is_file` on
+    // a `content://` reference answers false for every one of them.
+    if !platform::references_not_paths() && !Path::new(&path).is_file() {
+        return Err(format!("Refusing to overwrite non-file path: {path}"));
     }
-    fs::write(&path, text).map_err(|error| error.to_string())
+    platform::write_document(&app, &path, &text)
 }
 
 /// Copy a Lith into a folder that is already backed up.
@@ -2477,6 +2419,11 @@ fn set_sync_folder_in(dir: &Path, picked: Option<&Path>) -> Result<(), String> {
 #[cfg(not(any(target_os = "android", test)))]
 #[tauri::command]
 async fn pick_sync_folder(app: tauri::AppHandle, current: Option<String>) -> Result<Option<String>, String> {
+    // The trait lives here rather than at the top of the file because this is the only function
+    // left that opens a dialog itself: every other picker is `platform::pick_*`, whose desktop
+    // half reaches this plugin from `platform/documents.rs`. A top-level import would be unused
+    // in the test build, which is what this function is `cfg`-ed out of.
+    use tauri_plugin_dialog::DialogExt;
     let (sender, receiver) = std::sync::mpsc::channel();
     let mut picker = app.dialog().file();
     // Opens where the dialog already points, so changing the folder is a step from the
@@ -2683,11 +2630,11 @@ fn install_update_from(data: &serde_json::Value, built: &str) -> InstallUpdate {
 /// http(s) is accepted, so a page's own anchors cannot reach this to open a
 /// local file or a shell scheme.
 #[tauri::command]
-fn open_external(url: String) -> Result<(), String> {
+fn open_external(app: tauri::AppHandle, url: String) -> Result<(), String> {
     if !(url.starts_with("https://") || url.starts_with("http://")) {
         return Err("Only http and https addresses can be opened".to_string());
     }
-    platform::open_in_browser(&url)
+    platform::open_in_browser(&app, &url)
 }
 
 // --- Credential vault --------------------------------------------------------
@@ -3119,6 +3066,13 @@ pub fn run() {
 
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_fs::init())
+        .plugin(tauri_plugin_opener::init())
+        // This project's own Android bridge: the phone's picker and the webview's answer to an
+        // authentication challenge, both Kotlin (see `platform/android.rs`). Registered on every
+        // platform, where it owns nothing, so the gate that runs on Windows compiles the routing
+        // around it.
+        .plugin(platform::android::plugin())
         .manage(StartupFile(Mutex::new(startup_file)))
         .manage(VaultState::new())
         .setup(|app| {

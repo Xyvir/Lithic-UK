@@ -32,10 +32,10 @@ window.__LITHIC_HOSTED_IN_APP__ = hostedInApp(window.location);
 /*
  * What the process behind this page can do, read before the launcher mounts rather than from
  * inside it: the answer settles where saves land (`resolveStorageMode`), and the storage mode
- * is a `const` at the component's own boot. On the phone that answer is the difference
- * between a save that works and a picker returning a document reference the app cannot turn
- * into a path (`Capabilities::local_files`). Mounting is deferred by one local command, and
- * nothing else waits on it.
+ * is a `const` at the component's own boot, and on a phone that answer is what lets the app use
+ * its own picker and its own write rather than the browser's file powers
+ * (`Capabilities::local_files`). Mounting is deferred by one local command, and nothing else
+ * waits on it.
  */
 async function start() {
   const platformCapabilities = await readPlatformCapabilities(mode);

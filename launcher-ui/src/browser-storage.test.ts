@@ -33,11 +33,11 @@ test('a platform with files of its own is never storage-only, whatever the host 
   assert.equal(resolveStorageMode('tauri', {}, 'index-db'), 'file');
 });
 
-test('a platform with no file of its own gets the storage fallback, app or not', () => {
-  // Android is the one app mode that answers no (`Capabilities::local_files` in
-  // `src-tauri/src/platform/mod.rs`): its picker hands back a document reference rather than
-  // a path, so a save routed to a file cannot land. The launcher keeps the document in the
-  // app's own storage instead, exactly as a browser with no File System Access API does.
+test('a process that cannot hold a document falls back to browser storage, app or not', () => {
+  // No platform this app ships to answers `Capabilities::local_files` with false any more, but
+  // the branch stays because the answer is the process's and not this file's assumption: a build
+  // whose own picker and write cannot place a document keeps the document in browser storage,
+  // exactly as a browser with no File System Access API does.
   assert.equal(resolveStorageMode('tauri', picker, null, false), 'index-db');
   assert.equal(resolveStorageMode('tauri', picker, undefined, false), 'index-db');
   // A self-host instance is the same shape of answer: no local files, no file saves.
@@ -45,7 +45,7 @@ test('a platform with no file of its own gets the storage fallback, app or not',
   // The browser's own answers are untouched, having never had a file to lose.
   assert.equal(resolveStorageMode('webapp', picker, null, false), 'file');
   assert.equal(resolveStorageMode('webapp', {}, null, false), 'index-db');
-  // And a platform with files is unchanged, which is what the default is for.
+  // And a process with documents is unchanged, which is what the default is for.
   assert.equal(resolveStorageMode('tauri', {}, null), 'file');
   assert.equal(resolveStorageMode('tauri', {}, null, true), 'file');
 });

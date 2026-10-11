@@ -27,11 +27,50 @@ export interface PlatformCapabilities {
   /** This build carries the credential vault. */
   credentials?: boolean;
   /**
-   * This platform hands the app real files: a path it can read and write, and a picker that
-   * answers with one. False on Android, where the picker answers with a document reference
-   * instead, and where the launcher therefore saves into the app's own storage.
+   * This app has documents of its own: its picker hands one over and its own process can read
+   * and write it.
+   *
+   * The key keeps its old name and has lost its old meaning. It once asked whether that document
+   * is a *path*, which Android could not answer: its picker returns a granted `content://`
+   * reference instead, and the launcher fell back to storing the document in the browser's own
+   * storage. A phone now opens and saves a real document the same way a desktop does, through
+   * this app's own picker and its own write, so what is asked is whether there is anywhere for a
+   * document to go at all. False would mean a build with no document access whatever, which is
+   * no platform this app ships to; the flag is read as `!== false` so a report that did not
+   * arrive keeps the behaviour that has always been. See `Capabilities::local_files` in
+   * `src-tauri/src/platform/mod.rs`.
    */
   local_files?: boolean;
+  /**
+   * This platform's own webview can answer a bookmarked instance's login challenge, so the
+   * app's window can host one.
+   *
+   * False on Android: the webview there cancels the challenge rather than answering it, so a
+   * window handed an instance behind a login lands on the browser's own error page with the
+   * launcher already gone. See `opensInstanceInBrowser` for what the launcher does instead.
+   */
+  instance_auth?: boolean;
+}
+
+/**
+ * Whether a bookmarked instance opens in this window or in the platform's own browser.
+ *
+ * Two questions, and neither of them is a preference. Only the app has a window of its own to
+ * host an instance in (`mode === 'tauri'`); every browser page, which is the published PWA, an
+ * instance's own launcher and a shim alike, navigates the tab it is already in, and that tab
+ * *is* the user's browser and is where that instance's login lives. And an app whose webview cannot answer the
+ * instance's login challenge (see `instance_auth`) must not be handed one at all: the
+ * navigation ends on a browser error page with the launcher gone, and the phone's own browser
+ * is both where the saved password is and where the instance can be kept as an app.
+ *
+ * A missing capability reads as the window hosting it, like every other field past `install`: a
+ * report that did not arrive must not take over the behaviour the app has always had.
+ */
+export function opensInstanceInBrowser(
+  mode: LauncherMode,
+  capabilities: PlatformCapabilities | null
+): boolean {
+  return mode === 'tauri' && capabilities?.instance_auth === false;
 }
 
 /**

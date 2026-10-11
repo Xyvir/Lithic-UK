@@ -37,6 +37,16 @@ tauri = { version = "2", features = [] }
 # The native open/save dialog, used from Rust only: the launcher never opens one
 # from JavaScript, so no capability entry is needed for it.
 tauri-plugin-dialog = "2"
+# The filesystem plugin, used from Rust only, and for one platform: a phone's picker answers
+# with a `content://` reference, and reading or writing one means asking the platform's own
+# ContentResolver for a file descriptor, which is what this crate's cross-platform `fs` handle
+# does. On the desktops it adds the `FilePath` type the rest of the crate already names; the
+# launcher never opens a file from JavaScript, so no capability entry is needed for it.
+tauri-plugin-fs = "2"
+# The platform's own intent, which is the only way an app can hand a page to a browser:
+# a phone has no `xdg-open` to spawn, so Android's `open_in_browser` is this plugin's
+# `ACTION_VIEW`. Used from Rust only, like the dialog above.
+tauri-plugin-opener = "2"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 dirs = "5"

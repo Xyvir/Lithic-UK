@@ -132,6 +132,45 @@ export function documentPickerTypes(
 }
 
 /**
+ * Whether this page's file input is filtered by MIME type rather than by extension.
+ *
+ * Android is the platform this exists for, and the behaviour was read out of the WebView rather
+ * than guessed: the file input's `accept` is turned into `EXTRA_MIME_TYPES` by mapping each
+ * extension through the platform's MIME table (`getValidTypes` in wry's own
+ * `RustWebChromeClient.kt`, and Chromium's equivalent), and an extension the table does not know
+ * is *dropped*. `application/json`, `text/plain` and `text/html` are known and survive, so the
+ * picker keeps them and greys out every `.lith` in the folder: this project's own document is
+ * the one type a phone cannot be told about, because no phone ships a MIME type for it.
+ *
+ * (The wildcard that answers it is written in the code below rather than here: a star, a slash
+ * and a star are the two characters that end a comment, so prose can only describe it.)
+ *
+ * Asked of the user agent because there is nothing else to ask. It is not this launcher's
+ * platform (`platform-capabilities` is the answer to that question) but the *browser's* own
+ * chooser, which is the platform's and is not reachable from a page.
+ */
+export function pickerFiltersByMimeType(
+  userAgent = typeof navigator === 'undefined' ? '' : navigator.userAgent
+): boolean {
+  return /Android/i.test(userAgent);
+}
+
+/**
+ * The `accept` attribute for the classic file input.
+ *
+ * The extension list where the platform honours extensions, which is where it also gives the
+ * user a useful filter; the any-type wildcard where it does not, because a filter that drops the
+ * file the app exists to open is worse than no filter at all. Every other picker here offers
+ * an "all files" rung beside the typed ones (the desktop dialog's own filter list), so a page
+ * that reaches this rung is not a page that can pick something the launcher cannot read.
+ */
+export function inputAcceptTypes(filtersByMimeType = pickerFiltersByMimeType()): string {
+  return filtersByMimeType
+    ? '*/*'
+    : '.lith,.html,.htm,.json,.md,.txt,.tid,.ipynb,text/plain,text/html';
+}
+
+/**
  * Whether a file name is a document this build advertises.
  *
  * This is the "advertise" half of the pin, and it is what a server listing is filtered
