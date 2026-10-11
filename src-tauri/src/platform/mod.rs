@@ -123,6 +123,23 @@ pub struct Capabilities {
     /// the three webview flags above are: the launcher asks what this build can do
     /// instead of guessing about a platform it cannot see.
     pub credentials: bool,
+    /// This platform hands the app real files: a path it can read and write, and a picker
+    /// that answers with one.
+    ///
+    /// False on Android alone, and it is the phone's file model rather than a missing
+    /// feature. The picker there does not hand back a path: the Storage Access Framework
+    /// returns a document reference (`content://...`), which `tauri-plugin-dialog` carries
+    /// as `FilePath::Url` and `into_path()` refuses with "URL is not a valid path"
+    /// (`tauri-plugin-fs`, `error.rs`) -- the message a phone user saw when the launcher
+    /// asked the app for a save path this platform cannot produce.
+    ///
+    /// So the launcher asks this before it settles where a save lands, and on Android the
+    /// answer is the app's own storage: the same fallback a browser without the File
+    /// System Access API uses (`browser-storage.ts`), with the version history as the copy
+    /// that can be taken off the device, and the browser's own file input as the way a
+    /// `.lith` comes in. What Android gains from it is a save that works; what it does not
+    /// have yet is a `.lith` written to a folder the user picks.
+    pub local_files: bool,
     /// Opening a `.lith` from the file manager can reach this app.
     pub file_associations: bool,
     /// The folder a file was installed into can be opened in the platform's own file
@@ -157,6 +174,9 @@ pub fn capabilities() -> Capabilities {
         // Unlike `git_sync` the code is in this build either way: what the flag decides is
         // what the launcher offers, which is why it is the same shape as the flag above.
         credentials: cfg!(not(target_os = "android")),
+        // The third answer that follows a target, and the one the launcher acts on before
+        // any file is written. See `Capabilities::local_files` for what Android does instead.
+        local_files: local_files_for(os),
         // The three webview capabilities below are the flag side of the `#[cfg(windows)]`
         // implementations in their own modules. They are written as the same condition
         // rather than as a bare `true` so that implementing one on Linux is a change in
@@ -167,11 +187,29 @@ pub fn capabilities() -> Capabilities {
     }
 }
 
+/// Whether the process's own platform hands the app real file paths.
+///
+/// The one answer the file commands ask before they reach for a path, so a command Android
+/// cannot satisfy says what is true rather than surfacing a plugin's own wording (see
+/// `Capabilities::local_files`).
+pub fn local_files() -> bool {
+    local_files_for(current())
+}
+
 /// Whether the install offer applies on this platform, for this copy.
 ///
 /// Separate from `capabilities()` so the pairing is a function a test can drive: the offer
 /// answers the platform's question and the placement question, and a copy a package manager
 /// owns must lose it even on a platform where the offer exists.
+/// Whether this platform hands the app real file paths.
+///
+/// Android alone says no, and the reason is the platform's (`Capabilities::local_files`).
+/// Stated as a function of the platform rather than as a `cfg` so a test on any machine can
+/// ask what Android would answer.
+fn local_files_for(os: Os) -> bool {
+    !matches!(os, Os::Android)
+}
+
 fn install_supported(os: Os, package_managed: bool) -> bool {
     matches!(os, Os::Windows | Os::Linux) && !package_managed
 }
@@ -876,6 +914,14 @@ mod tests {
         assert_eq!(launch_entry_kind(Os::Linux), Some("application-menu"));
         assert_eq!(launch_entry_kind(Os::Macos), None, "a dmg drag is the macOS install");
         assert_eq!(launch_entry_kind(Os::Android), None, "the installed package is the phone's launch entry");
+        assert!(local_files_for(Os::Windows));
+        assert!(local_files_for(Os::Linux));
+        assert!(local_files_for(Os::Macos));
+        assert!(local_files_for(Os::Other), "an unknown platform keeps the file behaviour rather than losing it");
+        assert!(
+            !local_files_for(Os::Android),
+            "a phone picker answers with a document, not a path, so the launcher saves into the app's own storage there"
+        );
         assert_eq!(from_name("windows"), Os::Windows);
         assert_eq!(from_name("linux"), Os::Linux);
         assert_eq!(from_name("macos"), Os::Macos);

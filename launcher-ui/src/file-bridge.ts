@@ -122,9 +122,14 @@ interface FilePickerHandle {
  * landed. The legacy `<a download>` fallback cannot (the browser never reports
  * whether a download finished) so it reports `started`, and callers must not
  * present that as a file that exists.
+ *
+ * `localFiles` is the process's own answer (`Capabilities::local_files`), passed in by the
+ * caller because this function is also reached from the app's own page: on a platform with
+ * no file paths there is no Rust write to confirm, and the browser's download is the only
+ * copy that can leave at all.
  */
-export async function saveTextVerifiably(fileName: string, text: string): Promise<SaveOutcome> {
-  const api = tauriApi();
+export async function saveTextVerifiably(fileName: string, text: string, localFiles = true): Promise<SaveOutcome> {
+  const api = localFiles ? tauriApi() : null;
   if (api) {
     try {
       // The native dialog *and* the write happen in Rust, so a returned path is
@@ -336,8 +341,14 @@ function shimBridge(): FileBridge {
   };
 }
 
-export function createFileBridge(): FileBridge {
-  const invoke = tauriApi()?.invoke;
+export function createFileBridge(localFiles = true): FileBridge {
+  const invoke = localFiles ? tauriApi()?.invoke : undefined;
+  // A platform with no file paths (Android) uses the browser's bridge even inside the app,
+  // for the reason `Capabilities::local_files` records: the Rust commands behind the app
+  // bridge need a path the picker there never returns, so opening goes through the
+  // browser's own file input and a download through its own download, which are the two
+  // file powers the platform does grant. The shim check below is unaffected: it is the
+  // secret in the document that decides, and an app page never carries one.
   if (!invoke) return hasShimBackend() ? shimBridge() : browserBridge();
   return {
     loadUrl: fetchText,

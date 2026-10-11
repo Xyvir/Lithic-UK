@@ -4,6 +4,7 @@
   import { LOCALE_TAG, copy, type LaunchEntry } from './copy';
   import { declaresBrowserOnly, handoffQuery, LAUNCHER_QUERY_PARAM, launcherReturn, withLauncherHandoff, type LauncherMode } from './mode';
   import { createFileBridge, tauriInvoke, tauriListen, saveTextVerifiably } from './file-bridge';
+  import type { PlatformCapabilities } from './platform-capabilities';
   import { orphanPill, orphanDownloadNote, type OrphanDownloadState } from './orphan-download';
   import { isScratchFileName, isHtmlMonolithName, tracksUnsavedEdits, resolveMountName, resolveScratchKind, type ScratchKind } from './scratch-editor';
   import { pwaInstall, promptPwaInstall, shouldRestoreInstallOfferOnReset } from './pwa-install';
@@ -64,7 +65,21 @@
   } from './pending-imports';
 
   export let mode: LauncherMode;
-  const files = createFileBridge();
+  /**
+   * What the process behind this page said it can do, read before this component mounted
+   * (`main.ts`). Null on every page with no process behind it, and null for an app whose
+   * report could not be read: both mean the platform's behaviour as it has always been,
+   * which is why every use below asks `!== false` rather than for truth.
+   */
+  export let platformCapabilities: PlatformCapabilities | null = null;
+  /**
+   * Whether this platform has files for the launcher to open and write. False on Android
+   * alone (`Capabilities::local_files`), where the picker returns a document reference
+   * rather than a path: the browser's own file input and download are the file powers that
+   * platform grants, and the document itself lives in the app's own storage.
+   */
+  const localFiles = platformCapabilities?.local_files !== false;
+  const files = createFileBridge(localFiles);
   /**
    * Where this page's saves can land: a real file, or (on a platform with no
    * File System Access API (Safari and Firefox, which is the whole of macOS
@@ -144,7 +159,11 @@
     : resolveStorageMode(
         mode,
         typeof window === 'undefined' ? undefined : (window as unknown as { showSaveFilePicker?: unknown }),
-        typeof window === 'undefined' ? null : storageModeOverride(window.location.search)
+        typeof window === 'undefined' ? null : storageModeOverride(window.location.search),
+        // A process with no files of its own gets the storage fallback, which is the phone:
+        // the app's storage holds the document, the version history is the copy that can be
+        // taken off it, and no save is ever routed to a path this platform cannot produce.
+        localFiles
       );
   /**
    * The index-db-only fallback: no Lith mounted here has a file behind it, so
@@ -320,7 +339,11 @@
     }
     let launchedFromInstall = false;
     try {
-      const capabilities = await tauriInvoke<{ install: boolean; launch_entry: LaunchEntry | null; git_sync?: boolean; credentials?: boolean }>('platform_capabilities');
+      // The boot-time report where there was one, and a fresh ask only where the first
+      // failed: what this command answers is a fact about the running process, which cannot
+      // change while the page lives (the rule every other boot constant here follows).
+      const capabilities =
+        platformCapabilities ?? (await tauriInvoke<PlatformCapabilities>('platform_capabilities'));
       platformInstallable = capabilities.install;
       platformEntry = capabilities.launch_entry;
       // A build with no git in it says so, and the backup control is then not drawn at
@@ -3873,7 +3896,7 @@
         return;
       }
       const fileName = `${name.replace(/\.lith$/i, '')}_cached.lith`;
-      const outcome = await saveTextVerifiably(fileName, cached);
+      const outcome = await saveTextVerifiably(fileName, cached, localFiles);
       if (outcome === 'cancelled') {
         // The user backed out of the save dialog: leave the row as they found it.
         setOrphanDownload(name, 'idle');

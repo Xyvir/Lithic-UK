@@ -2,6 +2,7 @@ import { mount } from 'svelte';
 import App from './App.svelte';
 import { LOCALE_TAG } from './copy';
 import { declaresBrowserOnly, hostedInApp, resolveMode } from './mode';
+import { readPlatformCapabilities } from './platform-capabilities';
 import './styles.css';
 
 const mode = resolveMode(window.location);
@@ -28,10 +29,23 @@ window.__LITHIC_HOSTED_IN_APP__ = hostedInApp(window.location);
 // /ephemeral API; webapp and Tauri use the paper-light public swarm.
 (window as any).__EPHEMERAL_MODE__ = mode === 'self-host' ? 'self-host' : 'paper-light';
 
-mount(App, {
-  target: document.getElementById('app')!,
-  props: { mode }
-});
+/*
+ * What the process behind this page can do, read before the launcher mounts rather than from
+ * inside it: the answer settles where saves land (`resolveStorageMode`), and the storage mode
+ * is a `const` at the component's own boot. On the phone that answer is the difference
+ * between a save that works and a picker returning a document reference the app cannot turn
+ * into a path (`Capabilities::local_files`). Mounting is deferred by one local command, and
+ * nothing else waits on it.
+ */
+async function start() {
+  const platformCapabilities = await readPlatformCapabilities(mode);
+  mount(App, {
+    target: document.getElementById('app')!,
+    props: { mode, platformCapabilities }
+  });
+}
+
+void start();
 
 // PWA offline support (the legacy launcher registers the same worker), and its
 // deliberate absence on a page the shim served: that server runs on the same

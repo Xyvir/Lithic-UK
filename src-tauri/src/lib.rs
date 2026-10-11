@@ -124,6 +124,13 @@ struct LithPick {
 /// Multi-select mount: several liths in one trip through the dialog.
 #[tauri::command]
 async fn open_lith_files(app: tauri::AppHandle) -> Result<Option<Vec<LithPick>>, String> {
+    // A platform with no file paths cannot answer this at all: the picker returns a document
+    // reference rather than a path (`platform::Capabilities::local_files`). The launcher reads
+    // that capability and opens through the browser's own file input on such a platform, so
+    // this guard is the second half of the answer and not the only one.
+    if !platform::local_files() {
+        return Err("Android has no file path to open from.".to_string());
+    }
     let (sender, receiver) = std::sync::mpsc::channel();
     let mut picker = app
         .dialog()
@@ -156,6 +163,15 @@ async fn save_lith_file(
     suggested_name: String,
     path: Option<String>,
 ) -> Result<SavedLithFile, String> {
+    // Same reason as the picker above: there is no path to save into on a platform whose
+    // picker answers with a document reference, and the launcher saves into the app's own
+    // storage there instead of asking. Without this the failure would be the plugin's own
+    // wording for a path that cannot exist ("URL is not a valid path"), which is what a
+    // phone user saw before the capability existed.
+    if !platform::local_files() {
+        return Err("Android has no file path to save into.".to_string());
+    }
+
     // An explicit path skips the dialog entirely (a wiki saving over itself).
     let selected = match path {
         Some(path) => Some(PathBuf::from(path)),

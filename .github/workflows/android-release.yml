@@ -192,9 +192,11 @@ jobs:
         run: node scripts/build-launcher.mjs
 
       # Same rule as the desktop jobs: regenerate the icon set from the one source image, so
-      # the launcher icon on the phone is the same drawing as the one in the taskbar. This
-      # has to run before `android init`, which copies the generated set into the Gradle
-      # project's resources.
+      # the launcher icon on the phone is the same drawing as the one in the taskbar. This has
+      # to run before the patch step below, which is what actually puts the set into the Gradle
+      # project: `android init` does NOT copy `src-tauri/icons/android/`, whatever an earlier
+      # version of this comment claimed. Measured on the installed APK: the icon resources were
+      # the template's, so the launcher icon was generic.
       - name: Generate Icons
         run: |
           if [ -f src/app-icon.png ]; then
@@ -241,6 +243,16 @@ jobs:
       # whether to overwrite anything.
       - name: Initialize the Android Project
         run: npm run tauri android init -- --ci
+
+      # The project init has just written is Tauri's template, and this is where the two things
+      # wrong with it are put right: the placeholder launcher icon, and an activity that draws
+      # the page under the system bars with nothing reserving their space. The order is the
+      # point rather than a detail: init rewrites that tree on every run, so the patch has to
+      # come after it and before the build. `scripts/patch-android.mjs` verifies each thing it
+      # wrote and exits non-zero with a specific message when it cannot, because the failure
+      # mode here is an APK that installs and simply looks wrong.
+      - name: Patch the Generated Android Project
+        run: node scripts/patch-android.mjs
 
       # `--apk` and not `--aab`: an AAB is a Play upload, not something a person can install,
       # and there is no Play listing to upload to yet. No `--split-per-abi` either, because

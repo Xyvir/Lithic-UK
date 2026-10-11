@@ -24,6 +24,11 @@
  *      is what the small Linux AppImage carries)
  *
  * Usage: npm run check:push   (or: node scripts/pre-push-check.mjs)
+ *  11. the Android patch (its wiring in the release job, and its own self-test): the APK is
+ *      built from Tauri's template, which has a placeholder launcher icon and an activity
+ *      that draws the page under the status bar, and the patch that answers both can only
+ *      be tested by what it asserts here — no device or SDK is needed to run it.
+ *
  * Exit 0 = safe to push; nonzero = fix before pushing.
  *
  * Requires: node, launcher-ui deps, VS Build Tools (MSVC) on PATH-adjacent
@@ -273,7 +278,54 @@ function checkCargoAvailable() {
   return probe.status === 0;
 }
 
+/**
+ * The Android project the release builds is Tauri's template, and two things in it are wrong
+ * for this project: the template's placeholder launcher icon, and an activity that draws the
+ * page under the system bars with nothing reserving their space. `scripts/patch-android.mjs`
+ * is the answer to both, and it has to run *after* `tauri android init` (which rewrites that
+ * tree on every run) and before the build. This pins the order rather than trusting a
+ * comment in the workflow, because both faults shipped twice with the intent already written
+ * down: the icon was the template's PNG, and the status bar overlapped the launcher's header.
+ *
+ * Returns null when the job patches what init wrote, else a failure message.
+ */
+function checkAndroidPatchWiring() {
+  const file = '.github/workflows/android-release.yml';
+  let doc;
+  try {
+    doc = loadYaml(fs.readFileSync(file, 'utf8'));
+  } catch (error) {
+    return `${file}: ${String(error.message).split(/\r?\n/)[0]}`;
+  }
+  const job = Object.values(doc.jobs || {}).find((candidate) =>
+    (candidate.steps || []).some((step) => /android init/.test(String(step.run ?? '')))
+  );
+  if (!job) {
+    return `${file}: no job initializes the Android project — point this check at whatever replaced it`;
+  }
+  const steps = job.steps || [];
+  const run = (step) => String(step.run ?? '');
+  const initIndex = steps.findIndex((step) => /android init/.test(run(step)));
+  const patchIndex = steps.findIndex((step) => /patch-android\.mjs/.test(run(step)));
+  if (patchIndex === -1) {
+    return `${file}: nothing runs scripts/patch-android.mjs, so the APK keeps the template's icon and a page under the status bar`;
+  }
+  if (patchIndex < initIndex) {
+    return `${file}: the Android patch runs before \`tauri android init\`, which rewrites the project it patches — move it after init`;
+  }
+  const buildIndex = steps.findIndex((step) => /android build/.test(run(step)));
+  if (buildIndex !== -1 && patchIndex > buildIndex) {
+    return `${file}: the Android patch runs after the build, which has already packaged the unpatched project`;
+  }
+  return null;
+}
+
 const spawned = [
+  {
+    name: 'android patch self-test',
+    cmd: 'node',
+    args: ['scripts/patch-android.mjs', '--self-test'],
+  },
   {
     name: 'launcher-ui unit tests',
     cmd: 'node',
@@ -354,6 +406,16 @@ if (triggerProblem === null) {
   failed = true;
   console.log('FAILED');
   console.log('  ' + triggerProblem);
+}
+
+process.stdout.write('> android patch wiring           ');
+const androidProblem = checkAndroidPatchWiring();
+if (androidProblem === null) {
+  console.log('OK');
+} else {
+  failed = true;
+  console.log('FAILED');
+  console.log('  ' + androidProblem);
 }
 
 if (checkCargoAvailable()) {

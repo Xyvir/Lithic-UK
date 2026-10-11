@@ -25,12 +25,29 @@ test('a browser without it falls back to browser storage', () => {
   assert.equal(resolveStorageMode('webapp', {}), 'index-db');
 });
 
-test('the desktop app and a self-host instance are never storage-only', () => {
+test('a platform with files of its own is never storage-only, whatever the host reports', () => {
   // Neither one needs a picker (Rust writes the file, WebDAV writes the
   // server's copy) so a missing API there is not the launcher's problem.
   assert.equal(resolveStorageMode('tauri', {}), 'file');
   assert.equal(resolveStorageMode('self-host', {}), 'file');
   assert.equal(resolveStorageMode('tauri', {}, 'index-db'), 'file');
+});
+
+test('a platform with no file of its own gets the storage fallback, app or not', () => {
+  // Android is the one app mode that answers no (`Capabilities::local_files` in
+  // `src-tauri/src/platform/mod.rs`): its picker hands back a document reference rather than
+  // a path, so a save routed to a file cannot land. The launcher keeps the document in the
+  // app's own storage instead, exactly as a browser with no File System Access API does.
+  assert.equal(resolveStorageMode('tauri', picker, null, false), 'index-db');
+  assert.equal(resolveStorageMode('tauri', picker, undefined, false), 'index-db');
+  // A self-host instance is the same shape of answer: no local files, no file saves.
+  assert.equal(resolveStorageMode('self-host', picker, null, false), 'index-db');
+  // The browser's own answers are untouched, having never had a file to lose.
+  assert.equal(resolveStorageMode('webapp', picker, null, false), 'file');
+  assert.equal(resolveStorageMode('webapp', {}, null, false), 'index-db');
+  // And a platform with files is unchanged, which is what the default is for.
+  assert.equal(resolveStorageMode('tauri', {}, null), 'file');
+  assert.equal(resolveStorageMode('tauri', {}, null, true), 'file');
 });
 
 test('the query parameter can force either mode, for testing on any browser', () => {
