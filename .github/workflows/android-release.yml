@@ -25,6 +25,37 @@ name: Android Manual Release
 # than a release one; what it buys is an artifact that installs, today, with no key
 # anywhere.
 #
+# WHICH PHONES IT OPENS ON, and why two architectures rather than the four the template
+# assumes. The APK is gradle's `universal` flavor, which packages every ABI it is handed:
+# arm64-v8a and armeabi-v7a for phones, and x86 with x86_64 for the emulator, which is what
+# an emulator runs and no phone sold this decade does. Measured on the one published APK
+# (`Lithic_10.10.26-1817_debug.apk`, 632,262,452 bytes) by reading its zip directory rather
+# than downloading it: 595.4 MB of the 603 MB is four `lib/<abi>/libapp_lib.so` files, each
+# stored uncompressed (155.5 MB arm64-v8a, 156.8 MB x86_64, 146.1 MB x86, 137.1 MB
+# armeabi-v7a), and everything else together (eight `classes*.dex`, `resources.arsc`, 884
+# `res/` entries, `META-INF` and one `assets/tauri.conf.json`) is 7.3 MB, with the last
+# ~0.2 MB the zip directory and the signing block. So the emulator pair was 302.9 MB of a
+# download that no phone has ever installed. `--target aarch64 armv7` is what leaves it out:
+# cargo-mobile2 turns that into `assembleUniversalDebug -PabiList=arm64-v8a,armeabi-v7a
+# -ParchList=arm64,armv7 -PtargetList=aarch64,armv7`, and the verification step below fails
+# the run if an `x86` slice comes back, so the saving is a fact about the artifact rather
+# than an intention. What it costs is named rather than hidden: an emulator cannot install
+# this APK, and the day one is wanted the flag loses its x86 half rather than the build
+# growing a second flavor.
+#
+# WHAT THE DEBUG KEY ACTUALLY IS, because the paragraph above was reasoned from an
+# assumption the published APK contradicts. `--debug` does not bring a debug key with it: it
+# lets the Android Gradle plugin create one at `$HOME/.android/debug.keystore` the first
+# time it needs it, and a CI runner has none. That APK's v2 signing block carries
+# `CN=Android Debug, O=Android, C=US` with `notBefore Oct 10 19:24:55 2026 GMT`, ten seconds
+# before its 19:25:05Z upload, so the key that signed it was made by that run. Android
+# compares a new signature against the installed copy and refuses a mismatch, so the next
+# APK installs over this one only after an uninstall, and that uninstall takes the app's
+# stored state with it. Which is the outcome the paragraph above calls the worst of the
+# three options, arriving by the route it says avoids it: a keystore in the repository's
+# secrets is not only the way to a `release` profile, it is the way to an APK that updates
+# in place.
+#
 # WHY THE GRADLE PROJECT IS NOT IN THE REPOSITORY: `tauri android init` writes
 # `src-tauri/gen/android/`, and `src-tauri/gen/` is gitignored because everything in it is
 # derived from `tauri.conf.json` and `capabilities/`, both of which are tracked. Running
@@ -111,14 +142,14 @@ jobs:
         with:
           workspaces: 'src-tauri -> target'
 
-      # All four phone ABIs, named rather than left to `android build` to install for
-      # itself: a universal APK is the four of them in one file, and a target that is not
-      # installed is a build that fails rather than a download that quietly carries fewer
-      # architectures than its name claims.
+      # The two phone ABIs, named rather than left to `android build` to install for
+      # itself: a target that is not installed is a build that fails rather than a download
+      # that quietly carries fewer architectures than its name claims. The x86 pair is not
+      # here on purpose, and the header has the measurement behind that choice.
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
         with:
-          targets: aarch64-linux-android,armv7-linux-androideabi,i686-linux-android,x86_64-linux-android
+          targets: aarch64-linux-android,armv7-linux-androideabi
 
       # The SDK is on the runner image; the NDK is what has to be found rather than
       # assumed. Both variables are exported because they answer different questions:
@@ -215,6 +246,9 @@ jobs:
       # and there is no Play listing to upload to yet. No `--split-per-abi` either, because
       # one download that opens on whichever phone fetched it is the whole point of a
       # universal build; that flag is for the day the size matters more than the confusion.
+      # `--target aarch64 armv7` is the other half of that choice: the universal flavor
+      # packages every ABI it is handed, and handing it the two phone architectures is what
+      # keeps the emulator pair out of a phone's download (see the header for the numbers).
       - name: Build the APK
         env:
           TAURI_CONFIG: ${{ steps.tag.outputs.tauri_config }}
@@ -228,16 +262,17 @@ jobs:
           # package, no keystore is in the secrets, and the debug key is the one thing this
           # build can be signed with today. What arrives with it is cargo's `dev` profile,
           # which is the wrong profile for a file a person downloads: full debug info, no
-          # optimisation, no dead-code elimination, and all of it inside each of the four
-          # ABIs' libraries, because an ELF keeps its DWARF in the shared object rather than
+          # optimisation, no dead-code elimination, and all of it inside each ABI's own
+          # library, because an ELF keeps its DWARF in the shared object rather than
           # beside it the way a Windows build keeps a PDB.
           #
           # Measured on this crate's desktop build, same source, before and after the three
           # settings below: the executable 24 MB to 13 MB, its debug information 162 MB to
           # 9 MB, and the library target's own debug information 317 MB to 3 MB. For scale,
           # the whole program in `release`, with the LTO and strip `Cargo.toml` already asks
-          # for, is 14 MB. The APK pays that difference once per ABI, four times over, and
-          # that is where most of its size comes from.
+          # for, is 14 MB. The APK pays that difference once per ABI it carries, and that is
+          # where most of its size comes from: the published four-ABI APK was 603 MB of
+          # which 595.4 MB was these libraries, so this line is the whole of the story.
           #
           # An environment override rather than a `[profile.dev]` table, because that profile
           # is also how the developer and the local gate iterate: `cargo check`, clippy and the
@@ -247,12 +282,12 @@ jobs:
           #
           # `debug = 0` is the whole of the size story, since the debug information is the
           # bulk and nobody steps through a build they downloaded. The other two make what is
-          # left smaller rather than faster. No LTO: that would be paid for on all four ABIs of
-          # a job that is already long, for a fraction of what the first line saves.
+          # left smaller rather than faster. No LTO: that would be paid for on each ABI of a
+          # job that is already long, for a fraction of what the first line saves.
           CARGO_PROFILE_DEV_DEBUG: '0'
           CARGO_PROFILE_DEV_OPT_LEVEL: 's'
           CARGO_PROFILE_DEV_STRIP: 'symbols'
-        run: npm run tauri android build -- --debug --apk --ci
+        run: npm run tauri android build -- --debug --apk --ci --target aarch64 armv7
 
       - name: Rename Artifact
         run: |
@@ -307,6 +342,11 @@ jobs:
           # whose directories have one: `arm64-v8a` and `armeabi-v7a`. A class without it matches
           # `lib/x86/` and `lib/x86_64/` and nothing else, which is how an APK carrying all four
           # slices was reported as one carrying two.
+          #
+          # Both phone slices are required and an x86 one is a failure, which is the build's
+          # ABI decision checked rather than assumed. `--target aarch64 armv7` is supposed to
+          # leave the emulator pair out, and a step that only asked for arm64-v8a would pass a
+          # build that had quietly gone back to carrying all four.
           abis=$(unzip -l "${{ steps.tag.outputs.apk }}" | grep -oE 'lib/[A-Za-z0-9_.-]+/' | sed 's|^lib/||; s|/$||' | sort -u)
           echo "--- native slices ---"
           echo "${abis:-none}"
@@ -314,6 +354,14 @@ jobs:
             echo "::error::the APK carries no arm64-v8a slice, so it will not start on a modern phone."
             exit 1
           }
+          echo "${abis:-}" | grep -qx 'armeabi-v7a' || {
+            echo "::error::the APK carries no armeabi-v7a slice, so it will not install on a 32-bit phone."
+            exit 1
+          }
+          if echo "${abis:-}" | grep -qE '^x86(_64)?$'; then
+            echo "::error::the APK carries an emulator slice, which the build no longer asks for."
+            exit 1
+          fi
 
       # Sizes in the run summary, the same way every other job reports them: the APK carries
       # the launcher and the whole wiki, so a stray file in src/ shows up here as a jump
@@ -327,7 +375,9 @@ jobs:
           echo "$mb MB  ${{ steps.tag.outputs.apk }}"
           echo "| ${{ steps.tag.outputs.apk }} | $mb MB |" >> "$GITHUB_STEP_SUMMARY"
           echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "arm64-v8a and armeabi-v7a only, so an emulator cannot install this APK." >> "$GITHUB_STEP_SUMMARY"
           echo "Debug-signed, so it sideloads and cannot be updated by a store build." >> "$GITHUB_STEP_SUMMARY"
+          echo "The debug key is made per run, so installing over the last APK needs an uninstall first." >> "$GITHUB_STEP_SUMMARY"
 
       - name: Add to Release
         uses: softprops/action-gh-release@v3

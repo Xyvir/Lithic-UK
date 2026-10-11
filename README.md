@@ -143,19 +143,19 @@ adb install -r Lithic_<stamp>_debug.apk
 
 ### Building the APK yourself
 
-You need the Android SDK and NDK (`ANDROID_HOME` and `NDK_HOME`), a JDK 17, Rust (stable) with the four phone targets, and Node 22 or newer:
+You need the Android SDK and NDK (`ANDROID_HOME` and `NDK_HOME`), a JDK 17, Rust (stable) with the two phone targets, and Node 22 or newer:
 
 ```bash
-rustup target add aarch64-linux-android armv7-linux-androideabi i686-linux-android x86_64-linux-android
+rustup target add aarch64-linux-android armv7-linux-androideabi
 npm ci
 npm --prefix launcher-ui ci
 node scripts/build-launcher.mjs
 npm run tauri icon src/app-icon.png
 npm run tauri android init -- --ci
-LITHIC_BUILD_TAG=v2026.01.01-0000 npm run tauri android build -- --debug --apk --ci
+LITHIC_BUILD_TAG=v2026.01.01-0000 npm run tauri android build -- --debug --apk --ci --target aarch64 armv7
 ```
 
-`android init` writes the Gradle project into `src-tauri/gen/android/`, which is gitignored and regenerated rather than committed, so it is generated here the same way the release does it. The APK lands in `src-tauri/gen/android/app/build/outputs/apk/`. `LITHIC_BUILD_TAG` is the release stamp this build belongs to, the same as on Linux and macOS: unset, the app offers no update notice. The release job that produces this artifact is [.github/workflows/android-release.yml](.github/workflows/android-release.yml), and it is chained from the same publish step as the four desktop installers.
+`android init` writes the Gradle project into `src-tauri/gen/android/`, which is gitignored and regenerated rather than committed, so it is generated here the same way the release does it. The APK lands in `src-tauri/gen/android/app/build/outputs/apk/`. `--target aarch64 armv7` builds the two phone architectures and no others: the universal flavor would otherwise package x86 and x86_64 for the emulator, which nothing sold as a phone runs, and that pair is most of the download (the release job carries the measurement). An emulator therefore cannot install this APK. `LITHIC_BUILD_TAG` is the release stamp this build belongs to, the same as on Linux and macOS: unset, the app offers no update notice. The release job that produces this artifact is [.github/workflows/android-release.yml](.github/workflows/android-release.yml), and it is chained from the same publish step as the four desktop installers.
 
 ## Companion Project: Ephemeral.exe
 
