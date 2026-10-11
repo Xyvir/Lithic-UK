@@ -64,23 +64,29 @@ name: Android Manual Release
 # if anyone wants Android Studio on the project is to commit the generated tree and
 # delete this step.
 #
-# It only ever ADDS a file to a release that already exists, like every other job in this
-# chain, so it cannot blank another platform's work.
+# It only ever ADDS a file, like every other job in this chain, so it cannot blank another
+# platform's work. Where the chain gives it a tag that release already exists; a tag-less
+# hand-run stamps its own instead (see below), which contains nothing but this artifact.
 #
-# A HAND-RUN NAMES THE RELEASE IT ADDS TO, and the input is declared for the dispatch for the
-# same reason it is declared for the chain: the tag is what the two half-hour jobs of this
-# workflow are for, and the fallback below (today's date, when no tag is given) is a build that
-# has nothing to add to and would mint a release of its own from the stamp. That is against the
-# rule in the paragraph above, so the dispatch asks for the tag rather than letting a hand-run
-# discover the difference on the release page. It is also what makes the note higher up true:
-# this job can be dispatched on its own while the platform is being brought up, aimed at the
-# release whose APK is missing.
+# A HAND-RUN MAY NAME THE RELEASE IT ADDS TO, OR MINT ONE OF ITS OWN, and the tag input is the
+# whole of the difference. Given a tag, this job adds the APK to that release: what the chain
+# does, and what fills in an APK that is missing from a release built earlier. Given none, the
+# stamp step below makes one from the clock and the release action creates that release holding
+# this artifact alone, which is the behaviour the desktop workflow's dispatch has. A tag-less run
+# therefore mints a new release rather than adding to an existing one, and that is a trade named
+# rather than hidden: the chain never does it (`publish-release.yml` always passes the tag it
+# has just created), so the rule in the paragraph above still holds for every released build,
+# while a hand-run no longer has to find a release before it can build at all.
 on:
   workflow_dispatch:
     inputs:
+      # Optional, and empty means the stamp step below makes one from the clock, exactly as the
+      # desktop workflow's dispatch does. A hand-run with no tag builds a release of its own
+      # holding only the APK rather than adding to one, which is what bringing the platform up
+      # needs: a run should not have to find or name a release before it can build.
       tag_name:
-        description: 'Release tag to add the APK to, e.g. build-2026.10.10-1817'
-        required: true
+        description: 'Release tag to add the APK to. Leave empty to stamp a new one.'
+        required: false
         type: string
   workflow_call:
     inputs:
