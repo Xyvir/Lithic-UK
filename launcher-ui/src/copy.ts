@@ -58,7 +58,7 @@ const en = {
     githubLink: 'Lithic on GitHub',
     footerLink: 'Github',
     backToLauncher: 'Back to the main launcher',
-    setInstanceIcon: 'Set this instance’s icon',
+    manageInstance: 'Instance Management',
     viewIntro: 'View Introduction'
   },
 
@@ -292,9 +292,15 @@ const en = {
       ignoreLock: 'Ignore Lock and Open'
     },
 
+    /**
+     * Instance Management: what the heading mark opens, in every mode. The picker below is
+     * drawn only on an instance, since that is the one page whose icon can be set, and the
+     * other two actions belong to every page: the way out to the project, and the way to keep
+     * a hard copy of everything this device holds.
+     */
     icon: {
-      closeAria: 'Close icon picker',
-      title: 'Instance Icon',
+      closeAria: 'Close instance management',
+      title: 'Instance Management',
       intro: 'This icon belongs to the instance. Everyone who opens this address sees it.',
       chooseAria: 'Choose an instance icon',
       saving: 'Saving…',
@@ -306,7 +312,14 @@ const en = {
       savedHere: (detail: string) => `Saved on this device only. The server write failed (${detail}).`,
       canvasFailed: 'Could not render the icon (no canvas).',
       savedServer: '✓ Default icon restored server-wide.',
-      restoredHere: 'Restored on this device only.'
+      restoredHere: 'Restored on this device only.',
+      docs: 'View Docs on GitHub',
+      docsTitle: 'Opens the Lithic repository',
+      backup: 'Download Full Backup',
+      backupTitle: 'Every recent Lith, its history and the bookmarks, in one file',
+      backupSaved: 'Backup saved.',
+      backupStarted: 'Check your Downloads folder for the backup.',
+      backupFailed: (detail: string) => `The backup could not be written (${detail}).`
     },
 
     rebuild: {
@@ -324,7 +337,51 @@ const en = {
       cachedOnly: 'cached only',
       unsavedTag: 'unsaved edits',
       unsavedCaptured: (when: string) => `Unsaved edits captured ${when}`,
-      proceed: 'Proceed Anyway'
+      proceed: 'Proceed Anyway',
+      /** The whole-instance export, offered here because it covers every row, listed or not. */
+      fullBackup: 'Download Full Backup',
+      fullBackupTitle: 'Every recent Lith, its history and the bookmarks, in one file',
+      fullBackupNote: 'Covers every recent Lith here and the bookmarks, not only the rows listed.'
+    },
+
+    /**
+     * The fallback's own guardrail. Everywhere else a row points at a file that outlives the
+     * list; here the row *is* the document, so clearing the list takes the only copy there is.
+     * Reset is therefore gated: a download per row, or one full backup, and then it unlocks.
+     */
+    instanceBackup: {
+      closeAria: 'Close the backup and reset dialog',
+      title: 'Backup & Reset',
+      body: 'Every Lith here lives only in this browser, so a download is the only copy that leaves.',
+      gate: (remaining: number) =>
+        remaining === 1
+          ? 'Download the last one, or take the full backup, to unlock Reset.'
+          : `Download the last ${remaining}, or take the full backup, to unlock Reset.`,
+      fullBackup: 'Download Full Backup',
+      fullBackupTitle: 'Every recent Lith, its history and the bookmarks, in one file',
+      fullBackupTaken: '✓ Full backup downloaded.',
+      reset: 'Reset Recents',
+      resetLockedTitle: 'Download every Lith, or take the full backup, first'
+    },
+
+    /**
+     * A dropped backup this device cannot take whole. Nothing here is a decision, so the
+     * dialog is a title, a line and the names, and it carries no action row.
+     */
+    backupImport: {
+      closeAria: 'Close the import warning',
+      title: 'That backup holds Liths this device already has',
+      body: (count: number) =>
+        count === 1
+          ? 'One name here is already taken, so the file was not imported.'
+          : `${count} names here are already taken, so the file was not imported.`,
+      note: 'Rename or remove them, then drop the file again.',
+      failed: (detail: string) => `The backup could not be imported (${detail}).`,
+      imported: (liths: number, bookmarks: number) =>
+        bookmarks === 0
+          ? `${liths} ${liths === 1 ? 'lith' : 'liths'} restored from that backup.`
+          : `${liths} ${liths === 1 ? 'lith' : 'liths'} and ${bookmarks} ${bookmarks === 1 ? 'bookmark' : 'bookmarks'} restored.`,
+      importedNothing: 'That backup held no Liths.'
     },
 
     history: {
@@ -452,7 +509,13 @@ const en = {
     rebuildServerTitle: 'Read this server again and index its Liths here',
     rebuildDiskTitle: 'Rebuild this list from the files on disk',
     reset: 'Reset Recents',
-    resetTitle: 'Clears this list and its local history. Your files stay.'
+    resetTitle: 'Clears this list and its local history. Your files stay.',
+    /**
+     * The fallback's own foot control. There the store is the document, so the reset is gated
+     * behind a download per row, and the label says what the dialog then explains.
+     */
+    backupReset: 'Backup & Reset Recents',
+    backupResetTitle: 'Download every Lith here, then clear this list'
   },
 
   /** One line per row state, from the download of an orphaned cached copy. */
@@ -646,7 +709,7 @@ const es: Copy = {
     githubLink: 'Lithic en GitHub',
     footerLink: 'Github',
     backToLauncher: 'Volver al lanzador principal',
-    setInstanceIcon: 'Elegir el icono de esta instancia',
+    manageInstance: 'Gestión de la instancia',
     viewIntro: 'Ver la introducción'
   },
 
@@ -853,8 +916,8 @@ const es: Copy = {
     },
 
     icon: {
-      closeAria: 'Cerrar el selector de iconos',
-      title: 'Icono de la instancia',
+      closeAria: 'Cerrar la gestión de la instancia',
+      title: 'Gestión de la instancia',
       intro: 'Este icono es de la instancia. Todo el que abra esta dirección lo ve.',
       chooseAria: 'Elegir un icono de instancia',
       saving: 'Guardando…',
@@ -866,7 +929,14 @@ const es: Copy = {
       savedHere: (detail: string) => `Guardado solo en este dispositivo. La escritura en el servidor falló (${detail}).`,
       canvasFailed: 'No se pudo dibujar el icono (sin canvas).',
       savedServer: '✓ Icono original restaurado en todo el servidor.',
-      restoredHere: 'Restaurado solo en este dispositivo.'
+      restoredHere: 'Restaurado solo en este dispositivo.',
+      docs: 'Ver la documentación en GitHub',
+      docsTitle: 'Abre el repositorio de Lithic',
+      backup: 'Descargar copia completa',
+      backupTitle: 'Todos los Liths recientes, su historial y los marcadores, en un archivo',
+      backupSaved: 'Copia guardada.',
+      backupStarted: 'Busca la copia en tu carpeta de descargas.',
+      backupFailed: (detail: string) => `No se pudo escribir la copia (${detail}).`
     },
 
     rebuild: {
@@ -884,7 +954,41 @@ const es: Copy = {
       cachedOnly: 'solo en caché',
       unsavedTag: 'ediciones sin guardar',
       unsavedCaptured: (when: string) => `Ediciones sin guardar capturadas el ${when}`,
-      proceed: 'Continuar igualmente'
+      proceed: 'Continuar igualmente',
+      fullBackup: 'Descargar copia completa',
+      fullBackupTitle: 'Todos los Liths recientes, su historial y los marcadores, en un archivo',
+      fullBackupNote: 'Incluye todos los Liths recientes y los marcadores, no solo los de la lista.'
+    },
+
+    instanceBackup: {
+      closeAria: 'Cerrar el diálogo de copia y reinicio',
+      title: 'Copia y reinicio',
+      body: 'Cada Lith de aquí vive solo en este navegador, así que una descarga es la única copia que sale.',
+      gate: (remaining: number) =>
+        remaining === 1
+          ? 'Descarga el último, o la copia completa, para activar Reiniciar.'
+          : `Descarga los ${remaining} últimos, o la copia completa, para activar Reiniciar.`,
+      fullBackup: 'Descargar copia completa',
+      fullBackupTitle: 'Todos los Liths recientes, su historial y los marcadores, en un archivo',
+      fullBackupTaken: '✓ Copia completa descargada.',
+      reset: 'Reiniciar recientes',
+      resetLockedTitle: 'Descarga cada Lith, o la copia completa, primero'
+    },
+
+    backupImport: {
+      closeAria: 'Cerrar el aviso de importación',
+      title: 'Esa copia tiene Liths que este dispositivo ya tiene',
+      body: (count: number) =>
+        count === 1
+          ? 'Un nombre de aquí ya está tomado, así que el archivo no se importó.'
+          : `${count} nombres de aquí ya están tomados, así que el archivo no se importó.`,
+      note: 'Renómbralos o quítalos y vuelve a soltar el archivo.',
+      failed: (detail: string) => `No se pudo importar la copia (${detail}).`,
+      imported: (liths: number, bookmarks: number) =>
+        bookmarks === 0
+          ? `${liths} ${liths === 1 ? 'lith restaurado' : 'liths restaurados'} de esa copia.`
+          : `${liths} ${liths === 1 ? 'lith' : 'liths'} y ${bookmarks} ${bookmarks === 1 ? 'marcador' : 'marcadores'} restaurados.`,
+      importedNothing: 'Esa copia no tenía Liths.'
     },
 
     history: {
@@ -1003,7 +1107,9 @@ const es: Copy = {
     rebuildServerTitle: 'Leer este servidor otra vez e indexar sus Liths aquí',
     rebuildDiskTitle: 'Reconstruir esta lista desde los archivos en disco',
     reset: 'Reiniciar recientes',
-    resetTitle: 'Borra esta lista y su historial local. Tus archivos se quedan.'
+    resetTitle: 'Borra esta lista y su historial local. Tus archivos se quedan.',
+    backupReset: 'Copia y reiniciar recientes',
+    backupResetTitle: 'Descarga cada Lith de aquí y luego vacía esta lista'
   },
 
   orphan: {
@@ -1179,7 +1285,7 @@ const fr: Copy = {
     githubLink: 'Lithic sur GitHub',
     footerLink: 'Github',
     backToLauncher: 'Revenir au lanceur principal',
-    setInstanceIcon: 'Choisir l’icône de cette instance',
+    manageInstance: 'Gestion de l’instance',
     viewIntro: 'Voir l’introduction'
   },
 
@@ -1386,8 +1492,8 @@ const fr: Copy = {
     },
 
     icon: {
-      closeAria: 'Fermer le sélecteur d’icône',
-      title: 'Icône de l’instance',
+      closeAria: 'Fermer la gestion de l’instance',
+      title: 'Gestion de l’instance',
       intro: 'Cette icône appartient à l’instance. Toute personne qui ouvre cette adresse la voit.',
       chooseAria: 'Choisir une icône d’instance',
       saving: 'Enregistrement…',
@@ -1399,7 +1505,14 @@ const fr: Copy = {
       savedHere: (detail: string) => `Enregistré sur cet appareil seulement. L’écriture sur le serveur a échoué (${detail}).`,
       canvasFailed: 'Impossible de dessiner l’icône (pas de canvas).',
       savedServer: '✓ Icône d’origine rétablie sur tout le serveur.',
-      restoredHere: 'Rétabli sur cet appareil seulement.'
+      restoredHere: 'Rétabli sur cet appareil seulement.',
+      docs: 'Voir la documentation sur GitHub',
+      docsTitle: 'Ouvre le dépôt Lithic',
+      backup: 'Télécharger la sauvegarde complète',
+      backupTitle: 'Tous les Liths récents, leur historique et les marque-pages, en un fichier',
+      backupSaved: 'Sauvegarde enregistrée.',
+      backupStarted: 'Cherchez la sauvegarde dans vos téléchargements.',
+      backupFailed: (detail: string) => `Impossible d’écrire la sauvegarde (${detail}).`
     },
 
     rebuild: {
@@ -1417,7 +1530,41 @@ const fr: Copy = {
       cachedOnly: 'en cache seulement',
       unsavedTag: 'modifications non enregistrées',
       unsavedCaptured: (when: string) => `Modifications non enregistrées capturées ${when}`,
-      proceed: 'Continuer quand même'
+      proceed: 'Continuer quand même',
+      fullBackup: 'Télécharger la sauvegarde complète',
+      fullBackupTitle: 'Tous les Liths récents, leur historique et les marque-pages, en un fichier',
+      fullBackupNote: 'Couvre tous les Liths récents ici et les marque-pages, pas seulement ceux de la liste.'
+    },
+
+    instanceBackup: {
+      closeAria: 'Fermer le dialogue de sauvegarde et réinitialisation',
+      title: 'Sauvegarder et réinitialiser',
+      body: 'Chaque Lith ici ne vit que dans ce navigateur, donc un téléchargement est la seule copie qui sort.',
+      gate: (remaining: number) =>
+        remaining === 1
+          ? 'Téléchargez le dernier, ou la sauvegarde complète, pour déverrouiller Réinitialiser.'
+          : `Téléchargez les ${remaining} derniers, ou la sauvegarde complète, pour déverrouiller Réinitialiser.`,
+      fullBackup: 'Télécharger la sauvegarde complète',
+      fullBackupTitle: 'Tous les Liths récents, leur historique et les marque-pages, en un fichier',
+      fullBackupTaken: '✓ Sauvegarde complète téléchargée.',
+      reset: 'Réinitialiser les récents',
+      resetLockedTitle: 'Téléchargez chaque Lith, ou la sauvegarde complète, d’abord'
+    },
+
+    backupImport: {
+      closeAria: 'Fermer l’avertissement d’import',
+      title: 'Cette sauvegarde contient des Liths déjà présents ici',
+      body: (count: number) =>
+        count === 1
+          ? 'Un nom est déjà pris ici, donc le fichier n’a pas été importé.'
+          : `${count} noms sont déjà pris ici, donc le fichier n’a pas été importé.`,
+      note: 'Renommez-les ou supprimez-les, puis déposez le fichier à nouveau.',
+      failed: (detail: string) => `Impossible d’importer la sauvegarde (${detail}).`,
+      imported: (liths: number, bookmarks: number) =>
+        bookmarks === 0
+          ? `${liths} ${liths === 1 ? 'lith restauré' : 'liths restaurés'} depuis cette sauvegarde.`
+          : `${liths} ${liths === 1 ? 'lith' : 'liths'} et ${bookmarks} ${bookmarks === 1 ? 'marque-page' : 'marque-pages'} restaurés.`,
+      importedNothing: 'Cette sauvegarde ne contenait aucun Lith.'
     },
 
     history: {
@@ -1536,7 +1683,9 @@ const fr: Copy = {
     rebuildServerTitle: 'Relire ce serveur et indexer ses Liths ici',
     rebuildDiskTitle: 'Reconstruire cette liste depuis les fichiers du disque',
     reset: 'Réinitialiser les récents',
-    resetTitle: 'Efface cette liste et son historique local. Vos fichiers restent.'
+    resetTitle: 'Efface cette liste et son historique local. Vos fichiers restent.',
+    backupReset: 'Sauvegarder et réinitialiser',
+    backupResetTitle: 'Télécharger chaque Lith ici, puis vider cette liste'
   },
 
   orphan: {
@@ -1709,7 +1858,7 @@ const de: Copy = {
     githubLink: 'Lithic auf GitHub',
     footerLink: 'Github',
     backToLauncher: 'Zurück zum Haupt-Launcher',
-    setInstanceIcon: 'Icon dieser Instanz wählen',
+    manageInstance: 'Instanzverwaltung',
     viewIntro: 'Einführung ansehen'
   },
 
@@ -1916,8 +2065,8 @@ const de: Copy = {
     },
 
     icon: {
-      closeAria: 'Icon-Auswahl schließen',
-      title: 'Instanz-Icon',
+      closeAria: 'Instanzverwaltung schließen',
+      title: 'Instanzverwaltung',
       intro: 'Dieses Icon gehört zur Instanz. Jeder, der diese Adresse öffnet, sieht es.',
       chooseAria: 'Instanz-Icon auswählen',
       saving: 'Wird gespeichert…',
@@ -1929,7 +2078,14 @@ const de: Copy = {
       savedHere: (detail: string) => `Nur auf diesem Gerät gespeichert. Das Schreiben auf den Server ist fehlgeschlagen (${detail}).`,
       canvasFailed: 'Icon konnte nicht gezeichnet werden (kein Canvas).',
       savedServer: '✓ Standard-Icon serverweit wiederhergestellt.',
-      restoredHere: 'Nur auf diesem Gerät wiederhergestellt.'
+      restoredHere: 'Nur auf diesem Gerät wiederhergestellt.',
+      docs: 'Dokumentation auf GitHub ansehen',
+      docsTitle: 'Öffnet das Lithic-Repository',
+      backup: 'Vollständige Sicherung herunterladen',
+      backupTitle: 'Alle neuen Liths, ihr Verlauf und die Lesezeichen, in einer Datei',
+      backupSaved: 'Sicherung gespeichert.',
+      backupStarted: 'Suchen Sie die Sicherung im Download-Ordner.',
+      backupFailed: (detail: string) => `Die Sicherung konnte nicht geschrieben werden (${detail}).`
     },
 
     rebuild: {
@@ -1947,7 +2103,41 @@ const de: Copy = {
       cachedOnly: 'nur im Cache',
       unsavedTag: 'ungespeicherte Änderungen',
       unsavedCaptured: (when: string) => `Ungespeicherte Änderungen erfasst ${when}`,
-      proceed: 'Trotzdem fortfahren'
+      proceed: 'Trotzdem fortfahren',
+      fullBackup: 'Vollständige Sicherung herunterladen',
+      fullBackupTitle: 'Alle neuen Liths, ihr Verlauf und die Lesezeichen, in einer Datei',
+      fullBackupNote: 'Umfasst alle neuen Liths hier und die Lesezeichen, nicht nur die in der Liste.'
+    },
+
+    instanceBackup: {
+      closeAria: 'Dialog zum Sichern und Leeren schließen',
+      title: 'Sichern und Liste leeren',
+      body: 'Jeder Lith hier lebt nur in diesem Browser, ein Download ist die einzige Kopie, die hinausgeht.',
+      gate: (remaining: number) =>
+        remaining === 1
+          ? 'Laden Sie den letzten herunter, oder die vollständige Sicherung, um Leeren freizugeben.'
+          : `Laden Sie die letzten ${remaining} herunter, oder die vollständige Sicherung, um Leeren freizugeben.`,
+      fullBackup: 'Vollständige Sicherung herunterladen',
+      fullBackupTitle: 'Alle neuen Liths, ihr Verlauf und die Lesezeichen, in einer Datei',
+      fullBackupTaken: '✓ Vollständige Sicherung heruntergeladen.',
+      reset: 'Zuletzt verwendete zurücksetzen',
+      resetLockedTitle: 'Erst jeden Lith oder die vollständige Sicherung herunterladen'
+    },
+
+    backupImport: {
+      closeAria: 'Importhinweis schließen',
+      title: 'Diese Sicherung enthält Liths, die hier schon liegen',
+      body: (count: number) =>
+        count === 1
+          ? 'Ein Name ist hier schon vergeben, die Datei wurde nicht importiert.'
+          : `${count} Namen sind hier schon vergeben, die Datei wurde nicht importiert.`,
+      note: 'Umbenennen oder entfernen, dann die Datei erneut ablegen.',
+      failed: (detail: string) => `Die Sicherung konnte nicht importiert werden (${detail}).`,
+      imported: (liths: number, bookmarks: number) =>
+        bookmarks === 0
+          ? `${liths} ${liths === 1 ? 'Lith' : 'Liths'} aus dieser Sicherung wiederhergestellt.`
+          : `${liths} ${liths === 1 ? 'Lith' : 'Liths'} und ${bookmarks} Lesezeichen aus dieser Sicherung wiederhergestellt.`,
+      importedNothing: 'Diese Sicherung enthielt keine Liths.'
     },
 
     history: {
@@ -2066,7 +2256,9 @@ const de: Copy = {
     rebuildServerTitle: 'Diesen Server erneut lesen und seine Liths hier indexieren',
     rebuildDiskTitle: 'Diese Liste aus den Dateien auf der Festplatte neu aufbauen',
     reset: 'Zuletzt verwendete zurücksetzen',
-    resetTitle: 'Leert diese Liste und ihren lokalen Verlauf. Deine Dateien bleiben.'
+    resetTitle: 'Leert diese Liste und ihren lokalen Verlauf. Deine Dateien bleiben.',
+    backupReset: 'Sichern und Liste leeren',
+    backupResetTitle: 'Jeden Lith hier herunterladen und dann diese Liste leeren'
   },
 
   orphan: {

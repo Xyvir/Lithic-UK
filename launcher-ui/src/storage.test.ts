@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { KeyvalStore, setRecentRows, mergeRecentRow, mergeRecentLists, sameRecentRow, isAnonymousRow, getRecentFiles, recentRowName, clearAllRecentFiles, forgetWikiCache, saveSearchCache, purgeOldestCachesIfNeeded, isWikiDriftedFromHead, recentDiskPath, isFlatCacheKey, cachedWikiNames, isInstallDismissed, setInstallDismissed, INSTALL_DISMISS_KEY, type CacheStore } from './storage.ts';
+import { KeyvalStore, setRecentRows, mergeRecentRow, mergeRecentLists, sameRecentRow, isAnonymousRow, getRecentFiles, recentRowName, clearAllRecentFiles, forgetWikiCache, saveSearchCache, purgeOldestCachesIfNeeded, isWikiDriftedFromHead, recentDiskPath, isFlatCacheKey, cachedWikiNames, isInstallDismissed, setInstallDismissed, INSTALL_DISMISS_KEY, requestPersistentStorage, type CacheStore } from './storage.ts';
 import { KeyvalWikiHistory } from './wiki-history.ts';
 
 // In Node environment without native indexedDB, we mock indexedDB or test logic
@@ -429,4 +429,28 @@ test('nothing writes a placeholder row, so a relaunch cannot resurrect one', asy
   const rows = await setRecentRows([{ name: 'new.lith' }, { name: 'notes.lith', path: '/Lithic/notes.lith' }], store);
   assert.deepEqual(rows.map((row) => recentRowName(row)), ['notes.lith']);
   assert.deepEqual(((await store.get<any[]>('recentFiles'))!).map((row) => recentRowName(row)), ['notes.lith']);
+});
+
+test('a persistence request reads the answer and never becomes an error', async () => {
+  // Already granted: the state is read and nothing is asked again.
+  let persistCalls = 0;
+  assert.equal(await requestPersistentStorage({
+    persisted: async () => true,
+    persist: async () => { persistCalls += 1; return true; }
+  }), true);
+  assert.equal(persistCalls, 0, 'an origin that already has persistence is not asked again');
+
+  // Not granted: the request is made, and its own answer is what comes back.
+  assert.equal(await requestPersistentStorage({ persisted: async () => false, persist: async () => true }), true);
+  // A refusal is a false rather than a throw, so the save path cannot fail on it.
+  assert.equal(await requestPersistentStorage({ persisted: async () => false, persist: async () => false }), false);
+
+  // Every way it can be absent, and none of them may become an error on a save:
+  // no manager, no Storage API on one, and a call that throws.
+  assert.equal(await requestPersistentStorage(null), false);
+  assert.equal(await requestPersistentStorage({} as unknown as Pick<StorageManager, 'persist' | 'persisted'>), false);
+  assert.equal(await requestPersistentStorage({
+    persisted: async () => { throw new Error('blocked'); },
+    persist: async () => true
+  }), false);
 });

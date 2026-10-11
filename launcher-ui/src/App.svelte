@@ -5,7 +5,7 @@
   import { declaresBrowserOnly, handoffQuery, LAUNCHER_QUERY_PARAM, launcherReturn, withLauncherHandoff, type LauncherMode } from './mode';
   import { createFileBridge, tauriInvoke, tauriListen, saveTextVerifiably } from './file-bridge';
   import { opensInstanceInBrowser, type PlatformCapabilities } from './platform-capabilities';
-  import { orphanPill, orphanDownloadNote, type OrphanDownloadState } from './orphan-download';
+  import { backupGate, orphanPill, orphanDownloadNote, type OrphanDownloadState } from './orphan-download';
   import { isScratchFileName, isHtmlMonolithName, tracksUnsavedEdits, resolveMountName, resolveScratchKind, type ScratchKind } from './scratch-editor';
   import { pwaInstall, promptPwaInstall, shouldRestoreInstallOfferOnReset } from './pwa-install';
   import { RELEASES_LATEST_PAGE, latestReleaseTag, readBuildTag, updateOffered } from './update-notice';
@@ -30,8 +30,8 @@
   import { bootLegacyWiki, bootLegacyHtml, writeHandoff, type RemoteTarget } from './legacy-launcher-runtime';
   import { EMOJI_LIST, uploadInstanceIcon, clearInstanceIcon, emojiFaviconUrl, applyFavicon, bustIconCache, readInstanceEmoji, readServerEmoji, saveInstanceEmoji, clearInstanceEmoji, instanceMarkUrl } from './instance-icon';
   import { getRecentFiles, setRecentRows, mergeRecentRow, mergeRecentLists, isAnonymousRow, clearAllRecentFiles, purgeOldestCachesIfNeeded, saveSearchCache, forgetWikiCache, cachedWikiNames, idb, getSearchCacheText, readFetchedLith, rememberFetchedLith, listWikiVersions, wikiHasHistory, downloadWikiVersion, getDirtyState, clearDirtyState, listDirtyRecoveries, isWikiDriftedFromHead, isInstallDismissed, setInstallDismissed, recentDiskPath, type RecentEntry } from './storage';
-  import { rememberRowKind, resolveStorageMode, storageModeOverride, browserOnlyMarkTitle, type StorageMode } from './browser-storage';
-  import { readBookmarkEntries, saveBookmark, removeBookmark, setBookmarkIcon, refreshBookmarkIcon, verifyInstanceUrl, normalizeInstanceUrl, instanceLabel, type BookmarkEntry, type InstanceVerification } from './bookmarks';
+  import { isIosDevice, rememberRowKind, resolveStorageMode, storageModeOverride, browserOnlyMarkTitle, type StorageMode } from './browser-storage';
+  import { readBookmarkEntries, saveBookmark, removeBookmark, setBookmarkIcon, writeBookmarkList, refreshBookmarkIcon, verifyInstanceUrl, normalizeInstanceUrl, instanceLabel, type BookmarkEntry, type InstanceVerification } from './bookmarks';
   import { LOGIN_CHECK_LABELS, askInstanceAboutLogin, loginVerdict, loginVerdictFromError, typedLoginCheck, type LoginCheckState, type LoginVerdict } from './login-check';
   import { copyDropNote, forgetInstanceCopy } from './instance-copy';
   import { offlineMode, looksUnreachable } from './offline-mode';
@@ -43,6 +43,7 @@
   import { matchMarkup, showsForQuery, titleMatches, titleMarkup } from './name-match';
   import { topHits, type InstanceCacheRead, type InstanceReads } from './instance-search';
   import { computeBackupCoverage, folderOf, hasBackedUpRepo, orphanedEntries, reindexFolders, syncedDirFor, type CoverageRow, type RebuildOrphan } from './backup-coverage';
+import { backupFileName, collectInstanceBackup, mergeBookmarks, parseInstanceBackup, planBackupImport, restoreInstanceBackup, serializeInstanceBackup, type InstanceBackup } from './instance-backup';
   import { parseDeviceCode, parseDevicePoll, pollDelayMs, formatUserCode, generateRepoName, partitionRepos } from './github-device';
   import { copyText } from './clipboard';
   import { syncIndicator, shouldHeartbeat, healthFailure, verifiedAge, SYNC_PULSE_MS, type SyncIndicator, type HealthState } from './git-sync-health';
@@ -175,6 +176,28 @@
    */
   const indexDbOnly = storageMode === 'index-db';
   /**
+   * Whether this page is an iPhone, asked once because it cannot change while the page lives.
+   * The only platform read in the launcher, and `isIosDevice` explains why it has to exist.
+   */
+  const iosDevice = isIosDevice();
+  /**
+   * Whether the bookmark (meta-launcher) feature belongs on this page.
+   *
+   * Bookmarks are the thick app's feature, and the published PWA exists to be the zero-setup
+   * way in, so a browser with a native build to offer is not given them: a desktop or Android
+   * visitor is meant to install the app rather than keep a second list of instances, and a
+   * first run stays one action rather than a panel. The two pages that keep them are the app
+   * itself and the published PWA on an iPhone or iPad, which is the one platform with no native
+   * build to point at: there the meta-launcher is the whole of how one instance is kept beside
+   * another.
+   *
+   * macOS Safari lands in the same storage fallback as an iPhone and is deliberately not given
+   * the feature, because a Mac has the disk image to install and its PWA is the same
+   * minimum-friction path the rest of the desktop is offered. Telling the two apart is what
+   * `isIosDevice` is for, and it is the reason this is written as a platform question.
+   */
+  $: showBookmarks = mode === 'tauri' || (mode === 'webapp' && iosDevice);
+  /**
    * The instance's own mark, or null where there is no instance to read one from (see
    * `instanceMarkUrl`). Settled at boot like the storage mode, and for the same reason:
    * which address served this page cannot change while the page lives.
@@ -233,8 +256,17 @@
   let remoteCollision: { name: string; who: string } | null = null;
   let lockHeartbeat: ReturnType<typeof createLockHeartbeat> | null = null;
 
-  // --- Instance icon (emoji favicon) ---
+  // --- Instance icon (emoji favicon), and the Instance Management dialog it lives in ---
   let brandEmoji = '';
+  /**
+   * The Instance Management dialog, behind the heading mark in every mode.
+   *
+   * The picker's names are kept, because the picker is still the largest thing inside it and
+   * renaming them would touch every selector in the gallery and the smoke suite for a change
+   * of wording. What the dialog *is* has moved: the picker is drawn only on an instance, since
+   * that is the one page with an icon to set, and the docs link and the full backup are drawn
+   * everywhere.
+   */
   let showEmojiPicker = false;
   let emojiChoice = '';
   let emojiBusy = false;
@@ -1337,7 +1369,7 @@
   // panel itself, and the install offer, which waits in a launcher with no panel to hold
   // it rather than in one that does (see the offer's two homes in the markup).
   $: recentPanelShown =
-    bookmarks.length > 0 ||
+    (showBookmarks && bookmarks.length > 0) ||
     recentFiles.length > 0 ||
     remoteFiles.length > 0 ||
     isSelfHost() ||
@@ -3263,6 +3295,17 @@
     if (/\.(?:lith|json)$/.test(lowerName)) {
       try {
         const contents = await file.text();
+        // A dropped `.json` is read as an instance backup first, because that is the one file
+        // whose contents are this device's own store rather than a document to open. Anything
+        // that is not one falls through to the payload path below, which is what a `.json`
+        // holding a tiddler array has always been.
+        if (lowerName.endsWith('.json')) {
+          const backup = parseInstanceBackup(contents);
+          if (backup.ok) {
+            await importInstanceBackup(backup.backup);
+            return;
+          }
+        }
         const parsed = parseDroppedData(contents, lowerName.endsWith('.lith'));
         if (parsed.length > 0) {
           pendingImports = mergePendingImports(pendingImports, parsed);
@@ -3561,10 +3604,17 @@
     else clearInstanceEmoji();
   }
 
-  function openEmojiPicker(): void {
-    if (!isSelfHost()) return;
+  /**
+   * Open the heading mark's dialog.
+   *
+   * Every mode opens it, which is the point: the picker inside is an instance's own job, and
+   * the docs link and the full backup belong to every page. The desktop app draws no footer
+   * link, so for that mode this is also the only way out to the project.
+   */
+  function openInstanceManagement(): void {
     emojiChoice = brandEmoji;
     emojiStatus = '';
+    backupStatus = '';
     showEmojiPicker = true;
   }
 
@@ -3579,8 +3629,9 @@
    */
   $: emojiGrid = emojiChoice && !EMOJI_LIST.includes(emojiChoice) ? [emojiChoice, ...EMOJI_LIST] : EMOJI_LIST;
 
-  function closeEmojiPicker(): void {
+  function closeInstanceManagement(): void {
     showEmojiPicker = false;
+    backupStatus = '';
   }
 
   /** Preview on click: the header and tab update before anything is saved. */
@@ -3909,16 +3960,22 @@
    * knowing exactly what they are giving up; a started-but-unconfirmed download
    * says so instead of borrowing the green check.
    */
-  async function downloadCachedSnapshot(name: string): Promise<void> {
+  async function downloadCachedSnapshot(name: string, fallbackText = ''): Promise<void> {
     setOrphanDownload(name, 'saving');
     try {
-      const cached = await getSearchCacheText(name);
+      // A browser-only HTML monolith keeps its page in the recents row rather than in a cache,
+      // which is the one row the gated dialog lists that has nothing here to find. Without the
+      // fallback its download would fail and the gate it feeds could never open.
+      const cached = (await getSearchCacheText(name)) || fallbackText;
       if (!cached) {
         setOrphanDownload(name, 'failed');
         status = copy.status.noCachedCopy(name);
         return;
       }
-      const fileName = `${name.replace(/\.lith$/i, '')}_cached.lith`;
+      // The copy keeps the extension it came with, so a saved page is written as a page rather
+      // than as a Lith holding HTML.
+      const extension = /\.[a-z0-9]+$/i.exec(name)?.[0] ?? '.lith';
+      const fileName = `${name.replace(/\.[a-z0-9]+$/i, '')}_cached${extension}`;
       const outcome = await saveTextVerifiably(fileName, cached, documents);
       if (outcome === 'cancelled') {
         // The user backed out of the save dialog: leave the row as they found it.
@@ -3949,6 +4006,133 @@
   $: orphanNote = orphanDownloadNote(
     rebuildOrphans.map((orphan) => orphanDownloads[orphan.name] ?? 'idle')
   );
+
+  // --- The instance backup: everything this store holds, out and back in ---------
+
+  /** Whether the fallback's gated Backup and Reset dialog is on screen. */
+  let showInstanceBackup = false;
+  let backupBusy = false;
+  /** What the last export said, on whichever dialog offered it. */
+  let backupStatus = '';
+  /** Whether the whole instance has been written out this session, which opens the gate. */
+  let fullBackupTaken = false;
+  /** Names a dropped backup could not land, because this device already holds them. */
+  let importCollisions: string[] = [];
+
+  /**
+   * The rows the gated dialog lists: the whole recent list.
+   *
+   * Not the rebuild warning's orphan list, which is the rows whose file has gone: here every
+   * row is the document, so every row is what a reset would take. `text` is carried through
+   * because a browser-only HTML monolith keeps its page in the row rather than in a cache.
+   */
+  $: backupRows = recentFiles.map((row) => {
+    const name = getEntryName(row);
+    const text = (row as { text?: string }).text;
+    return {
+      name,
+      text: typeof text === 'string' ? text : '',
+      pill: orphanPill(orphanDownloads[name] ?? 'idle')
+    };
+  });
+
+  $: backupOpen = backupGate(
+    backupRows.map((row) => orphanDownloads[row.name] ?? 'idle'),
+    fullBackupTaken
+  );
+
+  /** Open the gated dialog. */
+  function openInstanceBackup(): void {
+    backupStatus = '';
+    showInstanceBackup = true;
+  }
+
+  /**
+   * Write the whole store out as one file.
+   *
+   * `source` decides which of two sentences confirms it, because the gated dialog has already
+   * explained what the file is for and the other two dialogs have not.
+   */
+  async function downloadInstanceBackup(source: 'manage' | 'gate' | 'rebuild'): Promise<void> {
+    if (backupBusy) return;
+    backupBusy = true;
+    backupStatus = '';
+    try {
+      // The bookmark list is handed in rather than read: it lives in localStorage, which is the
+      // page's store, and the module that builds the document reads only the wiki store.
+      const backup = await collectInstanceBackup(idb, { mode, origin: window.location.origin }, Date.now(), bookmarks);
+      const outcome = await saveTextVerifiably(backupFileName(), serializeInstanceBackup(backup), documents);
+      // The user backed out of the save dialog, which is not a backup: the gate stays shut.
+      if (outcome === 'cancelled') return;
+      fullBackupTaken = true;
+      backupStatus =
+        outcome === 'saved'
+          ? source === 'gate'
+            ? copy.dialogs.instanceBackup.fullBackupTaken
+            : copy.dialogs.icon.backupSaved
+          : copy.dialogs.icon.backupStarted;
+    } catch (error) {
+      backupStatus = copy.dialogs.icon.backupFailed(error instanceof Error ? error.message : String(error));
+    } finally {
+      backupBusy = false;
+    }
+  }
+
+  /** The gated reset: reachable once every row, or the full backup, has left. */
+  async function resetRecentsFromBackup(): Promise<void> {
+    if (!backupOpen.open) return;
+    showInstanceBackup = false;
+    await clearRecent();
+    orphanDownloads = {};
+    fullBackupTaken = false;
+    backupStatus = '';
+  }
+
+  /**
+   * Merge a dropped backup into this store, or refuse it whole.
+   *
+   * Refused rather than merged around, which is the one decision this feature makes. A name
+   * this device already holds is either the same Lith or a different one wearing the same
+   * name, and the file cannot tell the two apart; importing the rest and leaving the clashes
+   * behind would make one drop mean two things. So the answer is the names to settle first.
+   */
+  async function importInstanceBackup(backup: InstanceBackup): Promise<void> {
+    const held = [...new Set([...recentFiles.map((row) => getEntryName(row)), ...Object.keys(cachedEntries)])];
+    const plan = planBackupImport(backup, held);
+    if (!plan.ok) {
+      importCollisions = plan.collisions;
+      return;
+    }
+    try {
+      await restoreInstanceBackup(idb, plan.backup);
+    } catch (error) {
+      mountError = copy.dialogs.backupImport.failed(error instanceof Error ? error.message : String(error));
+      return;
+    }
+    // Read back rather than patched: the file is a whole store, and a list that disagreed with
+    // the caches under it is the state this restore exists to make impossible.
+    recentFiles = await getRecentFiles();
+    await updateCacheMatches(search);
+    await rereadHistoryAvailability(plan.backup.wikis.map((wiki) => wiki.name));
+    // The bookmarks are the half a store restore cannot write, and the half it must not replace:
+    // they live in localStorage, and an import may only ever add addresses here. Merging through
+    // the module that owns the list also applies its own cap, so the count below is the list's.
+    const mergedBookmarks = writeBookmarkList(mergeBookmarks(bookmarks, plan.backup.bookmarks), localStorage);
+    const bookmarksAdded = Math.max(0, mergedBookmarks.length - bookmarks.length);
+    if (bookmarksAdded > 0) {
+      // Read back through the module, which is where the label fallbacks live. An entry that
+      // arrived without an icon is fetched the way a fresh bookmark's is; one that carried the
+      // icon its file held is left alone until it goes stale. Fire and forget: an instance that
+      // cannot be reached yet must not hold the import open.
+      bookmarks = readBookmarkEntries();
+      void refreshBookmarkIcons();
+    }
+    void refreshBackupCoverage();
+    status =
+      plan.backup.wikis.length === 0
+        ? copy.dialogs.backupImport.importedNothing
+        : copy.dialogs.backupImport.imported(plan.backup.wikis.length, bookmarksAdded);
+  }
 
   async function clearRecent() {
     await clearAllRecentFiles();
@@ -4416,7 +4600,7 @@
       // commits and pushes without this page doing anything at all.
       void refreshServerSyncStatus(false);
       startServerSyncPolling();
-    } else {
+    } else if (showBookmarks) {
       // Meta-launcher: only the local modes keep a list of remote instances.
       void refreshBookmarkIcons();
     }
@@ -4483,7 +4667,7 @@
         if (instanceUnlock) cancelInstanceUnlock();
         if (showVaultModal) closeVaultModal();
         closeBookmarkModal();
-        closeEmojiPicker();
+        closeInstanceManagement();
         closeGitSyncModal();
       }
     };
@@ -4966,7 +5150,7 @@
     ? (offlineLauncher
         ? offlineRows.length === 0
         : filteredRemote.length === 0 && !remoteBusy && !remoteError)
-    : filteredRecent.length === 0 && filteredCached.length === 0 && filteredRemote.length === 0 && filteredBookmarks.length === 0;
+    : filteredRecent.length === 0 && filteredCached.length === 0 && filteredRemote.length === 0 && (!showBookmarks || filteredBookmarks.length === 0);
   $: emptyMessage = mode === 'self-host'
     ? (offlineLauncher
         ? (search.trim() ? copy.recent.empty.noMatch : copy.recent.empty.instanceHere)
@@ -5264,16 +5448,17 @@
     `disabled`, so the card's geometry does not change the moment the first Lith arrives, and
     its label greys out through the `:disabled` rule the busy state already uses.
 
-    One mode has neither: in the index-db-only fallback neither control means what it says.
-    Nothing on disk can be re-listed, and Reset there is not "clear a list, your files stay".
-    The cache is the files, so one click would take every Lith on the device with it. Site
-    data is the browser's own way to do that, and its friction is the point: it is worth
-    requiring a deliberate trip through the browser's settings to erase everything the
-    launcher holds. Offline mode gets neither, and there the rebuild is not merely unhelpful:
-    reading the server again is the very thing that just failed.
+    The fallback gets a third shape, `Backup & Reset Recents`, because there the list *is* the
+    only copy: nothing on disk can be re-listed, and Reset alone would take every Lith on the
+    device with it. That control opens the gated dialog, where each row can be written out
+    first and the reset unlocks once they have been. Offline mode gets none of the three, and
+    there the rebuild is not merely unhelpful: reading the server again is the very thing that
+    just failed.
   -->
   {#snippet recentFootControl(placeholder: boolean)}
-    {#if !indexDbOnly && !offlineLauncher}
+    {#if indexDbOnly && !offlineLauncher}
+      <button class="reset-cache" disabled={placeholder} on:click={openInstanceBackup} title={copy.foot.backupResetTitle}>{copy.foot.backupReset}</button>
+    {:else if !indexDbOnly && !offlineLauncher}
       {#if showRebuildControl}
         <button class="reset-cache" disabled={placeholder || rebuildBusy} on:click={rebuildRecents} title={isSelfHost() ? copy.foot.rebuildServerTitle : copy.foot.rebuildDiskTitle}>{rebuildBusy ? copy.foot.reindexing : copy.foot.rebuild}</button>
       {:else}
@@ -5300,23 +5485,27 @@
       of the flow in CSS, so neither the mark nor the title shifts by a pixel.
     -->
     {#if launcherReturnTarget}<button class="back-to-launcher" type="button" data-target={launcherReturnTarget.kind === 'url' ? launcherReturnTarget.url : 'history'} aria-label={copy.app.backToLauncher} title={copy.app.backToLauncher} on:click={backToLauncher}><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M19 12H5"/><path d="m11 18-6-6 6-6"/></svg></button>{/if}
-    {#if isSelfHost()}
-      <!-- A <button> only here, where the mark sets this deployment's own icon:
-           that is the one job the mark has, and it only exists for an instance. -->
-      <button
-        type="button"
-        class="brand-icon-wrap pickable"
-        class:brand-emoji-wrap={Boolean(brandEmoji)}
-        aria-label={copy.app.setInstanceIcon}
-        title={copy.app.setInstanceIcon}
-        on:click={() => openEmojiPicker()}
-      >
+    <!--
+      The mark, which opens Instance Management in every mode. It used to be three controls:
+      the picker's button on an instance, an inert tile on a shim, and a link to the project
+      everywhere else. Each was one of the dialog's own jobs, so the dialog is what the click
+      opens now, and the mode decides what is inside it. That also makes the project link in
+      the dialog the desktop app's only way out, since that mode draws no footer.
+    -->
+    <button
+      type="button"
+      class="brand-icon-wrap pickable"
+      class:brand-emoji-wrap={Boolean(brandEmoji)}
+      aria-label={copy.app.manageInstance}
+      title={copy.app.manageInstance}
+      on:click={() => openInstanceManagement()}
+    >
         {#if brandEmoji}
           <!-- The instance's recorded choice, drawn here rather than fetched: it is the
                same picture the published renders hold, and it is an answer an instance
                that cannot be asked still has. -->
           <span class="brand-emoji" aria-hidden="true">{brandEmoji}</span>
-        {:else if instanceMark && !instanceMarkMissing}
+        {:else if isSelfHost() && instanceMark && !instanceMarkMissing}
           <!-- The instance's own file, at the address the legacy launcher's header read.
                Whatever it holds is what this instance currently serves as its mark (
                published renders, an icon dropped in by hand) which is not something a
@@ -5328,29 +5517,7 @@
                it is also the whole of what the other modes draw. -->
           <img class="brand-icon" src={mstile150} alt={copy.app.brandAlt} />
         {/if}
-      </button>
-    {:else if browserOnly}
-      <!-- The shim AppImage serves this page from a process with no window of its own:
-           the mark is the shipped icon and nothing else. The link the other browser pages
-           carry is the launcher's way out to the project, and this distribution is the
-           app, so it has no way out to draw. -->
-      <span class="brand-icon-wrap"><img class="brand-icon" src={mstile150} alt={copy.app.brandAlt} /></span>
-    {:else}
-      <!-- Everywhere else there is no instance icon to set, so the mark carries
-           the project link instead of sitting inert. That is also what lets the
-           footer's Github button go on mobile without losing the way there. -->
-      <a
-        class="brand-icon-wrap brand-github"
-        href={PROJECT_URL}
-        target="_blank"
-        rel="noreferrer"
-        on:click={(event) => openExternalLink(event, PROJECT_URL)}
-        aria-label={copy.app.githubLink}
-        title={copy.app.githubLink}
-      >
-        <img class="brand-icon" src={mstile150} alt={copy.app.brandAlt} />
-      </a>
-    {/if}
+    </button>
     <div class="heading-copy">
       <h1>{copy.app.title}</h1>
       {#if isSelfHost()}
@@ -5653,7 +5820,7 @@
       </div>
     </div>
   {/if}
-  {#if showBookmarkModal}
+  {#if showBookmarks && showBookmarkModal}
     <div class="modal-overlay" role="presentation" on:click={(event) => event.currentTarget === event.target && closeBookmarkModal()}>
       <div class="launcher-modal bookmark-modal" role="dialog" aria-modal="true" aria-labelledby="bookmark-title">
         <button class="modal-close" aria-label={copy.dialogs.bookmark.closeAria} on:click={closeBookmarkModal}>×</button>
@@ -5947,12 +6114,15 @@
     </div>
   {/if}
   {#if showEmojiPicker}
-    <div class="modal-overlay" role="presentation" on:click={(event) => event.currentTarget === event.target && closeEmojiPicker()}>
+    <div class="modal-overlay" role="presentation" on:click={(event) => event.currentTarget === event.target && closeInstanceManagement()}>
       <div class="launcher-modal emoji-modal" role="dialog" aria-modal="true" aria-labelledby="emoji-title">
-        <button class="modal-close" aria-label={copy.dialogs.icon.closeAria} on:click={closeEmojiPicker}>×</button>
+        <button class="modal-close" aria-label={copy.dialogs.icon.closeAria} on:click={closeInstanceManagement}>×</button>
         <h2 id="emoji-title">{copy.dialogs.icon.title}</h2>
-        <!-- The icon is saved on the instance, not in this browser: saying so is what
-             makes the choice read as a setting rather than a theme. -->
+        <!--
+          The picker, on an instance only: this is the one page whose icon can be set, and the
+          icon belongs to the deployment rather than to this browser.
+        -->
+        {#if isSelfHost()}
         <p>{copy.dialogs.icon.intro}</p>
         <div class="emoji-preview" aria-hidden="true">{emojiChoice || '🎨'}</div>
         <div class="emoji-grid" role="listbox" aria-label={copy.dialogs.icon.chooseAria}>
@@ -5972,6 +6142,16 @@
           <button class="modal-action" disabled={emojiBusy || !emojiChoice} on:click={confirmEmojiIcon}>{emojiBusy ? copy.dialogs.icon.saving : copy.dialogs.icon.save}</button>
           <button class="modal-action secondary" disabled={emojiBusy} on:click={restoreDefaultInstanceIcon} title={copy.dialogs.icon.restoreTitle}>{copy.dialogs.icon.restore}</button>
         </div>
+        {/if}
+        <!--
+          The dialog's other two jobs, in every mode, under a rule so they read as the rest of
+          its business rather than as part of the icon choice above.
+        -->
+        <div class="modal-actions management-actions">
+          <a class="modal-action secondary" href={PROJECT_URL} target="_blank" rel="noreferrer" title={copy.dialogs.icon.docsTitle} on:click={(event) => openExternalLink(event, PROJECT_URL)}>{copy.dialogs.icon.docs}</a>
+          <button class="modal-action secondary" disabled={backupBusy} on:click={() => downloadInstanceBackup('manage')} title={copy.dialogs.icon.backupTitle}>{backupBusy ? '…' : copy.dialogs.icon.backup}</button>
+        </div>
+        {#if backupStatus}<p class="status-line" role="status">{backupStatus}</p>{/if}
       </div>
     </div>
   {/if}
@@ -6012,6 +6192,16 @@
           {/each}
         </ul>
         {#if orphanNote}<p class="orphan-progress" role="status">{orphanNote}</p>{/if}
+        <!--
+          The whole-instance export, beside the per-row downloads. It is the other way to keep
+          everything this dialog is about to drop, and the only one that also carries the
+          recents that were never in the list below; the note under it says so.
+        -->
+        <div class="instance-backup-full">
+          <button class="modal-action secondary" disabled={backupBusy} on:click={() => downloadInstanceBackup('rebuild')} title={copy.dialogs.rebuild.fullBackupTitle}>{backupBusy ? '…' : copy.dialogs.rebuild.fullBackup}</button>
+        </div>
+        <p class="git-sync-note">{copy.dialogs.rebuild.fullBackupNote}</p>
+        {#if backupStatus}<p class="status-line" role="status">{backupStatus}</p>{/if}
         <div class="modal-actions">
           <button class="modal-action secondary" on:click={() => resolveRebuildOrphans(false)}>{copy.common.cancel}</button>
           <!-- The destructive half of the question, in the red the app uses for one: the
@@ -6019,6 +6209,60 @@
                download from this dialog is the only way to write one of them out first. -->
           <button class="modal-action danger" on:click={() => resolveRebuildOrphans(true)}>{copy.dialogs.rebuild.proceed}</button>
         </div>
+      </div>
+    </div>
+  {/if}
+  <!--
+    The fallback's guardrail, and the one dialog in the launcher whose action is gated. Every
+    row here is the only copy of a Lith there is, so Reset waits for a download per row or for
+    one full backup, and the line above it says how many are left. The close control is the way
+    out, which is why there is no Cancel beside it (see the dismissal rule in styles.css).
+  -->
+  {#if showInstanceBackup}
+    <div class="modal-overlay" role="presentation" on:click={(event) => event.currentTarget === event.target && (showInstanceBackup = false)}>
+      <div class="launcher-modal orphan-modal instance-backup-modal" role="dialog" aria-modal="true" aria-labelledby="instance-backup-title">
+        <button class="modal-close" aria-label={copy.dialogs.instanceBackup.closeAria} on:click={() => (showInstanceBackup = false)}>×</button>
+        <h2 id="instance-backup-title">{copy.dialogs.instanceBackup.title}</h2>
+        <p>{copy.dialogs.instanceBackup.body}</p>
+        <ul class="orphan-list">
+          {#each backupRows as row (row.name)}
+            <li class="orphan-row">
+              <span class="orphan-name" title={row.name}>{row.name}</span>
+              <button class="recent-icon-button" type="button" aria-label={copy.row.downloadAria(row.name)} title={copy.row.downloadTitle} on:click={() => downloadCachedSnapshot(row.name, row.text)}>
+                <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 4v11"></path><path d="m7.5 10.5 4.5 4.5 4.5-4.5"></path><path d="M5 19h14"></path></svg>
+              </button>
+              {#if row.pill}<span class="orphan-pill {row.pill.tone}" role="status" title={row.pill.title}>{row.pill.label}</span>{/if}
+            </li>
+          {/each}
+        </ul>
+        <div class="instance-backup-full">
+          <button class="modal-action secondary" disabled={backupBusy} on:click={() => downloadInstanceBackup('gate')} title={copy.dialogs.instanceBackup.fullBackupTitle}>{backupBusy ? '…' : copy.dialogs.instanceBackup.fullBackup}</button>
+          {#if fullBackupTaken}<span class="instance-backup-mark" role="status">{copy.dialogs.instanceBackup.fullBackupTaken}</span>{/if}
+        </div>
+        {#if backupStatus}<p class="status-line" role="status">{backupStatus}</p>{/if}
+        {#if !backupOpen.open}<p class="instance-backup-gate" role="status">{copy.dialogs.instanceBackup.gate(backupOpen.remaining)}</p>{/if}
+        <div class="modal-actions">
+          <button class="modal-action danger" disabled={!backupOpen.open} title={backupOpen.open ? copy.foot.resetTitle : copy.dialogs.instanceBackup.resetLockedTitle} on:click={resetRecentsFromBackup}>{copy.dialogs.instanceBackup.reset}</button>
+        </div>
+      </div>
+    </div>
+  {/if}
+  <!--
+    A dropped backup this device cannot take whole. It is a refusal and not a question, so
+    there is no action row: the names are the work, and the close control is the way back.
+  -->
+  {#if importCollisions.length > 0}
+    <div class="modal-overlay" role="presentation" on:click={(event) => event.currentTarget === event.target && (importCollisions = [])}>
+      <div class="launcher-modal" role="dialog" aria-modal="true" aria-labelledby="import-collision-title">
+        <button class="modal-close" aria-label={copy.dialogs.backupImport.closeAria} on:click={() => (importCollisions = [])}>×</button>
+        <h2 id="import-collision-title">{copy.dialogs.backupImport.title}</h2>
+        <p>{copy.dialogs.backupImport.body(importCollisions.length)}</p>
+        <ul class="orphan-list">
+          {#each importCollisions as name (name)}
+            <li class="orphan-row"><span class="orphan-name" title={name}>{name}</span></li>
+          {/each}
+        </ul>
+        <p class="git-sync-note">{copy.dialogs.backupImport.note}</p>
       </div>
     </div>
   {/if}
@@ -6149,7 +6393,7 @@
         <button class="action-button new-blank-button" use:alignNewLithLabel on:click={openNewLithModal} disabled={busy}><span class="new-blank-label">{copy.actions.newBlank}</span></button>
       {/if}
       <button class="action-button mount-button" on:click={mountFromDisk} disabled={busy}><span class="mount-label">{mode === 'self-host' ? copy.actions.upload : copy.actions.mount}</span></button>
-      {#if mode !== 'self-host'}
+      {#if showBookmarks}
       <button class="bookmark-button" aria-label={copy.actions.bookmarkAria} title={copy.actions.bookmarkTitle} on:click={openBookmarkModal}><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 21V5a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v16l-6-4z" /></svg></button>
       {/if}
     </div>
@@ -6281,6 +6525,7 @@
         <!-- The device's own lists: recents, caches, bookmarks. Never drawn in self-host,
              for the same reason the server's rows are drawn only there. -->
         {#if mode !== 'self-host'}
+        {#if showBookmarks}
         {#each filteredBookmarks as entry (entry.url)}
           <div class="recent-row bookmark-row">
             <!--
@@ -6358,6 +6603,7 @@
             <button class="recent-icon-button remove-recent" type="button" aria-label={copy.row.removeBookmarkAria(entry.url)} on:click={() => removeInstanceBookmark(entry.url, entry.label)}><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m7 7 10 10M17 7 7 17"></path></svg></button>
           </div>
         {/each}
+        {/if}
         {#each filteredRecent as file}
           {@const name = getEntryName(file)}
           {@const diskPath = recentDiskPath(file as any)}

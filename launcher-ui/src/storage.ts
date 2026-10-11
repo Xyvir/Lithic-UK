@@ -384,6 +384,63 @@ export async function clearAllRecentFiles(store: CacheStore = idb): Promise<void
 }
 
 /**
+ * Whatever carries the Storage API in this document, or null where there is none.
+ */
+function defaultStorageManager(): Pick<StorageManager, 'persist' | 'persisted'> | null {
+  try {
+    return typeof navigator === 'undefined' ? null : navigator.storage ?? null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Ask this browser not to evict the origin's storage under pressure.
+ *
+ * IndexedDB holds the version history and the search cache in every mode, and in the
+ * browser-storage fallback it holds the documents themselves, so an eviction there costs
+ * a copy rather than a file. Boolean rather than void, and false for every way this can
+ * fail to happen: no Storage API, no `persist`, a refusal, or a throw. The answer is
+ * deliberately not surfaced, because the amber claim a browser-only row already carries
+ * says the copy is volatile and a second sentence would restate it.
+ *
+ * Support and behaviour differ, so this is best-effort everywhere (MDN:
+ * `StorageManager.persist`). Chromium decides silently, from engagement and whether the
+ * site is installed. Firefox asks the person. Safari implements the call but keeps its
+ * own deletion policy: an ordinary tab still loses script-writable storage after seven
+ * days without interaction, while a Home Screen web app is exempt. That last point is why
+ * the README's iPhone answer is installing the launcher rather than trusting this call,
+ * and this call is still worth making because it is free and it is the only lever a page
+ * has.
+ */
+export async function requestPersistentStorage(
+  manager: Pick<StorageManager, 'persist' | 'persisted'> | null = defaultStorageManager()
+): Promise<boolean> {
+  try {
+    if (!manager || typeof manager.persist !== 'function' || typeof manager.persisted !== 'function') return false;
+    if (await manager.persisted()) return true;
+    return await manager.persist();
+  } catch {
+    return false;
+  }
+}
+
+/** This session's one request, so a refusal is not re-asked on every save. */
+let persistentStorageRequest: Promise<boolean> | null = null;
+
+/**
+ * `requestPersistentStorage` once per session, which is how the save path asks for it.
+ * One promise rather than one call per save, because a browser that prompts the person
+ * must not be made to prompt every time a Lith is written.
+ */
+export function ensurePersistentStorage(
+  manager: Pick<StorageManager, 'persist' | 'persisted'> | null = defaultStorageManager()
+): Promise<boolean> {
+  if (!persistentStorageRequest) persistentStorageRequest = requestPersistentStorage(manager);
+  return persistentStorageRequest;
+}
+
+/**
  * Versioned search-cache save. Delegates to the per-wiki delta-chain history
  * (KeyvalWikiHistory): the new state is diffed against HEAD and stored as
  * tiny RFC 6902-style patch ops, with full snapshots only when diffs stop
@@ -394,6 +451,11 @@ export async function clearAllRecentFiles(store: CacheStore = idb): Promise<void
  */
 export async function saveSearchCache(fileName: string, text: string): Promise<void> {
   try {
+    // The write is the moment the request means something (see
+    // `ensurePersistentStorage`): asked here rather than at boot, so a browser that
+    // prompts asks while the person is saving, and asked once per session so a refusal
+    // is not re-asked on every save.
+    void ensurePersistentStorage();
     const now = Date.now();
     await historyStore.saveVersion(fileName, text, now);
     await idb.set('search_cache_' + fileName, {

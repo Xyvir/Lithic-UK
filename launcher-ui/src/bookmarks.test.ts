@@ -2,7 +2,9 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   BOOKMARKS_KEY,
+  BOOKMARK_LIMIT,
   ICON_MAX_AGE_MS,
+  writeBookmarkList,
   normalizeInstanceUrl,
   readBookmarkEntries,
   readBookmarks,
@@ -254,4 +256,18 @@ test('a bookmark icon is fetched through Rust when the desktop app offers it', a
   }));
   assert.match(entries[0].icon ?? '', /^data:image\/png;base64,/);
   assert.equal(browserCalls, 0, 'the native loader is preferred: the browser cannot read a CORS-less host');
+});
+
+test('a whole list is written through the same cap as every other write', () => {
+  const store = storage();
+  const many = Array.from({ length: BOOKMARK_LIMIT + 5 }, (_unused, index) => ({
+    url: `https://instance-${index}.test`,
+    label: `instance-${index}.test`
+  }));
+  const written = writeBookmarkList(many, store);
+  assert.equal(written.length, BOOKMARK_LIMIT, 'the list holds its own limit, whichever way it is written');
+  assert.deepEqual(readBookmarkEntries(store).map((entry) => entry.url), written.map((entry) => entry.url));
+  // An entry the list would not keep is not written either: this is the same reader and writer.
+  assert.deepEqual(writeBookmarkList([{ url: '', label: 'nothing' }], store), []);
+  assert.deepEqual(readBookmarkEntries(store), []);
 });

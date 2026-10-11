@@ -4,6 +4,7 @@ import {
   BROWSER_ONLY_HISTORY_NOTE,
   BROWSER_ONLY_TOOLTIP,
   browserOnlyMarkTitle,
+  isIosDevice,
   rememberRowKind,
   resolveStorageMode,
   storageModeOverride,
@@ -63,6 +64,24 @@ test('the query parameter can force either mode, for testing on any browser', ()
 test('the override is read from the page URL', () => {
   assert.equal(storageModeOverride('?storage=index-db&mode=webapp'), 'index-db');
   assert.equal(storageModeOverride(''), null);
+});
+
+test('the one platform read separates an iPhone from the Mac in the same fallback', () => {
+  const phone = 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1';
+  const ipadDesktopUa = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Safari/605.1.15';
+  const macSafari = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Safari/605.1.15';
+  const windowsChrome = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Safari/537.36';
+
+  assert.equal(isIosDevice(phone, 'iPhone', 5), true);
+  // An iPad reports a Macintosh agent and asks for the desktop site, so the touch points
+  // are the only half that catches it.
+  assert.equal(isIosDevice(ipadDesktopUa, 'MacIntel', 5), true);
+  assert.equal(isIosDevice('Mozilla/5.0 (iPad; CPU OS 17_0 like Mac OS X)', 'iPad', 5), true);
+  // A Mac is the page this has to keep out, and it has no touch points to mistake it for one.
+  assert.equal(isIosDevice(macSafari, 'MacIntel', 0), false);
+  assert.equal(isIosDevice(windowsChrome, 'Win32', 0), false);
+  // A page with no navigator at all is not a phone.
+  assert.equal(isIosDevice('', '', 0), false);
 });
 
 test('the mark says the copy is the only copy, and where to get a real one', () => {

@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { orphanPill, orphanDownloadNote, type OrphanDownloadState } from './orphan-download.ts';
+import { orphanPill, orphanDownloadNote, downloadAttained, backupGate, type OrphanDownloadState } from './orphan-download.ts';
 
 test('only a confirmed write gets the green tone', () => {
   assert.equal(orphanPill('saved')?.tone, 'saved');
@@ -46,4 +46,41 @@ test('the note never calls an unconfirmed download safe', () => {
 test('a single orphan reads as a sentence, not as a count of one', () => {
   assert.equal(orphanDownloadNote(['saved']), 'Saved. Safe to proceed.');
   assert.equal(orphanDownloadNote(['unverified']), 'Saved, but unconfirmed.');
+});
+
+test('an unconfirmed download counts as attained, or the gate could never open', () => {
+  // Safari and Firefox have no file picker, so every download there is unverified.
+  // A gate that waited for proof would be a button nobody could ever press.
+  assert.equal(downloadAttained('saved'), true);
+  assert.equal(downloadAttained('unverified'), true);
+  assert.equal(downloadAttained('idle'), false);
+  assert.equal(downloadAttained('saving'), false);
+  assert.equal(downloadAttained('failed'), false);
+  assert.equal(downloadAttained(undefined), false, 'a row the modal has not drawn yet is not attained');
+});
+
+test('the gate watches every row and opens only when none is left', () => {
+  const idle: OrphanDownloadState[] = ['idle', 'idle', 'idle'];
+  assert.deepEqual(backupGate(idle, false), { open: false, attained: 0, total: 3, remaining: 3 });
+  assert.deepEqual(backupGate(['saved', 'idle', 'idle'], false), {
+    open: false,
+    attained: 1,
+    total: 3,
+    remaining: 2
+  });
+  // A failure does not count, and neither does a row mid-save.
+  assert.equal(backupGate(['failed', 'saving', 'idle'], false).open, false);
+  assert.deepEqual(backupGate(['saved', 'unverified', 'saved'], false), {
+    open: true,
+    attained: 3,
+    total: 3,
+    remaining: 0
+  });
+});
+
+test('the full backup opens the gate on its own, and an empty list does not', () => {
+  assert.equal(backupGate(['idle', 'idle'], true).open, true);
+  // Nothing to reset means nothing to unlock.
+  assert.deepEqual(backupGate([], false), { open: false, attained: 0, total: 0, remaining: 0 });
+  assert.equal(backupGate([], true).open, true);
 });

@@ -29,6 +29,14 @@ const artifactHtml = await readFile(artifact, 'utf8');
 // tries to fetch one from a host that does not exist (see the bookmark section).
 const missingIconHost = 'no-icon.example.com';
 
+// A phone PWA. The bookmark (meta-launcher) control is kept on the app and on an iPhone or
+// iPad, and hidden from every browser that has a native build to install (`showBookmarks` in
+// App.svelte, with `isIosDevice` for the platform read that tells an iPhone from a Mac). The
+// page whose bookmark layout, dialog and rows are asserted below therefore has to answer as
+// one; the desktop case is asserted as an absence in the bookmark section.
+const IOS_USER_AGENT =
+  'Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1';
+
 /**
  * A recent row this suite seeds by hand.
  *
@@ -120,6 +128,7 @@ const browser = await puppeteer.launch({
 
 try {
   const page = await browser.newPage();
+  await page.setUserAgent(IOS_USER_AGENT);
   const errors = [];
   // Loading via file:// makes the PWA manifest/favicon lookups fail at the
   // network layer (the legacy launcher behaves the same way on disk). Filter
@@ -557,9 +566,9 @@ try {
   );
   await closeTypingRow();
 
-  // Webapp mode: the mark is the project link, so the footer's copy of it is
-  // the one that goes on mobile — the mark always fits. This file:// document
-  // resolves to webapp (no Tauri global, no instance marker).
+  // Webapp mode: the mark opens Instance Management, so the project link lives
+  // inside it and the footer's own copy is the one that goes on mobile. This
+  // file:// document resolves to webapp (no Tauri global, no instance marker).
   const readMarkAt = async (width) => {
     await page.setViewport({ width, height: 700 });
     return page.evaluate(() => {
@@ -576,13 +585,13 @@ try {
   };
   const mobileMark = await readMarkAt(600);
   const desktopMark = await readMarkAt(1000);
-  assert.equal(mobileMark.markTag, 'A', 'Mobile: the Lithic mark is the project link');
-  assert.equal(mobileMark.markHref, 'https://github.com/Xyvir/Lithic-UK', 'Mobile: the mark points at the project');
-  assert.equal(mobileMark.markLabel, 'Lithic on GitHub', 'Mobile: the mark is labelled for screen readers');
+  assert.equal(mobileMark.markTag, 'BUTTON', 'Mobile: the Lithic mark opens Instance Management');
+  assert.equal(mobileMark.markHref, null, 'Mobile: and the mark itself no longer links away');
+  assert.equal(mobileMark.markLabel, 'Instance Management', 'Mobile: the mark is labelled for screen readers');
   assert.equal(mobileMark.footerDisplay, 'none', 'Mobile hides the footer Github button');
-  assert.equal(desktopMark.markTag, 'A', 'Desktop: the mark is the project link too');
+  assert.equal(desktopMark.markTag, 'BUTTON', 'Desktop: the mark opens the same dialog');
   assert.equal(desktopMark.footerDisplay, 'flex', 'Desktop keeps the footer Github button');
-  assert.equal(desktopMark.footerHref, mobileMark.markHref, 'The footer link points where the mark does');
+  assert.equal(desktopMark.footerHref, 'https://github.com/Xyvir/Lithic-UK', 'The footer link is where the project address lives now');
 
   // The other half of that rule: self-host is the one mode where the mark really
   // is a control — the instance's own icon picker — so it must not have turned
@@ -681,8 +690,8 @@ try {
       error: document.querySelector('.status-line.error')?.textContent?.trim() ?? null
     };
   });
-  assert.equal(selfHost.tag, 'BUTTON', 'Self-host: the mark stays the icon picker button');
-  assert.equal(selfHost.label, 'Set this instance’s icon', 'Self-host: the picker button is still labelled');
+  assert.equal(selfHost.tag, 'BUTTON', 'Self-host: the mark is the button that opens Instance Management');
+  assert.equal(selfHost.label, 'Instance Management', 'Self-host: and it is labelled for the dialog it opens');
   assert.equal(selfHost.href, null, 'Self-host: the mark does not link away from the picker');
   assert.equal(selfHost.disabled, false, 'Self-host: the picker is a live control, not the old dead button');
   // This page is a file with no instance behind it, so there is no mark to read: the
@@ -2345,6 +2354,49 @@ try {
   // cursor wherever it already is, rather than only on the ✕ itself.
   const hoverTargetWidth = dismissHovered.buttonWidth - dismissHovered.gapToGlyph + (dismissHovered.glyphLeft - dismissHovered.labelLeft);
   assert.ok(hoverTargetWidth >= 40, 'The dismiss control keeps a wide enough hover target with the word hidden');
+
+  // --- The bookmark control is the phone PWA's, and nobody else's ---
+  // The desktop and Android PWAs are the zero-setup way in and nothing more, so they are
+  // handed no meta-launcher: a visitor with a native build to install is pointed at it
+  // instead. Seeded with a bookmark, so an empty list cannot be mistaken for the gate, and in
+  // its own context so the fixture is not left in the main page's store.
+  const desktopContext = await browser.createBrowserContext();
+  const desktopPage = await desktopContext.newPage();
+  await desktopPage.setViewport({ width: 900, height: 700 });
+  const desktopRequests = [];
+  desktopPage.on('request', (request) => desktopRequests.push(request.url()));
+  await desktopPage.goto(`file://${artifact}`, { waitUntil: 'domcontentloaded' });
+  await desktopPage.waitForSelector('main.container');
+  await desktopPage.evaluate(() => {
+    localStorage.setItem('bookmarkedInstances', JSON.stringify([
+      { url: 'https://personal.lithic.uk', label: 'personal.lithic.uk' }
+    ]));
+  });
+  await desktopPage.goto(`file://${artifact}`, { waitUntil: 'domcontentloaded' });
+  await desktopPage.waitForSelector('main.container');
+  await new Promise((resolve) => setTimeout(resolve, 150));
+  const desktopPwa = await desktopPage.evaluate(() => ({
+    desktopAgent: !/iPhone|iPad|iPod/i.test(navigator.userAgent),
+    bookmarkButton: document.querySelector('.bookmark-button') !== null,
+    bookmarkRows: document.querySelectorAll('.bookmark-row').length,
+    bookmarkModal: document.querySelector('.bookmark-modal') !== null,
+    mountButton: document.querySelector('.action-pair .mount-button') !== null,
+    newBlank: [...document.querySelectorAll('button')].some((button) => button.textContent?.includes('New Blank Lith'))
+  }));
+  assert.equal(desktopPwa.desktopAgent, true, 'This page really is a desktop browser, so it is the PWA the control is kept from');
+  assert.equal(desktopPwa.bookmarkButton, false, 'A desktop PWA draws no bookmark control');
+  assert.equal(desktopPwa.bookmarkRows, 0, '...and a seeded bookmark is not drawn as a row either, so this is the gate and not an empty list');
+  assert.equal(desktopPwa.bookmarkModal, false, '...and no dialog exists for a control that is not there');
+  assert.equal(desktopPwa.mountButton, true, '...while the action the page does offer stays');
+  assert.equal(desktopPwa.newBlank, true, '...and so does the one-click way in');
+  // The gate also skips the icon fetch the hidden feature would have made, which is the half
+  // of this that a page cannot see in its own DOM.
+  assert.equal(
+    desktopRequests.filter((url) => url.includes('personal.lithic.uk')).length,
+    0,
+    `A hidden bookmark fetches nothing for its icon: ${desktopRequests.filter((url) => url.includes('personal.lithic.uk')).join(', ')}`
+  );
+  await desktopContext.close();
 
   // --- A bookmark row is one control, not two ---
   // The cached instance icon belongs to the link. Left beside the button instead
@@ -4707,7 +4759,13 @@ try {
   // as a dead control while the update offer, which asks Rust, kept working. So the click is
   // taken over in that mode and given to Rust's opener, and what it carries is asserted here:
   // a link that opens the wrong project is the same bug at a slower speed.
-  await vaultPage.click('.brand-icon-wrap.brand-github');
+  // The link now lives inside the dialog the mark opens, on the row this mode depends on: the
+  // app draws no footer link at all, so the docs row is its only way out to the project, and
+  // what it carries is asserted here.
+  await vaultPage.click('.brand-icon-wrap');
+  await vaultPage.waitForSelector('.emoji-modal');
+  await assertNoExtraDismiss('.emoji-modal', 'The Instance Management dialog');
+  await vaultPage.click('.emoji-modal .management-actions a');
   await waitForCall(call => call.command === 'open_external');
   const openedProject = vaultCalls.filter(call => call.command === 'open_external').at(-1);
   assert.equal(
@@ -4715,6 +4773,10 @@ try {
     'https://github.com/Xyvir/Lithic-UK',
     `The project link is handed to the machine rather than to the webview: ${JSON.stringify(openedProject)}`
   );
+
+  // Closed again, so the sections below meet the page as the rest of this file left it.
+  await vaultPage.click('.emoji-modal .modal-close');
+  await vaultPage.waitForFunction(() => document.querySelector('.emoji-modal') === null);
 
   // --- The device-code step, which carries the folder it is about to back up ----------
   // The picker belongs to setting a backup up, and that means the screens that end at the
@@ -5540,6 +5602,172 @@ try {
   );
   await uploadContext.close();
   await uploadStub.close();
+
+  // --- The fallback's guardrail: there every row is the only copy there is ------------
+  //
+  // `?storage=index-db` is the resolver's own override (`STORAGE_MODE_PARAM` in
+  // `browser-storage.ts`), forced because a Chromium page would otherwise take the file path
+  // and never draw this control at all. What the mode means is that no Lith has a file behind
+  // it: the store *is* the document, so the panel's foot offers one control, and what it opens
+  // is the only place a copy can leave from before the reset takes everything.
+  //
+  // Two rows with text behind them, seeded into the store that mode reads them from. The gate
+  // counts the rows it could write out, so a row with nothing to download would be a row nobody
+  // could ever unlock, and that is the half of this a screenshot would not show.
+  const fallbackContext = await browser.createBrowserContext();
+  const fallbackPage = await fallbackContext.newPage();
+  const fallbackErrors = [];
+  fallbackPage.on('pageerror', (error) => fallbackErrors.push(error.message));
+  await fallbackPage.setViewport({ width: 1000, height: 800 });
+  // The file picker is removed before the page loads, which is both how this mode reads on
+  // Safari and Firefox and the only way a headless run can click a download at all: with the
+  // API present the button opens a native dialog no test can close. It also puts the export on
+  // the unverifiable path, which is the honest one here: the gate has to open on a started
+  // download, or it could never open in the browsers this mode exists for.
+  await fallbackPage.evaluateOnNewDocument(() => {
+    delete window.showSaveFilePicker;
+  });
+  await fallbackPage.goto(`file://${artifact}?storage=index-db`, { waitUntil: 'domcontentloaded' });
+  await fallbackPage.waitForSelector('main.container');
+  await fallbackPage.evaluate(async () => {
+    const store = await new Promise((resolve, reject) => {
+      const request = indexedDB.open('keyval-store', 1);
+      request.onerror = () => reject(request.error);
+      request.onsuccess = () => resolve(request.result);
+    });
+    const names = ['alpha.lith', 'beta.lith'];
+    await new Promise((resolve, reject) => {
+      const tx = store.transaction('keyval', 'readwrite');
+      const object = tx.objectStore('keyval');
+      object.put(
+        names.map((name) => ({ handle: null, name, tauriPath: null, browserOnly: true })),
+        'recentFiles'
+      );
+      for (const name of names) {
+        object.put(
+          { text: JSON.stringify([{ title: name, text: name }]), lastModified: '2026-01-01 00:00 UTC' },
+          `search_cache_${name}`
+        );
+      }
+      tx.oncomplete = resolve;
+      tx.onerror = () => reject(tx.error);
+    });
+  });
+  await fallbackPage.reload({ waitUntil: 'domcontentloaded' });
+  await fallbackPage.waitForSelector('.reset-cache');
+  const fallbackFoot = await fallbackPage.evaluate(() => ({
+    label: document.querySelector('.reset-cache')?.textContent?.trim() ?? null,
+    controls: document.querySelectorAll('.reset-cache').length,
+    mark: document.querySelector('.heading .brand-icon-wrap')?.tagName ?? null
+  }));
+  assert.equal(
+    fallbackFoot.label,
+    'Backup & Reset Recents',
+    `The fallback's foot control names what it does rather than resetting alone: ${JSON.stringify(fallbackFoot)}`
+  );
+  assert.equal(fallbackFoot.controls, 1, '...and it is the only foot control in a mode where no rebuild exists');
+  assert.equal(fallbackFoot.mark, 'BUTTON', 'The fallback draws the mark as the Instance Management button too');
+
+  await fallbackPage.click('.reset-cache');
+  await fallbackPage.waitForSelector('.instance-backup-modal');
+  const gated = await fallbackPage.evaluate(() => {
+    const modal = document.querySelector('.instance-backup-modal');
+    const reset = modal?.querySelector('.modal-action.danger');
+    return {
+      rows: [...(modal?.querySelectorAll('.orphan-name') ?? [])].map((node) => node.textContent.trim()),
+      resetLabel: reset?.textContent?.trim() ?? null,
+      resetDisabled: reset?.hasAttribute('disabled') ?? null,
+      gate: modal?.querySelector('.instance-backup-gate')?.textContent?.trim() ?? null,
+      modalActions: [...(modal?.querySelectorAll('.modal-action') ?? [])].map((node) => node.textContent.trim()),
+      close: modal?.querySelector('.modal-close') !== null,
+      cancel: [...(modal?.querySelectorAll('button') ?? [])].some((node) => node.textContent.trim() === 'Cancel')
+    };
+  });
+  assert.deepEqual(
+    gated.rows,
+    ['alpha.lith', 'beta.lith'],
+    `The dialog lists the recents, which in this mode are the documents: ${JSON.stringify(gated)}`
+  );
+  assert.equal(gated.resetLabel, 'Reset Recents', 'Its decision is the reset the foot control used to run alone');
+  assert.equal(gated.resetDisabled, true, '...and it is locked until the copies have left');
+  assert.match(gated.gate ?? '', /unlock Reset/, 'with a line above it saying what unlocks it');
+  assert.ok(
+    gated.modalActions.some((label) => /Full Backup/.test(label)),
+    `The whole-instance export is offered here too: ${JSON.stringify(gated.modalActions)}`
+  );
+  assert.equal(gated.close, true, 'The dialog carries the × in its corner');
+  assert.equal(gated.cancel, false, '...and no Cancel beside it, which is the same dismissal twice');
+
+  // One row on its own first: the per-row download has to move the gate too, and the mark it
+  // leaves has to be the honest one for a browser that cannot confirm a download, which is every
+  // browser this mode exists for. The file picker is gone, so this is that path.
+  await fallbackPage.click('.instance-backup-modal .orphan-row .recent-icon-button');
+  await fallbackPage.waitForSelector('.instance-backup-modal .orphan-pill');
+  assert.equal(
+    await fallbackPage.$eval('.instance-backup-modal .orphan-pill', (node) => node.textContent.trim()),
+    '✓ check downloads',
+    'A download nobody can confirm is marked unconfirmed rather than saved'
+  );
+  assert.equal(
+    await fallbackPage.$eval('.instance-backup-modal .instance-backup-gate', (node) => node.textContent.trim()),
+    'Download the last one, or take the full backup, to unlock Reset.',
+    '...and the gate counts it, so one row down leaves one to go'
+  );
+  assert.equal(
+    await fallbackPage.$eval('.instance-backup-modal .modal-action.danger', (node) => node.hasAttribute('disabled')),
+    true,
+    '...with the reset still locked while a row is left'
+  );
+
+  // One export of everything, which is the promise the gate is built on: a backup that covers
+  // every row is the single download that can open it without walking the list.
+  await fallbackPage.click('.instance-backup-full .modal-action');
+  await fallbackPage.waitForFunction(() => {
+    const reset = document.querySelector('.instance-backup-modal .modal-action.danger');
+    return reset !== null && !reset.hasAttribute('disabled');
+  }, POLL);
+  const openedGate = await fallbackPage.evaluate(() => ({
+    gate: document.querySelector('.instance-backup-gate')?.textContent?.trim() ?? null,
+    mark: document.querySelector('.instance-backup-mark')?.textContent?.trim() ?? null
+  }));
+  assert.equal(openedGate.gate, null, 'A started export opens the gate, so an unconfirmable download is enough');
+  assert.match(
+    openedGate.mark ?? '',
+    /Full backup/,
+    `...and the dialog says which download opened it: ${JSON.stringify(openedGate)}`
+  );
+
+  await fallbackPage.click('.instance-backup-modal .modal-action.danger');
+  await fallbackPage.waitForFunction(() => document.querySelector('.instance-backup-modal') === null, POLL);
+  // Polled rather than read once. The dialog closes as the pass starts, and a store is cleared
+  // a record at a time, so one read here would race the deletion it is watching for and report
+  // the list as still holding what it is in the middle of removing.
+  await fallbackPage.waitForFunction(
+    async () => {
+      const store = await new Promise((resolve, reject) => {
+        const request = indexedDB.open('keyval-store', 1);
+        request.onerror = () => reject(request.error);
+        request.onsuccess = () => resolve(request.result);
+      });
+      return new Promise((resolve, reject) => {
+        const tx = store.transaction('keyval', 'readonly');
+        const object = tx.objectStore('keyval');
+        const rows = object.get('recentFiles');
+        const cache = object.get('search_cache_alpha.lith');
+        tx.oncomplete = () =>
+          resolve((rows.result ?? []).length === 0 && (cache.result ?? null) === null);
+        tx.onerror = () => reject(tx.error);
+      });
+    },
+    POLL
+  );
+  assert.equal(
+    await fallbackPage.$$eval('.recent-row', (nodes) => nodes.length),
+    0,
+    'Reset takes the list, and the copies it asked to have downloaded first'
+  );
+  assert.deepEqual(fallbackErrors, [], `The whole fallback flow ran without a console error: ${fallbackErrors.join(' | ')}`);
+  await fallbackContext.close();
 
   // --- Which language the launcher speaks, and why -------------------------------
   //

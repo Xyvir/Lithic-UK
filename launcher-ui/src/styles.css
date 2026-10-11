@@ -223,8 +223,9 @@ h1 { flex: none; min-width: 0; margin: 0; color: var(--lithic-ink-strong); font-
   width: 52px;
   height: 52px;
   margin-right: 15px;
-  /* It is a real <button> in self-host mode so the emoji picker is keyboard
-     reachable; strip the UA chrome so the header looks identical elsewhere. */
+  /* It is a real <button>, in every mode, because Instance Management is keyboard
+     reachable that way; strip the UA chrome so it draws as a mark rather than as a
+     control with a box around it. */
   padding: 0;
   border: 0;
   background: none;
@@ -952,6 +953,9 @@ footer > * { pointer-events: auto; }
 .modal-actions { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 18px; }
 .modal-action { flex: 1 1 auto; white-space: nowrap; padding: 10px; border: 1px solid var(--lithic-accent); border-radius: 7px; background: var(--lithic-accent-wash-12); color: var(--lithic-accent); cursor: pointer; }
 .modal-action.secondary { border-color: var(--lithic-line); background: transparent; color: var(--lithic-ink); }
+/* The project link wears the action row's shape, so an anchor needs the two things a
+ * button brings for free: centred text, and no underline. */
+a.modal-action { text-decoration: none; text-align: center; color: var(--lithic-ink); }
 /*
  * The primary action, when what it does cannot be undone: the same shape as the outlined
  * primary in the red the rest of the app refuses in. `.vault-danger`'s colour, so the key
@@ -1955,6 +1959,14 @@ body.drag-over::after {
 .orphan-pill.unverified { background: var(--lithic-amber-wash-16); color: var(--lithic-amber-soft); }
 /* "2 of 5 saved". The line that says when Proceed is safe. */
 .orphan-progress { margin: 10px 0 0; color: var(--lithic-ok-pale); font-size: 0.8rem; text-align: center; }
+/* The whole-instance export, and the mark that says one has been taken. */
+.instance-backup-full { display: flex; align-items: center; gap: 10px; margin: 12px 0 0; }
+.instance-backup-full .modal-action { flex: 1 1 auto; min-width: 0; }
+.instance-backup-mark { color: var(--lithic-ok-pale); font-size: 0.8rem; white-space: nowrap; }
+/* What the gated Reset is waiting for. Muted rather than green: nothing has happened yet. */
+.instance-backup-gate { margin: 10px 0 0; color: var(--lithic-ink-muted); font-size: 0.8rem; text-align: center; }
+/* The Instance Management dialog's other two jobs, ruled off from the picker above. */
+.management-actions { margin-top: 16px; padding-top: 14px; border-top: 1px solid var(--lithic-line-faint); }
 
 /* --- Offline mode: a cached self-host launcher whose instance is out of reach --- */
 /*
@@ -2050,14 +2062,9 @@ body.drag-over::after {
 .brand-icon-wrap.pickable { cursor: pointer; }
 .brand-icon-wrap.pickable:hover .brand-icon { border-color: var(--lithic-amber); }
 .brand-icon-wrap.pickable:focus-visible { outline: 2px solid var(--lithic-amber); outline-offset: 2px; border-radius: 8px; }
-/* The mark as a link (webapp and the desktop app). Same 52px frame as the
- * button; `.brand-icon-wrap` resets `cursor` to default and this is an <a>, so
- * both the pointer and the underline have to be asked for. Hover uses the same
- * accent as the install button (the app's interactive colour) so the mark
- * reads as a way out rather than as decoration. */
-.brand-github { cursor: pointer; text-decoration: none; }
-.brand-github:hover .brand-icon, .brand-github:focus-visible .brand-icon { border-color: var(--lithic-accent); }
-.brand-github:focus-visible { outline: 2px solid var(--lithic-accent); outline-offset: 2px; border-radius: 8px; }
+/* The project link used to be the mark itself (webapp and the desktop app) and
+ * is now a row inside the dialog it opens, so the pair of rules that styled an
+ * <a> in the header frame are gone with it. */
 .brand-icon-wrap.brand-emoji-wrap .brand-emoji {
   display: grid; place-items: center; width: 52px; height: 52px; border: 3px solid var(--lithic-line);
   border-radius: 6px; background: var(--lithic-surface-light); font-size: 1.7rem; line-height: 1;

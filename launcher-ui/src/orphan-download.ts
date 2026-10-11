@@ -59,3 +59,42 @@ export function orphanDownloadNote(states: readonly OrphanDownloadState[]): stri
   }
   return copy.orphan.notePartial(done, total);
 }
+
+/**
+ * Whether a row's copy has left the browser, which is a different question from whether it landed
+ * on disk.
+ *
+ * `saved` is proof and `unverified` is a claim the browser cannot check, and a gate counts both.
+ * Waiting for proof would make Reset unreachable on the one platform the gate exists for: Safari
+ * and Firefox have no `showSaveFilePicker`, so every download there reports `unverified` and the
+ * green check would never arrive.
+ */
+export function downloadAttained(state: OrphanDownloadState | undefined): boolean {
+  return state === 'saved' || state === 'unverified';
+}
+
+/** How far a destructive Reset's gate has got, and whether it is open. */
+export interface BackupGate {
+  open: boolean;
+  attained: number;
+  total: number;
+  remaining: number;
+}
+
+/**
+ * The gate on Reset: a download per row, or one full backup, and then the button unlocks.
+ *
+ * @param states one entry per row the gate watches, in list order.
+ * @param fullBackupTaken whether the whole instance has already been written out, which is the
+ * one download that covers every row at once and so opens the gate on its own.
+ */
+export function backupGate(states: readonly OrphanDownloadState[], fullBackupTaken: boolean): BackupGate {
+  const total = states.length;
+  const attained = states.filter(downloadAttained).length;
+  return {
+    open: fullBackupTaken || (total > 0 && attained === total),
+    attained,
+    total,
+    remaining: total - attained
+  };
+}

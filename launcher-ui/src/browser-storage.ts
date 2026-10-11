@@ -74,6 +74,33 @@ export function storageModeOverride(search: string): string | null {
 }
 
 /**
+ * Whether this page is running on an iPhone or an iPad.
+ *
+ * This is the launcher's one deliberate read of a platform name. It exists because two
+ * platforms land in the same storage fallback for unrelated reasons and the launcher has to
+ * tell them apart: Safari on macOS and Safari on iOS both lack the File System Access API, so
+ * both answer `index-db`, and only one of them has a native build to install. The bookmark
+ * (meta-launcher) list is kept for the one that does not, which is the asymmetry `showBookmarks`
+ * in `App.svelte` draws. There is no capability that separates them, and asking the process is
+ * not an option because a page at a public address has no process behind it, so the user agent
+ * is the only thing left; this is the same last resort `pickerFiltersByMimeType` reads Android
+ * from (see `document-format.ts`), and it is quarantined here rather than spread through the
+ * page.
+ *
+ * An iPad has reported a Macintosh user agent since iPadOS 13, so the touch-point count is the
+ * half that catches it, and a Mac reports zero, which is what stops a desktop Mac from being
+ * read as an iPad.
+ */
+export function isIosDevice(
+  userAgent = typeof navigator === 'undefined' ? '' : navigator.userAgent,
+  platform = typeof navigator === 'undefined' ? '' : navigator.platform,
+  maxTouchPoints = typeof navigator === 'undefined' ? 0 : navigator.maxTouchPoints
+): boolean {
+  if (/iPhone|iPad|iPod/i.test(userAgent)) return true;
+  return platform === 'MacIntel' && maxTouchPoints > 1;
+}
+
+/**
  * Which kind of recents row a mount leaves behind.
  *
  *   'browser-only' nothing this page produces can be written to a file, so the row claims

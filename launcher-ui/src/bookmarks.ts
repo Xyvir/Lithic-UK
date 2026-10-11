@@ -17,6 +17,13 @@ export const BOOKMARKS_KEY = 'bookmarkedInstances';
 export const ICON_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000;
 /** Icons are stored in localStorage, so refuse anything unreasonably large. */
 export const ICON_MAX_BYTES = 128 * 1024;
+/**
+ * How many instances the list holds.
+ *
+ * Named because there are now three places that have to agree on it: the reader, the writer, and
+ * the instance backup, which carries the list whole and has to carry what the list holds.
+ */
+export const BOOKMARK_LIMIT = 20;
 /** Ordered by preference: the instance writes all of these. */
 export const ICON_PATHS = ['/favicon-32x32.png', '/favicon.ico'];
 
@@ -94,16 +101,43 @@ export function readBookmarkEntries(storage: Storage = localStorage): BookmarkEn
       const entry = toEntry(item);
       if (entry && !entries.some((existing) => existing.url === entry.url)) entries.push(entry);
     }
-    return entries.slice(0, 20);
+    return entries.slice(0, BOOKMARK_LIMIT);
   } catch {
     return [];
   }
 }
 
+/**
+ * Write a list, through the same rules the read path applies.
+ *
+ * Reading every entry back through `toEntry` is what keeps the list one length whichever door it
+ * came in by: a writer that stores what its reader will discard leaves a list that is quietly
+ * shorter than what was written, and every writer here but one builds its entries from this
+ * module already. The one that does not is the instance backup's merge, which hands over entries
+ * out of a file, and this is where a file that named an address badly stops. The dedupe is the
+ * reader's rule too, and the cap is the list's own.
+ */
 function writeBookmarkEntries(entries: BookmarkEntry[], storage: Storage): BookmarkEntry[] {
-  const result = entries.slice(0, 20);
+  const result: BookmarkEntry[] = [];
+  for (const entry of entries) {
+    const clean = toEntry(entry);
+    if (!clean || result.some((existing) => existing.url === clean.url)) continue;
+    result.push(clean);
+    if (result.length === BOOKMARK_LIMIT) break;
+  }
   storage.setItem(BOOKMARKS_KEY, JSON.stringify(result));
   return result;
+}
+
+/**
+ * Write a whole list back, through the same cap and the same stored shape as every other write.
+ *
+ * Exported for the instance backup's restore: that merge produces *a list* rather than an edit
+ * to the list, so it cannot go through `saveBookmark` or `setBookmarkIcon`, and writing it any
+ * other way would put the cap in a second place.
+ */
+export function writeBookmarkList(entries: BookmarkEntry[], storage: Storage = localStorage): BookmarkEntry[] {
+  return writeBookmarkEntries(entries, storage);
 }
 
 /** URLs only (legacy view of the same storage). */
