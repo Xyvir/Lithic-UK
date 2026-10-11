@@ -1398,6 +1398,116 @@ async fn git_sync_commit(path: String, message: String) -> Result<GitSyncCommit,
     git_sync_commit_inner(path, message, commit_log()).await
 }
 
+/// How many commits the trail asks for, and the most one call may ask for.
+///
+/// Ten is what a person reads in a dialog without scrolling; the ceiling exists because the walk
+/// is the only unbounded thing here, and a page asking for a five year history would be answered
+/// with one.
+const TRAIL_LIMIT: usize = 10;
+const TRAIL_LIMIT_MAX: usize = 50;
+
+/// The folder's history: the newest commits on the branch the sync publishes.
+///
+/// Empty rather than an error when this folder is not one Lithic manages. The dialog that asks
+/// is the same one that would then offer to connect it, and "there is no trail here" is the
+/// state it draws, not a fault to report to somebody who never asked for a backup.
+#[tauri::command]
+fn git_sync_history(path: String, limit: Option<usize>) -> Result<Vec<gitcore::CommitRow>, String> {
+    let Some(dir) = sync_dir_of(Path::new(&path)).filter(|dir| dir.is_dir()) else {
+        return Ok(Vec::new());
+    };
+    if managed_remote_url(&dir).is_none() {
+        return Ok(Vec::new());
+    }
+    let repo = gitcore::open(&dir)?;
+    gitcore::log(&repo, limit.unwrap_or(TRAIL_LIMIT).clamp(1, TRAIL_LIMIT_MAX))
+}
+
+/// What a revert hands back. `error` is the push's, when there was one: the folder is back at
+/// the target either way, and a backup that did not land has to be visible rather than implied.
+#[derive(serde::Serialize)]
+struct GitSyncRevert {
+    /// The commit the revert added, shortened.
+    short: String,
+    /// The commit it went back to, shortened.
+    target: String,
+    /// How many paths moved.
+    changes: usize,
+    /// Whether the folder's own uncommitted work was committed first, which the trail it draws
+    /// next will show.
+    saved_first: bool,
+    error: Option<String>,
+}
+
+/// The synchronous half of a revert: whatever the folder has not committed goes in first, then
+/// the tree goes back to the target as a new commit, then it is pushed.
+///
+/// The push is best-effort for the same reason a save's is: a revert made offline is still a
+/// revert, and the failure travels back to the dialog instead of failing the operation.
+fn revert_folder(dir: &Path, target: &str, url: &str) -> Result<GitSyncRevert, String> {
+    let repo = gitcore::open(dir)?;
+    gitcore::ensure_identity(&repo);
+    // The folder's own work first, so a revert can never discard a change git was never given.
+    // Nothing to commit is not a failure: it leaves the trail one commit shorter, which is what
+    // a folder with nothing pending should look like.
+    let saved_first = match gitcore::stage_tracked_changes(&repo)? {
+        0 => false,
+        _ => gitcore::commit(&repo, gitcore::PRE_REVERT_MESSAGE, false)?.is_some(),
+    };
+    let report = gitcore::revert_to(&repo, target)?;
+    let error = match gitcore::push_main(&repo, url, false) {
+        Ok(()) => None,
+        Err(error) => {
+            eprintln!("git push skipped: {}", error);
+            Some(error)
+        }
+    };
+    Ok(GitSyncRevert {
+        short: report.short,
+        target: report.target,
+        changes: report.changes,
+        saved_first,
+        error,
+    })
+}
+
+/// Put the instance back as it was at one of its own commits.
+///
+/// Async and on the blocking pool for the reason a save is: the push is a round trip, and a
+/// modal that waits for one is a modal that cannot draw its own progress. The outcome is
+/// recorded in the commit log as well as returned, so the heading's sync mark goes red here the
+/// same way it does for a save whose push failed.
+#[tauri::command]
+async fn git_sync_revert(path: String, commit: String) -> Result<GitSyncRevert, String> {
+    let file = PathBuf::from(&path);
+    let Some(dir) = file.parent().filter(|parent| parent.is_dir()) else {
+        return Err("There is no backup folder here".to_string());
+    };
+    let Some(url) = managed_remote_url(dir) else {
+        return Err("This folder is not backed up to GitHub".to_string());
+    };
+    let dir = dir.to_path_buf();
+    // A revert is its own operation, so it starts with a clean flag: only a Cancel pressed while
+    // this one runs may stop it, never one aimed at the connect before it.
+    gitcore::clear_cancel();
+    let folder = folder_key(&dir);
+    let log = commit_log();
+    log.begin(&folder);
+    let joined = tauri::async_runtime::spawn_blocking(move || revert_folder(&dir, &commit, &url)).await;
+    log.finish(&folder);
+    let outcome = joined.map_err(|error| error.to_string())?;
+    match outcome {
+        Ok(revert) => {
+            log.record(&folder, revert.error.clone());
+            Ok(revert)
+        }
+        Err(error) => {
+            log.record(&folder, Some(error.clone()));
+            Err(error)
+        }
+    }
+}
+
 // --- GitHub OAuth device flow ------------------------------------------------
 // The self-host launcher proxies these two GitHub endpoints through its CGI
 // handler (deploy/github-sync.sh) because a browser can't call them directly.
@@ -3111,6 +3221,8 @@ pub fn run() {
             github_list_repos,
             github_create_repo,
             git_sync_status,
+            git_sync_history,
+            git_sync_revert,
             git_sync_disconnect,
             git_sync_heartbeat,
             git_sync_reauth,

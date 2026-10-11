@@ -819,6 +819,37 @@ try {
   }, selector, label);
   const waitForAction = (page, selector, label) => page.waitForFunction((css, text) =>
     [...document.querySelectorAll(css)].some((node) => node.textContent.trim() === text), POLL, selector, label);
+  /**
+   * The instance's history trail as the dialog draws it.
+   *
+   * Read from the DOM rather than from the stub's state, because what this section is about is
+   * what a person sees: the id git prints, the sentence stored with it, the stamp, the distance
+   * between two rows, and the aria-label each revert button carries. The glyph's own viewBox is
+   * read too, since "the same size as the download icon" is a claim about the box it is drawn in.
+   */
+  const readTrail = (page) => page.evaluate(() => {
+    const panel = document.querySelector('.git-sync-modal .trail-panel');
+    if (!panel) return null;
+    return {
+      title: panel.querySelector('.trail-title')?.textContent?.trim() ?? null,
+      note: panel.querySelector('.trail-note')?.textContent?.trim() ?? null,
+      error: panel.querySelector('.status-line.error')?.textContent?.trim() ?? null,
+      rows: [...panel.querySelectorAll('li.history-entry')].map((row) => {
+        const button = row.querySelector('.trail-revert');
+        return {
+          hash: row.querySelector('.trail-hash')?.textContent?.trim() ?? '',
+          whole: row.querySelector('.trail-hash')?.getAttribute('title') ?? '',
+          subject: row.querySelector('.trail-subject')?.textContent?.trim() ?? '',
+          stamp: row.querySelector('.history-time')?.textContent?.trim() ?? '',
+          revert: button?.getAttribute('aria-label') ?? null,
+          glyph: button?.querySelector('svg')?.getAttribute('viewBox') ?? null,
+          disabled: button?.disabled ?? null
+        };
+      }),
+      gaps: [...panel.querySelectorAll('.history-link .history-gap')].map((gap) => gap.textContent.trim()),
+      connectors: panel.querySelectorAll('.history-link').length
+    };
+  });
   const readSyncDialog = (page) => page.evaluate(() => {
     const modal = document.querySelector('.git-sync-modal');
     if (!modal) return null;
@@ -912,6 +943,64 @@ try {
   assert.ok(
     !offer.lines.some((line) => line.includes('did not answer')),
     `Live self-host: an instance that answered is not reported as unreachable: ${JSON.stringify(offer.lines)}`
+  );
+
+  // The instance's own history, before it is backed up anywhere. This is the one screen where the
+  // trail is not about a GitHub account at all: the commits are `git log` on the server's own
+  // `/data`, so an instance kept in local git with no remote still has somewhere to go back to.
+  // The rows are read as text, and the distances as the two sentences the version trail draws.
+  await livePage.waitForFunction(
+    () => document.querySelectorAll('.git-sync-modal .trail-panel li.history-entry').length === 3,
+    POLL
+  );
+  const unsyncedTrail = await readTrail(livePage);
+  assert.equal(
+    unsyncedTrail.title,
+    'History Trail',
+    `Live self-host: the trail names itself above the rows: ${JSON.stringify(unsyncedTrail)}`
+  );
+  assert.deepEqual(
+    unsyncedTrail.rows.map((row) => [row.hash, row.subject, row.stamp]),
+    [
+      ['ccccccc', 'Add three.lith from Lithic', '2026-10-11 14:30:00 UTC'],
+      ['bbbbbbb', 'Automated Sync: 2026-10-11 12:00:00', '2026-10-11 12:00:00 UTC'],
+      ['aaaaaaa', 'Initial Sync: notes.lith', '2026-10-10 09:15:00 UTC']
+    ],
+    'Live self-host: the commits newest first, by the id git prints, the sentence stored with it, and the version trail’s own stamp'
+  );
+  assert.equal(
+    unsyncedTrail.rows[0].whole,
+    'c'.repeat(40),
+    'Live self-host: with the whole id in the tooltip, since seven characters are not the name'
+  );
+  assert.deepEqual(
+    unsyncedTrail.gaps,
+    ['2.5 hours later', '1 day later'],
+    `Live self-host: the distance between two of them stated as the newer row's own sentence, in one unit, the greatest that fits: ${JSON.stringify(unsyncedTrail.gaps)}`
+  );
+  assert.equal(
+    unsyncedTrail.connectors,
+    2,
+    'Live self-host: and one chevron between each pair, which is what says which way the list runs'
+  );
+  assert.match(
+    unsyncedTrail.rows[1].revert ?? '',
+    /^Revert the instance to bbbbbbb from 2026-10-11 12:00:00 UTC$/,
+    `Live self-host: each row's revert button names the commit and its date, so the control is not a riddle: ${unsyncedTrail.rows[1].revert}`
+  );
+  assert.equal(
+    unsyncedTrail.rows[1].glyph,
+    '56 108 33 36',
+    'Live self-host: and the revert mark is drawn in the download icon\u2019s own box, so the two are one size whatever either is restyled to'
+  );
+  assert.ok(
+    stub.state.asked.includes('GET /api/github/history?limit=10'),
+    `Live self-host: the history came from the instance itself, a local read that needs no token: ${JSON.stringify(stub.state.asked.slice(-3))}`
+  );
+  assert.deepEqual(
+    offer.actions,
+    ['Connect to GitHub', 'Connect & Push'],
+    'Live self-host: while the dialog still says there is no backup to draw'
   );
 
   // Step one of the device flow. The code is the server's, not Rust's: on an
@@ -1422,6 +1511,114 @@ try {
     /^GitHub Sync: github\.com\/keeper\/lithic-sync-4k2p, last synced \d+[smh] ago$/,
     `Live self-host: and the heading names it, so the move is visible outside the dialog: ${repointedTitle}`
   );
+
+  // --- the trail's one write: a revert on a connected instance ---------------
+  //
+  // The trail is a reading until a row's icon is pressed. What is driven here is the whole path
+  // of that press: the question, the decline that writes nothing, the answer that lands on the
+  // server as one request naming the commit, the trail read again rather than edited here (the
+  // server is the one that knows what it committed), and the row it added on top of the ones it
+  // went back over. Nothing below reads the page's own idea of the history.
+  await livePage.click('.heading .sync-button');
+  await waitForAction(livePage, '.git-sync-modal .modal-action', 'Disconnect');
+  await livePage.waitForFunction(
+    () => document.querySelectorAll('.git-sync-modal .trail-panel li.history-entry').length === 3,
+    POLL
+  );
+  const historyAsks = () => stub.state.asked.filter((entry) => entry.startsWith('GET /api/github/history')).length;
+  const asksBeforeRevert = historyAsks();
+
+  // Declining. The confirmation is the wiki trail's own confirm dialog, which keeps its Cancel
+  // beside the answer because both of them are decisions about the revert rather than a way out
+  // of a dialog: there is no × here, and the shape is the one the delete and disconnect prompts
+  // wear. It is not the red: a revert appends a commit instead of rewriting one, and the row it
+  // moved away from is the way back.
+  await livePage.evaluate(() => document.querySelectorAll('.git-sync-modal .trail-revert')[1].click());
+  await livePage.waitForSelector('.confirm-modal');
+  const revertAsk = await livePage.evaluate(() => ({
+    title: document.querySelector('.confirm-modal h2')?.textContent?.trim() ?? null,
+    body: document.querySelector('.confirm-modal p')?.textContent?.trim() ?? null,
+    actions: [...document.querySelectorAll('.confirm-modal .modal-action')].map((action) => action.textContent.trim()),
+    danger: document.querySelector('.confirm-modal .modal-action')?.classList.contains('danger') ?? false,
+    crosses: document.querySelectorAll('.confirm-modal .modal-close').length
+  }));
+  assert.equal(revertAsk.title, 'Revert to bbbbbbb?', 'Live self-host: pressing a row\u2019s revert icon asks first');
+  assert.equal(
+    revertAsk.body,
+    'The wiki returns to how it was 2026-10-11 12:00:00 UTC. Unsaved edits are committed first.',
+    `Live self-host: and says which moment it goes back to and what happens to work in flight: ${revertAsk.body}`
+  );
+  assert.deepEqual(
+    revertAsk.actions,
+    ['Revert', 'Cancel'],
+    'Live self-host: with the answer it is asking for beside the way out'
+  );
+  assert.equal(
+    revertAsk.crosses,
+    0,
+    'Live self-host: and no × of its own, the way out being the Cancel that declines it'
+  );
+  assert.equal(
+    revertAsk.danger,
+    false,
+    'Live self-host: in the blue rather than the red, because the move is a commit the trail will show and can be undone by reverting back'
+  );
+  await clickAction(livePage, '.confirm-modal .modal-action', 'Cancel');
+  await livePage.waitForSelector('.confirm-modal', { hidden: true });
+  assert.deepEqual(stub.state.reverted, [], 'Live self-host: declining the question asks the instance for nothing');
+
+  // Then the answer that means it.
+  await livePage.evaluate(() => document.querySelectorAll('.git-sync-modal .trail-revert')[1].click());
+  await livePage.waitForSelector('.confirm-modal');
+  await clickAction(livePage, '.confirm-modal .modal-action', 'Revert');
+  await livePage.waitForFunction(
+    () => [...document.querySelectorAll('.git-sync-modal .trail-hash')].some((node) => node.textContent.trim() === 'fffffff'),
+    POLL
+  );
+  assert.deepEqual(
+    stub.state.reverted,
+    ['b'.repeat(40)],
+    'Live self-host: the revert named the whole id of the commit the row was read from, not the seven characters it draws'
+  );
+  const afterRevert = await readTrail(livePage);
+  assert.equal(
+    afterRevert.rows[0].subject,
+    'Revert to bbbbbbb',
+    `Live self-host: and the commit it added is the newest row: ${JSON.stringify(afterRevert.rows.map((row) => row.subject))}`
+  );
+  assert.equal(
+    afterRevert.rows.length,
+    4,
+    'Live self-host: with the three it went back over still below it, so nothing in the history was rewritten'
+  );
+  assert.equal(
+    historyAsks(),
+    asksBeforeRevert + 1,
+    `Live self-host: the trail is read again after the revert, so the row it added is the server\u2019s answer rather than this page\u2019s guess: ${historyAsks()} reads`
+  );
+  const afterRevertDialog = await readSyncDialog(livePage);
+  assert.ok(
+    afterRevertDialog.lines.includes('Reverted to fffffff. Unsaved edits were committed first.'),
+    `Live self-host: and the dialog says what it did, and what it saved on the way: ${JSON.stringify(afterRevertDialog.lines)}`
+  );
+
+  // An instance whose `/data` is not a repository is the one case with no trail to draw at all,
+  // and it is drawn as nothing rather than as "no commits yet": a git folder with no commits is
+  // an empty history, while a folder that is not a repository has no history to be empty.
+  await livePage.click('.git-sync-modal .modal-close');
+  await livePage.waitForSelector('.git-sync-modal', { hidden: true });
+  stub.state.hasRepo = false;
+  await livePage.click('.heading .sync-button');
+  await waitForAction(livePage, '.git-sync-modal .modal-action', 'Disconnect');
+  await livePage.waitForFunction(() => document.querySelector('.git-sync-modal .trail-panel') === null, POLL);
+  assert.equal(
+    await readTrail(livePage),
+    null,
+    'Live self-host: a server that keeps no git history draws no section rather than an empty one'
+  );
+  await livePage.click('.git-sync-modal .modal-close');
+  await livePage.waitForSelector('.git-sync-modal', { hidden: true });
+  stub.state.hasRepo = true;
 
   assert.deepEqual(
     liveErrors,

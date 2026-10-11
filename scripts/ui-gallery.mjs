@@ -841,7 +841,7 @@ async function assertLandscapeCard(page, { placeholder = false } = {}) {
   // The band gives its room to the rows under it, so a band past its quarter is a band being
   // taller than this layout allows rather than a column that is too short. This is the rule for
   // the card in its full shape, which is the shape every pane that calls this draws: the two-row
-  // card of pane 130 is the one state that pays for a missing control out of the band, and it
+  // card of pane 140 is the one state that pays for a missing control out of the band, and it
   // asserts its own geometry (see `assertColumnsLevel`).
   if (measured.band > measured.column * 0.25 + 1) {
     throw new Error(
@@ -873,9 +873,9 @@ async function assertLandscapeCard(page, { placeholder = false } = {}) {
  * a card that leaves a strip of empty column under itself.
  *
  * It is its own helper because `assertLandscapeCard` cannot read the state that needs it most:
- * the browser-only store draws no reset control at all (there is nothing there to rebuild or
- * clear), so there is no card to read as three rows and none of that helper's other checks mean
- * anything. This one asks a question both states can answer.
+ * offline mode draws no reset control at all (there is nothing left to rebuild or clear), so
+ * there is no card to read as three rows and none of that helper's other checks mean anything.
+ * This one asks a question both states can answer.
  */
 function assertColumnsLevel({ card, panelBottom }) {
   if (panelBottom === null) return;
@@ -1244,6 +1244,36 @@ const DIALOG_STATES = [
     },
     clip: '.action-card',
     expect: '.new-lith-inline'
+  },
+  {
+    // The browser-only store's own way out, and the one dialog in the launcher whose action is
+    // gated by the work above it: that list is the only copy of those Liths, so Reset stays
+    // disabled until every row has been downloaded or one full backup has been taken, and the
+    // line under the list says how many are left. It is drawn at every viewport because the
+    // list, that line and the action row are what have to fit on a phone.
+    slug: 'instance-backup',
+    modal: 'instance-backup-title',
+    storage: 'index-db',
+    seed: { recents: [browserRow('fallback.lith'), browserRow('second.lith'), browserRow('third.lith')] },
+    drive: async (page) => {
+      await page.click('.recent-foot .reset-cache');
+      await page.waitForSelector('.instance-backup-modal');
+      await settle(page, 300);
+    },
+    clip: '.instance-backup-modal',
+    expect: '.instance-backup-modal',
+    verify: async (page) => {
+      // The gate itself, which the picture can only imply. Reset being pressable before the
+      // copies are out is the one thing this dialog exists to prevent, so nothing in its action
+      // row may be live, and the line that says what has to be downloaded first must be there.
+      const live = await page.query('.instance-backup-modal .modal-actions .modal-action:not([disabled])');
+      if (live.count !== 0) {
+        throw new Error('Reset is live before every Lith in this store has been downloaded');
+      }
+      if ((await page.query('.instance-backup-gate')).count !== 1) {
+        throw new Error('the dialog does not say what is left to download before Reset unlocks');
+      }
+    }
   }
 ];
 
@@ -1251,7 +1281,7 @@ const DIALOG_STATES = [
  * The three sheets those states are laid out on, one per viewport.
  *
  * A sheet per viewport rather than per dialog, because the question a person asks of a deck is
- * "does this hold on the device I am looking at", and 11 dialogs side by side at one width
+ * "does this hold on the device I am looking at", and 12 dialogs side by side at one width
  * answers it in one look. The pane numbers are allocated in blocks (`820`, `835`, `850`) so the
  * reading order of the deck survives the next state being added in the middle of a sheet.
  */
@@ -1274,6 +1304,9 @@ const DIALOG_SHEETS = [
       ...(state.seed ? { seed: state.seed } : {}),
       ...(state.storage ? { storage: state.storage } : {}),
       ...(state.server ? { server: state.server } : {}),
+      // A state that asserts something about itself. It is here for the gated dialog below, where
+      // a picture of a disabled button is not a check that the button is disabled.
+      ...(state.verify ? { verify: state.verify } : {}),
       drive: (page) => state.drive(page, name),
       clip: state.clip,
       expect: state.expect
@@ -1449,8 +1482,9 @@ const SHEETS = [
      * it changed. Each picture is here for something a person reads at a glance: the reset control
      * sitting inside the card at the same height and the same inset as the buttons above it (`110`),
      * the empty list in its own right column (`100`), that same card while a title is being typed
-     * (`120`), the card with no control in it at all (`130`), and the offline notice under the
-     * title in an instance that cannot be reached (`140`).
+     * (`120`), the card ending in the browser-only store's own gated control (`130`), and the
+     * offline notice under the title in an instance that cannot be reached, which is the one
+     * card here with nothing under it at all (`140`).
      *
      * The two states of the left column are also asserted, because they are the same card and a
      * pane that only photographed one of them could not tell: `assertLandscapeCard` holds the
@@ -1563,10 +1597,12 @@ const SHEETS = [
         }
       },
       {
-        // The browser-only store draws no reset control at all, so this is the picture of
-        // the card with nothing under its buttons: whatever room the control takes when it
-        // is there has to be gone from the card when it is not.
-        name: '130-fallback-no-control',
+        // The browser-only store's own last button: that list is the only copy of anything on
+        // the device, so a plain Reset would take every Lith with it and a rebuild would offer
+        // to re-read a list no disk holds. It opens the gated dialog instead (the dialog sheets
+        // draw that state as `832-instance-backup`), and which of the three shapes this store
+        // got is a fact about the label, which is what makes it worth a picture.
+        name: '130-fallback-own-control',
         view: 'landscape',
         storage: 'index-db',
         seed: {
@@ -1576,11 +1612,10 @@ const SHEETS = [
         },
         expect: '.recent-row',
         verify: async (page) => {
-          // This is the one landscape state with no reset control, so it is the one the quarter
-          // above does not describe: the card draws two rows, and the title band above it takes
-          // the room the missing one would have had. What it must not do is drift away from the
-          // column beside it, and the rows must still be one height, so those two are asserted
-          // here rather than left to the picture.
+          // This card is the three-row one every landscape state draws, so the quarter above
+          // describes it and the heading band is not what gives here. What this pane adds is
+          // which control the third row holds; the level ends and the one row height are
+          // asserted here rather than left to the picture, as they are in every state.
           const measured = await page.evaluate(() => {
             const box = (selector) => {
               const node = document.querySelector(selector);
@@ -1588,16 +1623,34 @@ const SHEETS = [
               const rect = node.getBoundingClientRect();
               return { bottom: rect.bottom, height: rect.height };
             };
+            const control = document.querySelector('.recent-foot .reset-cache');
             return {
               card: box('.action-card'),
               panelBottom: box('.recent-list, .recent-list-empty')?.bottom ?? null,
               button: box('.new-blank-button'),
               row: box('.recent-row'),
-              resetCount: document.querySelectorAll('.recent-foot .reset-cache').length
+              controlCount: document.querySelectorAll('.recent-foot .reset-cache').length,
+              controlLabel: control ? control.textContent.trim() : '',
+              controlDisabled: control ? control.disabled : true
             };
           });
-          if (measured.resetCount !== 0) {
-            throw new Error(`the browser-only store draws ${measured.resetCount} reset controls; it has nothing to reset`);
+          // One control, and it is the backup one. Both halves are the safety claim: a
+          // `Reset Recents` here is a button that deletes the only copy of every Lith on the
+          // device, and a rebuild control is an offer to re-read a list nothing on disk holds.
+          if (measured.controlCount !== 1) {
+            throw new Error(
+              `the browser-only store draws ${measured.controlCount} controls under its card, and this store owns exactly one`
+            );
+          }
+          if (measured.controlLabel !== 'Backup & Reset Recents') {
+            throw new Error(
+              `the browser-only store's control reads "${measured.controlLabel}"; the control this store owns is the one that writes every Lith out before it forgets any`
+            );
+          }
+          if (measured.controlDisabled) {
+            throw new Error(
+              'the browser-only store has rows on screen and its own control is disabled, so nothing in this store can be backed up'
+            );
           }
           if (!measured.card || !measured.button || !measured.row) {
             throw new Error('the fallback landscape card could not be measured');
@@ -1647,7 +1700,8 @@ const SHEETS = [
               windowHeight: window.innerHeight,
               documentHeight: document.documentElement.scrollHeight,
               offlineRows: document.querySelectorAll('.recent-row.offline-row').length,
-              marks: document.querySelectorAll('.recent-row.offline-row .cache-history-button.modified').length
+              marks: document.querySelectorAll('.recent-row.offline-row .cache-history-button.modified').length,
+              controls: document.querySelectorAll('.recent-foot .reset-cache').length
             };
           });
           if (!measured.title || !measured.banner || !measured.search || !measured.card || !measured.list) {
@@ -1682,6 +1736,17 @@ const SHEETS = [
           if (measured.marks !== measured.offlineRows) {
             throw new Error(`only ${measured.marks} of ${measured.offlineRows} offline rows carry the local-only mark`);
           }
+          // The one landscape card with nothing under its buttons, which is what the quarter
+          // above cannot describe: offline draws none of the three controls, because re-reading
+          // the instance is the thing that just failed and the browser-only store's own control
+          // belongs to a store this page never had. The card is a row short here, so the two
+          // columns ending level is what says the heading band above took the room it gave up.
+          if (measured.controls !== 0) {
+            throw new Error(
+              `the offline card draws ${measured.controls} controls under it; this is the state with nothing left to rebuild or reset`
+            );
+          }
+          assertColumnsLevel({ card: measured.card, panelBottom: measured.list.bottom });
         }
       },
     ]

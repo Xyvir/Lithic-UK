@@ -18,6 +18,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
+use git2::build::CheckoutBuilder;
 use git2::{
     Cred, ErrorCode, FetchOptions, ObjectType, Oid, PushOptions, RemoteCallbacks, Repository,
     RepositoryInitOptions, RepositoryOpenFlags, Signature, StatusOptions, TreeWalkMode,
@@ -450,4 +451,176 @@ pub fn push_main(repo: &Repository, url: &str, force: bool) -> Result<(), String
         let _ = repo.reference(REMOTE_MAIN, oid, true, "lithic: synced");
     }
     Ok(())
+}
+
+// --- The history trail ------------------------------------------------------
+// A second, smaller surface: what the branch has done, and one way to put the folder back at
+// an earlier point in it. The clone of this module in `shim/src/gitwrite.rs` answers the same
+// two questions for a shim, and the two are held in step by running the same tests over both
+// (see the harness in `tmp/revert-harness`, and the tests at the bottom of the shim's copy).
+
+/// The message a revert commits with, built here rather than passed in, because all three
+/// prongs write the same subject and a trail whose rows read differently per platform would be
+/// three trails. Short id only: a full hash in a subject is unreadable and the row beside it
+/// already carries the short one.
+pub fn revert_message(short: &str) -> String {
+    format!("Revert to {}", short)
+}
+
+/// The message the folder's uncommitted work is committed with before a revert.
+///
+/// A revert is not allowed to discard changes git was never given: they go in first, under
+/// this subject, so the trail shows them and a revert of the revert still brings them back.
+pub const PRE_REVERT_MESSAGE: &str = "Save before revert";
+
+/// One commit, as the trail draws it.
+///
+/// `short` travels beside the full id rather than being cut in the page: git's own abbreviation
+/// is a rule about object ids, and a second copy of it in JavaScript is a second answer.
+#[derive(Clone, serde::Serialize)]
+pub struct CommitRow {
+    pub hash: String,
+    pub short: String,
+    pub summary: String,
+    /// Author time in epoch seconds, which is the unit every date the launcher draws uses.
+    pub time: i64,
+}
+
+/// What one revert did, for the status line and the refresh that follows it.
+#[derive(Clone, serde::Serialize)]
+pub struct RevertReport {
+    /// The commit the revert added: where the branch is now.
+    pub hash: String,
+    pub short: String,
+    /// The commit it went back to, shortened.
+    pub target: String,
+    /// How many paths differed between where the branch was and where it landed.
+    pub changes: usize,
+}
+
+/// The seven characters git itself would print for an id.
+pub fn short_of(oid: Oid) -> String {
+    oid.to_string().chars().take(7).collect()
+}
+
+/// The newest `limit` commits on the branch, newest first.
+///
+/// A revwalk rather than following `parents()` by hand, so a merge in the history is listed once
+/// rather than walked down one side of. An empty repository has no history rather than a
+/// failure: the trail says there is nothing yet, which is the truth about a fresh folder.
+pub fn log(repo: &Repository, limit: usize) -> Result<Vec<CommitRow>, String> {
+    if !head_exists(repo) {
+        return Ok(Vec::new());
+    }
+    let mut walk = repo.revwalk().map_err(fail)?;
+    walk.set_sorting(git2::Sort::TIME).map_err(fail)?;
+    walk.push_head().map_err(fail)?;
+    let mut rows = Vec::new();
+    for oid in walk {
+        if rows.len() >= limit {
+            break;
+        }
+        let oid = oid.map_err(fail)?;
+        let commit = repo.find_commit(oid).map_err(fail)?;
+        rows.push(CommitRow {
+            hash: oid.to_string(),
+            short: short_of(oid),
+            // `summary` is fallible in git2 0.21 (it validates UTF-8), and a subject the object
+            // store cannot hand back as text is not a reason to fail the whole trail.
+            summary: commit.summary().ok().flatten().unwrap_or("").to_string(),
+            time: commit.time().seconds(),
+        });
+    }
+    Ok(rows)
+}
+
+/// Stage every change git already tracks, and nothing else, answering how many there were.
+///
+/// Untracked files are left where they are on purpose: a folder keeps things git was never
+/// asked to carry, and a revert is not the moment to start carrying them. This is what the
+/// commit before a revert uses, so "nothing is lost" means the tracked half.
+///
+/// The same per-entry staging `stage_working_tree` does, for the same reason it was written
+/// that way: `Index::add_all`'s callback segfaults in git2 0.21 when the walk has no pathspec.
+pub fn stage_tracked_changes(repo: &Repository) -> Result<usize, String> {
+    let mut options = StatusOptions::new();
+    options.include_untracked(false).include_ignored(false);
+    let statuses = repo.statuses(Some(&mut options)).map_err(fail)?;
+    let mut work: Vec<(PathBuf, bool)> = Vec::new();
+    for entry in statuses.iter() {
+        let Ok(path) = entry.path() else { continue };
+        work.push((PathBuf::from(path), entry.status().is_wt_deleted()));
+    }
+    let mut index = repo.index().map_err(fail)?;
+    for (path, removed) in &work {
+        let staged = if *removed {
+            match index.remove_path(path) {
+                Err(error) if error.code() == ErrorCode::NotFound => Ok(()),
+                outcome => outcome,
+            }
+        } else {
+            index.add_path(path)
+        };
+        staged.map_err(fail)?;
+    }
+    index.write().map_err(fail)?;
+    Ok(work.len())
+}
+
+/// Put the folder back as it was at `target`, as a new commit on top of where it is now.
+///
+/// The new commit's tree *is* the target's tree and its parent is the branch's tip, so no
+/// history is rewritten: everything between the two is still there to go back to, and the
+/// revert itself is undone by reverting to the commit it replaced. That is the whole reason
+/// this is not a reset, which would move the branch and lose the commits it moved over.
+///
+/// The index is read from the target's tree and then checked out over the working tree, so a
+/// file the target does not have is removed rather than left behind for the next save to commit
+/// back. Untracked files are untouched, which is deliberate and is how `.gitignore`d state and a
+/// person's own notes beside a wiki both survive a revert.
+pub fn revert_to(repo: &Repository, target: &str) -> Result<RevertReport, String> {
+    let target_oid = repo
+        .revparse_single(target)
+        .and_then(|object| object.peel_to_commit())
+        .map_err(fail)?
+        .id();
+    let target_commit = repo.find_commit(target_oid).map_err(fail)?;
+    let head = repo.head().map_err(fail)?.peel_to_commit().map_err(fail)?;
+    let tree = target_commit.tree().map_err(fail)?;
+
+    // Measured before anything is written: how many paths this moves, which is the number the
+    // status line carries. A diff failure is not worth failing the revert over, so it is
+    // reported as no paths rather than as an error nobody can act on.
+    let changes = head
+        .tree()
+        .ok()
+        .and_then(|from| repo.diff_tree_to_tree(Some(&from), Some(&tree), None).ok())
+        .map(|diff| diff.deltas().len())
+        .unwrap_or(0);
+
+    let mut index = repo.index().map_err(fail)?;
+    index.read_tree(&tree).map_err(fail)?;
+    index.write().map_err(fail)?;
+    let mut checkout = CheckoutBuilder::new();
+    checkout.force().remove_untracked(false);
+    repo.checkout_index(Some(&mut index), Some(&mut checkout))
+        .map_err(fail)?;
+
+    let signature = signature(repo)?;
+    let oid = repo
+        .commit(
+            Some("HEAD"),
+            &signature,
+            &signature,
+            &revert_message(&short_of(target_oid)),
+            &tree,
+            &[&head],
+        )
+        .map_err(fail)?;
+    Ok(RevertReport {
+        hash: oid.to_string(),
+        short: short_of(oid),
+        target: short_of(target_oid),
+        changes,
+    })
 }

@@ -24,6 +24,9 @@
 
 import { shimCommand, type ShimCall } from './shim-command.ts';
 import type { ShimResult } from './shim-files.ts';
+// The trail's own shapes and the one parser for both non-app backends' answers: the page reads
+// this module's `TrailCommit` whichever backend produced it.
+import { parseTrailCommits, TRAIL_LIMIT, type TrailCommit } from './instance-trail.ts';
 // The verdict vocabulary is the desktop app's, because `git-sync-health.ts` reads both and must
 // not have to know which backend answered.
 import type { HealthState } from './git-sync-health.ts';
@@ -111,6 +114,40 @@ export type ShimCommitAnswer = {
 
 export function shimGitCommit(path: string, message: string, call: ShimCall = {}): Promise<ShimResult<ShimCommitAnswer>> {
   return shimCommand('git-commit', { path, message }, call).then((answer) => result<ShimCommitAnswer>(answer));
+}
+
+/**
+ * The folder's history, read off the local object store.
+ *
+ * Synchronous on the shim's side (a revwalk touches no network), so this is one round trip rather
+ * than a job. A payload that is not a trail is reported as a `git` failure rather than as an
+ * empty list: "this repository has no commits" and "nothing could be read" are different
+ * statements, and the dialog makes the first one.
+ */
+export function shimGitHistory(
+  path: string,
+  limit: number = TRAIL_LIMIT,
+  call: ShimCall = {}
+): Promise<ShimResult<TrailCommit[]>> {
+  return shimCommand('git-history', { path, limit }, call).then((answer) => {
+    if (!answer.ok) return result<TrailCommit[]>(answer);
+    const commits = parseTrailCommits(answer.result);
+    return commits ? { ok: true, value: commits } : { ok: false, error: 'git' };
+  });
+}
+
+/**
+ * Put the folder back as it was at one of its own commits.
+ *
+ * A job rather than an answer, for the reason a connect is one: the last step is a push, which
+ * can outlive the shim's write timeout. `awaitShimJob` below is the poll loop.
+ */
+export function shimGitRevert(
+  path: string,
+  commit: string,
+  call: ShimCall = {}
+): Promise<ShimResult<ShimJobHandle>> {
+  return shimCommand('git-revert', { path, commit }, call).then((answer) => result<ShimJobHandle>(answer));
 }
 
 /** Re-point a synced folder at the same repository with a fresh token, and do nothing else. */

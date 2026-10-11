@@ -158,6 +158,11 @@ pub fn handle(request: &Request, port: u16, token: &str, startup: Option<&Path>)
         // `git-cancel`; the three that only touch a config file answer directly.
         "git-setup" => gitwrite::setup(&args),
         "git-commit" => gitwrite::commit(&args),
+        // The trail. `git-history` reads and answers directly, for the reason the reads above
+        // do; `git-revert` is a write whose push can outlive the connection, so it answers with
+        // a job like a save and a connect.
+        "git-history" => gitwrite::history(&args),
+        "git-revert" => gitwrite::revert(&args),
         "git-reauth" => gitwrite::reauth(&args),
         "git-disconnect" => gitwrite::disconnect(&args),
         "git-job" => gitwrite::job(&args),

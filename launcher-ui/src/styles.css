@@ -1895,6 +1895,38 @@ body.drag-over::after {
 .history-download-button:hover { background: var(--lithic-accent-wash-12); color: var(--lithic-accent); }
 .history-note { margin-top: 14px; color: var(--lithic-ink-faint); font-size: 0.8em; line-height: 1.45; }
 /*
+ * The instance trail in the GitHub sync dialog: the version list's row, one unit over.
+ *
+ * The entry box, the chevron, the distance beside it and the stamp are the version list's own
+ * rules (`.history-entry`, `.history-link`, `.history-gap`, `.history-time`, and the download
+ * icon's box), because the two lists are the same kind of thing read for the same reason. What
+ * a commit adds is the id git names it by and the sentence stored with it, which is all this
+ * sheet adds: the id in the faint grey the size column wears, the subject in the ink the stamp
+ * wears, and the stamp demoted to the second size because it is the row's third fact rather
+ * than its first. The list is capped shorter than the version list's own because this one sits
+ * under the sync controls instead of being the whole dialog.
+ */
+.trail-panel { margin-top: 16px; }
+.trail-title {
+  margin: 0 0 8px;
+  color: var(--lithic-ink-muted);
+  font-size: 0.78em;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+.trail-list { list-style: none; margin: 0; padding: 0; max-height: 34vh; overflow: auto; }
+.trail-note { margin: 0; color: var(--lithic-ink-faint); font-size: 0.8em; }
+.trail-hash { flex: none; color: var(--lithic-ink-faint); font-size: 0.76em; white-space: nowrap; }
+.trail-subject {
+  flex: 1; min-width: 0;
+  color: var(--lithic-ink); font-size: 0.84em;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+/* Written after `.history-time`, which it shares an element with: the two declarations it
+   changes are the ones that matter (the stamp is not the flexible cell here, and it is the
+   quieter of the row's three facts). */
+.trail-time { flex: none; color: var(--lithic-ink-faint); font-size: 0.76em; }
+/*
  * The history dialog's two notices, above the versions and in the yellow of the
  * row mark that opened it: the fallback's claim, at the only place a touch screen
  * can still read it, and the adaptive header's offer to copy a Lith that sits

@@ -192,6 +192,61 @@ pub fn push_main(_repo: &Repository, _url: &str, _force: bool) -> Result<(), Str
     Err(UNAVAILABLE.to_string())
 }
 
+// --- The history trail ------------------------------------------------------
+// The same split as everything above: the two strings are facts about the trail that three
+// prongs share, so they are real here, and the two calls that need a repository refuse. Nothing
+// in this build can reach a trail because nothing here can reach a commit.
+
+/// The subject a revert commits with, identical on every prong.
+pub fn revert_message(short: &str) -> String {
+    format!("Revert to {}", short)
+}
+
+/// The subject the folder's own uncommitted work is committed with before a revert.
+pub const PRE_REVERT_MESSAGE: &str = "Save before revert";
+
+/// One commit, as the trail draws it. Named because `lib.rs` reads one back from a call that
+/// refuses, exactly like `StageReport` above, and serializable because a refused call still has
+/// to line up with the command signature `lib.rs` compiles against.
+#[derive(Clone, serde::Serialize)]
+pub struct CommitRow {
+    pub hash: String,
+    pub short: String,
+    pub summary: String,
+    pub time: i64,
+}
+
+/// What one revert did. Named and serializable for the same reason.
+#[derive(Clone, serde::Serialize)]
+pub struct RevertReport {
+    pub hash: String,
+    pub short: String,
+    pub target: String,
+    pub changes: usize,
+}
+
+/// Unreachable, and honest about it: there is no id on this platform to shorten, so the only
+/// way out of this function is the empty match.
+pub fn short_of(oid: Oid) -> String {
+    match oid {}
+}
+
+/// Refused: no repository, so no history. An empty list would claim a trail that exists and is
+/// empty, which is a different thing from not having one at all.
+pub fn log(_repo: &Repository, _limit: usize) -> Result<Vec<CommitRow>, String> {
+    Err(UNAVAILABLE.to_string())
+}
+
+/// Refused.
+pub fn stage_tracked_changes(_repo: &Repository) -> Result<usize, String> {
+    Err(UNAVAILABLE.to_string())
+}
+
+/// Refused. Nothing here rewrites a folder it cannot open.
+pub fn revert_to(_repo: &Repository, _target: &str) -> Result<RevertReport, String> {
+    Err(UNAVAILABLE.to_string())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

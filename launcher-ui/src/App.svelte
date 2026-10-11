@@ -22,6 +22,8 @@
     shimGitDisconnect,
     shimGitFolder,
     shimGitHeartbeat,
+    shimGitHistory,
+    shimGitRevert,
     shimGitReauth,
     shimGitSetup,
     shimListRepos,
@@ -48,7 +50,8 @@ import { backupFileName, collectInstanceBackup, mergeBookmarks, parseInstanceBac
   import { copyText } from './clipboard';
   import { syncIndicator, shouldHeartbeat, healthFailure, verifiedAge, SYNC_PULSE_MS, type SyncIndicator, type HealthState } from './git-sync-health';
   import { gapCount, versionGap } from './history-gap';
-  import { createServerRepo, disconnectServerSync, fetchServerSyncStatus, listServerRepos, pollServerDeviceToken, requestServerDeviceCode, serverSyncIndicator, setupServerSync, type ServerSyncStatus } from './server-git-sync';
+  import { TRAIL_LIMIT, parseTrailCommits, trailGapLabel, trailRows as trailRowList, type TrailCommit, type TrailRow } from './instance-trail';
+  import { createServerRepo, disconnectServerSync, fetchServerSyncHistory, fetchServerSyncStatus, listServerRepos, pollServerDeviceToken, requestServerDeviceCode, revertServerSync, serverSyncIndicator, setupServerSync, type ServerSyncStatus } from './server-git-sync';
   import { serializeJsonToLith, parseLithToJSON } from './lithic-format';
   // Inlined as a base64 data URL (assetsInlineLimit: Infinity) so the brand
   // mark survives when launcher.html is bundled into the Tauri app.
@@ -898,6 +901,11 @@ import { backupFileName, collectInstanceBackup, mergeBookmarks, parseInstanceBac
     showGitSyncModal = true;
     gitSyncHealthApplies = healthAppliesToActive();
     void refreshGitSyncStatus(true);
+    // The history is read again on every open, for the reason the status is: a save made inside
+    // the wiki since the last look is a commit, so the rows in hand describe a repository that
+    // has moved. The read is local (a revwalk, or the server's own `git log`), so this costs
+    // nothing a person waits for.
+    void loadTrail(true);
     // Opening the dialog is the user asking "is this working?". Worth a check
     // even inside the throttle floor.
     void runGitSyncHeartbeat(true);
@@ -1344,6 +1352,203 @@ import { backupFileName, collectInstanceBackup, mergeBookmarks, parseInstanceBac
     }
     const answer = await shimGitDisconnect(path, { token: shimToken });
     if (!answer.ok) throw new Error(answer.detail ?? answer.error);
+  }
+
+  // --- the instance's history trail -----------------------------------------
+  //
+  // The last few commits whatever backs this instance up has made, and the one way back to an
+  // earlier one. Everything with a GitHub backup has a history, and a self-host instance kept in
+  // local git with no backup has one too, because the commits are on its own disk either way.
+  //
+  // What the trail adds is a way back that rewrites nothing: the backend commits the old tree on
+  // top of where the branch is, so the trail grows by one row and the move is itself undone by
+  // reverting to the commit it replaced.
+
+  /** What the trail in hand is: a read in flight, rows, or one of the two ways of having none. */
+  type TrailView = 'idle' | 'loading' | 'ready' | 'no-repo' | 'failed';
+
+  /**
+   * One shape for the three backends' answers, so the state machine below is written once.
+   *
+   * The server's own read answers this already (`ServerTrail`); the two local backends are
+   * folded into it here. `no-repo` means a repository to have a trail in, and the dialog draws
+   * nothing at all for it. `[]` is a repository with no commits yet, which it says out loud.
+   */
+  type TrailAnswer =
+    | { state: 'trail'; commits: TrailCommit[] }
+    | { state: 'no-repo' }
+    | { state: 'failed'; message: string };
+
+  /**
+   * What a revert answers, in the desktop app's own field names, whichever prong ran it.
+   * `error` is the push's: the instance is back either way, and a backup that did not upload is
+   * a second fact rather than a failed revert.
+   */
+  interface GitSyncRevert {
+    short: string;
+    target: string;
+    changes: number;
+    saved_first: boolean;
+    error?: string | null;
+  }
+
+  let trailView: TrailView = 'idle';
+  let trailCommits: TrailCommit[] = [];
+  let trailNote = '';
+  /** Which repository the rows in hand came from, so a reopen does not re-read it. */
+  let trailSource = '';
+
+  /** The rows the list draws: each commit stamped, and its distance from the row above. */
+  $: trailRows = trailRowList(trailCommits);
+
+  /**
+   * Whether there is a screen to draw a trail on.
+   *
+   * A connected backup always has one, on every prong. A self-host instance has one before it is
+   * connected too, because its history is a local read there: an instance kept in git with no
+   * GitHub account is exactly the case the trail exists for, and hiding it until a backup exists
+   * would hide it where it is the only way back.
+   */
+  $: trailOffered = gitSyncView === 'connected' || (isSelfHost() && gitSyncView === 'disconnected');
+
+  /** Read the history once per repository, as soon as there is a screen to draw it on. */
+  $: if (showGitSyncModal && trailOffered) void loadTrail();
+
+  /**
+   * The instance's own history, from whichever backend is behind this launcher.
+   *
+   * A self-host instance is read over its own CGI, because the commits are on the server; the
+   * desktop app's command and the shim's both open the folder's object store on this device, so
+   * they differ only in how the call travels.
+   */
+  async function readTrail(): Promise<TrailAnswer> {
+    if (isSelfHost()) return fetchServerSyncHistory(TRAIL_LIMIT);
+    const path = gitSyncFolder ?? '';
+    if (mode === 'tauri') {
+      try {
+        // Parsed rather than trusted: this is another process's JSON, and a shape this launcher
+        // does not recognise is a backend that did not answer the question rather than a crash
+        // in the dialog that asked it.
+        const commits = parseTrailCommits(
+          await tauriInvoke<unknown>('git_sync_history', { path, limit: TRAIL_LIMIT })
+        );
+        return commits
+          ? { state: 'trail', commits }
+          : { state: 'failed', message: copy.dialogs.gitSync.trail.unreadable };
+      } catch (error) {
+        return { state: 'failed', message: copy.dialogs.gitSync.trail.failed(trailFailure(error)) };
+      }
+    }
+    const answer = await shimGitHistory(path, TRAIL_LIMIT, { token: shimToken });
+    return answer.ok
+      ? { state: 'trail', commits: answer.value }
+      : { state: 'failed', message: copy.dialogs.gitSync.trail.failed(answer.detail ?? answer.error) };
+  }
+
+  /**
+   * Read the history into the dialog, dropping an answer nobody is waiting for any more.
+   *
+   * A read in flight when the dialog closes, or when the folder behind it changes, describes a
+   * repository the person is no longer looking at, so its answer is discarded rather than drawn.
+   */
+  async function loadTrail(force = false): Promise<void> {
+    const source = isSelfHost() ? 'server' : `folder:${gitSyncFolder ?? ''}`;
+    if (!force && source === trailSource && trailView !== 'idle') return;
+    trailSource = source;
+    trailView = 'loading';
+    trailNote = '';
+    const answer = await readTrail();
+    if (trailSource !== source) return;
+    if (answer.state === 'failed') {
+      trailCommits = [];
+      trailView = 'failed';
+      trailNote = answer.message;
+      return;
+    }
+    trailCommits = answer.state === 'trail' ? answer.commits : [];
+    trailView = answer.state === 'no-repo' ? 'no-repo' : 'ready';
+  }
+
+  /** A caught failure as the one line the dialog shows. */
+  function trailFailure(error: unknown): string {
+    return error instanceof Error ? error.message : String(error);
+  }
+
+  /**
+   * Ask before writing the whole instance, then do it.
+   *
+   * The confirmation is not red, and that is a reading of the rule the other callers follow:
+   * a revert appends a commit rather than rewriting one, unsaved work is committed first, and
+   * the way back is the row it moved away from. Nothing here is unrecoverable, so nothing here
+   * is drawn as the button that cannot be taken back.
+   */
+  async function askTrailRevert(row: TrailRow): Promise<void> {
+    if (gitSyncBusy) return;
+    const confirmed = await askConfirmation({
+      title: copy.dialogs.gitSync.trail.confirmTitle(row.short),
+      body: copy.dialogs.gitSync.trail.confirmBody(row.stamp),
+      confirmLabel: copy.dialogs.gitSync.trail.confirm
+    });
+    if (confirmed) await revertTrail(row);
+  }
+
+  /** Put this device's folder back, through the app or the shim. */
+  async function revertLocalTrail(commit: string): Promise<GitSyncRevert> {
+    const path = gitSyncFolder ?? '';
+    if (mode === 'tauri') return tauriInvoke<GitSyncRevert>('git_sync_revert', { path, commit });
+    const started = await shimGitRevert(path, commit, { token: shimToken });
+    if (!started.ok) throw new Error(started.detail ?? started.error);
+    return runShimSyncJob<GitSyncRevert>(started.value);
+  }
+
+  /** The server's own revert, in the shape the dialog reads. */
+  async function revertServerTrail(commit: string): Promise<GitSyncRevert> {
+    const answer = await revertServerSync(commit);
+    if ('ok' in answer) throw new Error(answer.message);
+    return {
+      short: answer.short,
+      target: answer.target,
+      changes: answer.changes,
+      saved_first: answer.savedFirst,
+      error: answer.error
+    };
+  }
+
+  /**
+   * Put the instance back as it was at one of its own commits.
+   *
+   * Nothing is rewound: the backend commits the old tree on top of where the branch is, so the
+   * commits this goes back over stay in the history and the move is undone by reverting to the
+   * commit it replaced. The instance's own uncommitted work is committed first, which is what
+   * keeps a revert from discarding a change git was never given. A push that did not land is
+   * said beside the revert, because the instance is back either way and a backup that did not
+   * upload has to be visible rather than implied.
+   */
+  async function revertTrail(commit: TrailCommit): Promise<void> {
+    if (gitSyncBusy) return;
+    gitSyncBusy = true;
+    gitSyncError = '';
+    gitSyncMessage = '';
+    startGitSyncProgress();
+    gitSyncStage = copy.dialogs.gitSync.trail.working;
+    try {
+      const answer = isSelfHost()
+        ? await revertServerTrail(commit.hash)
+        : await revertLocalTrail(commit.hash);
+      gitSyncMessage = copy.dialogs.gitSync.trail.reverted(answer.short || commit.short);
+      if (answer.saved_first) gitSyncMessage += ` ${copy.dialogs.gitSync.trail.savedFirst}`;
+      if (answer.error) gitSyncError = copy.dialogs.gitSync.trail.notUploaded(answer.error);
+      // The trail it just drew is a row out of date, and the heading's own mark describes a
+      // backup that has moved: both are re-read rather than assumed.
+      await loadTrail(true);
+      void refreshGitSyncStatus(false);
+      void runGitSyncHeartbeat(true);
+    } catch (error) {
+      gitSyncError = copy.dialogs.gitSync.trail.failed(trailFailure(error));
+    } finally {
+      gitSyncBusy = false;
+      endGitSyncProgress();
+    }
   }
 
   $: backupCoverage = computeBackupCoverage(recentRows(), backupRoots);
@@ -5592,6 +5797,74 @@ import { backupFileName, collectInstanceBackup, mergeBookmarks, parseInstanceBac
       </ul>
     </div>
   {/if}
+  <!--
+    The instance's own history, inside the GitHub sync dialog on every prong that has one.
+
+    A snippet rather than one block, because the connected screen is not the only one that draws
+    it: on a self-host instance the trail belongs to the unconnected screen too, where the commits
+    are `git log` on the server's own disk and no GitHub account is involved at all. The rows, the
+    chevron between them and the distance beside it are the wiki trail's (`instance-trail.ts`,
+    `.history-link`, `.history-gap`), because two lists about two timestamps that said the same
+    thing differently would be drift nobody notices until they sit side by side.
+
+    What each row adds is the one action this list exists for: the revert glyph, which writes the
+    instance back to that commit as a NEW commit on top, so the trail grows by a row and the move
+    is undone by reverting to the commit it replaced.
+  -->
+  {#snippet instanceTrail()}
+    {#if trailOffered && trailView !== 'no-repo'}
+      <div class="trail-panel">
+        <p class="trail-title">{copy.dialogs.gitSync.trail.title}</p>
+        {#if trailView === 'loading'}
+          <p class="trail-note">{copy.dialogs.gitSync.trail.loading}</p>
+        {:else if trailView === 'failed'}
+          <p class="status-line error" role="alert">{trailNote}</p>
+        {:else if trailRows.length === 0}
+          <p class="trail-note">{copy.dialogs.gitSync.trail.none}</p>
+        {:else}
+          <ul class="trail-list">
+            {#each trailRows as row, index (row.hash)}
+              {#if index > 0}
+                <!--
+                  What joins two commits, exactly as the wiki trail joins two versions: the
+                  chevron points up at the newer row, and the distance beside it is that row's
+                  own sentence. Decorative, so it stays out of the accessibility tree, and the
+                  chevron is pinned to the column's centre line so the arrows read as one spine.
+                -->
+                <li class="history-link" aria-hidden="true">
+                  <svg viewBox="0 0 14 8" aria-hidden="true"><path d="M1.5 6.5 7 1.5l5.5 5"></path></svg>
+                  {#if row.gap}<span class="history-gap">{trailGapLabel(row.gap, copy.dialogs.history.later, LOCALE_TAG)}</span>{/if}
+                </li>
+              {/if}
+              <li class="history-entry">
+                <span class="trail-hash" title={row.hash}>{row.short}</span>
+                <span class="trail-subject" title={row.summary || row.short}>{row.summary}</span>
+                <span class="history-time trail-time">{row.stamp}</span>
+                <!--
+                  The revert glyph, supplied as artwork rather than redrawn: the history trail's
+                  own mark turned a quarter turn, so it reads as the same family as the download
+                  icon beside the versions without being mistaken for it. It is drawn in the
+                  download icon's own coordinate box (`viewBox`, and the same `.history-download-icon`
+                  size rule) with one translate, which is what makes the two marks the same size
+                  whatever either of them is later restyled to.
+                -->
+                <button
+                  class="recent-icon-button history-download-button trail-revert"
+                  type="button"
+                  disabled={gitSyncBusy}
+                  aria-label={copy.dialogs.gitSync.trail.revertAria(row.short, row.stamp)}
+                  title={copy.dialogs.gitSync.trail.revertTitle}
+                  on:click={() => askTrailRevert(row)}
+                >
+                  <svg class="history-download-icon" viewBox="56 108 33 36" aria-hidden="true"><g transform="translate(-7.01 5.03)"><path class="history-icon-shape" d="m 80.482426,115.61206 v 8.05016 h 7.125663 v -1.59836 h -5.527311 v -6.4518 z"></path><path class="history-icon-shape" d="m 96.232885,121.64218 c 0,-7.19823 -5.58342,-13.10362 -12.64471,-13.64723 v -0.007 h -15.85743 v -1.32502 l -4.02559,2.32389 4.02559,2.32441 v -1.32343 h 15.85123 c 5.97937,0.53018 10.65103,5.5348 10.65103,11.65458 0,6.47462 -5.22855,11.70316 -11.70316,11.70316 -6.47462,0 -11.70161,-5.22854 -11.70161,-11.70316 0,-2.64451 0.87232,-5.08081 2.34508,-7.03781 h -2.39572 c -1.23707,2.05816 -1.94924,4.46633 -1.94924,7.03781 0,7.5555 6.14599,13.70356 13.70149,13.70356 7.5555,0 13.70304,-6.14806 13.70304,-13.70356 z"></path></g></svg>
+                </button>
+              </li>
+            {/each}
+          </ul>
+        {/if}
+      </div>
+    {/if}
+  {/snippet}
   {#if showGitSyncModal}
     <div class="modal-overlay" role="presentation" on:click={(event) => event.currentTarget === event.target && closeGitSyncModal()}>
       <div class="launcher-modal git-sync-modal" role="dialog" aria-modal="true" aria-labelledby="gitsync-title">          <button class="modal-close" aria-label={copy.dialogs.gitSync.closeAria} on:click={closeGitSyncModal}>×</button>
@@ -5667,6 +5940,13 @@ import { backupFileName, collectInstanceBackup, mergeBookmarks, parseInstanceBac
             <p>{copy.dialogs.gitSync.folderIntro}</p>
           {/if}
           {#if gitSyncError}<p class="status-line error" role="alert">{gitSyncError}</p>{/if}
+          <!--
+            The same two lines the connected screen carries, for the reason the trail is offered
+            here at all: on an instance the revert works before a backup exists, so its "I did it"
+            has to have somewhere to land. A revert with no remote already made this screen the
+            one place a successful write could go unsaid.
+          -->
+          {#if gitSyncMessage}<p class="status-line" role="status">{gitSyncMessage}</p>{/if}
           {#if gitSyncBusy}<p class="sync-progress" role="status"><span class="sync-spinner" aria-hidden="true"></span><span>{gitSyncStage || copy.dialogs.gitSync.working}</span><span class="sync-elapsed">{gitSyncElapsed}s</span>{#if !gitAuthActive && hasLocalSync}<button type="button" class="sync-cancel" on:click={cancelGitSync}>{gitSyncCancelling ? copy.dialogs.gitSync.stopping : copy.dialogs.gitSync.stopSyncing}</button>{/if}</p>{/if}
           <div class="modal-actions"><button class="modal-action" disabled={gitSyncBusy} on:click={startDeviceAuth}>{gitSyncBusy ? '…' : copy.dialogs.gitSync.connect}</button></div>
           <details class="git-sync-advanced">
@@ -5676,6 +5956,10 @@ import { backupFileName, collectInstanceBackup, mergeBookmarks, parseInstanceBac
             {#if gitSyncBusy}<p class="sync-progress" role="status"><span class="sync-spinner" aria-hidden="true"></span><span>{gitSyncStage || copy.dialogs.gitSync.working}</span><span class="sync-elapsed">{gitSyncElapsed}s</span>{#if !gitAuthActive && hasLocalSync}<button type="button" class="sync-cancel" on:click={cancelGitSync}>{gitSyncCancelling ? copy.dialogs.gitSync.stopping : copy.dialogs.gitSync.stopSyncing}</button>{/if}</p>{/if}
             <div class="modal-actions"><button class="modal-action" disabled={!gitRepoInput || !gitTokenInput || gitSyncBusy} on:click={connectGitSync}>{gitSyncBusy ? copy.dialogs.gitSync.connecting : copy.dialogs.gitSync.connectPush}</button></div>
           </details>
+          <!-- Below the connect controls, because connecting is still what this screen is for:
+               on a server the trail is a local read that needs no GitHub account, which is what
+               makes it worth offering before one is set up. -->
+          {@render instanceTrail()}
         {:else if gitSyncView === 'connecting'}
           <p>{copy.dialogs.gitSync.stepOne} <a href="https://github.com/login/device" target="_blank" rel="noreferrer" on:click={(event) => openExternalLink(event, 'https://github.com/login/device')}>github.com/login/device</a></p>
           <p>{copy.dialogs.gitSync.stepTwo}</p>
@@ -5801,6 +6085,7 @@ import { backupFileName, collectInstanceBackup, mergeBookmarks, parseInstanceBac
           {:else}
             <p class="git-sync-note">{copy.dialogs.gitSync.savesHere}</p>
           {/if}
+          {@render instanceTrail()}
           {#if gitSyncError}<p class="status-line error" role="alert">{gitSyncError}</p>{/if}
           {#if gitSyncMessage}<p class="status-line" role="status">{gitSyncMessage}</p>{/if}
           {#if gitSyncBusy}<p class="sync-progress" role="status"><span class="sync-spinner" aria-hidden="true"></span><span>{gitSyncStage || copy.dialogs.gitSync.working}</span><span class="sync-elapsed">{gitSyncElapsed}s</span>{#if !gitAuthActive && hasLocalSync}<button type="button" class="sync-cancel" on:click={cancelGitSync}>{gitSyncCancelling ? copy.dialogs.gitSync.stopping : copy.dialogs.gitSync.stopSyncing}</button>{/if}</p>{/if}

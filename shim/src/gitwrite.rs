@@ -29,7 +29,7 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
 
-use git2::build::RepoBuilder;
+use git2::build::{CheckoutBuilder, RepoBuilder};
 use git2::{
     Cred, ErrorCode, FetchOptions, PushOptions, RemoteCallbacks, Repository, RepositoryInitOptions,
     RepositoryOpenFlags, Signature, StatusOptions,
@@ -779,6 +779,245 @@ fn save(dir: &Path, url: &str, file: &str, message: &str, progress: &Progress) -
     }
 }
 
+// ---------------------------------------------------------------------------
+// The history trail
+// ---------------------------------------------------------------------------
+// A second, smaller surface: what the branch has done, and one way to put the folder back at an
+// earlier point in it. `src-tauri/src/gitcore.rs` answers the same two questions for the desktop
+// app, and the two implementations are kept in step by running the same tests over both: the
+// desktop file cannot be compiled from this crate, so the harness that does it is in
+// `tmp/revert-harness`, and the tests at the bottom of this file cover this copy.
+
+/// How many commits the trail asks for, and the most one call may ask for.
+///
+/// The desktop app's two numbers, because it is the same dialog: ten is what a person reads
+/// without scrolling, and the ceiling is there because the walk is the only unbounded thing here.
+const TRAIL_LIMIT: usize = 10;
+const TRAIL_LIMIT_MAX: usize = 50;
+
+/// The subject a revert commits with. Built here rather than passed in, so all three prongs write
+/// the same row into the trail (`gitcore::revert_message` is the desktop's, byte for byte).
+fn revert_message(short: &str) -> String {
+    format!("Revert to {short}")
+}
+
+/// The subject the folder's own uncommitted work is committed with before a revert.
+const PRE_REVERT_MESSAGE: &str = "Save before revert";
+
+/// `git-history { path, limit }`
+///
+/// A read, and synchronous like the other reads: a revwalk touches the local object store and
+/// nothing else, so there is no round trip to outlive and no job to poll. A folder Lithic does
+/// not manage answers an empty list rather than a refusal, which is the desktop app's own answer
+/// and the state the dialog draws: there is no trail here, rather than a fault to report.
+pub(crate) fn history(args: &Value) -> Response {
+    let Some(path) = path_arg(args) else { return bad_args() };
+    let empty = json!({ "commits": [] });
+    let Some(dir) = sync_dir_of(&path).filter(|dir| dir.is_dir()) else {
+        return ok(empty);
+    };
+    if managed_remote_url(&dir).is_none() {
+        return ok(empty);
+    }
+    let repo = match open(&dir) {
+        Ok(repo) => repo,
+        Err(error) => return failed_with(FAILED, error),
+    };
+    let asked = args
+        .get("limit")
+        .and_then(Value::as_u64)
+        .unwrap_or(TRAIL_LIMIT as u64) as usize;
+    match log(&repo, asked.clamp(1, TRAIL_LIMIT_MAX)) {
+        Ok(commits) => ok(json!({ "commits": commits })),
+        Err(error) => failed_with(FAILED, error),
+    }
+}
+
+/// The newest `limit` commits on the branch, newest first.
+///
+/// The desktop app's `gitcore::log`, narrowed to JSON. A revwalk rather than following `parents()`
+/// by hand, so a merge in the history is listed once rather than walked down one side of, and an
+/// empty repository is no history rather than a failure. `summary` is fallible in git2 0.21 (it
+/// validates UTF-8), and a subject the object store cannot hand back as text is not a reason to
+/// lose the whole trail.
+fn log(repo: &Repository, limit: usize) -> Result<Vec<Value>, String> {
+    if repo.head().ok().and_then(|head| head.target()).is_none() {
+        return Ok(Vec::new());
+    }
+    let mut walk = repo.revwalk().map_err(fail)?;
+    walk.set_sorting(git2::Sort::TIME).map_err(fail)?;
+    walk.push_head().map_err(fail)?;
+    let mut rows = Vec::new();
+    for oid in walk {
+        if rows.len() >= limit {
+            break;
+        }
+        let oid = oid.map_err(fail)?;
+        let commit = repo.find_commit(oid).map_err(fail)?;
+        rows.push(json!({
+            "hash": oid.to_string(),
+            "short": short_of(oid),
+            "summary": commit.summary().ok().flatten().unwrap_or(""),
+            "time": commit.time().seconds(),
+        }));
+    }
+    Ok(rows)
+}
+
+/// The seven characters git itself would print for an id.
+fn short_of(oid: git2::Oid) -> String {
+    oid.to_string().chars().take(7).collect()
+}
+
+/// Stage every change git already tracks, and nothing else, answering how many there were.
+///
+/// The tracked half is what a revert may commit on its own: an untracked file in the folder was
+/// never in the backup, so it is neither lost nor carried by a revert.
+fn stage_tracked_changes(repo: &Repository) -> Result<usize, String> {
+    let mut options = StatusOptions::new();
+    options.include_untracked(false).include_ignored(false);
+    let statuses = repo.statuses(Some(&mut options)).map_err(fail)?;
+    let mut work: Vec<(PathBuf, bool)> = Vec::new();
+    for entry in statuses.iter() {
+        let Ok(path) = entry.path() else { continue };
+        work.push((PathBuf::from(path), entry.status().is_wt_deleted()));
+    }
+    let mut index = repo.index().map_err(fail)?;
+    for (path, removed) in &work {
+        let staged = if *removed {
+            match index.remove_path(path) {
+                Err(error) if error.code() == ErrorCode::NotFound => Ok(()),
+                outcome => outcome,
+            }
+        } else {
+            index.add_path(path)
+        };
+        staged.map_err(fail)?;
+    }
+    index.write().map_err(fail)?;
+    Ok(work.len())
+}
+
+/// What one revert did, for the answer the page reads.
+struct RevertReport {
+    short: String,
+    target: String,
+    changes: usize,
+}
+
+/// Put the folder back as it was at `target`, as a new commit on top of where it is now.
+///
+/// `gitcore::revert_to` in the desktop app, down to the order of its two steps: the index is read
+/// from the target's tree and only then checked out over the working tree, so a file the target
+/// does not have is removed rather than left behind for the next save to commit back. Untracked
+/// files are untouched, which is how `.gitignore`d state and a person's own notes beside a wiki
+/// both survive a revert. Nothing is rewritten: the commits this goes back over are still in the
+/// history, so the revert is undone by reverting to the commit it replaced.
+fn revert_to(repo: &Repository, target: &str) -> Result<RevertReport, String> {
+    let target_oid = repo
+        .revparse_single(target)
+        .and_then(|object| object.peel_to_commit())
+        .map_err(fail)?
+        .id();
+    let target_commit = repo.find_commit(target_oid).map_err(fail)?;
+    let head = repo.head().map_err(fail)?.peel_to_commit().map_err(fail)?;
+    let tree = target_commit.tree().map_err(fail)?;
+    // Measured before anything is written: how many paths this moves, which is the number the
+    // dialog's status line carries. A diff failure is not worth failing the revert over.
+    let changes = head
+        .tree()
+        .ok()
+        .and_then(|from| repo.diff_tree_to_tree(Some(&from), Some(&tree), None).ok())
+        .map(|diff| diff.deltas().len())
+        .unwrap_or(0);
+    let mut index = repo.index().map_err(fail)?;
+    index.read_tree(&tree).map_err(fail)?;
+    index.write().map_err(fail)?;
+    let mut checkout = CheckoutBuilder::new();
+    checkout.force().remove_untracked(false);
+    repo.checkout_index(Some(&mut index), Some(&mut checkout))
+        .map_err(fail)?;
+    let signature = signature(repo)?;
+    let oid = repo
+        .commit(
+            Some("HEAD"),
+            &signature,
+            &signature,
+            &revert_message(&short_of(target_oid)),
+            &tree,
+            &[&head],
+        )
+        .map_err(fail)?;
+    Ok(RevertReport {
+        short: short_of(oid),
+        target: short_of(target_oid),
+        changes,
+    })
+}
+
+/// `git-revert { path, commit }`
+///
+/// A job rather than an answer, for the reason a connect is one: the push at the end is a network
+/// round trip that can outlive the shim's thirty second write timeout. The page polls `git-job`
+/// and can `git-cancel` it, which reaches the transfer callback the same way a save's does.
+pub(crate) fn revert(args: &Value) -> Response {
+    let Some(path) = path_arg(args) else { return bad_args() };
+    let Some(commit) = args.get("commit").and_then(Value::as_str).map(str::to_string) else {
+        return bad_args();
+    };
+    if commit.trim().is_empty() {
+        return bad_args();
+    }
+    let Some(dir) = sync_dir_of(&path).filter(|dir| dir.is_dir()) else {
+        return failed_with(FAILED, format!("Cannot resolve a folder for {}", path_text(&path)));
+    };
+    let Some(url) = managed_remote_url(&dir) else {
+        return failed_with(FAILED, "This folder is not a Lithic-managed sync folder".to_string());
+    };
+    let id = start("Reading the history", move |progress| {
+        revert_work(&dir, &commit, &url, &progress)
+    });
+    ok(json!({ "job": id }))
+}
+
+/// One revert, on the job's own thread.
+fn revert_work(dir: &Path, target: &str, url: &str, progress: &Progress) -> Result<Value, String> {
+    let cancel = progress.flag();
+    let repo = open(dir)?;
+    ensure_identity(&repo);
+    // Re-point first: the token lives in the URL, and a revert is a write that has to reach
+    // GitHub, so it refreshes the remote exactly as a save does.
+    set_remote(&repo, url)?;
+    // The folder's own work goes in first, so a revert can never discard a change git was never
+    // given. Nothing to commit is not a failure: it leaves the trail one commit shorter.
+    let saved_first = match stage_tracked_changes(&repo)? {
+        0 => false,
+        _ => commit_staged(&repo, PRE_REVERT_MESSAGE, false)?.is_some(),
+    };
+    if progress.cancelled() {
+        return Err(CANCELLED.to_string());
+    }
+    progress.say("Putting the files back");
+    let report = revert_to(&repo, target)?;
+    if progress.cancelled() {
+        return Err(CANCELLED.to_string());
+    }
+    progress.say("Pushing to GitHub");
+    let error = match push_main(&repo, url, false, &cancel) {
+        Ok(()) => Value::Null,
+        // Reported rather than returned: the folder is back at the target either way, and a
+        // backup that did not land has to be visible instead of implied.
+        Err(error) => Value::String(error),
+    };
+    Ok(json!({
+        "short": report.short,
+        "target": report.target,
+        "changes": report.changes,
+        "saved_first": saved_first,
+        "error": error,
+    }))
+}
+
 /// `git-reauth { path, repo, token }`
 ///
 /// Re-point a synced folder at the same repository with a fresh token, and do nothing else.
@@ -1142,5 +1381,208 @@ mod tests {
     fn body_error(response: Response) -> Value {
         let body: Value = serde_json::from_slice(&response.body).expect("a JSON answer");
         body["error"].clone()
+    }
+
+    fn body_result(response: Response) -> Value {
+        let body: Value = serde_json::from_slice(&response.body).expect("a JSON answer");
+        body["result"].clone()
+    }
+
+    /// A managed folder with a bare repository standing in for GitHub, and one commit in it.
+    fn trail_folder(label: &str) -> (Scratch, PathBuf, PathBuf, Repository) {
+        let scratch = Scratch::new(label);
+        let bare = scratch.root.join("remote.git");
+        Repository::init_bare(&bare).expect("bare remote");
+        let work = scratch.dir("work");
+        let repo = init(&work).expect("init");
+        ensure_identity(&repo);
+        (scratch, bare, work, repo)
+    }
+
+    /// Commit the folder's own files at a fixed time, so a test's history is its own order.
+    fn commit_at(repo: &Repository, message: &str, when: i64) {
+        let signature =
+            Signature::new("Lithic", "lithic@local", &git2::Time::new(when, 0)).expect("signature");
+        let mut index = repo.index().expect("index");
+        index
+            .add_all(["*"].iter(), git2::IndexAddOption::DEFAULT, None)
+            .expect("stage");
+        index.write().expect("index write");
+        let tree_id = index.write_tree().expect("tree");
+        let tree = repo.find_tree(tree_id).expect("tree");
+        let parent = repo.head().ok().and_then(|head| head.peel_to_commit().ok());
+        let parents: Vec<&git2::Commit> = parent.iter().collect();
+        repo.commit(Some("HEAD"), &signature, &signature, message, &tree, &parents)
+            .expect("commit");
+    }
+
+    fn trail_subjects(repo: &Repository) -> Vec<String> {
+        log(repo, 10)
+            .expect("log")
+            .iter()
+            .map(|row| row["summary"].as_str().unwrap_or("").to_string())
+            .collect()
+    }
+
+    #[test]
+    fn the_trail_lists_the_branch_newest_first_with_short_ids_and_dates() {
+        let (_scratch, _bare, work, repo) = trail_folder("trail");
+        std::fs::write(work.join("one.lith"), "first").expect("a Lith");
+        commit_at(&repo, "First", 1_700_000_000);
+        std::fs::write(work.join("two.lith"), "second").expect("another Lith");
+        commit_at(&repo, "Second", 1_700_000_600);
+        set_remote(&repo, "https://oauth2:tok@github.com/owner/name.git").expect("remote");
+
+        let answer = history(&json!({ "path": path_text(&work), "limit": 10 }));
+        let commits = body_result(answer)["commits"].as_array().cloned().unwrap_or_default();
+        assert_eq!(commits.len(), 2);
+        assert_eq!(commits[0]["summary"], json!("Second"));
+        assert_eq!(commits[0]["time"], json!(1_700_000_600));
+        assert_eq!(
+            commits[0]["short"],
+            json!(commits[0]["hash"].as_str().unwrap_or("").chars().take(7).collect::<String>()),
+            "the short id is the first seven characters of the full one"
+        );
+        assert_eq!(commits[1]["summary"], json!("First"));
+        // The limit is the caller's, which is what keeps a five year history out of a dialog.
+        let limited = history(&json!({ "path": path_text(&work), "limit": 1 }));
+        assert_eq!(body_result(limited)["commits"].as_array().unwrap().len(), 1);
+    }
+
+    #[test]
+    fn a_trail_with_nothing_to_show_is_an_empty_list_rather_than_a_fault() {
+        // A repository with no commits, and a folder Lithic does not manage: the dialog draws
+        // "no commits yet" for either instead of a failure nobody can act on.
+        let (_scratch, _bare, work, repo) = trail_folder("trail-empty");
+        assert!(log(&repo, 10).expect("log").is_empty());
+        let answer = history(&json!({ "path": path_text(&work) }));
+        assert_eq!(body_result(answer)["commits"], json!([]));
+        // And an unmanaged repository: same answer, because there is no backup to have a trail.
+        std::fs::write(work.join("one.lith"), "text").expect("a Lith");
+        commit_at(&repo, "First", 1_700_000_000);
+        let answer = history(&json!({ "path": path_text(&work) }));
+        assert_eq!(body_result(answer)["commits"], json!([]));
+    }
+
+    #[test]
+    fn a_revert_puts_the_folder_back_and_keeps_the_history_it_went_back_over() {
+        let (scratch, bare, work, repo) = trail_folder("revert");
+        std::fs::write(work.join("one.lith"), "first").expect("a Lith");
+        commit_at(&repo, "First", 1_700_000_000);
+        let first = repo.head().expect("head").target().expect("id").to_string();
+        std::fs::write(work.join("one.lith"), "second").expect("edit");
+        std::fs::write(work.join("two.lith"), "added later").expect("another Lith");
+        commit_at(&repo, "Second", 1_700_000_600);
+        // An untracked file, which a revert must not touch.
+        std::fs::write(work.join("notes.txt"), "mine").expect("notes");
+
+        let job = revert(&json!({ "path": path_text(&work), "commit": first }));
+        // Managed, so the wire accepted it; the remote is the local bare repository the folder
+        // was re-pointed at, which is how every other test here reaches a real push.
+        let id = body_result(job)["job"].as_u64();
+        assert!(id.is_none(), "an unmanaged folder is refused before a job starts");
+
+        let url = bare.to_string_lossy().to_string();
+        let outcome = revert_work(&work, &first, &url, &detached_progress()).expect("revert");
+        assert_eq!(outcome["target"], json!(&first[..7]));
+        assert_eq!(outcome["changes"], json!(2), "one file changed and one appeared");
+        assert_eq!(outcome["saved_first"], json!(false));
+        assert_eq!(outcome["error"], json!(null));
+
+        // The file added after the target is gone, because the new commit's tree does not have
+        // it; the untracked one was never the revert's to move.
+        assert!(!work.join("two.lith").exists(), "a file the target lacks must leave");
+        assert_eq!(std::fs::read_to_string(work.join("one.lith")).expect("read"), "first");
+        assert_eq!(std::fs::read_to_string(work.join("notes.txt")).expect("read"), "mine");
+
+        // Nothing was rewritten: the commits it went back over are still in the trail, under a
+        // row that names the act.
+        assert_eq!(
+            trail_subjects(&repo),
+            vec![
+                format!("Revert to {}", &first[..7]),
+                "Second".to_string(),
+                "First".to_string()
+            ]
+        );
+        // And it landed on the remote, which is the only proof that matters for a backup. The
+        // branch is read by name rather than through the bare repository's HEAD, which is still
+        // `master` on a fresh `init_bare` and is nobody's idea of where the backup goes.
+        let landed = Repository::open(&bare).expect("open bare");
+        let head = landed
+            .find_reference("refs/heads/main")
+            .expect("the branch arrived")
+            .peel_to_commit()
+            .expect("commit");
+        assert_eq!(
+            head.summary().ok().flatten(),
+            Some(format!("Revert to {}", &first[..7]).as_str())
+        );
+        drop(scratch);
+    }
+
+    #[test]
+    fn a_revert_commits_the_folders_own_work_before_it_goes_back() {
+        let (_scratch, bare, work, repo) = trail_folder("revert-dirty");
+        std::fs::write(work.join("one.lith"), "first").expect("a Lith");
+        commit_at(&repo, "First", 1_700_000_000);
+        let first = repo.head().expect("head").target().expect("id").to_string();
+        // Edited and never committed, which a revert is not allowed to discard.
+        std::fs::write(work.join("one.lith"), "edited").expect("edit");
+        std::fs::write(work.join("stray.txt"), "not mine to carry").expect("stray");
+
+        let outcome = revert_work(
+            &work,
+            &first,
+            bare.to_string_lossy().as_ref(),
+            &detached_progress(),
+        )
+        .expect("revert");
+        assert_eq!(outcome["saved_first"], json!(true));
+        assert_eq!(outcome["changes"], json!(1));
+        assert_eq!(
+            trail_subjects(&repo),
+            vec![
+                format!("Revert to {}", &first[..7]),
+                PRE_REVERT_MESSAGE.to_string(),
+                "First".to_string()
+            ]
+        );
+        // The edit is still in the history, one row down from the revert, and the folder is
+        // back at the target with the untracked file where it was.
+        let saved = log(&repo, 10).expect("log")[1]["hash"].as_str().unwrap_or("").to_string();
+        let object = repo.revparse_single(&saved).expect("object");
+        let blob = object
+            .peel_to_commit()
+            .expect("commit")
+            .tree()
+            .expect("tree")
+            .get_path(Path::new("one.lith"))
+            .expect("entry");
+        assert_eq!(repo.find_blob(blob.id()).expect("blob").content(), b"edited");
+        assert_eq!(std::fs::read_to_string(work.join("one.lith")).expect("read"), "first");
+        assert!(work.join("stray.txt").exists());
+    }
+
+    #[test]
+    fn a_revert_refuses_a_folder_lithic_does_not_manage_or_names_nothing() {
+        let scratch = Scratch::new("revert-unmanaged");
+        let work = scratch.dir("work");
+        let repo = init(&work).expect("init");
+        ensure_identity(&repo);
+        std::fs::write(work.join("one.lith"), "text").expect("a Lith");
+        commit_at(&repo, "First", 1_700_000_000);
+        let first = repo.head().expect("head").target().expect("id").to_string();
+        // A folder whose origin Lithic did not write is not a backup to rewrite.
+        set_remote(&repo, "https://github.com/somebody/theirs.git").expect("remote");
+        let answer = revert(&json!({ "path": path_text(&work), "commit": first }));
+        assert_eq!(body_error(answer), json!("git"));
+        // And the arguments that name nothing, before any folder is opened.
+        assert_eq!(body_error(revert(&json!({}))), json!("bad-args"));
+        assert_eq!(
+            body_error(revert(&json!({ "path": path_text(&work), "commit": "  " }))),
+            json!("bad-args")
+        );
+        assert_eq!(body_error(history(&json!({}))), json!("bad-args"));
     }
 }

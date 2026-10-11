@@ -5,14 +5,19 @@ import {
   SYNC_FRESH_MS,
   createServerRepo,
   disconnectServerSync,
+  fetchServerSyncHistory,
   fetchServerSyncStatus,
   listServerRepos,
   pollServerDeviceToken,
   requestServerDeviceCode,
+  revertFailureNote,
+  revertServerSync,
   serverSyncIndicator,
   setupFailureNote,
   setupServerSync
 } from './server-git-sync.ts';
+import { TRAIL_LIMIT } from './instance-trail.ts';
+import { copy } from './copy.ts';
 
 type Handler = (url: string, init: RequestInit | undefined) => Response | Promise<Response>;
 
@@ -39,7 +44,9 @@ test('the transport only ever calls the instance’s own git API', async () => {
   await createServerRepo('tok', 'lithic-sync-ab2d', fetcher);
   await setupServerSync('tok', 'me/lithic-sync-ab2d', fetcher);
   await disconnectServerSync(fetcher);
-  assert.equal(seen.length, 7);
+  await fetchServerSyncHistory(TRAIL_LIMIT, fetcher);
+  await revertServerSync('abc1234', fetcher);
+  assert.equal(seen.length, 9);
   for (const url of seen) assert.ok(url.startsWith(GITHUB_API_BASE), `${url} is outside the instance's API`);
 });
 
@@ -185,6 +192,86 @@ test('disconnect reports whether the server confirmed it', async () => {
     ),
     false
   );
+});
+
+test('the history is read from the server, and the three answers stay three', async () => {
+  const commit = { hash: 'abcdef1234567890', short: 'abcdef1', summary: 'Save notes.lith', time: 1_700_000_000 };
+  const seen: string[] = [];
+  const trail = await fetchServerSyncHistory(10, (async (url: unknown) => {
+    seen.push(String(url));
+    return json({ commits: [commit] });
+  }) as unknown as typeof fetch);
+  assert.deepEqual(trail, { state: 'trail', commits: [commit] });
+  assert.match(seen[0], /\/history\?limit=10$/);
+
+  // A server whose `/data` is not a repository has no trail to draw, which is not the same
+  // answer as one whose history is empty: the dialog hides the section for the first and says
+  // there is nothing yet for the second.
+  assert.deepEqual(await fetchServerSyncHistory(10, fakeFetch(() => json({ error: 'no_repo' }))), {
+    state: 'no-repo'
+  });
+  // And an instance older than this route, whose CGI answers its own catch-all: the same
+  // "no trail to draw", rather than a failure line about a feature it does not have.
+  assert.deepEqual(
+    await fetchServerSyncHistory(10, fakeFetch(() => json({ error: 'route_not_found', uri: '/api/github/history' }))),
+    { state: 'no-repo' }
+  );
+  assert.deepEqual(await fetchServerSyncHistory(10, fakeFetch(() => json({ commits: [] }))), {
+    state: 'trail',
+    commits: []
+  });
+  // A payload nobody can read is a server that did not answer, not an empty history.
+  assert.deepEqual(await fetchServerSyncHistory(10, fakeFetch(() => json('nonsense'))), {
+    state: 'failed',
+    message: copy.serverSync.noHistory
+  });
+  // And one that does not answer at all is the other sentence.
+  const refused = await fetchServerSyncHistory(10, fakeFetch(() => new Response('no', { status: 502 })));
+  assert.deepEqual(refused, { state: 'failed', message: copy.serverSync.noHistory });
+});
+
+test('a revert is posted as the commit, and its answer is read in the app’s own shape', async () => {
+  let body: unknown = null;
+  const answer = await revertServerSync('abcdef1', (async (_url: unknown, init?: RequestInit) => {
+    body = JSON.parse(String(init?.body));
+    return json({ status: 'success', short: '1234567', target: 'abcdef1', changes: 3, saved_first: true });
+  }) as unknown as typeof fetch);
+  assert.deepEqual(body, { commit: 'abcdef1' });
+  assert.deepEqual(answer, {
+    short: '1234567',
+    target: 'abcdef1',
+    changes: 3,
+    savedFirst: true,
+    error: null
+  });
+  // A push that did not land is data beside the revert rather than a failed revert.
+  const unpushed = await revertServerSync(
+    'abcdef1',
+    fakeFetch(() => json({ status: 'success', short: '1234567', target: 'abcdef1', changes: 3, saved_first: false, error: 'denied' }))
+  );
+  assert.deepEqual(unpushed, { short: '1234567', target: 'abcdef1', changes: 3, savedFirst: false, error: 'denied' });
+});
+
+test('a refused revert quotes the server’s own code, and nothing else is invented', async () => {
+  const refused = await revertServerSync(
+    'abcdef1',
+    fakeFetch(() => json({ status: 'error', message: 'unknown_commit' }, 200))
+  );
+  assert.deepEqual(refused, { ok: false, message: copy.serverSync.revertFailedDetail('unknown_commit') });
+  // A refusal with no message is the plain sentence rather than a bracket with nothing in it.
+  assert.deepEqual(await revertServerSync('abcdef1', fakeFetch(() => new Response('', { status: 500 }))), {
+    ok: false,
+    message: copy.serverSync.revertFailed
+  });
+  // And one that never arrived is the transport's own sentence, which is a different claim.
+  const unreachable = (() => Promise.reject(new Error('offline'))) as unknown as typeof fetch;
+  assert.deepEqual(await revertServerSync('abcdef1', unreachable), {
+    ok: false,
+    message: copy.serverSync.unreachableForRevert
+  });
+  // And an empty message is the plain sentence rather than a bracket with nothing in it.
+  assert.equal(revertFailureNote('  '), copy.serverSync.revertFailed);
+  assert.equal(revertFailureNote('x'.repeat(400)).length, copy.serverSync.revertFailedDetail('x'.repeat(160)).length);
 });
 
 test('the button asks the instance, and its four states are the legacy four', () => {

@@ -26,6 +26,9 @@ import {
   type DeviceCodeResponse
 } from './github-device.ts';
 import { verifiedAge, type SyncIndicator } from './git-sync-health.ts';
+// The trail's shapes and the one parser for every backend's answer: the page reads
+// `TrailCommit` whichever prong produced it.
+import { parseTrailCommits, TRAIL_LIMIT, type TrailCommit } from './instance-trail.ts';
 
 export const GITHUB_API_BASE = '/api/github/';
 
@@ -203,6 +206,117 @@ export async function disconnectServerSync(
   } catch {
     return false;
   }
+}
+
+/**
+ * The server's own trail, as `/api/github/history` reads it.
+ *
+ * The CGI walks `/data`'s commits and answers the same fields the desktop app's
+ * command does, so the parsing the page needs is `instance-trail.ts`, once, for
+ * all three prongs.
+ *
+ * The three answers are kept apart rather than folded into an empty list. A server
+ * whose `/data` is not a repository has no trail to draw at all, which is not the
+ * same thing as a repository whose first commit is the only one there is, and the
+ * dialog draws them differently. The third `no-repo` case is a server that does not
+ * *have* this route, which is what the CGI's catch-all answers to an instance older than
+ * it: no trail to draw is the honest reading of that too, and it keeps a deployment that
+ * simply predates the feature from wearing a failure line about it.
+ */
+export type ServerTrail =
+  | { state: 'trail'; commits: TrailCommit[] }
+  | { state: 'no-repo' }
+  | { state: 'failed'; message: string };
+
+/**
+ * The server's last few commits. A local read there: it needs no token and no GitHub,
+ * which is why an instance with local git and no backup is still offered its trail.
+ */
+export async function fetchServerSyncHistory(
+  limit = TRAIL_LIMIT,
+  fetcher: typeof fetch = fetch,
+  base = GITHUB_API_BASE
+): Promise<ServerTrail> {
+  try {
+    const response = await fetcher(`${base}history?limit=${limit}`, { headers: { Accept: 'application/json' } });
+    const payload = (await readJson(response)) as Record<string, unknown> | null;
+    // A repository to have a history in is the one answer that is not a failure and not a
+    // trail: the dialog draws nothing at all for it. So is a server with no such route.
+    if (payload?.error === 'no_repo' || payload?.error === 'route_not_found') return { state: 'no-repo' };
+    const commits = parseTrailCommits(payload);
+    // Null is a payload nobody can read, which is not the same as an empty repository: one
+    // says the history is empty, the other says nobody read it, and only one is true.
+    if (response.ok && commits) return { state: 'trail', commits };
+    return { state: 'failed', message: copy.serverSync.noHistory };
+  } catch {
+    return { state: 'failed', message: copy.serverSync.unreachableForHistory };
+  }
+}
+
+/**
+ * What a revert on the server did, in the desktop app's own answer shape
+ * (`GitSyncRevert`), so the dialog reads one shape from three prongs.
+ */
+export interface ServerRevert {
+  /** The commit the revert added: where the branch is now. */
+  short: string;
+  /** The commit it went back to, shortened. */
+  target: string;
+  /** How many paths moved. */
+  changes: number;
+  /** Whether the instance's own uncommitted work was committed first. */
+  savedFirst: boolean;
+  /** The push's failure, when the revert landed there but the backup did not. */
+  error: string | null;
+}
+
+/**
+ * Put the server's `/data` back as it was at one of its own commits.
+ *
+ * The server commits the old tree forward rather than moving the branch: the trail grows by
+ * one commit and the move is undone by reverting to the commit it replaced. Its own
+ * uncommitted work is committed first, so a revert can never discard a change git was never
+ * given, and the push is best effort for the reason a save's is: a revert made offline is
+ * still a revert, and the failure travels back as data.
+ */
+export async function revertServerSync(
+  commit: string,
+  fetcher: typeof fetch = fetch,
+  base = GITHUB_API_BASE
+): Promise<ServerRevert | ServerFailure> {
+  try {
+    const response = await fetcher(`${base}revert`, {
+      method: 'POST',
+      headers: { Accept: 'application/json', 'Content-Type': 'application/json' },
+      body: JSON.stringify({ commit })
+    });
+    const payload = (await readJson(response)) as Record<string, unknown> | null;
+    if (response.ok && payload?.status === 'success') {
+      return {
+        short: typeof payload.short === 'string' ? payload.short : '',
+        target: typeof payload.target === 'string' ? payload.target : '',
+        changes: typeof payload.changes === 'number' ? payload.changes : 0,
+        savedFirst: payload.saved_first === true,
+        error: typeof payload.error === 'string' && payload.error ? payload.error : null
+      };
+    }
+    const detail = typeof payload?.message === 'string' ? payload.message : '';
+    return { ok: false, message: revertFailureNote(detail) };
+  } catch {
+    return { ok: false, message: copy.serverSync.unreachableForRevert };
+  }
+}
+
+/**
+ * The revert's refusal, said in one line.
+ *
+ * The CGI answers a code here (`unknown_commit`, `read_tree_failed`) rather than the
+ * transcript a setup failure carries, so there is nothing to pick a line out of; what
+ * the code can be is empty, and then the sentence stands alone.
+ */
+export function revertFailureNote(message: string): string {
+  const clipped = String(message || '').trim().slice(0, 160);
+  return clipped ? copy.serverSync.revertFailedDetail(clipped) : copy.serverSync.revertFailed;
 }
 
 /**

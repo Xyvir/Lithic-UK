@@ -103,6 +103,19 @@ export function recoverStamp(ts: number): string {
 }
 
 /**
+ * The stamp both trails draw: `2026-10-11 14:30:00 UTC`.
+ *
+ * Exported because the instance's history trail reads commits rather than saved versions but
+ * shows the same column, and two date formats in two lists that mean the same thing is the kind
+ * of drift that only shows up when they are side by side. Fixed rather than locale-formatted on
+ * purpose: it is the shape this store's own records already carry, and a trail is scanned for
+ * which of these is the newer one rather than read as a sentence.
+ */
+export function utcStamp(ts: number): string {
+  return toIso(ts).replace('T', ' ').replace(/\.\d{3}Z$/, 'Z').replace('Z', ' UTC');
+}
+
+/**
  * Suggested download name for a recovered version: `<original>_recover_<stamp>.lith`.
  *
  * Deliberately not the build's document-format pin: what this names is an export of a
@@ -142,10 +155,7 @@ export class KeyvalWikiHistory implements WikiHistoryStore {
       const meta = await this.store.get<WikiHistoryMeta>(metaKey(name));
       if (!meta?.versions) return [];
       return meta.versions
-        .map((version) => ({
-          ...version,
-          lastModified: toIso(version.ts).replace('T', ' ').replace(/\.\d{3}Z$/, 'Z').replace('Z', ' UTC')
-        }))
+        .map((version) => ({ ...version, lastModified: utcStamp(version.ts) }))
         .sort((a, b) => b.ts - a.ts);
     } catch {
       return [];

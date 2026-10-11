@@ -22,8 +22,10 @@ import {
   shimGitDisconnect,
   shimGitFolder,
   shimGitHeartbeat,
+  shimGitHistory,
   shimGitJob,
   shimGitReauth,
+  shimGitRevert,
   shimGitSetup,
   shimListRepos,
   shimPickFolder
@@ -67,6 +69,8 @@ test('the writes frame the commands the shim dispatches', async () => {
   await shimDevicePoll('device-code', { fetcher, ...CALL });
   await shimListRepos('ghp_x', { fetcher, ...CALL });
   await shimCreateRepo('ghp_x', 'lithic-sync-abcd', { fetcher, ...CALL });
+  await shimGitHistory('/home/a/notes.lith', 10, { fetcher, ...CALL });
+  await shimGitRevert('/home/a', 'abcdef1', { fetcher, ...CALL });
 
   assert.deepEqual(body(seen[0].init), { command: 'git-folder', args: { derived: '/home/a/notes.lith' } });
   // A launcher with nothing to name asks the same question with no argument at all.
@@ -85,6 +89,33 @@ test('the writes frame the commands the shim dispatches', async () => {
   assert.deepEqual(body(seen[12].init), { command: 'github-device-poll', args: { deviceCode: 'device-code' } });
   assert.deepEqual(body(seen[13].init), { command: 'github-list-repos', args: { token: 'ghp_x' } });
   assert.deepEqual(body(seen[14].init), { command: 'github-create-repo', args: { token: 'ghp_x', name: 'lithic-sync-abcd' } });
+  assert.deepEqual(body(seen[15].init), {
+    command: 'git-history',
+    args: { path: '/home/a/notes.lith', limit: 10 }
+  });
+  assert.deepEqual(body(seen[16].init), { command: 'git-revert', args: { path: '/home/a', commit: 'abcdef1' } });
+});
+
+test('the trail reads the shim’s envelope, and a revert starts a job the page can poll', async () => {
+  const commits = [{ hash: 'abcdef1234567890', short: 'abcdef1', summary: 'Save notes.lith', time: 1_700_000_000 }];
+  const read = fakeFetch(() => json({ ok: true, result: { commits } }));
+  assert.deepEqual(await shimGitHistory('/home/a', 10, { fetcher: read.fetcher, ...CALL }), {
+    ok: true,
+    value: commits
+  });
+  // An answer that is not a trail is a failure rather than an empty history: the dialog says
+  // "no commits yet" for the second, and only one of the two is true of this answer.
+  const unreadable = fakeFetch(() => json({ ok: true, result: {} }));
+  assert.deepEqual(await shimGitHistory('/home/a', 10, { fetcher: unreadable.fetcher, ...CALL }), {
+    ok: false,
+    error: 'git'
+  });
+  // A revert answers an id for the reason a connect does: the push at the end outlives the wire.
+  const started = fakeFetch(() => json({ ok: true, result: { job: 7 } }));
+  assert.deepEqual(await shimGitRevert('/home/a', 'abcdef1', { fetcher: started.fetcher, ...CALL }), {
+    ok: true,
+    value: { job: 7 }
+  });
 });
 
 test('every write answers a failure as a value rather than a throw', async () => {
@@ -94,6 +125,8 @@ test('every write answers a failure as a value rather than a throw', async () =>
     error: 'refused'
   });
   assert.deepEqual(await shimGitHeartbeat('/home/a', { fetcher, ...CALL }), { ok: false, error: 'refused' });
+  assert.deepEqual(await shimGitHistory('/home/a', 10, { fetcher, ...CALL }), { ok: false, error: 'refused' });
+  assert.deepEqual(await shimGitRevert('/home/a', 'abcdef1', { fetcher, ...CALL }), { ok: false, error: 'refused' });
   assert.deepEqual(await shimDeviceCode({ fetcher, ...CALL }), { ok: false, error: 'refused' });
   // A page with no secret makes no request at all: the shim's wire is not even there.
   const never = fakeFetch(() => json({ ok: true, result: {} }));
@@ -182,7 +215,9 @@ test('the commands this module sends are the commands the shim dispatches', () =
     'github-device-code',
     'github-device-poll',
     'github-list-repos',
-    'github-create-repo'
+    'github-create-repo',
+    'git-history',
+    'git-revert'
   ]) {
     assert.match(shim, new RegExp(`"${command}" =>`), `the shim does not dispatch ${command}`);
   }

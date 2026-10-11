@@ -66,6 +66,18 @@ const SYNCED_AGO_SECONDS = 120;
 const INSTANCE_MARK_PATH = '/mstile-150x150.png';
 
 /**
+ * The commits an instance's `/data` is asked about, newest first, in the CGI's own field names
+ * (`hash`, `short`, `time` in epoch seconds, `summary`): the shape `parseTrailCommits` reads and
+ * the shape three prongs have to agree on. Times are fixed rather than relative, so the distance
+ * the trail draws between two of them is a fact this file can state.
+ */
+const DEFAULT_COMMITS = [
+  { hash: 'c'.repeat(40), short: 'ccccccc', summary: 'Add three.lith from Lithic', time: 1_791_729_000 },
+  { hash: 'b'.repeat(40), short: 'bbbbbbb', summary: 'Automated Sync: 2026-10-11 12:00:00', time: 1_791_720_000 },
+  { hash: 'a'.repeat(40), short: 'aaaaaaa', summary: 'Initial Sync: notes.lith', time: 1_791_623_700 }
+];
+
+/**
  * The instance's own mark, 2x2: small enough that it is unmistakably this file, and
  * deliberately not the 150x150 the build ships, so an assertion can tell the bytes the
  * instance served from the mark the page would fall back to.
@@ -185,6 +197,15 @@ export async function startSelfHostStub(options = {}) {
     statusHolds: [],
     userCode: options.userCode ?? DEFAULT_USER_CODE,
     deviceCode: options.deviceCode ?? DEFAULT_DEVICE_CODE,
+    /**
+     * The instance's own history, newest first. Live like the rest of the state: a scenario can
+     * empty it (a repository whose first commit is not there yet) or read what a revert added.
+     */
+    commits: (options.commits ?? DEFAULT_COMMITS).map((commit) => ({ ...commit })),
+    /** Whether `/data` is a repository at all, which `/history` answers `no_repo` for. */
+    hasRepo: options.hasRepo !== false,
+    /** Every commit a revert was asked for, in order, so the request itself is readable. */
+    reverted: [],
     repos: (options.repos ?? DEFAULT_REPOS).map((repo) => ({ ...repo })),
     /**
      * The WebDAV store's Liths: `{ name, lastModified, sizeBytes, text }`. `text` is what
@@ -350,6 +371,45 @@ export async function startSelfHostStub(options = {}) {
       state.repo = '';
       state.lastSync = 0;
       json({ status: 'success' });
+      return;
+    }
+    // The trail: this instance's own commits, a local read that needs no token and no remote,
+    // which is why an instance with no backup at all is still asked.
+    if (path === '/api/github/history') {
+      if (!state.hasRepo) {
+        json({ error: 'no_repo' });
+        return;
+      }
+      const asked = Number(url.searchParams.get('limit') ?? '');
+      const limit = Number.isFinite(asked) && asked > 0 ? Math.min(50, Math.floor(asked)) : 10;
+      json({ commits: state.commits.slice(0, limit) });
+      return;
+    }
+    // A revert: the answer a real CGI gives, with `short` for the commit it added and `error`
+    // for a push that did not land. The tree is not really written (this stub holds no
+    // repository), so what a scenario can assert on is the commit it was asked for, the answer
+    // it gave, and the row the launcher then reads back.
+    if (path === '/api/github/revert' && request.method === 'POST') {
+      const body = await readBody(request);
+      const target = String(body.commit ?? '').trim();
+      if (!target) {
+        json({ status: 'error', message: 'missing_commit' });
+        return;
+      }
+      if (!state.commits.some((commit) => commit.hash === target || commit.short === target)) {
+        json({ status: 'error', message: 'unknown_commit' });
+        return;
+      }
+      state.reverted.push(target);
+      const short = target.slice(0, 7);
+      const added = {
+        hash: 'f'.repeat(40),
+        short: 'fffffff',
+        summary: `Revert to ${short}`,
+        time: Math.floor(Date.now() / 1000)
+      };
+      state.commits.unshift(added);
+      json({ status: 'success', short: added.short, target: short, changes: 2, saved_first: true, error: null });
       return;
     }
 

@@ -218,7 +218,30 @@ const en = {
         desktop: 'Saves in this folder stop syncing to GitHub.',
         label: 'Disconnect'
       },
-      disconnectTitle: 'Disconnect GitHub Sync?'
+      disconnectTitle: 'Disconnect GitHub Sync?',
+      /**
+       * The instance's own history trail: the last few commits the folder, or the server, is
+       * backed up to, and the one way back to an earlier one. The row is the wiki trail's row,
+       * down to the distance between two of them (`dialogs.history.later`), because the two
+       * lists say the same thing and a second way of saying it would drift.
+       */
+      trail: {
+        title: 'History Trail',
+        loading: 'Reading the history…',
+        none: 'No commits yet.',
+        unreadable: 'The history could not be read.',
+        revertAria: (commit: string, when: string) => `Revert the instance to ${commit} from ${when}`,
+        revertTitle: 'Revert to this commit',
+        confirmTitle: (commit: string) => `Revert to ${commit}?`,
+        confirmBody: (when: string) =>
+          `The wiki returns to how it was ${when}. Unsaved edits are committed first.`,
+        confirm: 'Revert',
+        working: 'Reverting…',
+        reverted: (commit: string) => `Reverted to ${commit}.`,
+        savedFirst: 'Unsaved edits were committed first.',
+        notUploaded: (detail: string) => `The revert did not upload: ${detail}`,
+        failed: (detail: string) => `The revert did not finish: ${detail}`
+      }
     },
 
     bookmark: {
@@ -597,7 +620,12 @@ const en = {
     noCreate: 'Could not create the repository.',
     unreachableForSetup: 'Could not reach this server to set the backup up.',
     setupFailed: 'Setup failed.',
-    setupFailedDetail: (detail: string) => `Setup failed: ${detail}`
+    setupFailedDetail: (detail: string) => `Setup failed: ${detail}`,
+    noHistory: 'This server did not answer with its history.',
+    unreachableForHistory: 'Could not reach this server for its history.',
+    revertFailed: 'The revert failed.',
+    revertFailedDetail: (detail: string) => `The revert failed: ${detail}`,
+    unreachableForRevert: 'Could not reach this server for the revert.'
   },
 
   /** Everything the launcher says in passing: a status line, a failure, a count. */
@@ -842,7 +870,25 @@ const es: Copy = {
         desktop: 'Los guardados de esta carpeta dejan de subirse a GitHub.',
         label: 'Desconectar'
       },
-      disconnectTitle: '¿Desconectar GitHub Sync?'
+      disconnectTitle: '¿Desconectar GitHub Sync?',
+      /** The instance's own history trail, and the way back to an earlier commit. */
+      trail: {
+        title: 'Rastro de historial',
+        loading: 'Leyendo el historial…',
+        none: 'Aún no hay commits.',
+        unreadable: 'No se pudo leer el historial.',
+        revertAria: (commit: string, when: string) => `Volver la instancia a ${commit} desde ${when}`,
+        revertTitle: 'Volver a este commit',
+        confirmTitle: (commit: string) => `¿Volver a ${commit}?`,
+        confirmBody: (when: string) =>
+          `El wiki vuelve al estado de ${when}. Los cambios pendientes se guardan antes.`,
+        confirm: 'Volver',
+        working: 'Volviendo…',
+        reverted: (commit: string) => `Se volvió a ${commit}.`,
+        savedFirst: 'Los cambios pendientes se guardaron antes.',
+        notUploaded: (detail: string) => `La vuelta no se subió: ${detail}`,
+        failed: (detail: string) => `La vuelta no terminó: ${detail}`
+      }
     },
 
     bookmark: {
@@ -1182,7 +1228,12 @@ const es: Copy = {
     noCreate: 'No se pudo crear el repositorio.',
     unreachableForSetup: 'No se pudo alcanzar este servidor para preparar la copia.',
     setupFailed: 'Falló la configuración.',
-    setupFailedDetail: (detail: string) => `Falló la configuración: ${detail}`
+    setupFailedDetail: (detail: string) => `Falló la configuración: ${detail}`,
+    noHistory: 'Este servidor no respondió con su historial.',
+    unreachableForHistory: 'No se pudo alcanzar este servidor para su historial.',
+    revertFailed: 'Falló la vuelta atrás.',
+    revertFailedDetail: (detail: string) => `Falló la vuelta atrás: ${detail}`,
+    unreachableForRevert: 'No se pudo alcanzar este servidor para la vuelta atrás.'
   },
 
   status: {
@@ -1418,7 +1469,25 @@ const fr: Copy = {
         desktop: 'Les enregistrements de ce dossier ne sont plus envoyés à GitHub.',
         label: 'Déconnecter'
       },
-      disconnectTitle: 'Déconnecter GitHub Sync ?'
+      disconnectTitle: 'Déconnecter GitHub Sync ?',
+      /** The instance's own history trail, and the way back to an earlier commit. */
+      trail: {
+        title: 'Piste d’historique',
+        loading: 'Lecture de l’historique…',
+        none: 'Aucun commit pour l’instant.',
+        unreadable: 'L’historique n’a pas pu être lu.',
+        revertAria: (commit: string, when: string) => `Revenir l’instance à ${commit} depuis ${when}`,
+        revertTitle: 'Revenir à ce commit',
+        confirmTitle: (commit: string) => `Revenir à ${commit} ?`,
+        confirmBody: (when: string) =>
+          `Le wiki revient à son état de ${when}. Les modifications en attente sont enregistrées avant.`,
+        confirm: 'Revenir',
+        working: 'Retour en cours…',
+        reverted: (commit: string) => `Retour à ${commit} effectué.`,
+        savedFirst: 'Les modifications en attente ont été enregistrées avant.',
+        notUploaded: (detail: string) => `Le retour n’a pas été envoyé : ${detail}`,
+        failed: (detail: string) => `Le retour ne s’est pas terminé : ${detail}`
+      }
     },
 
     bookmark: {
@@ -1758,7 +1827,12 @@ const fr: Copy = {
     noCreate: 'Impossible de créer le dépôt.',
     unreachableForSetup: 'Impossible d’atteindre ce serveur pour préparer la sauvegarde.',
     setupFailed: 'Échec de la configuration.',
-    setupFailedDetail: (detail: string) => `Échec de la configuration : ${detail}`
+    setupFailedDetail: (detail: string) => `Échec de la configuration : ${detail}`,
+    noHistory: 'Ce serveur n’a pas répondu avec son historique.',
+    unreachableForHistory: 'Impossible d’atteindre ce serveur pour son historique.',
+    revertFailed: 'Le retour a échoué.',
+    revertFailedDetail: (detail: string) => `Le retour a échoué : ${detail}`,
+    unreachableForRevert: 'Impossible d’atteindre ce serveur pour le retour.'
   },
 
   status: {
@@ -1991,7 +2065,25 @@ const de: Copy = {
         desktop: 'Speicherungen in diesem Ordner werden nicht mehr zu GitHub hochgeladen.',
         label: 'Trennen'
       },
-      disconnectTitle: 'GitHub Sync trennen?'
+      disconnectTitle: 'GitHub Sync trennen?',
+      /** The instance's own history trail, and the way back to an earlier commit. */
+      trail: {
+        title: 'Verlaufsspur',
+        loading: 'Verlauf wird gelesen…',
+        none: 'Noch keine Commits.',
+        unreadable: 'Der Verlauf konnte nicht gelesen werden.',
+        revertAria: (commit: string, when: string) => `Instanz auf ${commit} vom ${when} zurücksetzen`,
+        revertTitle: 'Auf diesen Commit zurücksetzen',
+        confirmTitle: (commit: string) => `Auf ${commit} zurücksetzen?`,
+        confirmBody: (when: string) =>
+          `Das Wiki kehrt zum Stand von ${when} zurück. Offene Änderungen werden zuvor gespeichert.`,
+        confirm: 'Zurücksetzen',
+        working: 'Wird zurückgesetzt…',
+        reverted: (commit: string) => `Auf ${commit} zurückgesetzt.`,
+        savedFirst: 'Offene Änderungen wurden zuvor gespeichert.',
+        notUploaded: (detail: string) => `Das Zurücksetzen wurde nicht hochgeladen: ${detail}`,
+        failed: (detail: string) => `Das Zurücksetzen wurde nicht beendet: ${detail}`
+      }
     },
 
     bookmark: {
@@ -2331,7 +2423,12 @@ const de: Copy = {
     noCreate: 'Das Repository konnte nicht erstellt werden.',
     unreachableForSetup: 'Dieser Server war zum Einrichten der Sicherung nicht erreichbar.',
     setupFailed: 'Einrichtung fehlgeschlagen.',
-    setupFailedDetail: (detail: string) => `Einrichtung fehlgeschlagen: ${detail}`
+    setupFailedDetail: (detail: string) => `Einrichtung fehlgeschlagen: ${detail}`,
+    noHistory: 'Dieser Server hat nicht mit seinem Verlauf geantwortet.',
+    unreachableForHistory: 'Dieser Server war für seinen Verlauf nicht erreichbar.',
+    revertFailed: 'Das Zurücksetzen ist fehlgeschlagen.',
+    revertFailedDetail: (detail: string) => `Das Zurücksetzen ist fehlgeschlagen: ${detail}`,
+    unreachableForRevert: 'Dieser Server war für das Zurücksetzen nicht erreichbar.'
   },
 
   status: {

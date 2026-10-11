@@ -156,6 +156,110 @@ elif [[ "$REQUEST_URI" == */setup* ]] && [[ "$METHOD" == "POST" ]]; then
     # --- Release Lock ---
     rm -f "$LOCK_FILE"
 
+elif [[ "$REQUEST_URI" == */history* ]]; then
+    # The trail: this server's own commits, a local read. Offered whether or not a GitHub backup
+    # is connected, because the commits are there either way, and a self-host instance with local
+    # git and no remote is exactly the case the launcher's own dialog now draws.
+    if [ ! -d "${DATA_DIR}/.git" ]; then
+        echo '{"error":"no_repo"}'
+        exit 0
+    fi
+    LIMIT=$(echo "$QUERY_STRING" | sed -n 's/.*limit=\([0-9]*\).*/\1/p')
+    if [ -z "$LIMIT" ]; then LIMIT=10; fi
+    if [ "$LIMIT" -lt 1 ] 2>/dev/null; then LIMIT=10; fi
+    if [ "$LIMIT" -gt 50 ] 2>/dev/null; then LIMIT=50; fi
+    # One line per commit, fields separated by an unlikely delimiter so a subject with commas,
+    # colons or pipes in it survives. `%at` is the author time in epoch seconds, which is the
+    # unit the launcher formats for every date it draws.
+    COMMITS=""
+    while IFS=$'\x1f' read -r SHORT HASH WHEN SUBJECT; do
+        [ -z "$HASH" ] && continue
+        SUBJECT=$(printf '%s' "$SUBJECT" | sed 's/\\/\\\\/g; s/"/\\"/g')
+        [ -n "$COMMITS" ] && COMMITS="${COMMITS},"
+        COMMITS="${COMMITS}{\"hash\":\"${HASH}\",\"short\":\"${SHORT}\",\"time\":${WHEN},\"summary\":\"${SUBJECT}\"}"
+    done <<< "$(git -C "${DATA_DIR}" log -n "$LIMIT" --format='%h%x1f%H%x1f%at%x1f%s' 2>/dev/null)"
+    echo "{\"commits\":[${COMMITS}]}"
+
+elif [[ "$REQUEST_URI" == */revert* ]] && [[ "$METHOD" == "POST" ]]; then
+    mkdir -p "${DATA_DIR}/.git"
+
+    # --- Acquire Lock ---
+    while [ -f "$LOCK_FILE" ]; do
+        if [ "$(( $(date +%s) - $(stat -c %Y "$LOCK_FILE") ))" -gt 60 ]; then
+            rm -f "$LOCK_FILE"
+        else
+            sleep 1
+        fi
+    done
+    touch "$LOCK_FILE"
+
+    read -r PAYLOAD
+    COMMIT=$(extract_json_val "commit" "$PAYLOAD")
+
+    if [ ! -d "${DATA_DIR}/.git" ] || [ -z "$COMMIT" ]; then
+        echo '{"status":"error","message":"missing_commit"}'
+        rm -f "$LOCK_FILE"
+        exit 0
+    fi
+    if ! git -C "${DATA_DIR}" rev-parse --verify --quiet "${COMMIT}^{commit}" >/dev/null 2>&1; then
+        echo '{"status":"error","message":"unknown_commit"}'
+        rm -f "$LOCK_FILE"
+        exit 0
+    fi
+
+    # 1. The server's own uncommitted work goes in first, so a revert can never discard a change
+    #    git was never given. Untracked files are not the backup's to carry, which is the rule the
+    #    launcher's own pre-revert commit keeps (`git add -u` stages tracked paths only).
+    SAVED_FIRST=false
+    PUSH_ERROR=""
+    if [ -n "$(git -C "${DATA_DIR}" status --porcelain --untracked-files=no 2>/dev/null)" ]; then
+        git -C "${DATA_DIR}" add -u >/dev/null 2>&1
+        if git -C "${DATA_DIR}" commit -m "Save before revert" >/dev/null 2>&1; then
+            SAVED_FIRST=true
+        fi
+    fi
+
+    # 2. How much of the instance this moves, measured before anything is written.
+    CHANGES=$(git -C "${DATA_DIR}" diff --name-only "$COMMIT" HEAD 2>/dev/null | wc -l | tr -d ' ')
+
+    # 3. The tree, then the commit. `read-tree --reset -u` is the plumbing `git reset --hard`
+    #    uses: it makes the index and the working tree match the target, including removing a file
+    #    the target does not have. The branch is deliberately not moved, so the commits this goes
+    #    back over stay in the history and the revert is undone by reverting to them.
+    if ! git -C "${DATA_DIR}" read-tree --reset -u "$COMMIT" >/dev/null 2>&1; then
+        echo '{"status":"error","message":"read_tree_failed"}'
+        rm -f "$LOCK_FILE"
+        exit 0
+    fi
+    TARGET=$(git -C "${DATA_DIR}" rev-parse --short "$COMMIT" 2>/dev/null)
+    # `--allow-empty`, so going back to where the branch already is is recorded as the act it was
+    # rather than as a silent no-op. The launcher's own commit does the same.
+    git -C "${DATA_DIR}" commit --allow-empty -m "Revert to ${TARGET}" >/dev/null 2>&1
+    SHORT=$(git -C "${DATA_DIR}" rev-parse --short HEAD 2>/dev/null)
+
+    # 4. Publish, when this instance has a backup at all. A server with local git and no GitHub
+    #    connection keeps its trail where it is, which is the case the route is offered for.
+    if [ -f "${DATA_DIR}/.git/backup_token" ]; then
+        # A push that fails does not fail the revert: the instance is back at the target either
+        # way, and the dialog says the backup did not upload rather than implying it did. Only
+        # the last line is carried, which is the one git failed on.
+        if ! git -C "${DATA_DIR}" push origin main >> "${DATA_DIR}/.git/git_sync.log" 2>&1; then
+            PUSH_ERROR=$(tail -n 1 "${DATA_DIR}/.git/git_sync.log" | tr -d '\r' | tr '"' "'")
+        fi
+        echo "last_sync=$(date +%s)" > "${DATA_DIR}/.git/backup_status"
+    fi
+
+    # The watcher commits and pushes on its own timer, so it is told about this commit the way it
+    # is told about a patch save: by finding the work already done. Nothing to do here.
+    # `short` is the commit this added and `target` the one it went back to, which are the field
+    # names the desktop app's command answers with: the dialog reads one shape from three prongs.
+    ERROR_JSON="null"
+    [ -n "$PUSH_ERROR" ] && ERROR_JSON="\"${PUSH_ERROR}\""
+    echo "{\"status\":\"success\",\"short\":\"${SHORT}\",\"target\":\"${TARGET}\",\"changes\":${CHANGES:-0},\"saved_first\":${SAVED_FIRST},\"error\":${ERROR_JSON}}"
+
+    # --- Release Lock ---
+    rm -f "$LOCK_FILE"
+
 elif [[ "$REQUEST_URI" == */status* ]]; then
     if [ ! -f "${DATA_DIR}/.git/backup_token" ]; then
         echo '{"connected":false}'
