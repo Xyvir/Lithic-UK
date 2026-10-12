@@ -1005,6 +1005,52 @@ async function assertPinsCentred(page) {
 }
 
 /**
+ * The whole-instance export's mark, in front of its label, where a dialog offers that download.
+ *
+ * `dialog` is the dialog's own selector. Read from the DOM rather than looked at in the picture,
+ * because the position is the claim: the mark is the button's first element, so it leads the
+ * label instead of trailing it, and it holds no colour of its own, since it is filled from the
+ * button's ink. The rebuild dialog is the reason this exists at all: it is one of the three
+ * places the export is offered and the one the smoke test cannot reach, because reaching it
+ * needs a cached Lith the store does not hold.
+ */
+async function assertFullBackupMark(page, dialog) {
+  if ((await page.query(`${dialog} .full-backup-icon`)).count !== 1) {
+    throw new Error(`${dialog} offers its full backup without the export mark`);
+  }
+  const mark = await page.evaluate((selector) => {
+    const button = document.querySelector(`${selector} .full-backup-button`);
+    const drawing = button?.firstElementChild ?? null;
+    if (!drawing?.classList.contains('full-backup-icon')) return { leads: false };
+    // Measured rather than counted: the label is a text node, so a drawing placed after it
+    // would still be the button's first element. What says the mark is in front is that its
+    // box ends where the label's own ink begins.
+    const label = [...button.childNodes].find((node) => node.nodeType === 3 && node.textContent.trim() !== '');
+    if (!label) return { leads: false };
+    const range = document.createRange();
+    range.selectNode(label);
+    return {
+      leads: drawing.getBoundingClientRect().right <= range.getBoundingClientRect().left + 0.5,
+      discs: drawing.querySelectorAll('.full-backup-discs path').length,
+      literals: /#[0-9a-f]{3,8}|rgba?\(/i.test(drawing.outerHTML),
+      text: button.textContent.trim()
+    };
+  }, dialog);
+  if (!mark.leads) {
+    throw new Error(`${dialog} draws the export mark beside or after its label rather than in front of it`);
+  }
+  if (mark.discs !== 4) {
+    throw new Error(`${dialog} draws ${mark.discs} of the export mark's discs, and the drawing has four`);
+  }
+  if (mark.literals) {
+    throw new Error(`${dialog} draws the export mark with a colour of its own, so it stops following the button`);
+  }
+  if (mark.text !== 'Download Full Backup') {
+    throw new Error(`${dialog} calls its full backup ${mark.text}`);
+  }
+}
+
+/**
  * Every dialog, defined once and shot at every viewport.
  *
  * The deck had each dialog at exactly one size before this, and that size was a preset rather
@@ -1120,7 +1166,10 @@ const DIALOG_STATES = [
       await settle(page, 300);
     },
     clip: '.orphan-modal',
-    expect: '.orphan-modal .modal-action.danger'
+    expect: '.orphan-modal .modal-action.danger',
+    verify: async (page) => {
+      await assertFullBackupMark(page, '.orphan-modal');
+    }
   },
   {
     // Edits the launcher captured and never saw saved, asked about before the Lith mounts.
@@ -1399,30 +1448,20 @@ const SHEETS = [
         expect: '.new-lith-warn'
       },
       {
-        // The icon picker at the width where it is hardest to satisfy: the 80 glyphs are ten
-        // rows of eight on a phone and eight rows of ten in the 440px dialog, and both are
-        // meant to show all of them without a scrollbar. The count is 80 rather than 79 for
-        // exactly this pane: a grid fills only when the glyph count divides its column count,
-        // 80 is what divides both eight and ten, and a phone's grid draws eight columns. Left
-        // uncropped on purpose, because a crop cannot show a dialog that ran past the bottom
-        // of the screen, which is the one thing this pane exists to show. The instance carries
-        // the herb, one of the ten the cull gave back, so the grid here is the shortlist
-        // itself with its own choice highlighted in place. **What this pane deliberately does
-        // not photograph** is the other half of that contract: an instance whose icon the
-        // shortlist does not offer still shows it in the heading and still previews it, and it
-        // leads the grid as the chosen cell — but leading it makes the count 81, and no cell
-        // count and its successor both divide eight, so a picture of that state is a picture
-        // of the single-cell last row this count was chosen to remove. The smoke leg seeds the
-        // hibiscus and asserts the 81 cells with the first one selected, then 80 led by 📚 once
-        // 🎨 is picked, which is where that contract is proved now.
+        // The icon picker at the width where it is hardest to satisfy: the curated 25 choices
+        // make five rows of five, all visible on a phone. The instance carries 📚, a member of
+        // that shortlist, so its saved choice is highlighted in place. The dialog is left
+        // uncropped because a crop cannot show it running past the bottom of the screen, which
+        // is the layout this pane exists to review. The smoke test separately covers the older
+        // off-list icon: it stays previewed without becoming a grid choice.
         name: '080-instance-icon',
         view: 'phone',
         mode: 'self-host',
         server: true,
         drive: async (page) => {
-          stub.addFile('favicon.conf', '🌿');
+          stub.addFile('favicon.conf', '📚');
           await page.reload({ waitUntil: 'domcontentloaded' });
-          await page.waitForSelector('.brand-emoji');
+          await page.waitForFunction(() => document.querySelector('.brand-emoji')?.textContent.trim() === '📚');
           await page.click('.brand-icon-wrap.pickable');
           await page.waitForSelector('.emoji-modal');
           await settle(page, 300);
@@ -1861,9 +1900,9 @@ const SHEETS = [
         mode: 'self-host',
         server: true,
         drive: async (page) => {
-          stub.addFile('favicon.conf', '🌿');
+          stub.addFile('favicon.conf', '📚');
           await page.reload({ waitUntil: 'domcontentloaded' });
-          await page.waitForSelector('.brand-emoji');
+          await page.waitForFunction(() => document.querySelector('.brand-emoji')?.textContent.trim() === '📚');
           await settle(page, 300);
         },
         expect: '.brand-emoji'
@@ -2748,7 +2787,10 @@ const SHEETS = [
           await settle(page, 300);
         },
         clip: '.orphan-modal',
-        expect: '.orphan-modal .modal-action.danger'
+        expect: '.orphan-modal .modal-action.danger',
+        verify: async (page) => {
+          await assertFullBackupMark(page, '.orphan-modal');
+        }
       },
       {
         // Edits the launcher captured and never saw saved. Reachable here because a

@@ -822,6 +822,65 @@ try {
   const waitForAction = (page, selector, label) => page.waitForFunction((css, text) =>
     [...document.querySelectorAll(css)].some((node) => node.textContent.trim() === text), POLL, selector, label);
   /**
+   * The full-export mark, read out of the dialog that offers the whole-instance download.
+   *
+   * The button is found by its own class rather than by its label, because the label is part of
+   * what is being checked: the mark has to be the button's first element, an inline svg holding
+   * the artist's arrow and all four of the discs drawn with it, and drawn without a colour of
+   * its own. That last one is the claim a picture cannot carry. The mark is filled from the
+   * button's ink so it follows hover and disabled, and a hex in its markup is the day it stops.
+   */
+  const fullBackupMark = (page, dialog) => page.evaluate((selector) => {
+    const scope = document.querySelector(selector);
+    const buttons = [...(scope?.querySelectorAll('.full-backup-button') ?? [])];
+    const button = buttons[0] ?? null;
+    const mark = button?.firstElementChild ?? null;
+    // Where the label's own ink begins, which is what "in front" is a claim about: the mark's
+    // box has to end at or before it. The svg being the first *element* child says nothing on
+    // its own, since the label is a text node, and a mark drawn after the label would still be
+    // the only element in there.
+    const labelNode = [...(button?.childNodes ?? [])].find(
+      (node) => node.nodeType === 3 && node.textContent.trim() !== ''
+    );
+    let labelLeft = null;
+    if (mark && labelNode) {
+      const range = document.createRange();
+      range.selectNode(labelNode);
+      labelLeft = range.getBoundingClientRect().left;
+    }
+    const markBox = mark?.getBoundingClientRect() ?? null;
+    return {
+      count: buttons.length,
+      label: button?.textContent?.trim() ?? null,
+      tag: mark?.tagName ?? null,
+      cls: mark?.getAttribute('class') ?? null,
+      leads: markBox !== null && labelLeft !== null && markBox.right <= labelLeft + 0.5,
+      arrow: mark?.querySelectorAll(':scope > path').length ?? 0,
+      discs: mark?.querySelectorAll('.full-backup-discs > path').length ?? 0,
+      viewBox: mark?.getAttribute('viewBox') ?? null,
+      hidden: mark?.getAttribute('aria-hidden') ?? null,
+      focusable: mark?.getAttribute('focusable') ?? null,
+      literals: /#[0-9a-f]{3,8}|rgba?\(/i.test(mark?.outerHTML ?? '')
+    };
+  }, dialog);
+  /**
+   * What the mark has to be, wherever it is drawn. `where` names the dialog, so a failure says
+   * which of the three exports lost its mark rather than that one of them did.
+   */
+  const assertFullBackupMark = (mark, where) => {
+    assert.equal(mark.count, 1, `${where}: one whole-instance export in the row: ${JSON.stringify(mark)}`);
+    assert.equal(mark.tag, 'svg', `${where}: the export carries its mark as the button's own drawing`);
+    assert.match(mark.cls ?? '', /(^|\s)full-backup-icon(\s|$)/, `${where}: drawn with the full-export mark's own class`);
+    assert.equal(mark.leads, true, `${where}: and it is drawn in front of the label rather than after it`);
+    assert.equal(mark.arrow, 1, `${where}: the mark is the author's arrow`);
+    assert.equal(mark.discs, 4, `${where}: over all four of the discs they drew with it`);
+    assert.equal(mark.viewBox, '63.2 106.1 33.6 29.7', `${where}: in the artist's own coordinates, so the proportions are theirs too`);
+    assert.equal(mark.hidden, 'true', `${where}: the mark is decoration, and the label is what names the control`);
+    assert.equal(mark.focusable, 'false', `${where}: so it never takes the keyboard from the button`);
+    assert.equal(mark.literals, false, `${where}: and it holds no colour of its own, which is what lets the button's ink carry it in every state`);
+    assert.equal(mark.label, 'Download Full Backup', `${where}: with the label it is called by unchanged beside it`);
+  };
+  /**
    * The instance's history trail as the dialog draws it.
    *
    * Read from the DOM rather than from the stub's state, because what this section is about is
@@ -3154,6 +3213,23 @@ try {
     } catch {
       // No storage here: nothing is installed here either.
     }
+    // What the app says about the *other* windows on this machine, and what an install does
+    // once the copy has landed. Fixture-driven for the same reason as the answer above: the
+    // refusal and the close are two answers to one call each, and a leg has to be able to walk
+    // both sides of each.
+    let installHold = {
+      preflight: { asked: 0, blocked: false, holder: null },
+      revealed: true,
+      close: false,
+      quits: 0
+    };
+    try {
+      const held = JSON.parse(localStorage.getItem('__lithicInstallHold') ?? 'null');
+      if (held) installHold = { ...installHold, ...held, quits: 0 };
+    } catch {
+      // No storage here: a machine with one window and a folder that opens.
+    }
+    window.__lithicInstallHold = installHold;
     const answer = (command, args) => {
       vault.calls.push({ command, args });
       if (typeof window.__lithicRecord === 'function') window.__lithicRecord({ command, args });
@@ -3342,6 +3418,27 @@ try {
           // to read this before it may show anything, so a launcher that waited on the
           // disk for it would hold an offer back for no reason at all.
           return { installed: installAnswer.installed, dismissed: false };
+        case 'launcher_stage':
+          // The beat: where this window says it is, for the other copies of the app on this
+          // machine. Answered from the fixture so a leg can hold a close request over it, and
+          // recorded like every other call so a leg can read back which stage was said.
+          return { close: installHold.close, beat_ms: 2000 };
+        case 'install_preflight':
+          // That `.quits` above is reset here on purpose: this is the call the refusal is
+          // ordered against, and a leg reads the count after it.
+          return installHold.preflight;
+        case 'install_monolith':
+          return {
+            path: 'C:/Users/fixture/Documents/Lithic/Lithic.exe',
+            entry: null,
+            start_menu: null,
+            revealed: installHold.revealed
+          };
+        case 'quit_launcher':
+          // The window closing itself. Recorded rather than acted on, since a page that
+          // really closed would take the rest of its leg with it.
+          installHold.quits += 1;
+          return null;
         case 'install_update_check':
           // This build is the newest release, from the mock's side. The release
           // question belongs to the gallery and the Rust tests, and a browser test that
@@ -3477,6 +3574,115 @@ try {
   assert.equal(freshOffer.label, 'Install', 'And then it offers the install');
   assert.equal(freshOffer.animation, 'install-offer-in', 'The offer arrives with the reveal rather than being painted there');
   assert.ok(freshOffer.dismissal, 'It still carries its dismiss affordance');
+
+  // --- Update Install: the windows that close, and the window that closes itself -----------
+  // An update writes over the program those windows are running, which the operating system
+  // will not allow (Windows answers a sharing violation, Unix `ETXTBSY`). So the launcher asks
+  // the app to close the windows sitting on a launcher first, refuses instead of guessing when
+  // a window with a Lith open is holding the file, and closes itself once the new copy is on
+  // disk and its folder is in front of the user. All four are pinned here, on the page, because
+  // the refusal is only honest if no copy happens behind it and the close is only safe if the
+  // folder really opened.
+  const updateInstall = async (hold) => {
+    await vaultPage.evaluate((held) => {
+      // A copy on disk that is older than this build: the button that offers to replace it.
+      localStorage.setItem(
+        '__lithicInstall',
+        JSON.stringify({ status: { installed: true, up_to_date: false, running_from_install: false } })
+      );
+      localStorage.setItem('__lithicInstallHold', JSON.stringify(held));
+    }, hold);
+    await vaultPage.goto(`file://${artifact}?mode=tauri`, { waitUntil: 'domcontentloaded' });
+    await vaultPage.waitForFunction(
+      () => document.querySelector('.install-button')?.textContent.trim() === 'Update Install',
+      POLL
+    );
+    await vaultPage.click('.install-offer .install-button');
+  };
+  const ranInstall = () =>
+    vaultPage.evaluate(() => ({
+      commands: window.__lithicVault.calls.map((call) => call.command),
+      stages: window.__lithicVault.calls.filter((call) => call.command === 'launcher_stage').map((call) => call.args),
+      quits: window.__lithicInstallHold.quits,
+      status: document.querySelector('.status-line[role="status"]')?.textContent?.trim() ?? ''
+    }));
+
+  // A window with a Lith open is named and never closed, and the refusal happens before any
+  // copy is attempted: that is the whole reason the preflight is a separate call.
+  await updateInstall({ preflight: { asked: 0, blocked: true, holder: 'notes.lith' } });
+  await vaultPage.waitForFunction(
+    () =>
+      document
+        .querySelector('.status-line[role="status"]')
+        ?.textContent?.includes('Another Lithic window has notes.lith open.'),
+    { ...POLL, timeout: 5000 }
+  );
+  const refusedByName = await ranInstall();
+  assert.ok(refusedByName.commands.includes('install_preflight'), 'An update asks about the other windows before it copies');
+  assert.equal(refusedByName.commands.includes('install_monolith'), false, 'A refused update copies nothing at all');
+  assert.equal(refusedByName.quits, 0, '...and closes nothing, this window included');
+  assert.deepEqual(
+    refusedByName.stages.at(-1),
+    { stage: 'launcher', wiki: null },
+    'The window beats its stage to the app, which is what lets an install tell a launcher from a Lith'
+  );
+
+  // A lock nothing live explains is refused as well, with the sentence that does not name a
+  // Lith: a window that has gone quiet cannot be quoted back at the user.
+  await updateInstall({ preflight: { asked: 1, blocked: true, holder: null } });
+  await vaultPage.waitForFunction(
+    () =>
+      document
+        .querySelector('.status-line[role="status"]')
+        ?.textContent?.includes('The installed app is still running.'),
+    { ...POLL, timeout: 5000 }
+  );
+  const refusedWithoutName = await ranInstall();
+  assert.equal(refusedWithoutName.commands.includes('install_monolith'), false, 'And it copies nothing either');
+
+  // Nothing in the way: the copy happens once, the launcher says where it landed, and then the
+  // window closes itself so the user can start the copy that was just installed.
+  await updateInstall({ preflight: { asked: 1, blocked: false }, revealed: true });
+  await vaultPage.waitForFunction(() => window.__lithicInstallHold.quits > 0, { ...POLL, timeout: 5000 });
+  const updated = await ranInstall();
+  assert.equal(
+    updated.commands.filter((command) => command === 'install_monolith').length,
+    1,
+    'An update with the windows out of the way copies once'
+  );
+  assert.equal(updated.quits, 1, '...and then the launcher closes itself, once');
+  assert.ok(
+    updated.status.includes('Installed to C:/Users/fixture/Documents/Lithic/Lithic.exe'),
+    `...having said where the copy landed: ${updated.status}`
+  );
+
+  // And the close is tied to the folder opening, not to the copy: a platform that cannot open
+  // one keeps the launcher, because the line it draws is the only thing the user has to read.
+  await updateInstall({ preflight: { asked: 0, blocked: false }, revealed: false });
+  await vaultPage.waitForFunction(
+    () => window.__lithicVault.calls.some((call) => call.command === 'install_monolith'),
+    { ...POLL, timeout: 5000 }
+  );
+  await new Promise((resolve) => setTimeout(resolve, 400));
+  const unopened = await ranInstall();
+  assert.equal(unopened.quits, 0, 'A platform with no folder to open keeps the launcher open');
+  assert.ok(unopened.status.includes('Installed to'), '...and the line naming the file is what the user reads instead');
+
+  // The other side of the same beat, which is the half an update depends on: a window that is
+  // only sitting on a launcher closes when the install on another window asks it to, with
+  // nobody touching this one. That no click appears here is the whole of what is under test.
+  await vaultPage.evaluate(() => {
+    localStorage.setItem(
+      '__lithicInstallHold',
+      JSON.stringify({ preflight: { asked: 0, blocked: false }, close: true })
+    );
+  });
+  await vaultPage.goto(`file://${artifact}?mode=tauri`, { waitUntil: 'domcontentloaded' });
+  await vaultPage.waitForFunction(() => window.__lithicInstallHold.quits > 0, { ...POLL, timeout: 5000 });
+  const askedToClose = await ranInstall();
+  assert.equal(askedToClose.quits, 1, 'An idle launcher asked to close by another window closes itself, untouched');
+  assert.equal(askedToClose.commands.includes('install_monolith'), false, '...and installs nothing on its way out');
+  await vaultPage.evaluate(() => localStorage.removeItem('__lithicInstallHold'));
 
   // The reveal is a courtesy rather than a mechanism: a reader who has asked their
   // system for less motion gets the same offer, in place and fully lit, with nothing
@@ -5154,6 +5360,7 @@ try {
   await vaultPage.click('.brand-icon-wrap');
   await vaultPage.waitForSelector('.emoji-modal');
   await assertNoExtraDismiss('.emoji-modal', 'The Instance Management dialog');
+  assertFullBackupMark(await fullBackupMark(vaultPage, '.emoji-modal'), 'The Instance Management dialog');
   await vaultPage.click('.emoji-modal .management-actions a');
   await waitForCall(call => call.command === 'open_external');
   const openedProject = vaultCalls.filter(call => call.command === 'open_external').at(-1);
@@ -6086,6 +6293,7 @@ try {
     gated.modalActions.some((label) => /Full Backup/.test(label)),
     `The whole-instance export is offered here too: ${JSON.stringify(gated.modalActions)}`
   );
+  assertFullBackupMark(await fullBackupMark(fallbackPage, '.instance-backup-modal'), 'The fallback dialog');
   assert.equal(gated.close, true, 'The dialog carries the × in its corner');
   assert.equal(gated.cancel, false, '...and no Cancel beside it, which is the same dismissal twice');
 

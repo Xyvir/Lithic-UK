@@ -37,6 +37,7 @@
   import { LOGIN_CHECK_LABELS, askInstanceAboutLogin, loginVerdict, loginVerdictFromError, typedLoginCheck, type LoginCheckState, type LoginVerdict } from './login-check';
   import { copyDropNote, forgetInstanceCopy } from './instance-copy';
   import { offlineMode, looksUnreachable } from './offline-mode';
+  import { createStageBeat, type InstallPreflight, type StageBeat } from './launcher-stage';
   import PinEntry from './PinEntry.svelte';
   import { deleteRemoteFile, fetchRemoteFiles, fetchRemoteWiki, fetchRemoteWikiMeta, probePatchApi, createLockHeartbeat, readRemoteLock, uploadRemoteFile, webdavUrl, resolveSessionId, lithUploadName, type WebdavFile } from './webdav';
   import { normalizeLithName } from './legacy-saver';
@@ -258,6 +259,16 @@ import { backupFileName, collectInstanceBackup, mergeBookmarks, parseInstanceBac
   // paused on a choice (read-only / ignore / cancel) instead of guessing.
   let remoteCollision: { name: string; who: string } | null = null;
   let lockHeartbeat: ReturnType<typeof createLockHeartbeat> | null = null;
+  /**
+   * This window's own beat: where it is, said often enough for the other copies of this app on
+   * this machine to act on it.
+   *
+   * Started on a desktop launcher and never stopped by a page, because the beat has to outlive
+   * the document: a mount hands the whole document to the engine, and the window, this timer and
+   * everything else here carry on through it (see `launcher-stage.ts`). Nothing else reads this
+   * value, so a `null` is simply a window with no registry behind it.
+   */
+  let stageBeat: StageBeat | null = null;
 
   // --- Instance icon (emoji favicon), and the Instance Management dialog it lives in ---
   let brandEmoji = '';
@@ -2347,13 +2358,29 @@ import { backupFileName, collectInstanceBackup, mergeBookmarks, parseInstanceBac
       // The same install on both backends: the desktop app answers through Tauri, a shim
       // through its wire. The wire's failure is a code with an optional sentence, which is
       // turned into a thrown Error so the one report below covers both.
-      let result: { path: string; entry: string | null };
+      let result: { path: string; entry: string | null; revealed?: boolean };
       if (shimBackend) {
         const answer = await shimInstall({ token: shimToken });
         if (!answer.ok) throw new Error(answer.detail ?? answer.error);
         result = answer.value;
       } else {
-        result = await tauriInvoke<{ path: string; entry: string | null }>('install_monolith');
+        // Asked before the copy and never after it, because it is what decides whether there
+        // is a copy to attempt: the operating system will not let an install write over the
+        // program a window is running, so the windows still sitting on a launcher are asked to
+        // close first, and a window that has a Lith open is reported rather than closed or
+        // waited on (see `instances` in the Rust side). With nothing to ask, the answer comes
+        // back at once and the line below is never seen.
+        installStatus = copy.install.closing;
+        const preflight = await tauriInvoke<InstallPreflight>('install_preflight');
+        if (preflight.blocked) {
+          installStatus = preflight.holder
+            ? copy.install.blocked(preflight.holder)
+            : copy.install.blockedUnknown;
+          status = installStatus;
+          return;
+        }
+        installStatus = '';
+        result = await tauriInvoke<{ path: string; entry: string | null; revealed?: boolean }>('install_monolith');
       }
       // The tooltip is where the file went. The line names the entry instead when there is
       // one, because that is the thing the user can click. Neither sentence is written
@@ -2365,12 +2392,30 @@ import { backupFileName, collectInstanceBackup, mergeBookmarks, parseInstanceBac
       // The status line animates while it has text; retire the message
       // once it has had a moment to be read.
       setTimeout(() => { if (status.startsWith(copy.install.installedPrefix)) status = ''; }, 6000);
+      // The install has said all it has to say, and the folder the new copy landed in is open
+      // in front of the user: this window is the older copy now, so it gets out of the way and
+      // leaves them to launch the new one. Only where the folder was actually opened: a
+      // platform that cannot do that (see the shim) keeps the line that says where the file
+      // went, since it is the only thing the user has to read.
+      if (mode === 'tauri' && result.revealed) closeForInstall();
     } catch (error) {
       installStatus = copy.install.failed(error instanceof Error ? error.message : String(error));
       status = installStatus;
     } finally {
       installBusy = false;
     }
+  }
+
+  /**
+   * Close this window, which an install on another window has just made the older copy.
+   *
+   * Asked of the app rather than done with `window.close()`, so it closes the way the app's own
+   * handling of a close closes it, and so nothing here sits beside the ordinary exit path as a
+   * second, quieter way out. The user reopens from the copy that was just installed, whose
+   * folder is open in front of them.
+   */
+  function closeForInstall(): void {
+    void tauriInvoke('quit_launcher').catch(() => { /* the window is going either way */ });
   }
   type CacheSearchEntry = { name: string; text: string; sizeBytes: number };
   type CacheSearchMatch = { preview: string; title?: string };
@@ -3141,6 +3186,7 @@ import { backupFileName, collectInstanceBackup, mergeBookmarks, parseInstanceBac
       // actually opened, not a handoff left behind by an earlier mount.
       // In the browser-storage fallback there is no file to write back to, so the
       // serialized page goes into the monolith's own recents row instead.
+      stageBeat?.stage('wiki', safeName);
       await bootLegacyHtml(contents, safeName, path, indexDbOnly, shimToken);
       return;
     }
@@ -3151,6 +3197,12 @@ import { backupFileName, collectInstanceBackup, mergeBookmarks, parseInstanceBac
     writeHandoff(handoff);
     const scratchKind: ScratchKind | null = resolveScratchKind(safeName);
     const scratchMode = isScratch && scratchKind ? scratchKind : undefined;
+    // This window stops being a launcher here, and saying so first is what keeps an install on
+    // another window from closing this one: only a window that is still saying `launcher` is
+    // ever asked to close, and a window that has a Lith open says which Lith instead (see
+    // `instances` in the Rust side). Said before the document is handed over, not after,
+    // because after is a document the engine owns.
+    stageBeat?.stage('wiki', safeName);
     // Drain whatever the user queued via drop / share URL / intro.
     // The engine boots in place (document.open/write/close), keeping the
     // launcher URL in the address bar and preserving window globals; the
@@ -4943,6 +4995,16 @@ import { backupFileName, collectInstanceBackup, mergeBookmarks, parseInstanceBac
     // --- Tauri startup file (CLI arg / "Open with" association) ---
     if (mode === 'tauri') {
       void refreshInstallState();
+      // Where this window says it is, for the other copies of this app on this machine (see
+      // `launcher-stage.ts`). Desktop only: a page with no app behind it has no registry to
+      // write to, and only the app carries an install to update and a window to close.
+      stageBeat = createStageBeat({
+        // An install on another window has put a newer copy where this machine launches the app
+        // from, so this window is the older one and it gets out of the way. Nothing here is
+        // unsaved: this is the launcher, not a Lith.
+        onClose: () => closeForInstall()
+      });
+      void stageBeat.start();
       // The vault's own boot work (locking it, and reading the status the rows and the
       // manager control are drawn from) travels with the platform read above, because it
       // is that answer which decides whether this build has a vault to lock.
@@ -4962,6 +5024,8 @@ import { backupFileName, collectInstanceBackup, mergeBookmarks, parseInstanceBac
       // Leaving the launcher screen entirely: drop the presence lock so the
       // wiki is not held for the full staleness window.
       stopLockHeartbeat();
+      stageBeat?.stop();
+      stageBeat = null;
       if (gitSyncPollTimer) clearInterval(gitSyncPollTimer);
       if (shimPendingTimer) clearInterval(shimPendingTimer);
       if (gitSyncBackupTimer) clearInterval(gitSyncBackupTimer);
@@ -5640,6 +5704,32 @@ import { backupFileName, collectInstanceBackup, mergeBookmarks, parseInstanceBac
 <svelte:head><title>{copy.app.title}</title></svelte:head>
 
 <main class="container" class:panelled={recentPanelShown} data-mode={mode} data-shim-backend={shimBackendUp}>
+  <!--
+    The full-export mark, drawn in front of its label wherever the whole-instance export is
+    offered: the Instance Management dialog, the rebuild confirmation and the fallback's gated
+    dialog. One snippet rather than three copies of a path this long, because three copies are
+    three things to keep in step.
+
+    The drawing is the author's own, from an Inkscape page: the paths below are verbatim, and
+    the viewBox is the mark's measured tight box plus a hair of margin, so the glyph fills the
+    17px square the vault's key already occupies. Filled in `currentColor` and never stroked,
+    so it takes the button's own ink in every state instead of a colour of its own. The white
+    rims on the drawn discs are kept as the artist drew them, but their colour lives in the
+    sheet rather than in the markup: a rim is a gap between two discs, so it takes the colour
+    of whatever the button is sitting on. At 17px it is below a pixel and cannot be seen;
+    anywhere larger it is what keeps the mark a stack of discs rather than one blob.
+  -->
+  {#snippet fullBackupIcon()}
+    <svg class="full-backup-icon" viewBox="63.2 106.1 33.6 29.7" aria-hidden="true" focusable="false">
+      <path d="m 96.232885,121.64218 c 0,-7.19823 -5.58342,-13.10362 -12.64471,-13.64723 v -0.007 h -15.85743 v -1.32502 l -4.02559,2.32389 4.02559,2.32441 v -1.32343 h 15.85123 c 5.97937,0.53018 10.65103,5.5348 10.65103,11.65458 0,6.47462 -5.22855,11.70316 -11.70316,11.70316 -6.47462,0 -11.70161,-5.22854 -11.70161,-11.70316 0,-2.64451 0.87232,-5.08081 2.34508,-7.03781 h -2.39572 c -1.23707,2.05816 -1.94924,4.46633 -1.94924,7.03781 0,7.5555 6.14599,13.70356 13.70149,13.70356 7.5555,0 13.70304,-6.14806 13.70304,-13.70356 z" />
+      <g class="full-backup-discs" transform="translate(0.396875,0.247285)">
+        <path stroke-width="0.421115" transform="scale(-1)" d="m -77.794846,-123.84603 a 4.4289398,1.963775 0 0 1 -4.428939,1.96377 4.4289398,1.963775 0 0 1 -4.42894,-1.96377 4.4289398,1.963775 0 0 1 4.42894,-1.96378 4.4289398,1.963775 0 0 1 4.428939,1.96378 z" />
+        <path stroke-width="0.421115" transform="scale(-1)" d="m -77.794846,-122.05135 a 4.4289398,1.963775 0 0 1 -4.428939,1.96377 4.4289398,1.963775 0 0 1 -4.42894,-1.96377 4.4289398,1.963775 0 0 1 4.42894,-1.96378 4.4289398,1.963775 0 0 1 4.428939,1.96378 z" />
+        <path stroke-width="0.421115" transform="scale(-1)" d="m -77.794846,-120.25668 a 4.4289398,1.963775 0 0 1 -4.428939,1.96377 4.4289398,1.963775 0 0 1 -4.42894,-1.96377 4.4289398,1.963775 0 0 1 4.42894,-1.96378 4.4289398,1.963775 0 0 1 4.428939,1.96378 z" />
+        <path stroke-width="0.421115" transform="scale(-1)" d="m -77.794846,-118.46201 a 4.4289398,1.963775 0 0 1 -4.428939,1.96377 4.4289398,1.963775 0 0 1 -4.42894,-1.96377 4.4289398,1.963775 0 0 1 4.42894,-1.96378 4.4289398,1.963775 0 0 1 4.428939,1.96378 z" />
+      </g>
+    </svg>
+  {/snippet}
   <!--
     The install offer, written once because it has two homes and never both at once: the
     panel's foot row (where a phone wants it, beside the rebuild control) and the footer
@@ -6447,7 +6537,7 @@ import { backupFileName, collectInstanceBackup, mergeBookmarks, parseInstanceBac
           its business rather than as part of the icon choice above.
         -->
         <div class="modal-actions management-actions">
-          <button class="modal-action secondary" disabled={backupBusy} on:click={() => downloadInstanceBackup('manage')} title={copy.dialogs.icon.backupTitle}>{backupBusy ? '…' : copy.dialogs.icon.backup}</button>
+          <button class="modal-action secondary full-backup-button" disabled={backupBusy} on:click={() => downloadInstanceBackup('manage')} title={copy.dialogs.icon.backupTitle}>{@render fullBackupIcon()}{backupBusy ? '…' : copy.dialogs.icon.backup}</button>
           <!--
             The way out to the project as a small link at the end of the row rather than a
             third full-width button: the dialog has two jobs (the icon and the backup) and
@@ -6503,7 +6593,7 @@ import { backupFileName, collectInstanceBackup, mergeBookmarks, parseInstanceBac
           recents that were never in the list below; the note under it says so.
         -->
         <div class="instance-backup-full">
-          <button class="modal-action secondary" disabled={backupBusy} on:click={() => downloadInstanceBackup('rebuild')} title={copy.dialogs.rebuild.fullBackupTitle}>{backupBusy ? '…' : copy.dialogs.rebuild.fullBackup}</button>
+          <button class="modal-action secondary full-backup-button" disabled={backupBusy} on:click={() => downloadInstanceBackup('rebuild')} title={copy.dialogs.rebuild.fullBackupTitle}>{@render fullBackupIcon()}{backupBusy ? '…' : copy.dialogs.rebuild.fullBackup}</button>
         </div>
         <p class="git-sync-note">{copy.dialogs.rebuild.fullBackupNote}</p>
         {#if backupStatus}<p class="status-line" role="status">{backupStatus}</p>{/if}
@@ -6541,7 +6631,7 @@ import { backupFileName, collectInstanceBackup, mergeBookmarks, parseInstanceBac
           {/each}
         </ul>
         <div class="instance-backup-full">
-          <button class="modal-action secondary" disabled={backupBusy} on:click={() => downloadInstanceBackup('gate')} title={copy.dialogs.instanceBackup.fullBackupTitle}>{backupBusy ? '…' : copy.dialogs.instanceBackup.fullBackup}</button>
+          <button class="modal-action secondary full-backup-button" disabled={backupBusy} on:click={() => downloadInstanceBackup('gate')} title={copy.dialogs.instanceBackup.fullBackupTitle}>{@render fullBackupIcon()}{backupBusy ? '…' : copy.dialogs.instanceBackup.fullBackup}</button>
           {#if fullBackupTaken}<span class="instance-backup-mark" role="status">{copy.dialogs.instanceBackup.fullBackupTaken}</span>{/if}
         </div>
         {#if backupStatus}<p class="status-line" role="status">{backupStatus}</p>{/if}

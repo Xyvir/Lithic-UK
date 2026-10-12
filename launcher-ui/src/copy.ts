@@ -106,6 +106,15 @@ const en = {
     /** A browser that will not show a prompt still has a menu item. */
     unavailable: 'Install is available from the browser menu.',
     openFailed: (detail: string) => `Could not open your browser: ${detail}`,
+    /**
+     * Shown while the other launcher windows on this machine are asked to close, before the
+     * copy writes over the program they are running. With nothing to close the answer comes
+     * back at once and the line is never seen.
+     */
+    closing: 'Closing the other Lithic windows…',
+    /** An update the installed copy refuses, because a window is still holding it. */
+    blocked: (name: string) => `Another Lithic window has ${name} open. Close it, then try again.`,
+    blockedUnknown: 'The installed app is still running. Close it, then try again.',
     /** Confirmation for copying a local-only Lith into the covered folder. */
     copyToSyncedDir: 'Copy to Synced Dir',
     copyToSyncedDirBody: (name: string, folder: string) => `${name} is not backed up. Copy it into ${folder}?`,
@@ -765,6 +774,9 @@ const es: Copy = {
     dismissText: 'cerrar',
     unavailable: 'La instalación está en el menú del navegador.',
     openFailed: (detail: string) => `No se pudo abrir tu navegador: ${detail}`,
+    closing: 'Cerrando las otras ventanas de Lithic…',
+    blocked: (name: string) => `Otra ventana de Lithic tiene ${name} abierto. Ciérrala y vuelve a intentarlo.`,
+    blockedUnknown: 'La app instalada sigue en marcha. Ciérrala y vuelve a intentarlo.',
     copyToSyncedDir: 'Copiar a la carpeta sincronizada',
     copyToSyncedDirBody: (name: string, folder: string) => `${name} no está respaldado. ¿Copiarlo a ${folder}?`,
     copyConfirm: 'Copiar',
@@ -1364,6 +1376,9 @@ const fr: Copy = {
     dismissText: 'fermer',
     unavailable: 'L’installation est dans le menu du navigateur.',
     openFailed: (detail: string) => `Impossible d’ouvrir votre navigateur : ${detail}`,
+    closing: 'Fermeture des autres fenêtres Lithic…',
+    blocked: (name: string) => `Une autre fenêtre Lithic a ${name} ouvert. Fermez-la, puis réessayez.`,
+    blockedUnknown: 'L’app installée tourne encore. Fermez-la, puis réessayez.',
     copyToSyncedDir: 'Copier dans le dossier synchronisé',
     copyToSyncedDirBody: (name: string, folder: string) => `${name} n’est pas sauvegardé. Le copier dans ${folder} ?`,
     copyConfirm: 'Copier',
@@ -1960,6 +1975,9 @@ const de: Copy = {
     dismissText: 'ausblenden',
     unavailable: 'Installation ist über das Browsermenü möglich.',
     openFailed: (detail: string) => `Browser konnte nicht geöffnet werden: ${detail}`,
+    closing: 'Die anderen Lithic-Fenster werden geschlossen…',
+    blocked: (name: string) => `Ein anderes Lithic-Fenster hat ${name} geöffnet. Schließe es, dann versuche es erneut.`,
+    blockedUnknown: 'Die installierte App läuft noch. Schließe sie, dann versuche es erneut.',
     copyToSyncedDir: 'In den synchronisierten Ordner kopieren',
     copyToSyncedDirBody: (name: string, folder: string) => `${name} ist nicht gesichert. Nach ${folder} kopieren?`,
     copyConfirm: 'Kopieren',
