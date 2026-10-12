@@ -1051,15 +1051,6 @@ a.modal-action { text-decoration: none; text-align: center; color: var(--lithic-
  */
 .modal-action.full-backup-button { display: flex; align-items: center; justify-content: center; gap: 8px; }
 .modal-action.full-backup-button svg { flex: 0 0 auto; width: 17px; height: 17px; fill: currentColor; stroke: none; overflow: visible; }
-/*
- * The rims between the mark's discs, in the colour of the surface the button is drawn on. A
- * rim is a gap, so it belongs to whatever is behind the button rather than to the icon: the
- * button itself is transparent, and this is the surface showing through. Drawn white in the
- * author's own file because the page there is white, which is the same gap said the only way
- * a drawing can say it. At 17px the rim is under a pixel and invisible; above that it is the
- * difference between a stack of discs and one blob, so it is kept rather than dropped.
- */
-.modal-action.full-backup-button svg .full-backup-discs { stroke: var(--lithic-surface-panel); }
 .vault-modal { width: min(100%, 560px); }
 .vault-modal h3.vault-subhead { margin: 18px 0 0; font-size: 1rem; color: var(--lithic-ink); }
 .vault-modal .vault-field { display: block; margin: 12px 0 0; }

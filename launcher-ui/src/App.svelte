@@ -5710,23 +5710,28 @@ import { backupFileName, collectInstanceBackup, mergeBookmarks, parseInstanceBac
     dialog. One snippet rather than three copies of a path this long, because three copies are
     three things to keep in step.
 
-    The drawing is the author's own, from an Inkscape page: the paths below are verbatim, and
-    the viewBox is the mark's measured tight box plus a hair of margin, so the glyph fills the
-    17px square the vault's key already occupies. Filled in `currentColor` and never stroked,
-    so it takes the button's own ink in every state instead of a colour of its own. The white
-    rims on the drawn discs are kept as the artist drew them, but their colour lives in the
-    sheet rather than in the markup: a rim is a gap between two discs, so it takes the colour
-    of whatever the button is sitting on. At 17px it is below a pixel and cannot be seen;
-    anywhere larger it is what keeps the mark a stack of discs rather than one blob.
+    The drawing is the author's own, from an Inkscape page, and the paths below are verbatim
+    apart from their ids and their style attributes. Its ring is the mark the row download
+    control draws (`.history-download-icon`): rasterise the two and line them up by the one
+    translate their own start points differ by, (-8.334174 2.11647), and the rings differ by
+    three pixels in sixty nine thousand, which is antialiasing. So the two marks read as one
+    family wherever they appear. Inside the ring sits the disc stack from the same file, whose
+    gaps are gaps in the artwork rather than rims the sheet paints, which is why nothing here
+    is stroked: it fills in `currentColor` and takes the button's own ink in every state. The
+    viewBox is the mark's measured tight box plus a hair, so the glyph fills the 17px square
+    the vault's key already occupies.
   -->
   {#snippet fullBackupIcon()}
-    <svg class="full-backup-icon" viewBox="63.2 106.1 33.6 29.7" aria-hidden="true" focusable="false">
-      <path d="m 96.232885,121.64218 c 0,-7.19823 -5.58342,-13.10362 -12.64471,-13.64723 v -0.007 h -15.85743 v -1.32502 l -4.02559,2.32389 4.02559,2.32441 v -1.32343 h 15.85123 c 5.97937,0.53018 10.65103,5.5348 10.65103,11.65458 0,6.47462 -5.22855,11.70316 -11.70316,11.70316 -6.47462,0 -11.70161,-5.22854 -11.70161,-11.70316 0,-2.64451 0.87232,-5.08081 2.34508,-7.03781 h -2.39572 c -1.23707,2.05816 -1.94924,4.46633 -1.94924,7.03781 0,7.5555 6.14599,13.70356 13.70149,13.70356 7.5555,0 13.70304,-6.14806 13.70304,-13.70356 z" />
-      <g class="full-backup-discs" transform="translate(0.396875,0.247285)">
-        <path stroke-width="0.421115" transform="scale(-1)" d="m -77.794846,-123.84603 a 4.4289398,1.963775 0 0 1 -4.428939,1.96377 4.4289398,1.963775 0 0 1 -4.42894,-1.96377 4.4289398,1.963775 0 0 1 4.42894,-1.96378 4.4289398,1.963775 0 0 1 4.428939,1.96378 z" />
-        <path stroke-width="0.421115" transform="scale(-1)" d="m -77.794846,-122.05135 a 4.4289398,1.963775 0 0 1 -4.428939,1.96377 4.4289398,1.963775 0 0 1 -4.42894,-1.96377 4.4289398,1.963775 0 0 1 4.42894,-1.96378 4.4289398,1.963775 0 0 1 4.428939,1.96378 z" />
-        <path stroke-width="0.421115" transform="scale(-1)" d="m -77.794846,-120.25668 a 4.4289398,1.963775 0 0 1 -4.428939,1.96377 4.4289398,1.963775 0 0 1 -4.42894,-1.96377 4.4289398,1.963775 0 0 1 4.42894,-1.96378 4.4289398,1.963775 0 0 1 4.428939,1.96378 z" />
-        <path stroke-width="0.421115" transform="scale(-1)" d="m -77.794846,-118.46201 a 4.4289398,1.963775 0 0 1 -4.428939,1.96377 4.4289398,1.963775 0 0 1 -4.42894,-1.96377 4.4289398,1.963775 0 0 1 4.42894,-1.96378 4.4289398,1.963775 0 0 1 4.428939,1.96378 z" />
+    <svg class="full-backup-icon" viewBox="66.95 107.65 28.69 32.53" aria-hidden="true" focusable="false">
+      <path d="m 81.929682,107.65099 c -7.19823,0 -13.10362,5.58342 -13.64723,12.64471 h -0.007 v 15.85743 h -1.32502 l 2.32389,4.02559 2.32441,-4.02559 h -1.32343 V 120.3019 c 0.53018,-5.97937 5.5348,-10.65103 11.65458,-10.65103 6.47462,0 11.70316,5.22855 11.70316,11.70316 0,6.47462 -5.22854,11.70161 -11.70316,11.70161 -2.64451,0 -5.08081,-0.87232 -7.03781,-2.34508 v 2.39572 c 2.05816,1.23707 4.46633,1.94924 7.03781,1.94924 7.5555,0 13.70356,-6.14599 13.70356,-13.70149 0,-7.5555 -6.14806,-13.70304 -13.70356,-13.70304 z" />
+      <path d="m 78.212797,118.56692 c -0.01096,0.0474 -0.01803,0.095 -0.02119,0.14263 3.34e-4,0.002 6.79e-4,0.005 10e-4,0.007 0.0024,-0.05 0.0091,-0.10004 0.02015,-0.14986 z" />
+      <path d="m 87.016911,118.48682 c 0.02113,0.0768 0.032,0.15412 0.03256,0.23151 1.5e-5,-0.003 1.5e-5,-0.006 0,-0.009 -0.0013,-0.0745 -0.01219,-0.14882 -0.03256,-0.22273 z" />
+      <path d="m 78.31925,118.2548 c -0.04175,0.0756 -0.07332,0.1522 -0.09457,0.22944 0.02124,-0.0772 0.05282,-0.15386 0.09457,-0.22944 z" />
+      <g transform="matrix(1.5682946,0,0,1.5682946,-47.223077,-67.863211)">
+        <path d="m 86.571973,121.3909 c -0.75366,0.6607 -2.281343,1.07728 -3.95118,1.07745 -1.669763,2e-5 -3.197628,-0.41636 -3.951697,-1.07693 -0.313671,0.27473 -0.477237,0.57832 -0.47749,0.88625 -3.5e-5,0.004 -3.5e-5,0.009 0,0.0134 0.0026,-0.15311 0.04565,-0.30555 0.128157,-0.45423 0.487155,0.87768 2.26252,1.49457 4.30103,1.49448 2.038317,-2e-5 3.813403,-0.61688 4.300512,-1.49448 0.082,0.14905 0.124314,0.30185 0.126091,0.45527 7.29e-4,-0.005 0.0014,-0.01 0.0021,-0.0145 -6.9e-5,-0.30811 -0.16364,-0.61188 -0.47749,-0.88677 z" />
+        <path d="m 86.571973,123.17154 c -0.75366,0.6607 -2.281343,1.07728 -3.95118,1.07745 -1.669763,2e-5 -3.197628,-0.41636 -3.951697,-1.07693 -0.313671,0.27473 -0.477237,0.57832 -0.47749,0.88625 -3.5e-5,0.004 -3.5e-5,0.009 0,0.0134 0.0026,-0.15311 0.04565,-0.30555 0.128157,-0.45423 0.487155,0.87768 2.26252,1.49457 4.30103,1.49448 2.038317,-2e-5 3.813403,-0.61688 4.300512,-1.49448 0.082,0.14905 0.124314,0.30185 0.126091,0.45527 7.29e-4,-0.005 0.0014,-0.01 0.0021,-0.0145 -6.9e-5,-0.30811 -0.16364,-0.61188 -0.47749,-0.88677 z" />
+        <path d="m 78.67323,119.61337 c -0.316531,0.27582 -0.481558,0.58091 -0.481624,0.89039 -2e-5,0.003 -2e-5,0.007 0,0.0103 0.002,-0.15432 0.04501,-0.308 0.128157,-0.45785 0.487155,0.87768 2.26252,1.49457 4.30103,1.49448 2.038317,-2e-5 3.813403,-0.61688 4.300512,-1.49448 0.08351,0.15053 0.126528,0.30491 0.128158,0.45992 2.9e-5,-0.004 2.9e-5,-0.008 0,-0.0124 -6.6e-5,-0.30948 -0.165093,-0.61457 -0.481624,-0.89039 -0.755239,0.65871 -2.280497,1.07367 -3.947046,1.07384 -1.666735,-8e-5 -3.192239,-0.41506 -3.947563,-1.07384 z" />
+        <path d="m 82.620797,116.74533 c -2.048093,0.002 -3.826679,0.62552 -4.30103,1.50895 0.487155,0.87768 2.26252,1.49457 4.30103,1.49448 2.038317,-2e-5 3.813403,-0.61688 4.300512,-1.49448 -0.474306,-0.88334 -2.252613,-1.50731 -4.300512,-1.50895 z" />
       </g>
     </svg>
   {/snippet}
