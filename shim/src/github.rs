@@ -37,6 +37,7 @@ use ureq::tls::{RootCerts, TlsConfig, TlsProvider};
 
 use crate::command::{bad_args, failed_with, ok, path_arg};
 use crate::git::{managed_remote_url, parse_managed_remote, sync_dir_of};
+use crate::git_sync_contract;
 use crate::Response;
 
 /// The Lithic Sync GitHub App, the same client id self-host's `GITHUB_CLIENT_ID` carries.
@@ -174,7 +175,7 @@ pub(crate) fn git_heartbeat(args: &Value) -> Response {
 
 /// No repository Lithic manages contains the path.
 fn unmanaged() -> Value {
-    json!({ "state": "unmanaged", "repo": "", "detail": "This folder is not synced.", "last_commit_error": Value::Null })
+    json!({ "state": "unmanaged", "repo": "", "detail": git_sync_contract::detail("unmanaged", "", false), "last_commit_error": Value::Null })
 }
 
 /// The marker is there but cannot be read: reconnect is the repair.
@@ -182,7 +183,7 @@ fn malformed() -> Value {
     json!({
         "state": "malformed",
         "repo": "",
-        "detail": "This folder's saved remote is unreadable. Reconnect to repair it.",
+        "detail": git_sync_contract::detail("malformed", "", false),
         "last_commit_error": Value::Null,
     })
 }
@@ -192,38 +193,20 @@ fn offline(repo: &str) -> Value {
     json!({
         "state": "offline",
         "repo": repo,
-        "detail": "Cannot reach github.com. Saves stay on this device.",
+        "detail": git_sync_contract::detail("offline", repo, false),
         "last_commit_error": Value::Null,
     })
 }
 
 /// The status, the token's push permission and a rate limit turned into the launcher's own
 /// verdict plus the one sentence its tooltip and dialog show.
+///
+/// Both halves come from `git_sync_contract`, which is generated from the launcher's own source,
+/// so this backend and the desktop app state the same verdict in the same words rather than in
+/// two hand written copies of the same table.
 fn verdict(status: u16, push_allowed: Option<bool>, rate_limited: bool, repo: &str) -> Value {
-    let state = match status {
-        // 409 is a repository with no commits yet: the repository and the token are fine, and
-        // the branch simply does not exist until the first push lands.
-        200..=299 | 409 => match push_allowed {
-            Some(false) => "readonly",
-            _ => "ok",
-        },
-        401 => "auth",
-        403 if rate_limited => "throttled",
-        403 => "auth",
-        404 => "missing",
-        _ => "offline",
-    };
-    let detail = match state {
-        // A freshly created repository has no commits until the first push, which is a first
-        // backup waiting to happen rather than a fault.
-        "ok" if status == 409 => format!("github.com/{repo} is empty, so the next save starts it."),
-        "ok" => format!("Backed up to github.com/{repo}."),
-        "readonly" => format!("This token can only read github.com/{repo}. Reconnect to allow pushes."),
-        "auth" => "GitHub rejected this token. Reconnect to sign in again.".to_string(),
-        "missing" => format!("github.com/{repo} is missing or not shared with this token."),
-        "throttled" => "GitHub is rate-limiting this device. Saves stay local for now.".to_string(),
-        _ => "Cannot reach github.com. Saves stay on this device.".to_string(),
-    };
+    let state = git_sync_contract::classify(status, push_allowed, rate_limited);
+    let detail = git_sync_contract::detail(state, repo, status == 409);
     json!({ "state": state, "repo": repo, "detail": detail, "last_commit_error": Value::Null })
 }
 

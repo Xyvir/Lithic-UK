@@ -44,6 +44,7 @@ edition = "2021"
 # Windows checkout needs no OpenSSL to compile or run any of this.
 [dependencies]
 getrandom = "0.2"
+serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 # The GitHub device flow and REST calls (`shim/src/github.rs`). Blocking on purpose: the shim
 # is one thread per connection, so there is no reactor to feed and no async runtime to pay

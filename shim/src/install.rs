@@ -55,9 +55,6 @@ const MIME_FILE: &str = "lithic.xml";
 /// The file name the copy takes. `.AppImage` is kept, or the kernel stops running it as one.
 const TARGET_FILE: &str = "Lithic.AppImage";
 
-/// The folder's own ignore file, which is where the copy is kept out of a backup's content.
-const IGNORE_FILE: &str = ".gitignore";
-
 /// The file types this app opens, as the MIME types a Linux desktop understands.
 ///
 /// The same set the desktop app registers (`platform/linux.rs`), spelled the same way.
@@ -225,21 +222,7 @@ fn perform(layout: &Layout) -> Result<PathBuf, String> {
 /// `src-tauri/src/lib.rs`), since one machine can have either distribution and both land in
 /// the same folder; the two are held in step by a test on each side.
 fn ignore_installed_copy(dir: &Path, name: &str) {
-    if fs::create_dir_all(dir).is_err() {
-        return;
-    }
-    let path = dir.join(IGNORE_FILE);
-    let existing = fs::read_to_string(&path).unwrap_or_default();
-    if existing.lines().any(|line| line.trim() == name) {
-        return;
-    }
-    let mut text = existing;
-    if !text.is_empty() && !text.ends_with('\n') {
-        text.push('\n');
-    }
-    text.push_str(name);
-    text.push('\n');
-    let _ = fs::write(&path, text);
+    crate::shared_sync_core::ignore_installed_copy(dir, name);
 }
 
 /// Mark the copy runnable. A no-op off unix, where the file arrives runnable.
@@ -513,21 +496,43 @@ mod tests {
         // A folder with no ignore file gains one, and gains it even though the folder
         // itself did not exist yet.
         ignore_installed_copy(&dir, TARGET_FILE);
-        assert_eq!(fs::read_to_string(dir.join(IGNORE_FILE)).expect("ignore"), format!("{TARGET_FILE}\n"));
+        assert_eq!(
+            fs::read_to_string(dir.join(crate::shared_sync_core::IGNORE_FILE_NAME)).expect("ignore"),
+            format!("{TARGET_FILE}\n")
+        );
 
         // A folder with one keeps every line it had, and a second install does not repeat
         // this line: the file is written once per install and read by the backup's own walk.
-        fs::write(dir.join(IGNORE_FILE), "*.lock\nlighttpd.user").expect("existing");
+        fs::write(
+            dir.join(crate::shared_sync_core::IGNORE_FILE_NAME),
+            "*.lock\nlighttpd.user",
+        )
+        .expect("existing");
         ignore_installed_copy(&dir, TARGET_FILE);
         ignore_installed_copy(&dir, TARGET_FILE);
-        let text = fs::read_to_string(dir.join(IGNORE_FILE)).expect("ignore");
+        let text =
+            fs::read_to_string(dir.join(crate::shared_sync_core::IGNORE_FILE_NAME)).expect("ignore");
         assert_eq!(text, format!("*.lock\nlighttpd.user\n{TARGET_FILE}\n"));
-        assert_eq!(text.lines().filter(|line| *line == TARGET_FILE).count(), 1, "{text}");
+        assert_eq!(
+            text.lines().filter(|line| *line == TARGET_FILE).count(),
+            1,
+            "{text}"
+        );
 
         // A line that is already present in another spelling of whitespace is the same line.
-        fs::write(dir.join(IGNORE_FILE), format!("  {TARGET_FILE}  \n")).expect("whitespace");
+        fs::write(
+            dir.join(crate::shared_sync_core::IGNORE_FILE_NAME),
+            format!("  {TARGET_FILE}  \n"),
+        )
+        .expect("whitespace");
         ignore_installed_copy(&dir, TARGET_FILE);
-        assert_eq!(fs::read_to_string(dir.join(IGNORE_FILE)).expect("ignore").lines().count(), 1);
+        assert_eq!(
+            fs::read_to_string(dir.join(crate::shared_sync_core::IGNORE_FILE_NAME))
+                .expect("ignore")
+                .lines()
+                .count(),
+            1
+        );
 
         let _ = fs::remove_dir_all(&root);
     }
@@ -566,7 +571,7 @@ mod tests {
         // The folder is where a first backup proposes to live, so the copy it receives is
         // named in its ignore file rather than becoming content of that backup.
         assert_eq!(
-            fs::read_to_string(root.join("Documents").join("Lithic").join(IGNORE_FILE)).expect("ignore"),
+            fs::read_to_string(root.join("Documents").join("Lithic").join(crate::shared_sync_core::IGNORE_FILE_NAME)).expect("ignore"),
             format!("{TARGET_FILE}\n")
         );
 

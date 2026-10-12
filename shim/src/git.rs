@@ -37,6 +37,7 @@ use std::path::{Path, PathBuf};
 use serde_json::{json, Map, Value};
 
 use crate::command::{bad_args, ok, path_arg, path_text};
+use crate::shared_sync_core;
 use crate::Response;
 
 /// The marker Lithic writes into the origin of a repository it manages.
@@ -45,7 +46,7 @@ use crate::Response;
 /// Lithic connected and a git folder somebody else made, and only the first kind is ever
 /// committed into or pushed from. `deploy/github-sync.sh` writes the same shape self-host, so
 /// a folder connected on either side reads the same here.
-const MANAGED_MARKER: &str = "oauth2:";
+const MANAGED_MARKER: &str = crate::git_sync_contract::MANAGED_MARKER;
 
 /// The most `.lith` files a re-index is answered with, the same cap the desktop app's
 /// `REINDEX_LIST_LIMIT` puts on its own listing.
@@ -176,18 +177,7 @@ fn repo_name(url: &str) -> String {
 /// trailing slash still parses. Only the marker is strict, since that is what makes the folder
 /// ours at all.
 pub(crate) fn parse_managed_remote(url: &str) -> Option<(String, String)> {
-    let (userinfo, host_and_path) = url.split_once("://")?.1.split_once('@')?;
-    let token = userinfo.strip_prefix(MANAGED_MARKER)?.trim();
-    if token.is_empty() {
-        return None;
-    }
-    let path = host_and_path.split_once('/')?.1.trim_end_matches('/');
-    let path = path.strip_suffix(".git").unwrap_or(path);
-    let (owner, name) = path.split_once('/')?;
-    if owner.is_empty() || name.is_empty() || name.contains('/') {
-        return None;
-    }
-    Some((format!("{owner}/{name}"), token.to_string()))
+    shared_sync_core::parse_managed_remote(url).map(|remote| (remote.repo(), remote.token))
 }
 
 /// Every `.lith` file in one folder, newest first, capped. A flat read of the folder itself,

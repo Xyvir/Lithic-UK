@@ -82,6 +82,9 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 mod command;
 mod git;
+mod git_sync_contract;
+#[path = "../../shared/sync_core.rs"]
+mod shared_sync_core;
 mod github;
 mod gitwrite;
 mod install;

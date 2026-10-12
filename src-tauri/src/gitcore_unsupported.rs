@@ -59,15 +59,6 @@ pub enum Repository {}
 #[derive(Debug)]
 pub enum Oid {}
 
-/// How many files one first connect may stage. Kept because `lib.rs` names it, and the
-/// number is a fact about the sync rather than about the platform that cannot run it.
-pub const FIRST_SYNC_FILE_CAP: usize = 2000;
-
-/// The branch the sync publishes, on both sides.
-pub const MAIN: &str = "refs/heads/main";
-/// The remote-tracking ref a first connect's merge reads.
-pub const REMOTE_MAIN: &str = "refs/remotes/origin/main";
-
 /// What one staging pass did. Never built here, and named because `lib.rs` reads its
 /// fields back from a call that refuses.
 pub struct StageReport {
@@ -193,21 +184,15 @@ pub fn push_main(_repo: &Repository, _url: &str, _force: bool) -> Result<(), Str
 }
 
 // --- The history trail ------------------------------------------------------
-// The same split as everything above: the two strings are facts about the trail that three
-// prongs share, so they are real here, and the two calls that need a repository refuse. Nothing
-// in this build can reach a trail because nothing here can reach a commit.
+// The matching surface is shared with desktop and shim, but this target cannot instantiate a
+// repository. Keep these signatures here so the rest of the app remains target-independent.
 
-/// The subject a revert commits with, identical on every prong.
+
 pub fn revert_message(short: &str) -> String {
-    format!("Revert to {}", short)
+    crate::shared_sync_core::revert_message(short)
 }
 
-/// The subject the folder's own uncommitted work is committed with before a revert.
-pub const PRE_REVERT_MESSAGE: &str = "Save before revert";
-
-/// One commit, as the trail draws it. Named because `lib.rs` reads one back from a call that
-/// refuses, exactly like `StageReport` above, and serializable because a refused call still has
-/// to line up with the command signature `lib.rs` compiles against.
+/// The shared history row is named here because the unsupported surface cannot use git2.
 #[derive(Clone, serde::Serialize)]
 pub struct CommitRow {
     pub hash: String,
@@ -216,7 +201,7 @@ pub struct CommitRow {
     pub time: i64,
 }
 
-/// What one revert did. Named and serializable for the same reason.
+/// The unsupported surface has no revert report to construct, but keeps its public type stable.
 #[derive(Clone, serde::Serialize)]
 pub struct RevertReport {
     pub hash: String,

@@ -25,6 +25,9 @@ mod instance_search;
 mod instance_copy;
 mod cdp;
 mod platform;
+mod git_sync_contract;
+#[path = "../../shared/sync_core.rs"]
+mod shared_sync_core;
 
 struct StartupFile(Mutex<Option<String>>);
 
@@ -292,27 +295,9 @@ fn platform_capabilities() -> platform::Capabilities {
 /// or two above this folder, and idempotent, because every install writes it again. Best
 /// effort: a folder whose ignore file cannot be written is still a folder to install into.
 ///
-/// The shim does the same thing in its own words (`shim/src/install.rs`), since one machine
-/// can have either distribution and both land in the same folder; the two are held in step
-/// by a test on each side.
-fn ignore_installed_copy(dir: &Path, name: &str) {
-    if fs::create_dir_all(dir).is_err() {
-        return;
-    }
-    let path = dir.join(".gitignore");
-    let existing = fs::read_to_string(&path).unwrap_or_default();
-    if existing.lines().any(|line| line.trim() == name) {
-        return;
-    }
-    let mut text = existing;
-    if !text.is_empty() && !text.ends_with('\n') {
-        text.push('\n');
-    }
-    text.push_str(name);
-    text.push('\n');
-    let _ = fs::write(&path, text);
-}
-
+/// The shared helper makes the ignore rule identical for both distributions; tests in each
+/// crate exercise it against a scratch directory.
+///
 /// Copy the running program to a stable, *visible* per-user location so file
 /// associations ("Open with Lithic") survive updates and app moves, then ask the
 /// platform to make it launchable and reachable from its own menu.
@@ -343,7 +328,7 @@ fn install_monolith() -> Result<InstallResult, String> {
     // The folder is also where a first backup proposes to live, so the copy is named in
     // its ignore file before the copy lands there rather than after it.
     if let Some(name) = target.file_name().and_then(|name| name.to_str()) {
-        ignore_installed_copy(&target_dir, name);
+        shared_sync_core::ignore_installed_copy(&target_dir, name);
     }
 
     // Copy only when different to keep timestamps stable across re-installs.
@@ -1149,7 +1134,7 @@ fn list_folder_liths(path: String) -> Vec<String> {
 fn managed_remote_url(dir: &Path) -> Option<String> {
     let repo = gitcore::open(dir).ok()?;
     let url = gitcore::remote_url(&repo, "origin")?;
-    url.contains("oauth2:").then_some(url)
+    url.contains(git_sync_contract::MANAGED_MARKER).then_some(url)
 }
 
 /// Lithic's remote shape: the token is embedded in the URL, exactly as
@@ -1157,17 +1142,12 @@ fn managed_remote_url(dir: &Path) -> Option<String> {
 /// tells us a folder is ours to commit into. One function builds it so the
 /// connect path and the reconnect path cannot drift apart.
 fn sync_remote_url(repo: &str, token: &str) -> String {
-    format!("https://oauth2:{}@github.com/{}.git", token, repo)
+    shared_sync_core::managed_url(repo, token)
 }
 
 /// A managed remote taken apart. The embedded token is what marks the folder
 /// as ours; owner/name are what a health check needs to address the repository.
-#[derive(Debug, PartialEq, Eq)]
-struct ManagedRemote {
-    owner: String,
-    name: String,
-    token: String,
-}
+use crate::shared_sync_core::ManagedRemote;
 
 /// Split `https://oauth2:<token>@github.com/<owner>/<name>.git` back into its
 /// parts, for the callers that need the repository and the credential rather
@@ -1178,22 +1158,7 @@ struct ManagedRemote {
 /// written. A URL that carries the marker but cannot be read reports as
 /// malformed to the user, which is a state reconnect can repair.
 fn parse_managed_remote(url: &str) -> Option<ManagedRemote> {
-    let (userinfo, host_and_path) = url.split_once("://")?.1.split_once('@')?;
-    let token = userinfo.strip_prefix("oauth2:")?.trim();
-    if token.is_empty() {
-        return None;
-    }
-    let path = host_and_path.split_once('/')?.1.trim_end_matches('/');
-    let path = path.strip_suffix(".git").unwrap_or(path);
-    let (owner, name) = path.split_once('/')?;
-    if owner.is_empty() || name.is_empty() || name.contains('/') {
-        return None;
-    }
-    Some(ManagedRemote {
-        owner: owner.to_string(),
-        name: name.to_string(),
-        token: token.to_string(),
-    })
+    shared_sync_core::parse_managed_remote(url)
 }
 
 /// What one save's backup did.
@@ -1398,13 +1363,8 @@ async fn git_sync_commit(path: String, message: String) -> Result<GitSyncCommit,
     git_sync_commit_inner(path, message, commit_log()).await
 }
 
-/// How many commits the trail asks for, and the most one call may ask for.
-///
-/// Ten is what a person reads in a dialog without scrolling; the ceiling exists because the walk
-/// is the only unbounded thing here, and a page asking for a five year history would be answered
-/// with one.
-const TRAIL_LIMIT: usize = 10;
-const TRAIL_LIMIT_MAX: usize = 50;
+// The trail's size is the launcher's own number, generated into `git_sync_contract` from
+// `launcher-ui/src/git-sync-contract.ts`, so the page and this backend cannot drift.
 
 /// The folder's history: the newest commits on the branch the sync publishes.
 ///
@@ -1420,7 +1380,12 @@ fn git_sync_history(path: String, limit: Option<usize>) -> Result<Vec<gitcore::C
         return Ok(Vec::new());
     }
     let repo = gitcore::open(&dir)?;
-    gitcore::log(&repo, limit.unwrap_or(TRAIL_LIMIT).clamp(1, TRAIL_LIMIT_MAX))
+    gitcore::log(
+        &repo,
+        limit
+            .unwrap_or(git_sync_contract::TRAIL_LIMIT)
+            .clamp(1, git_sync_contract::TRAIL_LIMIT_MAX),
+    )
 }
 
 /// What a revert hands back. `error` is the push's, when there was one: the folder is back at
@@ -2094,41 +2059,9 @@ async fn fetch_instance_icon(url: String, state: tauri::State<'_, VaultState>) -
 // leave the marker perfectly intact. One authenticated request answers those,
 // which is what lets the launcher paint green only when it is telling the truth.
 
-/// What one heartbeat learned about the connection.
-#[derive(Debug, PartialEq, Eq, Clone, Copy)]
-enum Health {
-    Ok,
-    ReadOnly,
-    Auth,
-    Missing,
-    Throttled,
-    Offline,
-}
-
-/// Map one `GET /repos/{owner}/{name}` response to a verdict.
-///
-/// Pure, because the cases that matter are exactly the ones that decide whether
-/// a green icon is honest, and they are otherwise only reachable with a real
-/// expired token in hand.
-///
-/// GitHub answers 404 both for a repository that was deleted and for a private
-/// one this token cannot see, so `Missing` is reported as "deleted, renamed, or
-/// no longer shared" rather than asserting which of the two happened.
-fn verdict_for(status: u16, push_allowed: Option<bool>, rate_limited: bool) -> Health {
-    match status {
-        // 409 is a repository with no commits yet: the repository and the token
-        // are fine, the branch simply does not exist until the first push lands.
-        200..=299 | 409 => match push_allowed {
-            Some(false) => Health::ReadOnly,
-            _ => Health::Ok,
-        },
-        401 => Health::Auth,
-        403 if rate_limited => Health::Throttled,
-        403 => Health::Auth,
-        404 => Health::Missing,
-        _ => Health::Offline,
-    }
-}
+// The verdict table (the status arithmetic and the sentence for each state) is generated into
+// `git_sync_contract` from the launcher's own source. See `git_sync_contract::classify` and
+// `git_sync_contract::detail`.
 
 /// The launcher's view of a heartbeat: a machine-readable verdict plus the one
 /// sentence the icon's tooltip and the sync dialog both show.
@@ -2148,7 +2081,7 @@ impl GitSyncHealth {
         Self {
             state: "unmanaged",
             repo: String::new(),
-            detail: "This folder is not synced.".to_string(),
+            detail: git_sync_contract::detail("unmanaged", "", false),
             last_commit_error: None,
         }
     }
@@ -2157,7 +2090,7 @@ impl GitSyncHealth {
         Self {
             state: "malformed",
             repo: String::new(),
-            detail: "This folder's saved remote is unreadable. Reconnect to repair it.".to_string(),
+            detail: git_sync_contract::detail("malformed", "", false),
             last_commit_error: None,
         }
     }
@@ -2168,8 +2101,8 @@ impl GitSyncHealth {
         eprintln!("heartbeat offline: {reason}");
         Self {
             state: "offline",
-            repo,
-            detail: "Cannot reach github.com. Saves stay on this device.".to_string(),
+            repo: repo.clone(),
+            detail: git_sync_contract::detail("offline", &repo, false),
             last_commit_error: None,
         }
     }
@@ -2179,36 +2112,8 @@ impl GitSyncHealth {
         self
     }
 
-    fn new(health: Health, repo: String, status: u16) -> Self {
-        let state = match health {
-            Health::Ok => "ok",
-            Health::ReadOnly => "readonly",
-            Health::Auth => "auth",
-            Health::Missing => "missing",
-            Health::Throttled => "throttled",
-            Health::Offline => "offline",
-        };
-        let detail = match health {
-            // A freshly created repository has no commits until the first push
-            // lands, which is a first backup waiting to happen, not a fault.
-            Health::Ok if status == 409 => {
-                format!("github.com/{} is empty, so the next save starts it.", repo)
-            }
-            Health::Ok => format!("Backed up to github.com/{}.", repo),
-            Health::ReadOnly => format!(
-                "This token can only read github.com/{}. Reconnect to allow pushes.",
-                repo
-            ),
-            Health::Auth => "GitHub rejected this token. Reconnect to sign in again.".to_string(),
-            Health::Missing => format!(
-                "github.com/{} is missing or not shared with this token.",
-                repo
-            ),
-            Health::Throttled => {
-                "GitHub is rate-limiting this device. Saves stay local for now.".to_string()
-            }
-            Health::Offline => "Cannot reach github.com. Saves stay on this device.".to_string(),
-        };
+    fn new(state: &'static str, repo: String, status: u16) -> Self {
+        let detail = git_sync_contract::detail(state, &repo, status == 409);
         Self {
             state,
             repo,
@@ -2275,11 +2180,15 @@ async fn git_sync_heartbeat(path: String) -> Result<GitSyncHealth, String> {
     let Some(remote) = parse_managed_remote(&url) else {
         return Ok(GitSyncHealth::malformed().with_last_commit_error(last_error));
     };
-    let repo = format!("{}/{}", remote.owner, remote.name);
+    let repo = remote.repo();
     let endpoint = format!("https://api.github.com/repos/{}", repo);
     let health = match github_api_probe(&endpoint, &remote.token).await {
         Ok((status, rate_limited, push_allowed)) => {
-            GitSyncHealth::new(verdict_for(status, push_allowed, rate_limited), repo, status)
+            GitSyncHealth::new(
+                git_sync_contract::classify(status, push_allowed, rate_limited),
+                repo,
+                status,
+            )
         }
         Err(reason) => GitSyncHealth::offline(repo, &reason),
     };
@@ -2310,7 +2219,11 @@ fn git_sync_reauth(path: String, repo: String, token: String) -> Result<String, 
         return Err("Both repository (owner/name) and token are required".to_string());
     }
     let handle = gitcore::open(&dir)?;
-    gitcore::set_remote(&handle, "origin", &sync_remote_url(&repo, token.trim()))?;
+    gitcore::set_remote(
+        &handle,
+        "origin",
+        &shared_sync_core::managed_url(&repo, token.trim()),
+    )?;
     Ok(repo)
 }
 
@@ -3786,15 +3699,15 @@ mod tests {
 
         // A folder with no ignore file gains one, and gains it even though the folder
         // itself did not exist yet.
-        ignore_installed_copy(&dir, "Lithic.exe");
+        shared_sync_core::ignore_installed_copy(&dir, "Lithic.exe");
         let ignore = dir.join(".gitignore");
         assert_eq!(fs::read_to_string(&ignore).unwrap(), "Lithic.exe\n");
 
         // A folder with one keeps every line it had, and a second install does not repeat
         // this one: the same folder is somebody's backups as well as this program's home.
         fs::write(&ignore, "*.lock\nlighttpd.user").unwrap();
-        ignore_installed_copy(&dir, "Lithic.exe");
-        ignore_installed_copy(&dir, "Lithic.exe");
+        shared_sync_core::ignore_installed_copy(&dir, "Lithic.exe");
+        shared_sync_core::ignore_installed_copy(&dir, "Lithic.exe");
         let text = fs::read_to_string(&ignore).unwrap();
         assert_eq!(text, "*.lock\nlighttpd.user\nLithic.exe\n");
         assert_eq!(text.lines().filter(|line| *line == "Lithic.exe").count(), 1);
@@ -3947,7 +3860,7 @@ mod tests {
         write(&downloads, "tiddlers.lith", "stray\n");
 
         assert_eq!(
-            preferred_sync_folder(Some(&downloads.join("tiddlers.lith")), &[library.clone()]),
+            preferred_sync_folder(Some(&downloads.join("tiddlers.lith")), std::slice::from_ref(&library)),
             Some(library.clone())
         );
 
@@ -3956,12 +3869,12 @@ mod tests {
         let plain = root.join("plain");
         write(&plain, "one.lith", "one\n");
         assert_eq!(
-            preferred_sync_folder(Some(&plain.join("one.lith")), &[plain.clone()]),
+            preferred_sync_folder(Some(&plain.join("one.lith")), std::slice::from_ref(&plain)),
             None
         );
         // No derived path at all — a fresh install with empty recents — is still
         // enough to answer.
-        assert_eq!(preferred_sync_folder(None, &[library.clone()]), Some(library));
+        assert_eq!(preferred_sync_folder(None, std::slice::from_ref(&library)), Some(library));
 
         let _ = fs::remove_dir_all(&root);
     }
@@ -3982,26 +3895,26 @@ mod tests {
         fs::create_dir_all(&picked).unwrap();
 
         assert_eq!(
-            resolved_sync_folder(Some(&picked), Some(&downloads.join("tiddlers.lith")), &[library.clone()]),
+            resolved_sync_folder(Some(&picked), Some(&downloads.join("tiddlers.lith")), std::slice::from_ref(&library)),
             Some(picked)
         );
         // Picking the folder Lithic would have inferred is not a special case: the choice
         // is the answer either way, which is what keeps the dialog from arguing with a
         // user who picked what was already there.
         assert_eq!(
-            resolved_sync_folder(Some(&library), Some(&downloads.join("tiddlers.lith")), &[library.clone()]),
+            resolved_sync_folder(Some(&library), Some(&downloads.join("tiddlers.lith")), std::slice::from_ref(&library)),
             Some(library.clone())
         );
         // A folder that is not on this machine is not an answer — the drive it was on is
         // unplugged, or the bundle was copied without it. The dialog goes back to the
         // folder Lithic works out instead of naming a path that is not there.
         assert_eq!(
-            resolved_sync_folder(Some(&root.join("gone")), Some(&downloads.join("tiddlers.lith")), &[library.clone()]),
+            resolved_sync_folder(Some(&root.join("gone")), Some(&downloads.join("tiddlers.lith")), std::slice::from_ref(&library)),
             Some(library.clone())
         );
         // With nothing picked, the automatic answer stands.
         assert_eq!(
-            resolved_sync_folder(None, Some(&downloads.join("tiddlers.lith")), &[library.clone()]),
+            resolved_sync_folder(None, Some(&downloads.join("tiddlers.lith")), std::slice::from_ref(&library)),
             Some(library)
         );
 
@@ -4201,7 +4114,7 @@ mod tests {
         let downloads = root.join("Downloads");
         write(&downloads, "tiddlers.lith", "stray\n");
         assert_eq!(
-            preferred_sync_folder(Some(&downloads.join("tiddlers.lith")), &[library.clone()]),
+            preferred_sync_folder(Some(&downloads.join("tiddlers.lith")), std::slice::from_ref(&library)),
             Some(library)
         );
 
@@ -4220,7 +4133,7 @@ mod tests {
         run_git(&library, &["remote", "add", "origin", MANAGED_REMOTE]);
 
         assert!(!is_left_repository(&library));
-        assert_eq!(preferred_sync_folder(None, &[library.clone()]), None);
+        assert_eq!(preferred_sync_folder(None, std::slice::from_ref(&library)), None);
 
         let _ = fs::remove_dir_all(&root);
     }
@@ -4238,16 +4151,16 @@ mod tests {
         let library = root.join("Lithic");
         write(&library, "notes.lith", "notes\n");
         attach(&library);
-        assert_eq!(preferred_sync_folder(None, &[library.clone()]), Some(library.clone()));
+        assert_eq!(preferred_sync_folder(None, std::slice::from_ref(&library)), Some(library.clone()));
 
         disconnect_sync_folder(&library.to_string_lossy(), None)
             .expect("disconnect should succeed");
-        assert_eq!(preferred_sync_folder(None, &[library.clone()]), None);
+        assert_eq!(preferred_sync_folder(None, std::slice::from_ref(&library)), None);
 
         let remote = seed_remote(&root, &[("notes.lith", "remote\n")]);
         sync_with_remote(&library, remote.to_str().unwrap(), &|_, _| {})
             .expect("re-attaching should succeed");
-        assert_eq!(preferred_sync_folder(None, &[library.clone()]), Some(library));
+        assert_eq!(preferred_sync_folder(None, std::slice::from_ref(&library)), Some(library));
 
         let _ = fs::remove_dir_all(&root);
     }
@@ -4329,7 +4242,7 @@ mod tests {
         // commit has ever landed, so it is not something to aim at.
         assert!(is_managed_dir(&half));
         assert_eq!(
-            preferred_sync_folder(Some(&half.join("tiddlers.lith")), &[half.clone()]),
+            preferred_sync_folder(Some(&half.join("tiddlers.lith")), std::slice::from_ref(&half)),
             None
         );
 
@@ -4337,7 +4250,7 @@ mod tests {
         write(&library, "notes.lith", "notes\n");
         attach(&library);
         assert_eq!(
-            preferred_sync_folder(Some(&half.join("tiddlers.lith")), &[library.clone()]),
+            preferred_sync_folder(Some(&half.join("tiddlers.lith")), std::slice::from_ref(&library)),
             Some(library)
         );
 
@@ -4434,21 +4347,36 @@ mod tests {
     /// so this is the only thing between the user and a silent failure.
     #[test]
     fn a_heartbeat_verdict_says_which_failure_it_is() {
-        assert_eq!(verdict_for(200, Some(true), false), Health::Ok);
+        assert_eq!(git_sync_contract::classify(200, Some(true), false), "ok");
         // A token that can read but not push would otherwise look healthy right
         // up until a save failed to upload.
-        assert_eq!(verdict_for(200, Some(false), false), Health::ReadOnly);
+        assert_eq!(git_sync_contract::classify(200, Some(false), false), "readonly");
         // Permissions absent (an older API shape) still counts as healthy.
-        assert_eq!(verdict_for(200, None, false), Health::Ok);
-        assert_eq!(verdict_for(401, None, false), Health::Auth);
+        assert_eq!(git_sync_contract::classify(200, None, false), "ok");
+        assert_eq!(git_sync_contract::classify(401, None, false), "auth");
         // 403 is GitHub's rate limit *and* its forbidden, told apart by header.
-        assert_eq!(verdict_for(403, None, true), Health::Throttled);
-        assert_eq!(verdict_for(403, None, false), Health::Auth);
+        assert_eq!(git_sync_contract::classify(403, None, true), "throttled");
+        assert_eq!(git_sync_contract::classify(403, None, false), "auth");
         // GitHub answers 404 for a private repository the token cannot see.
-        assert_eq!(verdict_for(404, None, false), Health::Missing);
+        assert_eq!(git_sync_contract::classify(404, None, false), "missing");
         // A repository with no commits yet is a first push waiting to happen.
-        assert_eq!(verdict_for(409, Some(true), false), Health::Ok);
-        assert_eq!(verdict_for(500, None, false), Health::Offline);
+        assert_eq!(git_sync_contract::classify(409, Some(true), false), "ok");
+        assert_eq!(git_sync_contract::classify(500, None, false), "offline");
+        // The sentence is the contract's too, and it fills the repository in.
+        assert_eq!(
+            git_sync_contract::detail("readonly", "o/n", false),
+            "This token can only read github.com/o/n. Reconnect to allow pushes."
+        );
+        assert_eq!(
+            git_sync_contract::detail("ok", "o/n", true),
+            "github.com/o/n is empty, so the next save starts it."
+        );
+        // And the same verdict without the empty branch, which is the sentence a healthy
+        // backup shows: the two differ only in which arm the status chose.
+        assert_eq!(
+            git_sync_contract::detail("ok", "o/n", false),
+            "Backed up to github.com/o/n."
+        );
     }
 
     /// A plain save in a folder Lithic does not manage must never look like a

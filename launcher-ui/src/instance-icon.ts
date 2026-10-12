@@ -29,46 +29,20 @@ import { WEBDAV_BASE } from './webdav.ts';
 import { paletteValue } from './color-palette.ts';
 
 /**
- * The glyphs the picker offers, in the order (and the groups) they are laid out in.
+ * The 25 choices shown in Instance Management. Five columns and five rows keep
+ * the picker compact and square on phones, tablets, and desktop windows.
  *
- * Curated, not exhaustive: an instance's icon is the way one instance is told from another
- * at a glance, and a list long enough to scroll spends more of the dialog on the choosing
- * than the choice is worth. The legacy shortlist held 112 and drew thirteen rows inside a
- * `max-height: 80vh` dialog, so its last rows were always below the fold. Forty-two went on
- * 2026-09-26: the near-duplicates, one of each pair or three (the other two globes, the
- * other two clocks, the two charts beside the bar chart, the other two flowers beside the
- * cherry blossom, the two fireworks, the second pin, the paintbrush and the fountain pen),
- * then every face, then the speaking head, which is a face wearing a mask. Ten came back the
- * same day, and the count is the reason every time: a grid fills only when the glyph count
- * divides its column count, and one count has to divide both the phone's eight columns and
- * the dialog's ten, where under a hundred only 40 and 80 do. The lightning bolt came back
- * first, because it is the one whose absence showed (on a 390px phone 70 glyphs left the
- * last row a cell short, which reads as a missing icon rather than as the end of a list)
- * and a globe with it to reach 72, which fills a nine-column grid but not the ten-column one
- * the dialog is drawn at. The owner then asked for the count that fills both, so the list is
- * 80: ten full eight-wide rows on a phone, eight full ten-wide rows in a 440px dialog,
- * neither a scrollbar. (At 400 the dialog would draw nine columns, which 80 does not divide;
- * at 460 it would draw eleven.) The eight that came back for it are the
- * ones that read as a subject of their own rather than as a second version of something
- * already offered (the fire, the snowflake, the herb, four buildings and the ballot box)
- * so the cull's real work, the near-duplicates and the faces, stands as it did. See
- * agents.md.
- *
- * What is gone from here is gone from the offer only: an instance carrying an icon from the
- * old list still shows it (the choice is text in `favicon.conf`, read as it is written),
- * and `confirmEmojiIcon` does not care whether this list knows the character.
+ * The shortlist favors note-taking, study, science, and engineering. Older
+ * instances can still preview and keep any saved icon that is not in this list;
+ * it does not add a twenty-sixth cell to the grid.
  */
 export const EMOJI_LIST: string[] = [
-  // Study & Work
-  '📚', '📖', '📝', '📋', '🗒️', '📁', '🗂️', '📦', '🔖', '📌', '🗃️', '🗄️', '📊',
-  // Science & Tech
-  '🔬', '🔭', '🧪', '🧫', '🧬', '💡', '🔋', '🔌', '💻', '⌨️', '📱', '📡', '🛰️', '🤖', '🧲', '⚙️', '🔩', '🧰',
-  // World & Nature
-  '🌐', '🗺️', '🧭', '🌍', '🌎', '⭐', '🌙', '☀️', '🌊', '⚡', '🔥', '❄️', '🌱', '🌿', '🌸', '🍃', '🌴',
-  // Places & Things
-  '🔐', '🗝️', '🗳️', '🔮', '🎯', '🧩', '🎲', '♟️', '🎺', '🏛️', '🏰', '⛩️', '🗼', '🗿',
-  // Art & Creative
-  '🎨', '🖍️', '🗯️', '✏️', '🖊️', '📷', '📸', '🎥', '🎞️', '🏗️', '🎭', '🎬', '🎤', '🎧', '🎈', '✨', '🌈', '🐞'
+  // Notes & study
+  '📚', '📖', '📝', '📓', '📔', '📒', '🔖', '✏️', '🖊️',
+  // Science & scholarship
+  '🔬', '🔭', '🧪', '🧫', '🧬', '🧠', '🧮', '📊',
+  // Engineering & computing
+  '📐', '📏', '⚙️', '💻', '⌨️', '🔧', '🧰', '🏗️'
 ];
 
 /**

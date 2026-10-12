@@ -30,6 +30,7 @@
 
 import { copy } from './copy.ts';
 
+// >>> sync-contract: HealthState
 /** Verdicts `git_sync_heartbeat` can return. */
 export type HealthState =
   | 'ok'
@@ -40,6 +41,7 @@ export type HealthState =
   | 'offline'
   | 'malformed'
   | 'unmanaged';
+// <<< sync-contract: HealthState
 
 /** What the header icon renders (each has a colour in styles.css). */
 export type SyncIndicator = 'idle' | 'checking' | 'connected' | 'syncing' | 'error';

@@ -1,7 +1,7 @@
 //! In-process git for the GitHub sync, via the `git2` crate (libgit2).
 //!
 //! The sync used to shell out to the system `git` binary, which made the
-//! desktop app depend on git being installed *and* on the PATH — a requirement
+//! desktop app depend on git being installed *and* on the PATH, a requirement
 //! that stays invisible until it fails, that a "Git from Git Bash only" install
 //! on Windows silently breaks, and that on Windows popped a console window for
 //! every spawn (the status poll spawns git every ten seconds). libgit2 is
@@ -18,22 +18,20 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
-use git2::build::CheckoutBuilder;
 use git2::{
     Cred, ErrorCode, FetchOptions, ObjectType, Oid, PushOptions, RemoteCallbacks, Repository,
-    RepositoryInitOptions, RepositoryOpenFlags, Signature, StatusOptions, TreeWalkMode,
-    TreeWalkResult,
+    RepositoryInitOptions, RepositoryOpenFlags, StatusOptions, TreeWalkMode, TreeWalkResult,
 };
 
-/// How many files one first connect may stage before Lithic declines the folder.
-///
-/// A first connect commits the folder as a unit, which is only sane when the
-/// folder is the unit the user chose. The sync target is derived from the newest
-/// recent row, so a Lith saved into `Downloads` aims the next connect at the
-/// *whole* Downloads folder: thousands of unrelated files, hours of hashing, and
-/// a repository nobody asked for. This is the backstop that turns that into one
-/// sentence instead.
-pub const FIRST_SYNC_FILE_CAP: usize = 2000;
+pub use crate::git_sync_contract::{
+    FIRST_SYNC_FILE_CAP, MAIN, ORIGIN_FETCH_SPEC, PRE_REVERT_MESSAGE, REMOTE_MAIN,
+};
+use crate::shared_sync_core::{
+    log as shared_log, revert_to as shared_revert_to, signature as shared_signature,
+    stage_tracked_changes as shared_stage_tracked_changes,
+};
+pub use crate::shared_sync_core::{CommitRow, RevertReport};
+use git2::Signature;
 
 // --- Cancellation ----------------------------------------------------------
 // One flag for the process, because only one first connect runs at a time (the
@@ -67,14 +65,6 @@ pub struct StageReport {
     /// The walk stopped because the user asked it to.
     pub cancelled: bool,
 }
-
-/// The branch the sync publishes, on both sides.
-pub const MAIN: &str = "refs/heads/main";
-/// The remote-tracking ref the first-connect merge reads.
-pub const REMOTE_MAIN: &str = "refs/remotes/origin/main";
-/// The fetch refspec `git remote add` writes, kept so a user running git by
-/// hand in the folder gets the same remote-tracking refs they'd expect.
-const ORIGIN_FETCH_SPEC: &str = "+refs/heads/*:refs/remotes/origin/*";
 
 fn fail(error: impl std::fmt::Display) -> String {
     error.to_string()
@@ -111,7 +101,9 @@ pub fn init(dir: &Path) -> Result<Repository, String> {
 /// Give the repository an identity to commit with, so a machine with no global
 /// git configuration can still sync. Existing configuration always wins.
 pub fn ensure_identity(repo: &Repository) {
-    let Ok(mut config) = repo.config() else { return };
+    let Ok(mut config) = repo.config() else {
+        return;
+    };
     let has_name = config
         .get_string("user.name")
         .map(|name| !name.trim().is_empty())
@@ -123,12 +115,6 @@ pub fn ensure_identity(repo: &Repository) {
 }
 
 /// The key that records a folder the user took out of sync by hand.
-///
-/// In the repository's own config rather than beside the app, because it is a fact
-/// about this folder: it means "a repository is here, and it is not the backup the
-/// user wants", which is what keeps a Disconnected folder from being preferred
-/// again on the next launch — the repository and its commits are still on disk, so
-/// nothing else would tell the two states apart.
 const DETACHED_KEY: &str = "lithic.detached";
 
 /// Record that the user disconnected this folder.
@@ -154,9 +140,7 @@ pub fn is_detached(repo: &Repository) -> bool {
 }
 
 fn signature(repo: &Repository) -> Result<Signature<'static>, String> {
-    repo.signature()
-        .or_else(|_| Signature::now("Lithic", "lithic@local"))
-        .map_err(fail)
+    shared_signature(repo)
 }
 
 /// URL configured for `name`, if that remote exists.
@@ -186,21 +170,17 @@ pub fn set_remote(repo: &Repository, name: &str, url: &str) -> Result<(), String
         })
         .unwrap_or(false);
     if !has_spec {
-        repo.remote_add_fetch(name, ORIGIN_FETCH_SPEC).map_err(fail)?;
+        repo.remote_add_fetch(name, ORIGIN_FETCH_SPEC)
+            .map_err(fail)?;
     }
     Ok(())
 }
 
-/// Remove a remote from the configuration. Fails when it doesn't exist, which
-/// the callers treat as "nothing to remove".
+/// Remove a remote from the configuration.
 pub fn remove_remote(repo: &Repository, name: &str) -> Result<(), String> {
     repo.remote_delete(name).map_err(fail)
 }
 
-/// Credentials embedded in the remote URL. Lithic stores the token there (the
-/// same `https://oauth2:<token>@github.com/...` shape the self-host CGI uses),
-/// so libgit2 normally has them already; these are the fallback for when it
-/// asks a callback instead of reading the URL.
 fn url_credentials(url: &str) -> Option<(String, String)> {
     let rest = url.split_once("://")?.1;
     let (userinfo, _) = rest.split_once('@')?;
@@ -216,9 +196,6 @@ fn callbacks(url: &str, rejected: Option<Arc<Mutex<Option<String>>>>) -> RemoteC
         None => Cred::default(),
     });
     if let Some(slot) = rejected {
-        // libgit2 reports a per-ref rejection here rather than as an error, so
-        // without this a refused push (protected branch, stale token) would
-        // look like success and the user would believe a save had been backed up.
         callbacks.push_update_reference(move |refname, status| {
             if let Some(status) = status {
                 if let Ok(mut slot) = slot.lock() {
@@ -228,17 +205,13 @@ fn callbacks(url: &str, rejected: Option<Arc<Mutex<Option<String>>>>) -> RemoteC
             Ok(())
         });
     }
-    // Cancelling between stages is not enough: a big first connect spends most
-    // of its life inside these transfers, and returning false here is the only
-    // way libgit2 lets go of one once it has started.
-    callbacks.transfer_progress(|_progress| !cancelled());
+    callbacks.transfer_progress(|_| !cancelled());
     callbacks
 }
 
 /// Fetch `main` into `refs/remotes/origin/main`. Returns `false` when there is
-/// nothing to merge — a repository with no `main` yet, or a remote that can't
-/// be reached. Both are normal on a first connect, and the push that follows
-/// surfaces a genuinely broken remote with a real error.
+/// nothing to merge: a missing remote branch or an unreachable remote. Both
+/// are normal during first connect, and the push that follows reports failures.
 pub fn fetch_main(repo: &Repository, url: &str) -> Result<bool, String> {
     let mut remote = repo.find_remote("origin").map_err(fail)?;
     let mut options = FetchOptions::new();
@@ -253,15 +226,13 @@ pub fn fetch_main(repo: &Repository, url: &str) -> Result<bool, String> {
     }
 }
 
-/// Every file path in `rev`, in tree order — the same order
-/// `git ls-tree -r --name-only` prints, so the report the modal shows is
-/// unchanged from the shelled-out version.
+/// Every blob path stored by `rev`, in traversal order.
 pub fn files_at(repo: &Repository, rev: &str) -> Result<Vec<String>, String> {
-    let tree = repo
+    let commit = repo
         .find_reference(rev)
         .and_then(|reference| reference.peel_to_commit())
-        .and_then(|commit| commit.tree())
         .map_err(fail)?;
+    let tree = commit.tree().map_err(fail)?;
     let mut files = Vec::new();
     tree.walk(TreeWalkMode::PreOrder, |root, entry| {
         if entry.kind() == Some(ObjectType::Blob) {
@@ -294,19 +265,6 @@ pub fn head_exists(repo: &Repository) -> bool {
 
 /// Stage the working tree while reporting progress, refusing a folder over
 /// `cap` files and stopping when the user asks.
-///
-/// Not `add_all` with its own callback, which is where this started and which
-/// segfaults: libgit2 hands that callback a NULL matched-pathspec whenever the
-/// walk has no pathspec — always, here — and git2 0.21's trampoline turns it
-/// into `CStr::from_ptr(null)`. Measured as an access violation in the connect
-/// test, not as anything a compiler would catch.
-///
-/// Enumerating the status list instead costs one walk either way, and buys
-/// everything the callback was wanted for: an exact count *before* anything is
-/// hashed, so an oversized folder is refused in milliseconds with the index
-/// untouched; progress that moves; and a cancel that lands per file. `done` and
-/// `total` are both passed because a bare running count reads as the job getting
-/// bigger rather than smaller.
 pub fn stage_working_tree<F, C>(
     repo: &Repository,
     cap: Option<usize>,
@@ -323,18 +281,14 @@ where
         .recurse_untracked_dirs(true)
         .include_ignored(false);
     let statuses = repo.statuses(Some(&mut options)).map_err(fail)?;
-    // (path, removed from disk). Owned, because the entries borrow the status
-    // list and the walk below needs the index, which is not shareable with it.
     let mut work: Vec<(PathBuf, bool)> = Vec::new();
     for entry in statuses.iter() {
-        // A non-UTF-8 path cannot be addressed by the index API here; skipping it
-        // is the same thing `add_all` does with one.
         let Ok(path) = entry.path() else { continue };
         work.push((PathBuf::from(path), entry.status().is_wt_deleted()));
     }
 
     let total = work.len();
-    if cap.map(|cap| total > cap).unwrap_or(false) {
+    if cap.is_some_and(|cap| total > cap) {
         return Ok(StageReport {
             files: total,
             over_cap: true,
@@ -343,8 +297,6 @@ where
     }
 
     let mut index = repo.index().map_err(fail)?;
-    // One event up front, so the modal says how much work this is before the
-    // first file is hashed rather than after the first quarter second.
     progress(0, total);
     let mut last_report = Instant::now();
     let mut done = 0usize;
@@ -357,9 +309,6 @@ where
             });
         }
         let staged = if removed {
-            // Gone from disk, so it leaves the index too — the same thing
-            // `git add .` does, and what keeps a deletion out of the union push.
-            // Absent from the index already is not a failure.
             match index.remove_path(&path) {
                 Err(error) if error.code() == ErrorCode::NotFound => Ok(()),
                 outcome => outcome,
@@ -369,9 +318,6 @@ where
         };
         staged.map_err(fail)?;
         done += 1;
-        // Throttled by time, not by count: one event per file would be thousands
-        // of round trips to the window for a line that changes a few times a
-        // second anyway.
         if last_report.elapsed() >= Duration::from_millis(400) {
             last_report = Instant::now();
             progress(done, total);
@@ -392,33 +338,35 @@ pub fn stage_path(repo: &Repository, path: &str) -> Result<(), String> {
     index.write().map_err(fail)
 }
 
-/// Commit the staged tree to `main`, returning the new id, or `None` when the
-/// tree is identical to the parent's and `allow_empty` is false. That `None` is
-/// the in-process equivalent of git's "nothing to commit", which the sync has
-/// always treated as a no-op — saves that change nothing must not pile up empty
-/// commits in the user's repository.
+/// Commit the staged tree, returning `None` when it is unchanged.
 pub fn commit(repo: &Repository, message: &str, allow_empty: bool) -> Result<Option<Oid>, String> {
     let mut index = repo.index().map_err(fail)?;
     let tree_id = index.write_tree().map_err(fail)?;
     let parent = repo.head().ok().and_then(|head| head.peel_to_commit().ok());
-    if !allow_empty {
-        if let Some(parent) = &parent {
-            if parent.tree_id() == tree_id {
-                return Ok(None);
-            }
-        }
+    if !allow_empty
+        && parent
+            .as_ref()
+            .is_some_and(|commit| commit.tree_id() == tree_id)
+    {
+        return Ok(None);
     }
     let tree = repo.find_tree(tree_id).map_err(fail)?;
     let signature = signature(repo)?;
     let parents: Vec<&git2::Commit> = parent.iter().collect();
     let oid = repo
-        .commit(Some("HEAD"), &signature, &signature, message, &tree, &parents)
+        .commit(
+            Some("HEAD"),
+            &signature,
+            &signature,
+            message,
+            &tree,
+            &parents,
+        )
         .map_err(fail)?;
     Ok(Some(oid))
 }
 
-/// Record the upstream the way `git push -u` does, so the folder behaves for a
-/// user who runs git by hand in it afterwards.
+/// Record the upstream the way `git push -u` does.
 pub fn set_upstream(repo: &Repository, name: &str, branch: &str) {
     if let Ok(mut config) = repo.config() {
         let _ = config.set_str(&format!("branch.{}.remote", branch), name);
@@ -443,7 +391,9 @@ pub fn push_main(repo: &Repository, url: &str, force: bool) -> Result<(), String
     } else {
         format!("{}:{}", MAIN, MAIN)
     };
-    remote.push(&[refspec.as_str()], Some(&mut options)).map_err(fail)?;
+    remote
+        .push(&[refspec.as_str()], Some(&mut options))
+        .map_err(fail)?;
     if let Some(message) = rejected.lock().ok().and_then(|slot| slot.clone()) {
         return Err(message);
     }
@@ -453,174 +403,17 @@ pub fn push_main(repo: &Repository, url: &str, force: bool) -> Result<(), String
     Ok(())
 }
 
-// --- The history trail ------------------------------------------------------
-// A second, smaller surface: what the branch has done, and one way to put the folder back at
-// an earlier point in it. The clone of this module in `shim/src/gitwrite.rs` answers the same
-// two questions for a shim, and the two are held in step by running the same tests over both
-// (see the harness in `tmp/revert-harness`, and the tests at the bottom of the shim's copy).
-
-/// The message a revert commits with, built here rather than passed in, because all three
-/// prongs write the same subject and a trail whose rows read differently per platform would be
-/// three trails. Short id only: a full hash in a subject is unreadable and the row beside it
-/// already carries the short one.
-pub fn revert_message(short: &str) -> String {
-    format!("Revert to {}", short)
-}
-
-/// The message the folder's uncommitted work is committed with before a revert.
-///
-/// A revert is not allowed to discard changes git was never given: they go in first, under
-/// this subject, so the trail shows them and a revert of the revert still brings them back.
-pub const PRE_REVERT_MESSAGE: &str = "Save before revert";
-
-/// One commit, as the trail draws it.
-///
-/// `short` travels beside the full id rather than being cut in the page: git's own abbreviation
-/// is a rule about object ids, and a second copy of it in JavaScript is a second answer.
-#[derive(Clone, serde::Serialize)]
-pub struct CommitRow {
-    pub hash: String,
-    pub short: String,
-    pub summary: String,
-    /// Author time in epoch seconds, which is the unit every date the launcher draws uses.
-    pub time: i64,
-}
-
-/// What one revert did, for the status line and the refresh that follows it.
-#[derive(Clone, serde::Serialize)]
-pub struct RevertReport {
-    /// The commit the revert added: where the branch is now.
-    pub hash: String,
-    pub short: String,
-    /// The commit it went back to, shortened.
-    pub target: String,
-    /// How many paths differed between where the branch was and where it landed.
-    pub changes: usize,
-}
-
-/// The seven characters git itself would print for an id.
-pub fn short_of(oid: Oid) -> String {
-    oid.to_string().chars().take(7).collect()
-}
-
-/// The newest `limit` commits on the branch, newest first.
-///
-/// A revwalk rather than following `parents()` by hand, so a merge in the history is listed once
-/// rather than walked down one side of. An empty repository has no history rather than a
-/// failure: the trail says there is nothing yet, which is the truth about a fresh folder.
+/// Shared history reader; orchestration and wire serialization remain local.
 pub fn log(repo: &Repository, limit: usize) -> Result<Vec<CommitRow>, String> {
-    if !head_exists(repo) {
-        return Ok(Vec::new());
-    }
-    let mut walk = repo.revwalk().map_err(fail)?;
-    walk.set_sorting(git2::Sort::TIME).map_err(fail)?;
-    walk.push_head().map_err(fail)?;
-    let mut rows = Vec::new();
-    for oid in walk {
-        if rows.len() >= limit {
-            break;
-        }
-        let oid = oid.map_err(fail)?;
-        let commit = repo.find_commit(oid).map_err(fail)?;
-        rows.push(CommitRow {
-            hash: oid.to_string(),
-            short: short_of(oid),
-            // `summary` is fallible in git2 0.21 (it validates UTF-8), and a subject the object
-            // store cannot hand back as text is not a reason to fail the whole trail.
-            summary: commit.summary().ok().flatten().unwrap_or("").to_string(),
-            time: commit.time().seconds(),
-        });
-    }
-    Ok(rows)
+    shared_log(repo, limit)
 }
 
-/// Stage every change git already tracks, and nothing else, answering how many there were.
-///
-/// Untracked files are left where they are on purpose: a folder keeps things git was never
-/// asked to carry, and a revert is not the moment to start carrying them. This is what the
-/// commit before a revert uses, so "nothing is lost" means the tracked half.
-///
-/// The same per-entry staging `stage_working_tree` does, for the same reason it was written
-/// that way: `Index::add_all`'s callback segfaults in git2 0.21 when the walk has no pathspec.
+/// Shared tracked staging, kept behind this crate's gitcore surface.
 pub fn stage_tracked_changes(repo: &Repository) -> Result<usize, String> {
-    let mut options = StatusOptions::new();
-    options.include_untracked(false).include_ignored(false);
-    let statuses = repo.statuses(Some(&mut options)).map_err(fail)?;
-    let mut work: Vec<(PathBuf, bool)> = Vec::new();
-    for entry in statuses.iter() {
-        let Ok(path) = entry.path() else { continue };
-        work.push((PathBuf::from(path), entry.status().is_wt_deleted()));
-    }
-    let mut index = repo.index().map_err(fail)?;
-    for (path, removed) in &work {
-        let staged = if *removed {
-            match index.remove_path(path) {
-                Err(error) if error.code() == ErrorCode::NotFound => Ok(()),
-                outcome => outcome,
-            }
-        } else {
-            index.add_path(path)
-        };
-        staged.map_err(fail)?;
-    }
-    index.write().map_err(fail)?;
-    Ok(work.len())
+    shared_stage_tracked_changes(repo)
 }
 
-/// Put the folder back as it was at `target`, as a new commit on top of where it is now.
-///
-/// The new commit's tree *is* the target's tree and its parent is the branch's tip, so no
-/// history is rewritten: everything between the two is still there to go back to, and the
-/// revert itself is undone by reverting to the commit it replaced. That is the whole reason
-/// this is not a reset, which would move the branch and lose the commits it moved over.
-///
-/// The index is read from the target's tree and then checked out over the working tree, so a
-/// file the target does not have is removed rather than left behind for the next save to commit
-/// back. Untracked files are untouched, which is deliberate and is how `.gitignore`d state and a
-/// person's own notes beside a wiki both survive a revert.
+/// Shared tree restoration, kept behind this crate's gitcore surface.
 pub fn revert_to(repo: &Repository, target: &str) -> Result<RevertReport, String> {
-    let target_oid = repo
-        .revparse_single(target)
-        .and_then(|object| object.peel_to_commit())
-        .map_err(fail)?
-        .id();
-    let target_commit = repo.find_commit(target_oid).map_err(fail)?;
-    let head = repo.head().map_err(fail)?.peel_to_commit().map_err(fail)?;
-    let tree = target_commit.tree().map_err(fail)?;
-
-    // Measured before anything is written: how many paths this moves, which is the number the
-    // status line carries. A diff failure is not worth failing the revert over, so it is
-    // reported as no paths rather than as an error nobody can act on.
-    let changes = head
-        .tree()
-        .ok()
-        .and_then(|from| repo.diff_tree_to_tree(Some(&from), Some(&tree), None).ok())
-        .map(|diff| diff.deltas().len())
-        .unwrap_or(0);
-
-    let mut index = repo.index().map_err(fail)?;
-    index.read_tree(&tree).map_err(fail)?;
-    index.write().map_err(fail)?;
-    let mut checkout = CheckoutBuilder::new();
-    checkout.force().remove_untracked(false);
-    repo.checkout_index(Some(&mut index), Some(&mut checkout))
-        .map_err(fail)?;
-
-    let signature = signature(repo)?;
-    let oid = repo
-        .commit(
-            Some("HEAD"),
-            &signature,
-            &signature,
-            &revert_message(&short_of(target_oid)),
-            &tree,
-            &[&head],
-        )
-        .map_err(fail)?;
-    Ok(RevertReport {
-        hash: oid.to_string(),
-        short: short_of(oid),
-        target: short_of(target_oid),
-        changes,
-    })
+    shared_revert_to(repo, target)
 }

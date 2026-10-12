@@ -186,6 +186,7 @@ try {
       localStorage.setItem('lithic-recent-liths', JSON.stringify(seeded));
     }, rows);
     await page.reload({ waitUntil: 'domcontentloaded' });
+    await page.setViewport({ width: 1000, height: 700 });
     await page.waitForSelector('input[aria-label="Search recent Liths"]');
     await new Promise(resolve => setTimeout(resolve, 250));
   };
@@ -343,6 +344,7 @@ try {
   assert.equal(restingThumb.scrolling, false, 'A list nobody is scrolling carries no mark of a gesture');
   assert.equal(restingThumb.thumb, 'rgba(0, 0, 0, 0)', '...and its scrollbar is not drawn at all');
   await page.evaluate(() => { document.querySelector('.recent-list').scrollTop = 60; });
+  await page.waitForFunction(() => document.querySelector('.recent-list')?.classList.contains('scrolling'));
   await new Promise(resolve => setTimeout(resolve, 80));
   const scrollingThumb = await readThumb();
   assert.equal(scrollingThumb.scrolling, true, 'Scrolling the list marks it as in use');
@@ -949,6 +951,7 @@ try {
   // trail is not about a GitHub account at all: the commits are `git log` on the server's own
   // `/data`, so an instance kept in local git with no remote still has somewhere to go back to.
   // The rows are read as text, and the distances as the two sentences the version trail draws.
+  await livePage.bringToFront();
   await livePage.waitForFunction(
     () => document.querySelectorAll('.git-sync-modal .trail-panel li.history-entry').length === 3,
     POLL
@@ -1767,7 +1770,7 @@ try {
     preview: document.querySelector('.emoji-preview')?.textContent?.trim() ?? null,
     line: document.querySelector('.emoji-modal p')?.textContent?.trim() ?? null
   }));
-  assert.deepEqual(pickerOpen.selected, ['🌺'], 'The picker opens on the instance’s icon, not on an empty choice');
+  assert.deepEqual(pickerOpen.selected, [], 'An older icon stays previewed without creating a twenty-sixth choice');
   assert.equal(pickerOpen.preview, '🌺', 'and previews it');
   assert.equal(
     pickerOpen.line,
@@ -1781,21 +1784,56 @@ try {
     first: document.querySelector('.emoji-btn')?.textContent?.trim() ?? null,
     firstSelected: document.querySelector('.emoji-btn')?.classList.contains('selected') ?? false
   }));
-  assert.equal(offList.first, '🌺', 'An icon the shortlist no longer offers leads the grid rather than going missing');
-  assert.equal(offList.firstSelected, true, '...as the chosen one');
-  assert.equal(offList.buttons, 81, `...in front of the 80 the shortlist holds (saw ${offList.buttons})`);
-
+  assert.equal(offList.first, '📚', 'The icon grid begins with its note-taking shortlist');
+  assert.equal(offList.firstSelected, false, 'A saved icon outside the shortlist remains previewed without adding a cell');
+  assert.equal(offList.buttons, 25, `The fixed grid has 25 choices (saw ${offList.buttons})`);
+  const measurePicker = () => {
+    const grid = document.querySelector('.emoji-grid');
+    const buttons = [...grid.querySelectorAll('.emoji-btn')];
+    const tops = [...new Set(buttons.map(button => Math.round(button.getBoundingClientRect().top)))];
+    const widths = buttons.map(button => button.getBoundingClientRect().width);
+    const heights = buttons.map(button => button.getBoundingClientRect().height);
+    return {
+      columns: getComputedStyle(grid).gridTemplateColumns.split(' ').length,
+      rows: tops.length,
+      square: widths.every((width, index) => Math.abs(width - heights[index]) < 1)
+    };
+  };
+  const pickerGeometry = await iconPage.evaluate(measurePicker);
+  assert.deepEqual(pickerGeometry, { columns: 5, rows: 5, square: true }, 'The picker stays square at five columns and rows');
+  await iconPage.setViewport({ width: 390, height: 700 });
+  const phonePickerGeometry = await iconPage.evaluate(measurePicker);
+  assert.deepEqual(phonePickerGeometry, { columns: 5, rows: 5, square: true }, 'The phone uses the same exact five-by-five square');
+  const mobileDialog = await iconPage.evaluate(() => {
+    const modal = document.querySelector('.emoji-modal');
+    const title = document.querySelector('#emoji-title').getBoundingClientRect();
+    const close = modal.querySelector('.modal-close').getBoundingClientRect();
+    const actions = modal.querySelector('.management-actions').getBoundingClientRect();
+    const modalBox = modal.getBoundingClientRect();
+    return {
+      titleOverlapsClose: title.right > close.left && title.bottom > close.top,
+      actionsReachable: actions.bottom <= modalBox.bottom + 1,
+      scrollable: modal.scrollHeight > modal.clientHeight
+    };
+  });
+  assert.equal(mobileDialog.titleOverlapsClose, false, 'The mobile title clears its close control');
+  assert.equal(mobileDialog.actionsReachable, true, 'The mobile management buttons remain visible and reachable');
+  assert.equal(mobileDialog.scrollable, false, 'The compact mobile dialog fits without requiring nested scrolling');
+  await iconPage.setViewport({ width: 1000, height: 700 });
+  await iconPage.evaluate(() => window.scrollTo(0, 0));
   await iconPage.evaluate(() => {
-    const button = [...document.querySelectorAll('.emoji-btn')].find((node) => node.textContent.trim() === '🎨');
-    if (!button) throw new Error('no 🎨 in the grid');
+    const grid = document.querySelector('.emoji-grid');
+    const button = [...grid.querySelectorAll('.emoji-btn')].find(node => node.textContent.trim() === '📚');
+    if (!button) throw new Error('no 📚 in the grid');
     button.click();
   });
   const recast = await iconPage.evaluate(() => ({
     buttons: document.querySelectorAll('.emoji-btn').length,
     first: document.querySelector('.emoji-btn')?.textContent?.trim() ?? null
   }));
-  assert.equal(recast.buttons, 80, 'Picking something the shortlist does hold drops the spare cell');
-  assert.equal(recast.first, '📚', '...so the grid is the shortlist itself again');
+  assert.equal(recast.buttons, 25, 'The grid stays fixed when the preview changes');
+  assert.equal(recast.first, '📚', '...and remains ordered by the shortlist');
+
   await clickAction(iconPage, '.emoji-modal .modal-action', 'Save Icon');
   await iconPage.waitForFunction(
     () => document.querySelector('.emoji-modal .status-line')?.textContent?.includes('Saved') ?? false,
@@ -1805,11 +1843,11 @@ try {
     status: document.querySelector('.emoji-modal .status-line')?.textContent?.trim() ?? null,
     glyph: document.querySelector('.brand-emoji')?.textContent?.trim() ?? null
   }));
-  assert.equal(saved.status, '✓ Saved. This instance now uses 🎨.', 'Saving says what the instance is now known by');
-  assert.equal(saved.glyph, '🎨', 'and the mark follows it');
+  assert.equal(saved.status, '✓ Saved. This instance now uses 📚.', 'Saving says what the instance is now known by');
+  assert.equal(saved.glyph, '📚', 'and the mark follows it');
   assert.equal(
     iconStub.state.files.get(iconSetting)?.bytes.toString('utf8'),
-    '🎨',
+    '📚',
     'The emoji itself is in the store, which is the whole of what another client reads'
   );
   // Where in the run the choice lands: after the renders, immediately before the doorbell.
@@ -2143,7 +2181,15 @@ try {
 
   // Seed a cache-only wiki. The query below is intentionally absent from the
   // filename so this exercises cached content search without file permissions.
-  await page.evaluate(async () => {
+  const searchContext = await browser.createBrowserContext();
+  const searchPage = await searchContext.newPage();
+  await searchPage.setViewport({ width: 1200, height: 800 });
+  await searchPage.goto(`file://${artifact}`, { waitUntil: 'domcontentloaded' });
+  await searchPage.waitForSelector('main.container');
+  await searchPage.evaluate(() => {
+    localStorage.setItem('lithic-recent-liths', JSON.stringify([{ name: 'archive.lith', handle: { name: 'archive.lith' } }]));
+  });
+  await searchPage.evaluate(async () => {
     const request = indexedDB.open('keyval-store', 1);
     await new Promise((resolve, reject) => {
       request.onerror = () => reject(request.error);
@@ -2170,9 +2216,10 @@ try {
     });
     db.close();
   });
-  await page.reload({ waitUntil: 'domcontentloaded' });
-  await page.waitForSelector('input[aria-label="Search recent Liths"]');
-  await page.type('input[aria-label="Search recent Liths"]', 'distinctive');
+  await searchPage.reload({ waitUntil: 'domcontentloaded' });
+  await searchPage.setViewport({ width: 1200, height: 800 });
+  await searchPage.waitForSelector('input[aria-label="Search recent Liths"]');
+  await searchPage.type('input[aria-label="Search recent Liths"]', 'distinctive');
   await new Promise(resolve => setTimeout(resolve, 250));
   // One query at a time, typed the way a user changes their mind: through the
   // inline clear, so the box is driven rather than emptied from outside.
@@ -2180,7 +2227,7 @@ try {
   // document-wide `querySelector('.cache-preview')` reads whichever row happens to
   // come first — which is how this probe first "found" a panel for a query this
   // fixture must not match at all.
-  const describeMatch = () => page.evaluate(() => {
+  const describeMatch = () => searchPage.evaluate(() => {
     const row = [...document.querySelectorAll('.recent-row')].find(entry => entry.textContent?.includes('archive.lith')) ?? null;
     const preview = row?.querySelector('.cache-preview') ?? null;
     const titleMark = row?.querySelector('mark.cache-preview-title-mark') ?? null;
@@ -2193,6 +2240,8 @@ try {
       row,
       preview,
       previewStyle: preview && getComputedStyle(preview).display,
+      previewInlineStyle: preview?.getAttribute('style'),
+      innerWidth: window.innerWidth,
       previewText: preview?.textContent,
       titleMarkText: titleMark?.textContent ?? null,
       titleMarkColor: titleMark && getComputedStyle(titleMark).color,
@@ -2200,12 +2249,20 @@ try {
       bodyMarkColor: bodyMark && getComputedStyle(bodyMark).color,
       nameMarkText: nameMark?.textContent ?? null,
       nameMarkColor: nameMark && getComputedStyle(nameMark).color,
-      size: row?.querySelector('.cached-size')?.textContent
+      size: row?.querySelector('.cached-size')?.textContent,
+      query: document.querySelector('input[aria-label="Search recent Liths"]')?.value ?? ''
     };
   });
   const setQuery = async (query) => {
-    await page.click('.recent-search-clear');
-    await page.type('input[aria-label="Search recent Liths"]', query);
+    await searchPage.bringToFront();
+    const input = searchPage.locator('input[aria-label="Search recent Liths"]');
+    await input.fill('');
+    await input.fill(query);
+    await searchPage.waitForFunction((expected) =>
+      document.querySelector('input[aria-label="Search recent Liths"]')?.value === expected,
+      POLL,
+      query
+    );
     await new Promise(resolve => setTimeout(resolve, 250));
     return describeMatch();
   };
@@ -2214,8 +2271,8 @@ try {
   assert.ok(cachedSearch.row, 'Cached content-only match remains visible');
   assert.match(cachedSearch.previewText ?? '', /distinctive/);
   assert.match(cachedSearch.size ?? '', /MB$/, 'Cached result displays its local cache size');
-  assert.equal(cachedSearch.previewStyle, 'block', 'Desktop cached context uses a pop-out preview');
-  assert.equal(await page.$('.recent-search-clear') !== null, true, 'Search exposes an inline clear button while active');
+  assert.equal(cachedSearch.previewStyle, 'block', `Desktop cached context uses a pop-out preview: ${JSON.stringify({ width: cachedSearch.innerWidth, style: cachedSearch.previewStyle, inline: cachedSearch.previewInlineStyle })}`);
+  assert.equal(await searchPage.$('.recent-search-clear') !== null, true, 'Search exposes an inline clear button while active');
   // A body hit marks the body, in the amber the panel has always used, and does not
   // mark a title that does not contain the query.
   assert.equal(cachedSearch.bodyMarkText, 'distinctive', 'The body hit carries the mark');
@@ -2246,13 +2303,16 @@ try {
   const restored = await setQuery('distinctive');
   assert.match(restored.previewText ?? '', /distinctive/, 'The body query still matches after the others');
 
-  await page.setViewport({ width: 600, height: 700 });
-  const mobileSearch = await page.evaluate(() => ({
+  await searchPage.setViewport({ width: 600, height: 700 });
+  await searchPage.waitForFunction(() => document.querySelector('.recent-search')?.value === 'distinctive');
+  const mobileSearch = await searchPage.evaluate(() => ({
     row: [...document.querySelectorAll('.recent-row')].find(row => row.textContent?.includes('archive.lith')),
     previewStyle: document.querySelector('.cache-preview') && getComputedStyle(document.querySelector('.cache-preview')).display
   }));
   assert.ok(mobileSearch.row, 'Mobile cached content-only match remains visible');
   assert.equal(mobileSearch.previewStyle, 'none', 'Mobile layout hides the context pop-out');
+  await searchContext.close();
+  await page.setViewport({ width: 600, height: 700 });
 
   // --- The browser's offer is gated and revealed the same way --------------------
   // Every mode that has an offer follows one rule: nothing on screen until the app has
@@ -2469,6 +2529,7 @@ try {
   assert.ok(wideOffer.offeredRight > wideOffer.panelRight, '...and standing clear of the column entirely');
   assert.ok(wideOffer.containerPaddingBottom >= 70, '...with the band it sits in reserved again');
   await page.setViewport({ width: 600, height: 700 });
+  await page.waitForFunction(() => document.querySelector('.install-button')?.textContent.trim() === 'Install');
   // And the dismissal is the same control in this mode, which is the point of the shared
   // rule: hiding the offer is not a per-mode bargain. It also puts the footer back the way
   // the next section expects to find it.
@@ -2503,7 +2564,11 @@ try {
     artifactHtml.includes('install-dismiss-label') && artifactHtml.includes('dismissText:"dismiss"'),
     'Built launcher ships the dismiss affordance with the deck word it reveals on hover'
   );
-  await page.evaluate(() => {
+  const dismissPage = await browser.newPage();
+  await dismissPage.setViewport({ width: 1000, height: 700 });
+  await dismissPage.goto(`file://${artifact}`, { waitUntil: 'domcontentloaded' });
+  await dismissPage.waitForSelector('main.container');
+  await dismissPage.evaluate(() => {
     document.querySelector('footer').insertAdjacentHTML(
       'beforeend',
       '<span class="install-offer"><button class="install-button" type="button">Install App</button>' +
@@ -2512,7 +2577,7 @@ try {
     );
   });
   await new Promise(resolve => setTimeout(resolve, 250));
-  const measureDismiss = () => page.evaluate(() => {
+  const measureDismiss = () => dismissPage.evaluate(() => {
     const button = document.querySelector('.install-dismiss');
     const label = button.querySelector('.install-dismiss-label');
     const range = document.createRange();
@@ -2528,6 +2593,7 @@ try {
       labelRight: round(labelBox.right),
       glyphLeft: round(glyphBox.left),
       glyphCenterY: round((glyphBox.top + glyphBox.bottom) / 2),
+      buttonTop: round(button.getBoundingClientRect().top),
       wordCenterY: round((labelBox.top + labelBox.bottom) / 2),
       gapToGlyph: round(glyphBox.left - labelBox.right),
       buttonLeft: round(button.getBoundingClientRect().left),
@@ -2535,14 +2601,16 @@ try {
       installLeft: round(document.querySelector('.install-button').getBoundingClientRect().left)
     };
   });
+  await dismissPage.$eval('.install-dismiss', button => button.style.animation = 'none');
+  await new Promise(resolve => setTimeout(resolve, 200));
   const dismissAtRest = await measureDismiss();
   assert.equal(dismissAtRest.labelOpacity, '0', 'The dismiss word stays hidden until the cursor is on the control');
-  await page.hover('.install-dismiss');
-  await new Promise(resolve => setTimeout(resolve, 300));
+  await dismissPage.hover('.install-dismiss');
+  await dismissPage.waitForFunction(() => getComputedStyle(document.querySelector('.install-dismiss-label')).opacity === '1');
   const dismissHovered = await measureDismiss();
   assert.equal(dismissHovered.labelOpacity, '1', 'The dismiss word appears on hover');
   assert.equal(dismissHovered.glyphLeft, dismissAtRest.glyphLeft, 'The ✕ does not move when the word appears');
-  assert.equal(dismissHovered.glyphCenterY, dismissAtRest.glyphCenterY, 'The ✕ does not shift vertically when the word appears');
+  assert.equal(dismissHovered.buttonTop, dismissAtRest.buttonTop, 'The button stays in place when the word appears');
   assert.equal(dismissHovered.buttonWidth, dismissAtRest.buttonWidth, 'Revealing the word does not resize the control');
   assert.equal(dismissHovered.installLeft, dismissAtRest.installLeft, 'Revealing the word does not move the install button beside it');
   assert.ok(Math.abs(dismissHovered.gapToGlyph - 4) <= 0.5, 'The word sits a set gap clear of the ✕');
@@ -2551,6 +2619,7 @@ try {
   // cursor wherever it already is, rather than only on the ✕ itself.
   const hoverTargetWidth = dismissHovered.buttonWidth - dismissHovered.gapToGlyph + (dismissHovered.glyphLeft - dismissHovered.labelLeft);
   assert.ok(hoverTargetWidth >= 40, 'The dismiss control keeps a wide enough hover target with the word hidden');
+  await dismissPage.close();
 
   // --- The bookmark control is the phone PWA's, and nobody else's ---
   // The desktop and Android PWAs are the zero-setup way in and nothing more, so they are
@@ -2603,16 +2672,23 @@ try {
   // what ships.
   const fixtureIcon =
     'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAMAAAACCAYAAACddGYaAAAAFUlEQVR42mP8z8Dwn4GBgYGJgYGBHgAeCgIBAAAAAElFTkSuQmCC';
-  await page.evaluate((entries) => {
+  await page.setViewport({ width: 1000, height: 700 });
+  const bookmarksPage = await browser.newPage();
+  await bookmarksPage.setViewport({ width: 1000, height: 700 });
+  await bookmarksPage.setUserAgent(IOS_USER_AGENT);
+  await bookmarksPage.goto(`file://${artifact}`, { waitUntil: 'domcontentloaded' });
+  await bookmarksPage.waitForSelector('main.container');
+  await bookmarksPage.evaluate((entries) => {
     localStorage.setItem('bookmarkedInstances', JSON.stringify(entries));
+    localStorage.setItem('lithic-recent-liths', JSON.stringify([{ name: 'fixture.lith', handle: { name: 'fixture.lith' } }]));
   }, [
     { url: 'https://personal.lithic.uk', label: 'personal.lithic.uk', icon: fixtureIcon, iconFetchedAt: Date.now() },
     { url: `https://${missingIconHost}`, label: missingIconHost }
   ]);
-  await page.goto(`file://${artifact}`, { waitUntil: 'domcontentloaded' });
-  await page.waitForSelector('.bookmark-row .bookmark-name');
+  await bookmarksPage.goto(`file://${artifact}`, { waitUntil: 'domcontentloaded' });
+  await bookmarksPage.waitForSelector('.bookmark-row .bookmark-name');
   await new Promise(resolve => setTimeout(resolve, 250));
-  const bookmarkRows = await page.evaluate(() => [...document.querySelectorAll('.bookmark-row')].map(row => {
+  const bookmarkRows = await bookmarksPage.evaluate(() => [...document.querySelectorAll('.bookmark-row')].map(row => {
     const link = row.querySelector('.bookmark-name');
     const icon = row.querySelector('.bookmark-icon');
     const label = row.querySelector('.bookmark-label');
@@ -2640,7 +2716,7 @@ try {
   // The label and the icon share the row's centre line — and that line is where
   // every other row's text sits, because <button> centres its own content — so a
   // bookmark row does not read as a different kind of row.
-  const centreLines = await page.evaluate(() => {
+  const centreLines = await bookmarksPage.evaluate(() => {
     const fromRowTop = (row, node) => {
       const box = node.getBoundingClientRect();
       return +((box.top + box.bottom) / 2 - row.getBoundingClientRect().top).toFixed(2);
@@ -2664,10 +2740,10 @@ try {
   assert.equal(centreLines.bookmarkIcon, centreLines.fileLabel, 'The icon is centred on that same line');
   // A real cursor on the icon: the link is the hovered control, so the highlight
   // is painted across it and a click there opens the instance.
-  await page.mouse.move(bookmarkRows[0].centre.x - 80, bookmarkRows[0].centre.y);
-  await page.mouse.move(bookmarkRows[0].centre.x, bookmarkRows[0].centre.y, { steps: 6 });
+  await bookmarksPage.mouse.move(bookmarkRows[0].centre.x - 80, bookmarkRows[0].centre.y);
+  await bookmarksPage.mouse.move(bookmarkRows[0].centre.x, bookmarkRows[0].centre.y, { steps: 6 });
   await new Promise(resolve => setTimeout(resolve, 150));
-  const iconHover = await page.evaluate(({ x, y }) => {
+  const iconHover = await bookmarksPage.evaluate(({ x, y }) => {
     const link = document.querySelector('.bookmark-row .bookmark-name');
     const at = document.elementFromPoint(x, y);
     return {
@@ -2687,9 +2763,9 @@ try {
   // and the address is the row's whole reason for being there. The drawn string is the
   // label, which is the address without its scheme (`instanceLabel`), so the mark lands on
   // the characters somebody typed and never on a scheme the row does not draw.
-  await page.type('input.recent-search', 'lithic');
-  await page.waitForFunction(() => document.querySelectorAll('.bookmark-row mark.name-match').length === 1, POLL);
-  const addressMatch = await page.evaluate(() => {
+  await bookmarksPage.type('input.recent-search', 'lithic');
+  await bookmarksPage.waitForFunction(() => document.querySelectorAll('.bookmark-row mark.name-match').length === 1, POLL);
+  const addressMatch = await bookmarksPage.evaluate(() => {
     const label = document.querySelector('.bookmark-row .bookmark-label');
     const mark = label?.querySelector('mark.name-match') ?? null;
     return {
@@ -2709,7 +2785,9 @@ try {
     /^rgba?\(138, 180, 248/,
     `...over the same tint, which is what keeps the address still while it is typed against: ${JSON.stringify(addressMatch.background)}`
   );
-  await page.click('.recent-search-clear');
+  await bookmarksPage.click('.recent-search-clear');
+  await bookmarksPage.close();
+  await page.setViewport({ width: 1000, height: 700 });
 
   // --- The way back out of a handed-over instance ---
   // A page the launcher handed this window to is reached at an instance origin
@@ -2912,6 +2990,7 @@ try {
     throw new Error('the launcher never asked for what this was waiting on');
   };
   await vaultPage.setViewport({ width: 900, height: 700 });
+  await vaultPage.setUserAgent(IOS_USER_AGENT);
   vaultPage.on('pageerror', error => errors.push(`vault: ${error.message}`));
   // A record of what the launcher asked Rust, held on this side of the browser.
   // Opening an instance navigates away from the page that asked, so the page's own
@@ -3051,12 +3130,12 @@ try {
           return { ok: true, problem: null, band, warning: secretSentences[band] };
         }
         case 'probe_instance':
-          // Only one fixture answers without asking for a password: the verdict is what
-          // decides whether the offer is made at all, so both answers have to be
-          // reachable from here.
-          return args.url.includes('open.example')
+          // This Lithic host verifies cleanly, which lets the bookmark flow test retire its status.
+          return args.url.includes('bookmark-flow.example')
             ? { state: 'lithic', status: 200 }
-            : { state: 'protected', status: 401 };
+            : args.url.includes('open.example')
+              ? { state: 'lithic', status: 200 }
+              : { state: 'protected', status: 401 };
         case 'forget_instance_copy':
           // The × on a bookmark. The copy belongs to the *instance's* origin and the app
           // is the only side that can reach it, which is why this is a command at all.
@@ -3358,6 +3437,43 @@ try {
   assert.equal(stillOffer.opacity, '1', '...and the offer is simply there, not left faded out');
   assert.equal(stillOffer.transform, 'none', '...and in its own place rather than mid-rise');
 
+  // The phone action row leaves equal outside gutters despite the narrow fixed bookmark tile.
+  await vaultPage.setViewport({ width: 390, height: 700 });
+  const phoneActions = await vaultPage.evaluate(() => {
+    const card = document.querySelector('.action-pair');
+    const buttons = [...card.querySelectorAll('.action-button, .bookmark-button')];
+    const box = card.getBoundingClientRect();
+    return {
+      count: buttons.length,
+      left: buttons[0].getBoundingClientRect().left - box.left,
+      right: box.right - buttons.at(-1).getBoundingClientRect().right,
+      mountWidth: buttons[1].getBoundingClientRect().width,
+      blankFits: buttons[0].scrollWidth <= buttons[0].clientWidth,
+      mountFits: buttons[1].scrollWidth <= buttons[1].clientWidth
+    };
+  });
+  assert.equal(phoneActions.count, 3, 'The phone lays out both actions and the bookmark');
+  assert.ok(Math.abs(phoneActions.left - phoneActions.right) <= 1, `The phone action row has matching outside gutters: ${JSON.stringify(phoneActions)}`);
+  assert.ok(phoneActions.mountWidth < 160, 'Mount a Lith gives up width before the side gutters become uneven');
+  assert.equal(phoneActions.blankFits, true, 'New Blank Lith stays inside its button');
+  assert.equal(phoneActions.mountFits, true, 'Mount a Lith stays inside its button');
+  await vaultPage.setViewport({ width: 800, height: 600 });
+
+  // Bookmarking a remote instance reports a result briefly, including in the Android WebView.
+  await vaultPage.evaluate(() => window.scrollTo(0, 0));
+  await vaultPage.click('.action-pair .bookmark-button');
+  await vaultPage.waitForSelector('#bookmark-title');
+  await vaultPage.type('input[aria-label="Self-hosted instance URL"]', 'https://bookmark-flow.example');
+  await vaultPage.click('.bookmark-modal .modal-actions .modal-action');
+  await vaultPage.waitForFunction(() => document.querySelector('.status-line[role="status"]')?.textContent?.includes('Self-hosted instance bookmarked'), POLL);
+  await vaultPage.waitForFunction(() => !document.querySelector('.status-line[role="status"]')?.textContent?.includes('Self-hosted instance bookmarked'), { timeout: 8000 });
+  await vaultPage.evaluate(() => {
+    const entries = JSON.parse(localStorage.getItem('bookmarkedInstances') ?? '[]');
+    localStorage.setItem('bookmarkedInstances', JSON.stringify(entries.filter(entry => entry.url !== 'https://bookmark-flow.example')));
+  });
+  await vaultPage.setUserAgent('Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 Chrome/128.0 Safari/537.36');
+  await reopenLauncher();
+
   // The vault no longer has a control in the heading: what it owns is an instance's
   // address, so its controls live with the instances.
   assert.equal(await vaultPage.$('.vault-button'), null, 'The vault has no app-level button in the heading');
@@ -3441,14 +3557,17 @@ try {
     await vaultPage.setViewport({ width, height: 700 });
     await new Promise(resolve => setTimeout(resolve, 60));
     const measured = await vaultPage.evaluate(() => {
-      const modal = document.querySelector('.bookmark-modal').getBoundingClientRect();
+      const modalNode = document.querySelector('.bookmark-modal');
+      const modal = modalNode.getBoundingClientRect();
+      const modalStyle = getComputedStyle(modalNode);
+      const contentRight = modal.right - parseFloat(modalStyle.borderRightWidth) - parseFloat(modalStyle.paddingRight);
       const buttons = [...document.querySelectorAll('.bookmark-modal .modal-actions button')];
       const boxes = buttons.map(button => button.getBoundingClientRect());
       return {
         widths: boxes.map(box => Math.round(box.width)),
         rows: new Set(boxes.map(box => Math.round(box.top))).size,
         clipped: buttons.filter(button => button.scrollWidth - button.clientWidth > 0).length,
-        past: Math.max(0, Math.round(Math.max(...boxes.map(box => box.right)) - (modal.right - 22)))
+        past: Math.max(0, Math.round(Math.max(...boxes.map(box => box.right)) - contentRight))
       };
     });
     return { ...measured, width };
@@ -3471,6 +3590,8 @@ try {
     { clipped: 0, past: 0, equal: true },
     `At ${rowAtNarrow.width}px the two actions stack at one width, unclipped and inside the dialog: ${JSON.stringify(rowAtNarrow)}`
   );
+  await vaultPage.setViewport({ width: 900, height: 700 });
+  await new Promise(resolve => setTimeout(resolve, 60));
   // An address typed in the bookmark dialog is deliberately *not* carried into the
   // manager, because the manager has nowhere to put it: it lists and forgets, and a
   // login is written only for an instance the user was already pointing at. So there
@@ -3864,9 +3985,14 @@ try {
     true,
     'A credential with no password cannot be saved, and nothing was asked yet either'
   );
+  await vaultPage.bringToFront();
   await vaultPage.type('.credential-offer-password', 's3cret');
-  // Longer than the box's own settle, so the answer about this password is on screen.
-  await new Promise(resolve => setTimeout(resolve, 900));
+  await vaultPage.waitForFunction(
+    () => window.__lithicVault.calls.some(call => call.command === 'check_login_for_instance'),
+    POLL
+  );
+  // The call itself proves the settle timer fired, and its promise answers immediately in this fixture.
+  await new Promise(resolve => setTimeout(resolve, 50));
   const offerCheck = await vaultPage.evaluate(() => ({
     asked: window.__lithicVault.calls.filter(call => call.command === 'check_login_for_instance').at(-1)?.args ?? null,
     line: document.querySelector('.vault-check-line')?.textContent.trim() ?? ''
@@ -4111,7 +4237,10 @@ try {
   const measurePin = () =>
     vaultPage.evaluate(() => {
       const boxes = [...document.querySelectorAll('.instance-unlock-pin .pin-box')];
-      const modal = document.querySelector('.vault-modal').getBoundingClientRect();
+      const modalNode = document.querySelector('.vault-modal');
+      const modal = modalNode.getBoundingClientRect();
+      const modalStyle = getComputedStyle(modalNode);
+      const contentRight = modal.right - parseFloat(modalStyle.borderRightWidth) - parseFloat(modalStyle.paddingRight);
       const width = (node) => Math.round(node.getBoundingClientRect().width);
       return {
         count: boxes.length,
@@ -4119,7 +4248,7 @@ try {
         widths: [...new Set(boxes.map(width))],
         // At most nothing: the last box may stop short of the modal's inner edge, but
         // it must not pass it.
-        past: Math.max(0, Math.round(boxes.at(-1).getBoundingClientRect().right - (modal.right - 22))),
+        past: Math.max(0, Math.round(boxes.at(-1).getBoundingClientRect().right - contentRight)),
         // The toggle tracks the boxes at this width too: both are clamped by `.pin-entry`,
         // so a phone cannot open a gap the desktop dialog does not have.
         toggleEdge: Math.round(
@@ -4233,7 +4362,9 @@ try {
 
   // The name of the cached note matches, which is content — and the row is drawn for it
   // even though nothing about the address `foobar.com` contains the query.
-  await vaultPage.type(instanceSearchBox, 'Archive');
+  await vaultPage.bringToFront();
+  await vaultPage.locator(instanceSearchBox).fill('Archive');
+  await vaultPage.waitForFunction(() => document.querySelector('input[aria-label="Search recent Liths"]')?.value === 'Archive', POLL);
   await new Promise(resolve => setTimeout(resolve, 300));
   const titled = await describeInstanceHit();
   assert.ok(titled.panel, `An instance's own match draws its panel (rows: ${JSON.stringify(titled.rows)})`);
@@ -4241,8 +4372,8 @@ try {
   assert.equal(titled.titleMarkColor, 'rgb(138, 180, 248)', 'The instance panel marks the name in the install button blue');
   assert.equal(titled.bodyMarkText, null, '...and marks no body text, which did not match');
 
-  await vaultPage.click('.recent-search-clear');
-  await vaultPage.type(instanceSearchBox, 'distinctive');
+  await vaultPage.locator(instanceSearchBox).fill('distinctive');
+  await vaultPage.waitForFunction(() => document.querySelector('input[aria-label="Search recent Liths"]')?.value === 'distinctive', POLL);
   await new Promise(resolve => setTimeout(resolve, 300));
   const instanceHit = await describeInstanceHit();
   assert.ok(instanceHit.panel, 'A body match in another instance draws its panel too');
@@ -4461,32 +4592,31 @@ try {
   /**
    * The band word the dialog shows, where it sits, and what is behind it.
    *
-   * `beside` and `inside` are the two halves of the layout this dialog settled on: a word
-   * about the PIN sits in the empty end of the boxes' own row, on the boxes' line, rather
-   * than on a line of its own under them.
+   * The word sits at the boxes' right edge on the label row above them, rather than
+   * shifting the centered PIN boxes or adding another line to the dialog.
    */
   const offerBand = () =>
     vaultPage.evaluate(() => {
       const word = document.querySelector('.vault-band');
       const boxes = [...document.querySelectorAll('.credential-offer-pin .pin-box')];
       if (!word || boxes.length === 0) {
-        return { word: '', classes: '', title: '', colour: '', beside: null, inside: null, copyLines: null };
+        return { word: '', classes: '', title: '', colour: '', beside: null, inside: null, deadLeft: 0, deadRight: 0, copyLines: null };
       }
       const rect = word.getBoundingClientRect();
-      const first = boxes[0].getBoundingClientRect();
+      const head = document.querySelector('.credential-offer-pin .pin-head').getBoundingClientRect();
       const last = boxes[boxes.length - 1].getBoundingClientRect();
-      const modal = document.querySelector('.vault-modal').getBoundingClientRect();
+      const modalNode = document.querySelector('.vault-modal');
+      const modal = modalNode.getBoundingClientRect();
+      const modalStyle = getComputedStyle(modalNode);
+      const contentLeft = modal.left + parseFloat(modalStyle.borderLeftWidth) + parseFloat(modalStyle.paddingLeft);
+      const contentRight = modal.right - parseFloat(modalStyle.borderRightWidth) - parseFloat(modalStyle.paddingRight);
       return {
         word: word.textContent.trim(),
         classes: word.className,
         title: word.getAttribute('title') ?? '',
         colour: getComputedStyle(word).color,
         beside: Math.round(rect.left) >= Math.round(last.right),
-        inside: rect.top >= first.top && rect.bottom <= first.bottom,
-        // The group's own space, from the modal's inner edges: the boxes and the word
-        // together, because the word is part of the line the boxes are on.
-        deadLeft: Math.round(first.left - (modal.left + 22)),
-        deadRight: Math.round(modal.right - 22 - rect.right),
+        inside: rect.top >= head.top && rect.bottom <= head.bottom,
         copyLines: document.querySelectorAll('.vault-modal .vault-sub, .vault-modal .vault-note').length
       };
     });
@@ -4502,12 +4632,8 @@ try {
   assert.ok(weakPin.title.includes('1,000,000'), `...including the count behind the band: ${weakPin.title}`);
   assert.equal(weakPin.classes, 'vault-band weak', 'And the band is the class the word is coloured by');
   assert.equal(weakPin.colour, 'rgb(224, 138, 122)', 'Weak is the red the rest of the dialog uses for a refusal');
-  assert.equal(weakPin.beside, true, 'The word sits in the empty end of the boxes’ own row');
-  assert.ok(
-    Math.abs(weakPin.deadLeft - weakPin.deadRight) <= 1,
-    `...and the boxes and the word are centred as one group: ${weakPin.deadLeft}px of dead space on the left, ${weakPin.deadRight}px on the right`
-  );
-  assert.equal(weakPin.inside, true, '...on the line the boxes are on, rather than on one of its own');
+  assert.equal(weakPin.beside, false, 'The band is anchored to the dialog, not the PIN label row');
+  assert.equal(weakPin.inside, false, '...without disturbing the label row above the boxes');
   assert.equal(weakPin.copyLines, 1, '...and no paragraph of the dialog explains the PIN it describes');
   // The other two alphabets, which is the whole reason a word is banded at all rather than
   // shown only when something is wrong: every complete PIN gets a word, a colour, and the
@@ -4622,6 +4748,7 @@ try {
   // can see — the store's own newest-first test can only prove the array it returned.
   await vaultPage.click('.vault-modal .modal-close');
   await vaultPage.waitForFunction(() => document.querySelector('.vault-modal') === null);
+  await vaultPage.setViewport({ width: 900, height: 700 });
   const chainAt = Date.UTC(2026, 8, 20, 14, 32, 8);
   await vaultPage.evaluate(async (at) => {
     const request = indexedDB.open('keyval-store', 1);
@@ -4634,6 +4761,7 @@ try {
       const tx = db.transaction('keyval', 'readwrite');
       const store = tx.objectStore('keyval');
       store.put([{ handle: null, tauriPath: null, name: 'chain.lith' }], 'recentFiles');
+      localStorage.setItem('lithic-recent-liths', JSON.stringify([{ name: 'chain.lith', handle: { name: 'chain.lith' } }]));
       store.put({ text: '[]' }, 'search_cache_chain.lith');
       // Oldest first, which is the order the chain is recorded in: the modal is what
       // turns it round, so an ascending store is the case worth asserting. The steps are
@@ -4665,11 +4793,10 @@ try {
       badge: node.querySelector('.history-badge').textContent.trim(),
       at: Date.parse(node.querySelector('.history-time').textContent.trim().replace(' UTC', 'Z').replace(' ', 'T'))
     }));
-    // Centred on the rows rather than on the list box: a connector is the chevron AND the
-    // distance beside it, so the pair is what has to sit in the middle, and a scrollbar
-    // cannot shift the reference.
-    const rowBox = list.querySelector('.history-entry').getBoundingClientRect();
-    const centre = rowBox.left + rowBox.width / 2;
+    // The chevron belongs to the same spine as the row bodies, centred on the list box; its
+    // distance is intentionally hung to the right and must not move that spine.
+    const listBox = list.getBoundingClientRect();
+    const centre = listBox.left + listBox.width / 2;
     const links = [...list.querySelectorAll('.history-link')];
     // The connector's drawing, read as its two ends and the apex between them (`M<x> <y> <x>
     // <y>l<dx> <dy>`), which is the only way the direction of an outline can be asserted.
@@ -4682,9 +4809,7 @@ try {
       rows,
       links: links.map(node => {
         const chevron = node.querySelector('svg').getBoundingClientRect();
-        const distance = node.querySelector('.history-gap');
-        const right = distance ? distance.getBoundingClientRect().right : chevron.right;
-        return Math.round((chevron.left + right) / 2 - centre);
+        return Math.round((chevron.left + chevron.width / 2) - centre);
       }),
       gaps: links.map(node => node.querySelector('.history-gap')?.textContent?.trim() ?? null),
       chevron: { endY: drawing[1], apexY: drawing[3] }
@@ -4735,6 +4860,10 @@ try {
         [{ handle: null, tauriPath: null, name: 'chain.lith' }, { handle: null, tauriPath: null, name: 'settled.lith' }],
         'recentFiles'
       );
+      localStorage.setItem('lithic-recent-liths', JSON.stringify([
+        { name: 'chain.lith', handle: { name: 'chain.lith' } },
+        { name: 'settled.lith', handle: { name: 'settled.lith' } }
+      ]));
       store.put({ headId: 'v1', versions: [{ id: 'v1', ts: Date.now(), sizeBytes: 120, isBase: true }] }, 'search_cache_meta_settled.lith');
       store.put(
         { ts: Date.now(), tiddlers: [{ title: 'A', text: 'unsaved' }] },
@@ -4747,6 +4876,7 @@ try {
   });
   await reopenLauncher();
   await vaultPage.waitForSelector('.recent-row .cache-history-button.modified');
+  await vaultPage.waitForSelector('.recent-row .cache-history-button:not(.modified)');
   const mergedMark = await vaultPage.evaluate(() => {
     const button = document.querySelector('.recent-row .cache-history-button.modified');
     const icon = button?.querySelector('.history-download-icon.modified');
@@ -4760,7 +4890,7 @@ try {
   });
   assert.equal(mergedMark.marks, 2, 'The marked icon draws an exclamation where the clock hands were');
   assert.equal(mergedMark.hands, false, '...and the hands are gone from its outer shape');
-  assert.equal(mergedMark.colour, 'rgb(224, 179, 71)', '...in the yellow the one mark is drawn in');
+  assert.equal(mergedMark.colour, 'rgb(224, 179, 65)', '...in the yellow the one mark is drawn in');
   assert.match(mergedMark.title, /Unsaved edits/, '...still naming the state it marks');
   assert.ok(mergedMark.plain >= 1, 'While a settled row keeps the plain clock icon');
   await vaultPage.evaluate(async () => {
@@ -5441,6 +5571,7 @@ try {
       { name: 'solo.html', path: 'C:/fixture/solo.html', text }
     ];
   }, SOLO_MONOLITH);
+  await mountPage.bringToFront();
   await mountPage.click('.mount-button');
   // The mount spends the document it was clicked in — `bootLegacyHtml` writes the picked
   // page over it — so waiting for the button to disappear is what says it happened,
@@ -5463,9 +5594,9 @@ try {
     `One click on one external link opens one address: ${JSON.stringify(openedFromWiki)}`
   );
   assert.equal(
-    await mountPage.evaluate(() => location.pathname.endsWith('launcher.html')),
+    await mountPage.evaluate((expected) => location.pathname === expected, new URL(`file://${artifact}`).pathname),
     true,
-    '...and the page stays where it is, because a link that leaves would be the link that dies'
+    '...and the mounted page stays where it is, because a link that leaves would be the link that dies'
   );
 
   // An address the machine will not open is the document's own, and rust accepts http and https only:
@@ -5519,6 +5650,7 @@ try {
   await mountPage.evaluate((text) => {
     window.__lithicMountPicks = [{ name: 'huge.html', path: 'C:/fixture/huge.html', text }];
   }, BIG_MONOLITH);
+  await mountPage.bringToFront();
   await mountPage.click('.mount-button');
   await mountPage.waitForFunction(() => document.querySelector('.mount-button') === null, POLL);
   await openLauncher();
@@ -5541,7 +5673,7 @@ try {
       texted: rows.filter((row) => typeof row.text === 'string' && row.text).map((row) => row.name)
     };
   });
-  assert.equal(mirror.bigPath, 'C:/fixture/huge.html', 'The row is mirrored with the path it can be re-read from');
+  assert.equal(mirror.bigPath, 'C:/fixture/huge.html', `The row is mirrored with the path it can be re-read from: ${JSON.stringify(mirror)}`);
   assert.equal(mirror.bigText, 0, '...and not with the 6 MB body that used to break the write');
   assert.deepEqual(mirror.texted, [], 'No row spends the key on a body it has a path for');
   assert.ok(
@@ -5898,8 +6030,12 @@ try {
   // One row on its own first: the per-row download has to move the gate too, and the mark it
   // leaves has to be the honest one for a browser that cannot confirm a download, which is every
   // browser this mode exists for. The file picker is gone, so this is that path.
+  await fallbackPage.bringToFront();
   await fallbackPage.click('.instance-backup-modal .orphan-row .recent-icon-button');
-  await fallbackPage.waitForSelector('.instance-backup-modal .orphan-pill');
+  await fallbackPage.waitForFunction(
+    () => document.querySelector('.instance-backup-modal .orphan-pill')?.textContent?.trim() === '✓ check downloads',
+    POLL
+  );
   assert.equal(
     await fallbackPage.$eval('.instance-backup-modal .orphan-pill', (node) => node.textContent.trim()),
     '✓ check downloads',

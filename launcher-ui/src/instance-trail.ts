@@ -23,9 +23,13 @@
 import { gapCount, versionGap, type VersionGap } from './history-gap.ts';
 import { utcStamp } from './wiki-history.ts';
 
-/** How many commits the trail asks for, and the most one request may ask for. */
-export const TRAIL_LIMIT = 10;
-export const TRAIL_LIMIT_MAX = 50;
+/**
+ * How many commits the trail asks for, and the most one request may ask for.
+ *
+ * Declared once, in `git-sync-contract.ts`, because the two backends are generated from those same
+ * numbers: re-exported here so the trail's own consumers keep one import.
+ */
+export { TRAIL_LIMIT, TRAIL_LIMIT_MAX } from './git-sync-contract.ts';
 
 /** One commit, in the shape every backend is read into. */
 export interface TrailCommit {

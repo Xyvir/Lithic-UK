@@ -2938,11 +2938,15 @@ import { backupFileName, collectInstanceBackup, mergeBookmarks, parseInstanceBac
    * in-memory list is the copy that matters either way; this is the mirror beside it.
    */
   function persistRecentRows(): void {
-    const rows = recentFiles.map(({ name, path, text }) => ({
-      name,
-      path,
-      ...(text && !path && text.length <= RECENT_TEXT_LIMIT ? { text } : {})
-    }));
+    const rows = recentFiles.map((item) => {
+      const path = recentDiskPath(item) ?? undefined;
+      const text = (item as any).text;
+      return {
+        name: getEntryName(item),
+        ...(path ? { path } : {}),
+        ...(text && !path && text.length <= RECENT_TEXT_LIMIT ? { text } : {})
+      };
+    });
     if (writeRecentRows(rows)) return;
     writeRecentRows(rows.map(({ name, path }) => ({ name, path })));
   }
@@ -3832,7 +3836,7 @@ import { backupFileName, collectInstanceBackup, mergeBookmarks, parseInstanceBac
    * choice itself, so it is the selected one, and it disappears the moment the choice
    * changes to something the list holds.
    */
-  $: emojiGrid = emojiChoice && !EMOJI_LIST.includes(emojiChoice) ? [emojiChoice, ...EMOJI_LIST] : EMOJI_LIST;
+  $: emojiGrid = EMOJI_LIST;
 
   function closeInstanceManagement(): void {
     showEmojiPicker = false;
@@ -3993,7 +3997,7 @@ import { backupFileName, collectInstanceBackup, mergeBookmarks, parseInstanceBac
       // instances apart at a glance, and keep doing so offline.
       void refreshBookmarkIcons();
       closeBookmarkModal();
-      status = copy.dialogs.bookmark.saved;
+      reportAndRetire(copy.dialogs.bookmark.saved);
     } catch (error) {
       bookmarkError = error instanceof Error ? error.message : String(error);
     }

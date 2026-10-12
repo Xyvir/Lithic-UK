@@ -29,7 +29,7 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
 
-use git2::build::{CheckoutBuilder, RepoBuilder};
+use git2::build::RepoBuilder;
 use git2::{
     Cred, ErrorCode, FetchOptions, PushOptions, RemoteCallbacks, Repository, RepositoryInitOptions,
     RepositoryOpenFlags, Signature, StatusOptions,
@@ -38,32 +38,16 @@ use serde_json::{json, Value};
 
 use crate::command::{bad_args, failed_with, ok, path_arg, path_text};
 use crate::git::{liths_in, managed_remote_url, sync_dir_of};
+use crate::shared_sync_core as shared;
 use crate::syncfolder::{connect_dir, proposed};
 use crate::Response;
 
 /// The error code every one of these answers with, with the reason in `detail`.
 const FAILED: &str = "git";
 
-/// How many files one first connect may stage before the folder is refused.
-///
-/// The same backstop the desktop app has, and for the same reason: the sync target is derived
-/// from a recent file, so a Lith saved into `Downloads` aims the connect at the whole folder.
-/// Thousands of unrelated files, hours of hashing, and a repository nobody asked for becomes
-/// one sentence instead.
-///
-/// Applied **before the fetch**, which is where the desktop app applies it, and that placement
-/// was a bug here until it was measured: a connect aimed at a personal `~/Documents` spent
-/// minutes downloading the repository it was pointed at, wrote the remote's files into that
-/// folder, and only then counted the folder and refused it (see [`undo_first_connect`]).
-const FIRST_SYNC_FILE_CAP: usize = 2000;
-
-/// The branch the sync publishes, on both sides.
-const MAIN: &str = "refs/heads/main";
-/// The remote-tracking ref the first connect reads.
-const REMOTE_MAIN: &str = "refs/remotes/origin/main";
-/// The fetch refspec `git remote add` writes, so a user running git by hand in the folder
-/// afterwards gets the remote-tracking refs they expect.
-const ORIGIN_FETCH_SPEC: &str = "+refs/heads/*:refs/remotes/origin/*";
+use crate::git_sync_contract::{
+    FIRST_SYNC_FILE_CAP, MAIN, ORIGIN_FETCH_SPEC, PRE_REVERT_MESSAGE, REMOTE_MAIN,
+};
 
 /// The key that records a folder the user took out of sync by hand. In the repository's own
 /// config rather than beside the app, because it is a fact about this folder.
@@ -310,7 +294,7 @@ fn signature(repo: &Repository) -> Result<Signature<'static>, String> {
 /// The URL Lithic writes for a repository it manages. One function, so the connect path and
 /// the reconnect path cannot drift apart.
 fn managed_url(repo: &str, token: &str) -> String {
-    format!("https://oauth2:{}@github.com/{}.git", token.trim(), repo.trim())
+    shared::managed_url(repo, token)
 }
 
 /// Credentials embedded in the remote URL. Lithic stores the token there, so libgit2 normally
@@ -788,22 +772,11 @@ fn save(dir: &Path, url: &str, file: &str, message: &str, progress: &Progress) -
 // desktop file cannot be compiled from this crate, so the harness that does it is in
 // `tmp/revert-harness`, and the tests at the bottom of this file cover this copy.
 
-/// How many commits the trail asks for, and the most one call may ask for.
-///
-/// The desktop app's two numbers, because it is the same dialog: ten is what a person reads
-/// without scrolling, and the ceiling is there because the walk is the only unbounded thing here.
-const TRAIL_LIMIT: usize = 10;
-const TRAIL_LIMIT_MAX: usize = 50;
-
-/// The subject a revert commits with. Built here rather than passed in, so all three prongs write
-/// the same row into the trail (`gitcore::revert_message` is the desktop's, byte for byte).
-fn revert_message(short: &str) -> String {
-    format!("Revert to {short}")
-}
+// The trail's two numbers are the launcher's own, generated into `git_sync_contract` from
+// `launcher-ui/src/git-sync-contract.ts`, so this backend and the desktop app cannot drift.
+use crate::git_sync_contract::{TRAIL_LIMIT, TRAIL_LIMIT_MAX};
 
 /// The subject the folder's own uncommitted work is committed with before a revert.
-const PRE_REVERT_MESSAGE: &str = "Save before revert";
-
 /// `git-history { path, limit }`
 ///
 /// A read, and synchronous like the other reads: a revwalk touches the local object store and
@@ -841,32 +814,16 @@ pub(crate) fn history(args: &Value) -> Response {
 /// validates UTF-8), and a subject the object store cannot hand back as text is not a reason to
 /// lose the whole trail.
 fn log(repo: &Repository, limit: usize) -> Result<Vec<Value>, String> {
-    if repo.head().ok().and_then(|head| head.target()).is_none() {
-        return Ok(Vec::new());
-    }
-    let mut walk = repo.revwalk().map_err(fail)?;
-    walk.set_sorting(git2::Sort::TIME).map_err(fail)?;
-    walk.push_head().map_err(fail)?;
-    let mut rows = Vec::new();
-    for oid in walk {
-        if rows.len() >= limit {
-            break;
-        }
-        let oid = oid.map_err(fail)?;
-        let commit = repo.find_commit(oid).map_err(fail)?;
-        rows.push(json!({
-            "hash": oid.to_string(),
-            "short": short_of(oid),
-            "summary": commit.summary().ok().flatten().unwrap_or(""),
-            "time": commit.time().seconds(),
-        }));
-    }
-    Ok(rows)
-}
-
-/// The seven characters git itself would print for an id.
-fn short_of(oid: git2::Oid) -> String {
-    oid.to_string().chars().take(7).collect()
+    shared::log(repo, limit).map(|rows| {
+        rows.into_iter()
+            .map(|row| json!({
+                "hash": row.hash,
+                "short": row.short,
+                "summary": row.summary,
+                "time": row.time,
+            }))
+            .collect()
+    })
 }
 
 /// Stage every change git already tracks, and nothing else, answering how many there were.
@@ -874,28 +831,7 @@ fn short_of(oid: git2::Oid) -> String {
 /// The tracked half is what a revert may commit on its own: an untracked file in the folder was
 /// never in the backup, so it is neither lost nor carried by a revert.
 fn stage_tracked_changes(repo: &Repository) -> Result<usize, String> {
-    let mut options = StatusOptions::new();
-    options.include_untracked(false).include_ignored(false);
-    let statuses = repo.statuses(Some(&mut options)).map_err(fail)?;
-    let mut work: Vec<(PathBuf, bool)> = Vec::new();
-    for entry in statuses.iter() {
-        let Ok(path) = entry.path() else { continue };
-        work.push((PathBuf::from(path), entry.status().is_wt_deleted()));
-    }
-    let mut index = repo.index().map_err(fail)?;
-    for (path, removed) in &work {
-        let staged = if *removed {
-            match index.remove_path(path) {
-                Err(error) if error.code() == ErrorCode::NotFound => Ok(()),
-                outcome => outcome,
-            }
-        } else {
-            index.add_path(path)
-        };
-        staged.map_err(fail)?;
-    }
-    index.write().map_err(fail)?;
-    Ok(work.len())
+    shared::stage_tracked_changes(repo)
 }
 
 /// What one revert did, for the answer the page reads.
@@ -907,51 +843,14 @@ struct RevertReport {
 
 /// Put the folder back as it was at `target`, as a new commit on top of where it is now.
 ///
-/// `gitcore::revert_to` in the desktop app, down to the order of its two steps: the index is read
-/// from the target's tree and only then checked out over the working tree, so a file the target
-/// does not have is removed rather than left behind for the next save to commit back. Untracked
-/// files are untouched, which is how `.gitignore`d state and a person's own notes beside a wiki
-/// both survive a revert. Nothing is rewritten: the commits this goes back over are still in the
-/// history, so the revert is undone by reverting to the commit it replaced.
+/// The index restore and checkout are shared with the desktop app; this wrapper only adapts the
+/// response shape the shim's command uses.
 fn revert_to(repo: &Repository, target: &str) -> Result<RevertReport, String> {
-    let target_oid = repo
-        .revparse_single(target)
-        .and_then(|object| object.peel_to_commit())
-        .map_err(fail)?
-        .id();
-    let target_commit = repo.find_commit(target_oid).map_err(fail)?;
-    let head = repo.head().map_err(fail)?.peel_to_commit().map_err(fail)?;
-    let tree = target_commit.tree().map_err(fail)?;
-    // Measured before anything is written: how many paths this moves, which is the number the
-    // dialog's status line carries. A diff failure is not worth failing the revert over.
-    let changes = head
-        .tree()
-        .ok()
-        .and_then(|from| repo.diff_tree_to_tree(Some(&from), Some(&tree), None).ok())
-        .map(|diff| diff.deltas().len())
-        .unwrap_or(0);
-    let mut index = repo.index().map_err(fail)?;
-    index.read_tree(&tree).map_err(fail)?;
-    index.write().map_err(fail)?;
-    let mut checkout = CheckoutBuilder::new();
-    checkout.force().remove_untracked(false);
-    repo.checkout_index(Some(&mut index), Some(&mut checkout))
-        .map_err(fail)?;
-    let signature = signature(repo)?;
-    let oid = repo
-        .commit(
-            Some("HEAD"),
-            &signature,
-            &signature,
-            &revert_message(&short_of(target_oid)),
-            &tree,
-            &[&head],
-        )
-        .map_err(fail)?;
+    let report = shared::revert_to(repo, target)?;
     Ok(RevertReport {
-        short: short_of(oid),
-        target: short_of(target_oid),
-        changes,
+        short: report.short,
+        target: report.target,
+        changes: report.changes,
     })
 }
 
