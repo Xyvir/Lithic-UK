@@ -168,9 +168,11 @@ async function convertPdfDataToTiddlers(arrayBuffer, fileName, setProgress) {
 
         await page.render({ canvasContext: context, viewport: viewport }).promise;
 
-        const dataUri = canvas.toDataURL("image/webp", 0.75);
+        // The bundled whiteboard's image shape only accepts PNG/JPEG/GIF/SVG assets.
+        // Keep PDF pages in PNG so the rendered data URL is supported by its image shape.
+        const dataUri = canvas.toDataURL("image/png");
         images.push({
-            filename: "page_" + i + ".webp",
+            filename: "page_" + i + ".png",
             dataUri: dataUri,
             width: viewport.width,
             height: viewport.height
