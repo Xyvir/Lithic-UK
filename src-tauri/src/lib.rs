@@ -23,6 +23,9 @@ mod gitcore_unsupported;
 use gitcore_unsupported as gitcore;
 mod instance_search;
 mod instance_copy;
+// The other Lithic windows on this machine, and the two questions an install asks them:
+// which ones may be closed, and which one is holding the copy it is about to write.
+mod instances;
 mod cdp;
 mod platform;
 mod git_sync_contract;
@@ -224,6 +227,14 @@ struct InstallResult {
     /// field is the only thing it knows to look at. A launcher built from this source
     /// reads `entry`.
     start_menu: Option<String>,
+    /// Whether the installed file was shown in the platform's file manager.
+    ///
+    /// Reported rather than only logged, because what the launcher does next depends on it: a
+    /// launcher that has just installed a newer copy of itself closes and leaves the user to
+    /// start that copy, and the folder opening in front of them is the whole of the message.
+    /// Where there is no folder to open, the launcher stays where it is and keeps the line that
+    /// names the file it wrote.
+    revealed: bool,
 }
 
 // The shell link, the Start Menu entry, the registry registration and the browser
@@ -281,6 +292,147 @@ fn install_status() -> InstallStatus {
 #[tauri::command]
 fn platform_capabilities() -> platform::Capabilities {
     platform::capabilities()
+}
+
+/// This window, as the other Lithic windows on this machine see it.
+///
+/// The page owns the stage: it is the only side that knows whether the engine has taken the
+/// document over, and it is the side that keeps the record fresh (see `instances`). What is
+/// held here is the last thing it said, so a beat can write it back out with a new moment.
+struct LauncherStage {
+    presence: Mutex<instances::Presence>,
+}
+
+impl LauncherStage {
+    fn new() -> Self {
+        LauncherStage {
+            presence: Mutex::new(instances::Presence {
+                pid: std::process::id(),
+                stage: instances::STAGE_LAUNCHER.to_string(),
+                wiki: None,
+                // The running *image* rather than `current_exe`, for the same reason the copy
+                // below uses it: on Linux the AppImage is the file a person launched and the
+                // file an install writes over.
+                image: platform::running_image()
+                    .map(|image| image.to_string_lossy().into_owned())
+                    .unwrap_or_default(),
+                seen_ms: instances::now_ms(),
+            }),
+        }
+    }
+}
+
+/// What a beat hears back: whether an install has asked this window to close, and how long
+/// to wait before the next beat.
+///
+/// The cadence is served back rather than written into the page, because the two numbers are
+/// one decision: the page's beat is how an install knows a window is still there, and how
+/// long a word is believed is `instances::LIVE_MS`. A page that chose its own interval could
+/// drift below that and make a window look gone while it was only slow.
+#[derive(serde::Serialize)]
+struct StageAnswer {
+    close: bool,
+    beat_ms: u64,
+}
+
+/// Say what this window is doing, and hear whether an install has asked it to close.
+///
+/// Called every couple of seconds for as long as the launcher runs, including after the
+/// engine has taken the document over. That is what keeps a window that is inside a Lith
+/// visible to an install about to write over its program, and it is the same beat the
+/// install's own wait watches for (see `instances`).
+#[tauri::command]
+fn launcher_stage(stage: String, wiki: Option<String>, state: tauri::State<LauncherStage>) -> StageAnswer {
+    let Some(registry) = instances::Registry::open() else {
+        return StageAnswer { close: false, beat_ms: instances::BEAT_MS };
+    };
+    let Ok(mut presence) = state.presence.lock() else {
+        return StageAnswer { close: false, beat_ms: instances::BEAT_MS };
+    };
+    presence.stage = stage;
+    presence.wiki = wiki;
+    presence.seen_ms = instances::now_ms();
+    let _ = registry.write(&presence);
+    // The same predicate the asking side used, so a window can never close on a request that
+    // would not have been made of it: a window inside a Lith hears the request and declines.
+    let close = instances::may_close(&presence, instances::now_ms()) && registry.quit_requested(presence.pid);
+    StageAnswer { close, beat_ms: instances::BEAT_MS }
+}
+
+/// What an install learns before it writes over the copy that is already installed.
+#[derive(serde::Serialize, Default)]
+struct InstallPreflight {
+    /// How many other windows were asked to close.
+    asked: usize,
+    /// Whether the installed copy is still held, which is what makes the copy fail.
+    blocked: bool,
+    /// The Lith the window holding it has open, when a live one can say. This is the only
+    /// reason a window's own Lith name is written down, and it is absent when nothing live
+    /// explains the lock.
+    holder: Option<String>,
+}
+
+/// Ask the other windows to close, and report what an install is walking into.
+///
+/// Async, and that is load-bearing rather than stylistic: a sync command runs on the main
+/// thread, and this one waits (up to `instances::WAIT_MS`) for windows to finish closing. The
+/// copy itself is separate and unchanged (`install_monolith`): this is the courtesy before
+/// it, so the copy is never the thing that has to explain a locked file.
+#[tauri::command]
+async fn install_preflight() -> InstallPreflight {
+    tauri::async_runtime::spawn_blocking(install_preflight_blocking)
+        .await
+        .unwrap_or_default()
+}
+
+fn install_preflight_blocking() -> InstallPreflight {
+    let Some(registry) = instances::Registry::open() else {
+        return InstallPreflight::default();
+    };
+    // Only the windows still saying they are on a launcher, which is the rule that keeps this
+    // from closing somebody's open Lith: an install may close what it can see is idle, and
+    // nothing else.
+    let asked = instances::askable(&registry.entries(), instances::now_ms());
+    for peer in &asked {
+        registry.ask_to_quit(peer.pid);
+    }
+    if !asked.is_empty() {
+        let deadline = instances::now_ms() + instances::WAIT_MS;
+        while instances::now_ms() < deadline {
+            if instances::askable(&registry.entries(), instances::now_ms()).is_empty() {
+                break;
+            }
+            std::thread::sleep(instances::poll_interval());
+        }
+        // The request was this side's to make, so taking it back is this side's to do: a
+        // window that was inside a Lith for the whole wait must not close the moment its user
+        // comes back to a launcher, which is a close nobody asked for by then.
+        for peer in &asked {
+            registry.recall_quit(peer.pid);
+        }
+    }
+    let entries = registry.entries();
+    let now = instances::now_ms();
+    let target = platform::install_target();
+    let blocked = target.as_deref().is_some_and(instances::is_locked);
+    InstallPreflight {
+        asked: asked.len(),
+        blocked,
+        holder: match (blocked, target.as_deref()) {
+            (true, Some(target)) => instances::holder(&entries, now, target),
+            _ => None,
+        },
+    }
+}
+
+/// Close this window, once an install has put the new copy where it can be launched from.
+///
+/// Closing the window rather than exiting the process, so the app's own close handling (the
+/// part that decides what a close means) is what runs, and so nothing about this sits beside
+/// the ordinary exit path as a second, quieter way out.
+#[tauri::command]
+fn quit_launcher(window: tauri::WebviewWindow) -> Result<(), String> {
+    window.close().map_err(|error| error.to_string())
 }
 
 /// Keep the installed copy out of the folder's own content.
@@ -370,14 +522,16 @@ fn install_monolith() -> Result<InstallResult, String> {
 
     // Show the installed file so the user sees where it went. Best effort, and on Linux
     // it opens the folder rather than selecting the file: the freedesktop file managers
-    // share no argument for "and this one".
-    let _ = platform::reveal(&target);
+    // share no argument for "and this one". A platform that cannot do it is not a failed
+    // install, so the answer travels back rather than becoming an error.
+    let revealed = platform::reveal(&target).is_ok();
 
     let entry = entry.map(|path| path.to_string_lossy().into_owned());
     Ok(InstallResult {
         path: target.to_string_lossy().into_owned(),
         start_menu: entry.clone(),
         entry,
+        revealed,
     })
 }
 
@@ -3098,6 +3252,7 @@ pub fn run() {
         .plugin(platform::android::plugin())
         .manage(StartupFile(Mutex::new(startup_file)))
         .manage(VaultState::new())
+        .manage(LauncherStage::new())
         .setup(|app| {
             // Window configuration is applied before this hook runs, so the
             // launcher's webview exists by now. The handler has to be attached
@@ -3105,6 +3260,24 @@ pub fn run() {
             // protected instance from re-prompting on every launch.
             if let Some(window) = tauri::Manager::get_webview_window(app, "main") {
                 webview_auth::install(&window, app.handle().clone());
+            }
+            // This window joins the machine's registry as a launcher. The page takes the
+            // record over from its first beat (`launcher_stage`); this writes one now so a
+            // window whose page is slow to start is still a window an install can see. The
+            // sweep is the registry's only housekeeping, and a start is the one moment it is
+            // safe: every live window beats, so anything this old is a crash nobody missed.
+            if let Some(registry) = instances::Registry::open() {
+                registry.sweep(instances::now_ms());
+                // A copy rather than the guard: the entry is written as this window's own
+                // record, and holding the lock across a file write would block the first
+                // beat for no reason.
+                let entry = {
+                    let stage = tauri::Manager::state::<LauncherStage>(app);
+                    stage.presence.lock().map(|presence| presence.clone()).ok()
+                };
+                if let Some(entry) = entry {
+                    let _ = registry.write(&entry);
+                }
             }
             Ok(())
         })
@@ -3117,6 +3290,9 @@ pub fn run() {
             save_lith_file,
             write_text_path,
             copy_lith_to_synced_dir,
+            launcher_stage,
+            install_preflight,
+            quit_launcher,
             install_monolith,
             install_status,
             platform_capabilities,
@@ -3162,8 +3338,18 @@ pub fn run() {
             instance_cache_search,
             forget_instance_copy
         ])
-        .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+        .build(tauri::generate_context!())
+        .expect("error while building tauri application")
+        .run(|_app, event| {
+            // The ordinary end of a session leaves nothing behind for the next install to
+            // read or to reason about: a window that has gone is not one to close, and its
+            // Lith is not one to name in a refusal.
+            if let tauri::RunEvent::Exit = event {
+                if let Some(registry) = instances::Registry::open() {
+                    registry.forget(std::process::id());
+                }
+            }
+        });
 }
 #[cfg(test)]
 mod tests {
