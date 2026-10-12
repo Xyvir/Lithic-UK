@@ -855,8 +855,8 @@ try {
       tag: mark?.tagName ?? null,
       cls: mark?.getAttribute('class') ?? null,
       leads: markBox !== null && labelLeft !== null && markBox.right <= labelLeft + 0.5,
-      arrow: mark?.querySelectorAll(':scope > path').length ?? 0,
-      discs: mark?.querySelectorAll('.full-backup-discs > path').length ?? 0,
+      paths: mark?.querySelectorAll('path').length ?? 0,
+      stack: mark?.querySelectorAll(':scope > g > path').length ?? 0,
       viewBox: mark?.getAttribute('viewBox') ?? null,
       hidden: mark?.getAttribute('aria-hidden') ?? null,
       focusable: mark?.getAttribute('focusable') ?? null,
@@ -872,9 +872,9 @@ try {
     assert.equal(mark.tag, 'svg', `${where}: the export carries its mark as the button's own drawing`);
     assert.match(mark.cls ?? '', /(^|\s)full-backup-icon(\s|$)/, `${where}: drawn with the full-export mark's own class`);
     assert.equal(mark.leads, true, `${where}: and it is drawn in front of the label rather than after it`);
-    assert.equal(mark.arrow, 1, `${where}: the mark is the author's arrow`);
-    assert.equal(mark.discs, 4, `${where}: over all four of the discs they drew with it`);
-    assert.equal(mark.viewBox, '63.2 106.1 33.6 29.7', `${where}: in the artist's own coordinates, so the proportions are theirs too`);
+    assert.equal(mark.paths, 8, `${where}: the mark is the author's own drawing, every path of it`);
+    assert.equal(mark.stack, 4, `${where}: with the disc stack's four lenses inside the ring`);
+    assert.equal(mark.viewBox, '66.95 107.65 28.69 32.53', `${where}: in the artist's own coordinates, so the proportions are theirs too`);
     assert.equal(mark.hidden, 'true', `${where}: the mark is decoration, and the label is what names the control`);
     assert.equal(mark.focusable, 'false', `${where}: so it never takes the keyboard from the button`);
     assert.equal(mark.literals, false, `${where}: and it holds no colour of its own, which is what lets the button's ink carry it in every state`);

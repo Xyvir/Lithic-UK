@@ -1031,7 +1031,8 @@ async function assertFullBackupMark(page, dialog) {
     range.selectNode(label);
     return {
       leads: drawing.getBoundingClientRect().right <= range.getBoundingClientRect().left + 0.5,
-      discs: drawing.querySelectorAll('.full-backup-discs path').length,
+      discs: drawing.querySelectorAll('g > path').length,
+      paths: drawing.querySelectorAll('path').length,
       literals: /#[0-9a-f]{3,8}|rgba?\(/i.test(drawing.outerHTML),
       text: button.textContent.trim()
     };
@@ -1040,7 +1041,9 @@ async function assertFullBackupMark(page, dialog) {
     throw new Error(`${dialog} draws the export mark beside or after its label rather than in front of it`);
   }
   if (mark.discs !== 4) {
-    throw new Error(`${dialog} draws ${mark.discs} of the export mark's discs, and the drawing has four`);
+    throw new Error(
+      `${dialog} draws ${mark.discs} of the export mark's disc paths (${mark.paths} paths in all), and the disc stack has four`
+    );
   }
   if (mark.literals) {
     throw new Error(`${dialog} draws the export mark with a colour of its own, so it stops following the button`);
