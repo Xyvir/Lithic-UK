@@ -15,6 +15,10 @@ on:
       - main
     paths:
       - 'src-tauri/**'
+      # `shared/sync_core.rs` is compiled through the crate (a `#[path]` module, not a package
+      # of its own), so a push that edits only it changes what this job compiles.
+      - 'shared/**'
+      - 'scripts/check-android-face.mjs'
       - '.github/workflows/rust-check.yml'
   workflow_dispatch:
 
@@ -32,6 +36,14 @@ jobs:
 
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
+
+      # The android-face step is a Node script, like the repository's other gates. Node is
+      # already on the runner; naming the version keeps this job's answer the same one the
+      # build workflow and a developer's machine give.
+      - name: Setup Node.js
+        uses: actions/setup-node@v5
+        with:
+          node-version: '24'
 
       - name: Rust Cache
         uses: swatinem/rust-cache@v2
@@ -58,3 +70,14 @@ jobs:
       - name: cargo test
         working-directory: src-tauri
         run: cargo test --quiet 2>&1 | tail -40 && exit ${PIPESTATUS[0]}
+
+      # The phone's git face. Android is the only platform where `gitcore` means
+      # `gitcore_unsupported` rather than the libgit2 module beside it, and nothing a
+      # developer runs resolves a single `gitcore::` reference against the stub — which is
+      # how the surface drifted once already: the sync contract's constants moved,
+      # gitcore.rs followed them, the stub did not, and the Android release job was the
+      # first thing to notice. This step compiles the crate with that predicate forced true
+      # in a throwaway copy, so the phone's arrangement is checked on every push, with no
+      # Android SDK and no NDK in sight.
+      - name: android face (git stub)
+        run: node scripts/check-android-face.mjs

@@ -40,6 +40,28 @@
 
 use std::path::Path;
 
+/// The sync contract's constants, re-exported so this face answers to every name
+/// `gitcore` does.
+///
+/// `lib.rs` spells them `gitcore::REMOTE_MAIN` and its siblings, and which module that
+/// resolves to is the platform's choice, so both faces have to carry them: `gitcore.rs`
+/// gets them from the generated contract with the same `pub use`, and this file is the
+/// surface that had none, which is what failed the Android build (an error no gate on
+/// this machine could see, because `lib.rs` only resolves `gitcore` to this module on
+/// Android — see the test at the bottom of this file).
+///
+/// They are the one part of this surface that is not a refusal, because a constant is a
+/// fact about the protocol rather than something a platform can or cannot do.
+///
+/// The two nothing here can use are allowed rather than dropped: the mirror is the
+/// promise, and a name that is only ever read by a real implementation is still a name
+/// `lib.rs` is allowed to spell. The test at the bottom of the file is what holds the
+/// list to the names the crate actually resolves through this face.
+#[allow(unused_imports)]
+pub use crate::git_sync_contract::{
+    FIRST_SYNC_FILE_CAP, MAIN, ORIGIN_FETCH_SPEC, PRE_REVERT_MESSAGE, REMOTE_MAIN,
+};
+
 /// What every command that cannot run here answers with.
 ///
 /// A sentence of its own rather than the failure of any folder or network: this is the
@@ -246,6 +268,24 @@ mod tests {
         let dir = std::env::temp_dir();
         assert_eq!(open(&dir).unwrap_err(), UNAVAILABLE);
         assert_eq!(init(&dir).unwrap_err(), UNAVAILABLE);
+    }
+
+    /// The contract's constants are part of the surface this file mirrors, and the
+    /// compiler is the assertion: each line below names one through this module's own
+    /// path, so if this face stops exporting it, the test does not build.
+    ///
+    /// This is the Android failure of 2026-10-12 as a check. The constants moved into
+    /// the generated `git_sync_contract`, `gitcore.rs` re-exported them, and this file
+    /// did not; on every platform the local gate compiles, `lib.rs`'s
+    /// `gitcore::REMOTE_MAIN` resolved to the libgit2 module and built cleanly, and it
+    /// resolved to this one only for Android, in a job that never runs here.
+    #[test]
+    fn the_contracts_constants_are_exported_by_this_face_too() {
+        assert_eq!(REMOTE_MAIN, crate::git_sync_contract::REMOTE_MAIN);
+        assert_eq!(MAIN, crate::git_sync_contract::MAIN);
+        assert_eq!(ORIGIN_FETCH_SPEC, crate::git_sync_contract::ORIGIN_FETCH_SPEC);
+        assert_eq!(FIRST_SYNC_FILE_CAP, crate::git_sync_contract::FIRST_SYNC_FILE_CAP);
+        assert_eq!(PRE_REVERT_MESSAGE, crate::git_sync_contract::PRE_REVERT_MESSAGE);
     }
 
     /// Nothing is running, so a cancel is a no-op rather than a flag left set. A

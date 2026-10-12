@@ -28,6 +28,12 @@
  *      built from Tauri's template, which has a placeholder launcher icon and an activity
  *      that draws the page under the status bar, and the patch that answers both can only
  *      be tested by what it asserts here — no device or SDK is needed to run it.
+ *  12. the phone's compile face: `lib.rs` chooses `gitcore` with a
+ *      `cfg(target_os = "android")`, so the stub that answers the sync on Android is a
+ *      module no gate on this machine resolved a reference against until this step
+ *      existed — and the Android release job was where that blind spot was found. It
+ *      rewrites the crate's own predicates in a throwaway copy and compiles it, which
+ *      needs neither the SDK nor the NDK the APK's own steps need.
  *
  * Exit 0 = safe to push; nonzero = fix before pushing.
  *
@@ -342,6 +348,14 @@ const spawned = [
     name: 'light artifact guard',
     cmd: 'node',
     args: ['scripts/check-light-artifact.mjs'],
+  },
+  // Cargo, but through a script because the arrangement it checks is an edit of the
+  // sources rather than a flag. Warm, it copies the crate, rewrites 23 predicates and
+  // checks the library, which is one rustc pass over the crate and none over its deps.
+  {
+    name: 'android face (git stub)',
+    cmd: 'node',
+    args: ['scripts/check-android-face.mjs'],
   },
 ];
 
