@@ -393,7 +393,17 @@ const en = {
       fullBackupTitle: 'Every recent Lith, its history and the bookmarks, in one file',
       fullBackupTaken: '✓ Full backup downloaded.',
       reset: 'Reset Recents',
-      resetLockedTitle: 'Download every Lith, or take the full backup, first'
+      resetLockedTitle: 'Download every Lith, or take the full backup, first',
+      /**
+       * The same dialog where the list is not this device's to clear, so it draws no reset and
+       * no line about unlocking one: an instance that cannot be reached is not a list to empty,
+       * while the copies this device took are the only thing a download saves.
+       */
+      backupOnly: {
+        closeAria: 'Close the backup dialog',
+        title: 'Backup Recents',
+        body: 'While the instance is out of reach, this device holds the only copies.'
+      }
     },
 
     /**
@@ -547,7 +557,15 @@ const en = {
      * behind a download per row, and the label says what the dialog then explains.
      */
     backupReset: 'Backup & Reset Recents',
-    backupResetTitle: 'Download every Lith here, then clear this list'
+    backupResetTitle: 'Download every Lith here, then clear this list',
+    /**
+     * The offline launcher's own control, where there is nothing this device may clear: the
+     * shelves belong to an instance that cannot be reached, so the dialog writes the copies
+     * this device holds out and offers no reset at all (see
+     * `dialogs.instanceBackup.backupOnly`).
+     */
+    backupOnly: 'Backup Recents',
+    backupOnlyTitle: 'Download every Lith this device holds'
   },
 
   /** One line per row state, from the download of an orphaned cached copy. */
@@ -1030,7 +1048,12 @@ const es: Copy = {
       fullBackupTitle: 'Todos los Liths recientes, su historial y los marcadores, en un archivo',
       fullBackupTaken: '✓ Copia completa descargada.',
       reset: 'Reiniciar recientes',
-      resetLockedTitle: 'Descarga cada Lith, o la copia completa, primero'
+      resetLockedTitle: 'Descarga cada Lith, o la copia completa, primero',
+      backupOnly: {
+        closeAria: 'Cerrar el diálogo de copia',
+        title: 'Copia de recientes',
+        body: 'Mientras la instancia está inalcanzable, este dispositivo guarda las únicas copias.'
+      }
     },
 
     backupImport: {
@@ -1167,7 +1190,9 @@ const es: Copy = {
     reset: 'Reiniciar recientes',
     resetTitle: 'Borra esta lista y su historial local. Tus archivos se quedan.',
     backupReset: 'Copia y reiniciar recientes',
-    backupResetTitle: 'Descarga cada Lith de aquí y luego vacía esta lista'
+    backupResetTitle: 'Descarga cada Lith de aquí y luego vacía esta lista',
+    backupOnly: 'Copia de recientes',
+    backupOnlyTitle: 'Descarga cada Lith que guarda este dispositivo'
   },
 
   orphan: {
@@ -1632,7 +1657,12 @@ const fr: Copy = {
       fullBackupTitle: 'Tous les Liths récents, leur historique et les marque-pages, en un fichier',
       fullBackupTaken: '✓ Sauvegarde complète téléchargée.',
       reset: 'Réinitialiser les récents',
-      resetLockedTitle: 'Téléchargez chaque Lith, ou la sauvegarde complète, d’abord'
+      resetLockedTitle: 'Téléchargez chaque Lith, ou la sauvegarde complète, d’abord',
+      backupOnly: {
+        closeAria: 'Fermer le dialogue de sauvegarde',
+        title: 'Sauvegarder les récents',
+        body: 'Tant que le serveur est injoignable, cet appareil garde les seules copies.'
+      }
     },
 
     backupImport: {
@@ -1769,7 +1799,9 @@ const fr: Copy = {
     reset: 'Réinitialiser les récents',
     resetTitle: 'Efface cette liste et son historique local. Vos fichiers restent.',
     backupReset: 'Sauvegarder et réinitialiser',
-    backupResetTitle: 'Télécharger chaque Lith ici, puis vider cette liste'
+    backupResetTitle: 'Télécharger chaque Lith ici, puis vider cette liste',
+    backupOnly: 'Sauvegarder les récents',
+    backupOnlyTitle: 'Télécharger chaque Lith que cet appareil détient'
   },
 
   orphan: {
@@ -2231,7 +2263,12 @@ const de: Copy = {
       fullBackupTitle: 'Alle neuen Liths, ihr Verlauf und die Lesezeichen, in einer Datei',
       fullBackupTaken: '✓ Vollständige Sicherung heruntergeladen.',
       reset: 'Zuletzt verwendete zurücksetzen',
-      resetLockedTitle: 'Erst jeden Lith oder die vollständige Sicherung herunterladen'
+      resetLockedTitle: 'Erst jeden Lith oder die vollständige Sicherung herunterladen',
+      backupOnly: {
+        closeAria: 'Sicherungsdialog schließen',
+        title: 'Zuletzt verwendete sichern',
+        body: 'Solange der Server nicht erreichbar ist, hält dieses Gerät die einzigen Kopien.'
+      }
     },
 
     backupImport: {
@@ -2368,7 +2405,9 @@ const de: Copy = {
     reset: 'Zuletzt verwendete zurücksetzen',
     resetTitle: 'Leert diese Liste und ihren lokalen Verlauf. Deine Dateien bleiben.',
     backupReset: 'Sichern und Liste leeren',
-    backupResetTitle: 'Jeden Lith hier herunterladen und dann diese Liste leeren'
+    backupResetTitle: 'Jeden Lith hier herunterladen und dann diese Liste leeren',
+    backupOnly: 'Zuletzt verwendete sichern',
+    backupOnlyTitle: 'Jeden Lith herunterladen, den dieses Gerät hält'
   },
 
   orphan: {

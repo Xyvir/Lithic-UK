@@ -1505,12 +1505,13 @@ a.modal-action { text-decoration: none; text-align: center; color: var(--lithic-
  * rows rather than as a full-size control over shrunken ones. The mark keeps a floor of its own
  * (36px) so a short window spends the band's type before it spends the icon.
  *
- * One state is short of a row and pays for it out of the band, because a row height is a fact
- * about the window rather than about which control happens to be drawn: the browser-only store
- * and offline mode draw no rebuild or reset control at all (nothing there to rebuild, and the
- * server is the very thing that just failed), so their card is two rows and their band is a
- * quarter plus the missing row's worth. The alternative was a card the height of a control it
- * does not draw, which reads as a button that failed to arrive, or a mode with a row height of
+ * Every state puts exactly one control in that row, and which control it is belongs to the mode
+ * rather than to the layout: a rebuild and a reset where the list is this device's, the
+ * browser-only store's backup-and-reset where the store is the document, and the export of the
+ * copies this device holds on an instance that cannot be reached (nothing there to rebuild,
+ * because reading the server again is the very thing that just failed). A row height is a fact
+ * about the window rather than about which control happens to be drawn, so a mode with none
+ * would be a card the height of a button that failed to arrive, or a mode with a row height of
  * its own, which would make the same phone draw different rows depending on its browser.
  *
  * The height is the trigger rather than the width: a landscape tablet is 1024 by 768 and has
@@ -1539,10 +1540,10 @@ a.modal-action { text-decoration: none; text-align: center; color: var(--lithic-
      *   the column  is the window less the container's own 10px of top and bottom padding
      *               (`100dvh - 20px`; `#app` is `100dvh`).
      *   the title   is capped at a quarter of that column (`25dvh - 5px`), which is the band the
-     *               grid row below hands its slack to. Where a mode draws no reset control the
-     *               card is one row shorter than this and the band takes that shortfall instead,
-     *               which is the one place the quarter does not have to hold: it is a cap on the
-     *               band, not a row height that anything else is measured against.
+     *               grid row below hands its slack to. It is a cap rather than a row height that
+     *               anything is measured against, and no state is short of a control in that
+     *               third row any more: offline mode's export sits there like every other mode's
+     *               control, so the band takes no shortfall for a mode that draws nothing.
      *   the gaps    are the two 10px row gaps between the three grid rows (20px).
      *   the card    holds 1px of border, 8px of padding and two 7px gaps around its three rows
      *               (32px).
@@ -1581,9 +1582,9 @@ a.modal-action { text-decoration: none; text-align: center; color: var(--lithic-
    * the title inside it. That row is the one that gives, and it is also the notice's only
    * honest home: every row below it is a fixed height (the search box, and the card's own
    * rows), so a line with a track of its own would be taken out of the controls rather than
-   * out of the slack. In an instance that cannot be reached the mode draws no reset control
-   * either (nothing there to rebuild), which is exactly the row's worth of slack the notice
-   * spends, the same trade the band already makes for that missing row.
+   * out of the slack. In an instance that cannot be reached the notice is what the band spends
+   * its own slack on, and the card below is the same three rows every other state draws,
+   * because that mode's foot control is the export of the copies this device still holds.
    *
    * The alternative, which this replaces, was a strip of its own across both columns at an
    * implicit fourth row: measured at 844 by 390 it landed at the window's bottom edge under

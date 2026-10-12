@@ -681,12 +681,14 @@ try {
       // nothing to separate them from.
       groupLabels: document.querySelectorAll('.recent-group-label').length,
       remoteDots: document.querySelectorAll('.remote-dot').length,
-      // The rebuild control, which online is this mode's to keep: the list is the server's,
+      // The foot control, which online is this mode's to keep: the list is the server's,
       // but the caches it repairs are this device's, and reading the store again is also
       // what indexes it here. Reset is the half that does not belong to a list this device
-      // does not own. Offline it goes too, because re-reading the server is the thing that
-      // just failed.
-      resetCache: document.querySelector('.reset-cache') !== null,
+      // does not own. Offline both of those go, because re-reading the server is the thing
+      // that just failed and the list is still not this device's to clear; what is left is
+      // the export of the copies it does hold.
+      footControls: document.querySelectorAll('.recent-foot .reset-cache').length,
+      footLabel: document.querySelector('.recent-foot .reset-cache')?.textContent?.trim() ?? null,
       rebuildLabel: [...document.querySelectorAll('button')].map(button => button.textContent?.trim()).find(text => text?.includes('Rebuild')) ?? null,
       empty: document.querySelector('.empty')?.textContent?.trim() ?? null,
       error: document.querySelector('.status-line.error')?.textContent?.trim() ?? null
@@ -728,8 +730,17 @@ try {
   assert.equal(selfHost.cachedRows, 0, 'Self-host: and its own search panel is not a second copy of them');
   assert.equal(selfHost.groupLabels, 0, 'Self-host: no group heading, because there is no second group');
   assert.equal(selfHost.remoteDots, 0, 'Self-host: the server\'s rows carry no marker');
-  assert.equal(selfHost.resetCache, false, 'Self-host: nothing offers to read a server that cannot answer');
   assert.equal(selfHost.rebuildLabel, null, 'Self-host: so the rebuild is not drawn at all');
+  assert.equal(
+    selfHost.footControls,
+    1,
+    `Self-host: the offline card draws one foot control, and it is the export of what this device holds: ${JSON.stringify(selfHost)}`
+  );
+  assert.equal(
+    selfHost.footLabel,
+    'Backup Recents',
+    'Self-host: ...named for the copies it hands over rather than for a reset this list is not'
+  );
   assert.equal(selfHost.empty, null, 'Self-host: a failed list says the failure, not that the server is empty');
   assert.equal(selfHost.error, null, 'Self-host: and the failure is the banner rather than a status line');
   assert.equal(selfHost.offlineHeading, 'Server unreachable', `Self-host: the banner names the cause: ${JSON.stringify(selfHost.offlineHeading)}`);
@@ -740,6 +751,43 @@ try {
   );
   assert.equal(selfHost.offlineRowTitle, 'Open this device’s copy read-only', 'Self-host: the row says what clicking it does');
   assert.equal(selfHost.offlineMarkTitle, 'Only on this device while offline.', 'Self-host: and the mark says why it is marked');
+
+  // The dialog behind that control, which is the same export with the reset half left out
+  // rather than a dialog of its own: the rows are the copies this device took, the whole-list
+  // backup is offered, and there is no action row at all, because on an instance the list is
+  // not this device's to clear and offline it is the only copy of anything on screen.
+  await selfHostPage.click('.recent-foot .reset-cache');
+  await selfHostPage.waitForSelector('.instance-backup-modal');
+  const offlineBackup = await selfHostPage.evaluate(() => {
+    const modal = document.querySelector('.instance-backup-modal');
+    return {
+      rows: [...(modal?.querySelectorAll('.orphan-name') ?? [])].map((node) => node.textContent.trim()),
+      title: modal?.querySelector('h2')?.textContent?.trim() ?? null,
+      body: modal?.querySelector('p')?.textContent?.trim() ?? null,
+      actions: [...(modal?.querySelectorAll('.modal-action') ?? [])].map((node) => node.textContent.trim()),
+      actionRows: modal?.querySelectorAll('.modal-actions').length ?? 0,
+      gate: modal?.querySelector('.instance-backup-gate') !== null,
+      close: modal?.querySelector('.modal-close') !== null
+    };
+  });
+  assert.deepEqual(
+    offlineBackup.rows,
+    ['cache-only.lith'],
+    `Offline: the dialog lists the copies this device holds, which are the rows the list draws: ${JSON.stringify(offlineBackup)}`
+  );
+  assert.equal(offlineBackup.title, 'Backup Recents', 'Offline: and it is named for what it does here');
+  assert.equal(
+    offlineBackup.actionRows,
+    0,
+    'Offline: with no action row, because there is nothing here to unlock or to press'
+  );
+  assert.equal(offlineBackup.gate, false, 'Offline: and no line about a reset it does not draw');
+  assert.ok(
+    offlineBackup.actions.some((label) => /Download Full Backup/.test(label)),
+    `Offline: while the whole-list export is offered exactly as it is elsewhere: ${JSON.stringify(offlineBackup.actions)}`
+  );
+  assert.equal(offlineBackup.close, true, 'Offline: the × is the only way out, which is the whole action row it needs');
+  await selfHostPage.click('.instance-backup-modal .modal-close');
 
   // The backup dialog, opened from that button. What is asserted here is that the
   // *dialog* speaks about a server rather than a folder, and that the two things

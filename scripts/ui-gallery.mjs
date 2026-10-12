@@ -1326,6 +1326,42 @@ const DIALOG_STATES = [
         throw new Error('the dialog does not say what is left to download before Reset unlocks');
       }
     }
+  },
+  {
+    /**
+     * The same export on an instance this device cannot reach, which is the shape that has no
+     * reset in it: the rows are the copies this device took, the export is offered exactly as
+     * it is in the pane beside this one, and the action row and its gate line are gone.
+     *
+     * It is a state of its own rather than a second drive on the pane above because the two
+     * differ by more than a control: that one is a store whose document is the browser's, and
+     * this one is a server's list with the server out of reach.
+     */
+    slug: 'offline-backup',
+    modal: 'instance-backup-title',
+    mode: 'self-host',
+    server: true,
+    seed: { caches: OFFLINE_CACHES },
+    drive: async (page) => {
+      await goOffline(page);
+      await page.click('.recent-foot .reset-cache');
+      await page.waitForSelector('.instance-backup-modal');
+      await settle(page, 300);
+    },
+    clip: '.instance-backup-modal',
+    expect: '.instance-backup-modal',
+    verify: async (page) => {
+      // The missing half is the claim, and a picture of a dialog without a button in it is not
+      // a check that the button is absent from the markup: something the eye cannot tell from
+      // the other dialog's cropped edge is exactly what this catches.
+      if ((await page.query('.instance-backup-modal .modal-actions')).count !== 0) {
+        throw new Error('the offline dialog draws an action row, so this is not the shape with nothing to decide');
+      }
+      if ((await page.query('.instance-backup-gate')).count !== 0) {
+        throw new Error('the offline dialog says what unlocks a reset it does not draw');
+      }
+      await assertFullBackupMark(page, '.instance-backup-modal');
+    }
   }
 ];
 
@@ -1743,7 +1779,9 @@ const SHEETS = [
               documentHeight: document.documentElement.scrollHeight,
               offlineRows: document.querySelectorAll('.recent-row.offline-row').length,
               marks: document.querySelectorAll('.recent-row.offline-row .cache-history-button.modified').length,
-              controls: document.querySelectorAll('.recent-foot .reset-cache').length
+              controls: document.querySelectorAll('.recent-foot .reset-cache').length,
+              controlLabel: document.querySelector('.recent-foot .reset-cache')?.textContent?.trim() ?? '',
+              controlDisabled: document.querySelector('.recent-foot .reset-cache')?.disabled ?? true
             };
           });
           if (!measured.title || !measured.banner || !measured.search || !measured.card || !measured.list) {
@@ -1778,14 +1816,24 @@ const SHEETS = [
           if (measured.marks !== measured.offlineRows) {
             throw new Error(`only ${measured.marks} of ${measured.offlineRows} offline rows carry the local-only mark`);
           }
-          // The one landscape card with nothing under its buttons, which is what the quarter
-          // above cannot describe: offline draws none of the three controls, because re-reading
-          // the instance is the thing that just failed and the browser-only store's own control
-          // belongs to a store this page never had. The card is a row short here, so the two
-          // columns ending level is what says the heading band above took the room it gave up.
-          if (measured.controls !== 0) {
+          // The control this state owns, and the two it does not: no rebuild, because
+          // re-reading the instance is the thing that just failed, and no reset, because the
+          // shelves are the instance's and not this device's. So what stands under the card is
+          // the export of the copies this device still holds, which is one row like every other
+          // landscape state's card and leaves the two columns level.
+          if (measured.controls !== 1) {
             throw new Error(
-              `the offline card draws ${measured.controls} controls under it; this is the state with nothing left to rebuild or reset`
+              `the offline card draws ${measured.controls} controls under it, and this state owns exactly one`
+            );
+          }
+          if (measured.controlLabel !== 'Backup Recents') {
+            throw new Error(
+              `the offline card's control reads "${measured.controlLabel}"; this state exports the copies this device holds and clears nothing`
+            );
+          }
+          if (measured.controlDisabled) {
+            throw new Error(
+              'the offline launcher has rows on screen and its export control is disabled, so nothing it holds can be written out'
             );
           }
           assertColumnsLevel({ card: measured.card, panelBottom: measured.list.bottom });

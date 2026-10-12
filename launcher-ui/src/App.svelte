@@ -2798,20 +2798,25 @@ import { backupFileName, collectInstanceBackup, mergeBookmarks, parseInstanceBac
   $: offlineLauncher = offlineMode(mode, online, remoteUnreachable);
 
   /**
-   * The rows an offline launcher lists: the Liths this device already holds a copy of,
-   * which are the only ones that can be opened without the instance.
+   * The rows an offline launcher holds: the Liths this device already has a copy of, which
+   * are the only ones that can be opened without the instance.
    *
    * By name rather than by date: with no server there is nothing to order by, and the
    * server's order would change under the reader the moment it answered. Every row is a
    * copy this device took, so the set is `cachedEntries` (the same store the online
    * list already reads for its sizes and its search) and nothing new is fetched to
    * build it, which is the whole point of a mode with no network.
+   *
+   * The query filters these rather than the set itself, and the two are separate on purpose:
+   * a search narrows what the list draws, and must never narrow what a download covers. The
+   * backup dialog reads the set (see `backupRows`).
    */
-  $: offlineRows = offlineLauncher
-    ? Object.values(cachedEntries)
-        .filter((entry) => showsForQuery(entry.name, search) || Boolean(cacheSearchMatches[entry.name]?.preview))
-        .sort((a, b) => a.name.localeCompare(b.name))
+  $: offlineEntries = offlineLauncher
+    ? Object.values(cachedEntries).sort((a, b) => a.name.localeCompare(b.name))
     : [];
+  $: offlineRows = offlineEntries.filter(
+    (entry) => showsForQuery(entry.name, search) || Boolean(cacheSearchMatches[entry.name]?.preview)
+  );
 
   /**
    * Bookmark rows to draw: the address matches, *or* the instance holds a cached wiki
@@ -4285,28 +4290,49 @@ import { backupFileName, collectInstanceBackup, mergeBookmarks, parseInstanceBac
   let importCollisions: string[] = [];
 
   /**
-   * The rows the gated dialog lists: the whole recent list.
+   * The rows the dialog lists: every Lith this device can hand over.
    *
    * Not the rebuild warning's orphan list, which is the rows whose file has gone: here every
-   * row is the document, so every row is what a reset would take. `text` is carried through
+   * row is a document, so every row is what a reset would take. `text` is carried through
    * because a browser-only HTML monolith keeps its page in the row rather than in a cache.
+   *
+   * Offline it is the other list, and for the reason the two are separate there: what is being
+   * backed up is the copies this device took, which are exactly the rows the launcher is
+   * drawing, and the store's own recents would offer downloads for Liths this page cannot read
+   * while missing the ones it can.
    */
-  $: backupRows = recentFiles.map((row) => {
-    const name = getEntryName(row);
-    const text = (row as { text?: string }).text;
-    return {
-      name,
-      text: typeof text === 'string' ? text : '',
-      pill: orphanPill(orphanDownloads[name] ?? 'idle')
-    };
-  });
+  $: backupRows = (offlineLauncher
+    ? offlineEntries.map((entry) => ({ name: entry.name, text: '' }))
+    : recentFiles.map((row) => {
+        const name = getEntryName(row);
+        const text = (row as { text?: string }).text;
+        return { name, text: typeof text === 'string' ? text : '' };
+      })
+  ).map((row) => ({ ...row, pill: orphanPill(orphanDownloads[row.name] ?? 'idle') }));
 
   $: backupOpen = backupGate(
     backupRows.map((row) => orphanDownloads[row.name] ?? 'idle'),
     fullBackupTaken
   );
 
-  /** Open the gated dialog. */
+  /**
+   * Whether this dialog draws a reset at all.
+   *
+   * Only the browser-only store's does: there the store is the document, so clearing it is a
+   * thing a person may want and the gate above is what makes it safe to press. An instance's
+   * list is not this device's to clear, and offline it is the only copy of anything on screen,
+   * so that shape prints the export and stops.
+   */
+  $: backupResettable = indexDbOnly && !offlineLauncher;
+
+  /**
+   * The dialog's own words, which follow the shape above: one decision, so one place the title,
+   * the body and the close control's label are read from, and no way for a mode to wear the
+   * other mode's sentence over its own buttons.
+   */
+  $: backupCopy = backupResettable ? copy.dialogs.instanceBackup : copy.dialogs.instanceBackup.backupOnly;
+
+  /** Open the dialog. */
   function openInstanceBackup(): void {
     backupStatus = '';
     showInstanceBackup = true;
@@ -5759,12 +5785,18 @@ import { backupFileName, collectInstanceBackup, mergeBookmarks, parseInstanceBac
     The fallback gets a third shape, `Backup & Reset Recents`, because there the list *is* the
     only copy: nothing on disk can be re-listed, and Reset alone would take every Lith on the
     device with it. That control opens the gated dialog, where each row can be written out
-    first and the reset unlocks once they have been. Offline mode gets none of the three, and
-    there the rebuild is not merely unhelpful: reading the server again is the very thing that
-    just failed.
+    first and the reset unlocks once they have been.
+
+    Offline mode gets a fourth, `Backup Recents`, which opens that same dialog with no reset in
+    it at all. The shelves belong to an instance this page cannot reach, so clearing them is not
+    this page's to offer, while the copies on this device are the one thing a download saves and
+    nothing else can replace. The rebuild is not merely unhelpful there either: reading the
+    server again is the very thing that just failed.
   -->
   {#snippet recentFootControl(placeholder: boolean)}
-    {#if indexDbOnly && !offlineLauncher}
+    {#if offlineLauncher}
+      <button class="reset-cache" disabled={placeholder} on:click={openInstanceBackup} title={copy.foot.backupOnlyTitle}>{copy.foot.backupOnly}</button>
+    {:else if indexDbOnly}
       <button class="reset-cache" disabled={placeholder} on:click={openInstanceBackup} title={copy.foot.backupResetTitle}>{copy.foot.backupReset}</button>
     {:else if !indexDbOnly && !offlineLauncher}
       {#if showRebuildControl}
@@ -6613,17 +6645,24 @@ import { backupFileName, collectInstanceBackup, mergeBookmarks, parseInstanceBac
     </div>
   {/if}
   <!--
-    The fallback's guardrail, and the one dialog in the launcher whose action is gated. Every
-    row here is the only copy of a Lith there is, so Reset waits for a download per row or for
-    one full backup, and the line above it says how many are left. The close control is the way
-    out, which is why there is no Cancel beside it (see the dismissal rule in styles.css).
+    The export's own dialog, in the two shapes the one decision above gives it (see
+    `backupResettable`). The browser-only store's is the guardrail, and the one dialog in the
+    launcher whose action is gated: every row there is the only copy of a Lith there is, so
+    Reset waits for a download per row or for one full backup, and the line above it says how
+    many are left. The close control is the way out, which is why there is no Cancel beside it
+    (see the dismissal rule in styles.css).
+
+    On an instance that cannot be reached the same dialog prints with no reset in it: the rows
+    are the copies this device holds, the export is offered exactly as it is here, and the action
+    row and its gate line are gone rather than disabled, because there is nothing under them to
+    unlock and this page has no business clearing somebody's instance.
   -->
   {#if showInstanceBackup}
     <div class="modal-overlay" role="presentation" on:click={(event) => event.currentTarget === event.target && (showInstanceBackup = false)}>
       <div class="launcher-modal orphan-modal instance-backup-modal" role="dialog" aria-modal="true" aria-labelledby="instance-backup-title">
-        <button class="modal-close" aria-label={copy.dialogs.instanceBackup.closeAria} on:click={() => (showInstanceBackup = false)}>×</button>
-        <h2 id="instance-backup-title">{copy.dialogs.instanceBackup.title}</h2>
-        <p>{copy.dialogs.instanceBackup.body}</p>
+        <button class="modal-close" aria-label={backupCopy.closeAria} on:click={() => (showInstanceBackup = false)}>×</button>
+        <h2 id="instance-backup-title">{backupCopy.title}</h2>
+        <p>{backupCopy.body}</p>
         <ul class="orphan-list">
           {#each backupRows as row (row.name)}
             <li class="orphan-row">
@@ -6640,10 +6679,12 @@ import { backupFileName, collectInstanceBackup, mergeBookmarks, parseInstanceBac
           {#if fullBackupTaken}<span class="instance-backup-mark" role="status">{copy.dialogs.instanceBackup.fullBackupTaken}</span>{/if}
         </div>
         {#if backupStatus}<p class="status-line" role="status">{backupStatus}</p>{/if}
-        {#if !backupOpen.open}<p class="instance-backup-gate" role="status">{copy.dialogs.instanceBackup.gate(backupOpen.remaining)}</p>{/if}
-        <div class="modal-actions">
-          <button class="modal-action danger" disabled={!backupOpen.open} title={backupOpen.open ? copy.foot.resetTitle : copy.dialogs.instanceBackup.resetLockedTitle} on:click={resetRecentsFromBackup}>{copy.dialogs.instanceBackup.reset}</button>
-        </div>
+        {#if backupResettable}
+          {#if !backupOpen.open}<p class="instance-backup-gate" role="status">{copy.dialogs.instanceBackup.gate(backupOpen.remaining)}</p>{/if}
+          <div class="modal-actions">
+            <button class="modal-action danger" disabled={!backupOpen.open} title={backupOpen.open ? copy.foot.resetTitle : copy.dialogs.instanceBackup.resetLockedTitle} on:click={resetRecentsFromBackup}>{copy.dialogs.instanceBackup.reset}</button>
+          </div>
+        {/if}
       </div>
     </div>
   {/if}
