@@ -886,12 +886,10 @@ footer > * { pointer-events: auto; }
   .modal-overlay { align-items: start; padding: 12px; }
   .launcher-modal { max-height: calc(100dvh - 24px); padding: 18px; }
   .emoji-modal { max-height: calc(100dvh - 24px); }
-  .emoji-preview { margin: 4px 0 6px; font-size: 1.65rem; }
-  .emoji-modal > h2 { margin-bottom: 8px; }
-  .emoji-modal > p { margin: 0 0 6px; font-size: 0.85rem; line-height: 1.3; }
-  .emoji-modal .modal-actions { gap: 6px; margin-top: 8px; }
-  .emoji-modal .management-actions { margin-top: 8px; padding-top: 8px; }
 }
+/* The picker's own phone sizes are at the end of this file, under the picker's base rules,
+ * because a media query adds no weight to a selector: a size declared before the rule it
+ * means to replace loses to it even when the query matches. */
 .launcher-modal p { color: var(--lithic-ink-soft); line-height: 1.5; }
 .launcher-modal input { width: 100%; padding: 12px 10px; border: 1px solid var(--lithic-line); border-radius: 7px; background: var(--lithic-surface-control); color: var(--lithic-ink); font: inherit; }
 .launcher-modal input:focus { outline: none; border-color: var(--lithic-amber); }
@@ -2122,7 +2120,14 @@ body.drag-over::after {
 .brand-icon-wrap.pickable:hover .brand-emoji { border-color: var(--lithic-amber); }
 /* Five fixed columns keep the 25 choices square at every viewport width. */
 .emoji-modal { width: min(100%, 440px); }
-.emoji-preview { margin: 6px 0 10px; font-size: 2rem; line-height: 1; text-align: center; }
+/* A fixed em-high box, so the preview is the same height whether it holds an emoji or the
+ * shipped mark: the dialog must not change height when the icon does. */
+.emoji-preview { display: flex; align-items: center; justify-content: center; height: 1em; margin: 6px 0 10px; font-size: 2rem; line-height: 1; }
+.emoji-preview-glyph { display: inline-block; }
+/* The shipped mark, previewed while nothing is chosen: the preview answers "what is the
+ * icon now", and on an instance with no emoji that answer is this tile rather than a
+ * blank. Sized in `em` so it tracks the emoji it stands in for at every breakpoint. */
+.emoji-preview-mark { display: inline-block; width: 1em; height: 1em; vertical-align: middle; border: 1px solid var(--lithic-line); border-radius: 0.16em; }
 .emoji-grid {
   display: grid;
   grid-template-columns: repeat(5, minmax(0, 1fr));
@@ -2136,9 +2141,56 @@ body.drag-over::after {
 .emoji-modal .emoji-grid + .status-line { margin: 4px 0 0; }
 .emoji-modal .modal-actions { margin-top: 10px; }
 .emoji-modal .management-actions { margin-top: 10px; padding-top: 10px; }
+/* The project link, the one control in this dialog that is not one of its jobs: a small
+ * link at the end of the row rather than a third full-width button. The action beside it
+ * grows to fill what is left, which is what puts this in the corner, and `margin-left:
+ * auto` keeps it there if the row wraps on a narrow phone. */
+.modal-footnote-link { flex: 0 0 auto; margin-left: auto; align-self: center; font-size: 0.75rem; line-height: 1.2; color: var(--lithic-ink-muted); text-decoration: none; }
+.modal-footnote-link:hover, .modal-footnote-link:focus-visible { color: var(--lithic-ink); text-decoration: underline; }
 .emoji-btn {
   display: grid; place-items: center; width: 100%; aspect-ratio: 1; min-width: 0; padding: 0; border: 1px solid transparent;
   border-radius: 6px; background: transparent; font-size: clamp(0.9rem, 6vw, 1.4rem); line-height: 1; cursor: pointer;
 }
 .emoji-btn:hover { background: var(--lithic-sheen-wash-7); }
 .emoji-btn.selected { border-color: var(--lithic-amber); background: var(--lithic-amber-wash-16); }
+/* The picker on a phone. These sit under the base rules rather than with the other phone
+ * sizes because a media query adds no weight to a selector: declared any earlier, each of
+ * them would lose to the same selector below it. */
+@media (max-width: 600px) {
+  .emoji-preview { margin: 4px 0 6px; font-size: 1.65rem; }
+  .emoji-modal > h2 { margin-bottom: 8px; }
+  .emoji-modal > p { margin: 0 0 6px; font-size: 0.85rem; line-height: 1.3; }
+  .emoji-modal .modal-actions { gap: 6px; margin-top: 8px; }
+  .emoji-modal .management-actions { margin-top: 8px; padding-top: 8px; }
+  /* The grid is the tallest thing here and the one element whose height follows the viewport
+   * width, so it is what gives when the browser chrome takes a slice of the height: a
+   * narrower grid is a shorter one, and the cells stay square either way. */
+  .emoji-modal .emoji-grid { max-width: min(100%, 15.5rem); margin-inline: auto; }
+}
+/* The dialog prefers to fit rather than to scroll, and portrait on a phone is the case that
+ * asks for it: the whole thing is meant to be taken in at once there. It gives height back in
+ * steps as the window shortens, tightening its own chrome first and the grid second, since
+ * the grid is the only element whose size is arbitrary. Landscape is deliberately left out,
+ * and so is any window shorter than the last step. `.launcher-modal` still scrolls, so the
+ * controls are reachable in either case; they are simply not all on screen at once. */
+@media (max-width: 600px) and (orientation: portrait) and (max-height: 680px) {
+  .launcher-modal.emoji-modal { padding: 14px; }
+  .emoji-preview { margin: 2px 0 4px; }
+  .emoji-modal > h2 { margin-bottom: 6px; }
+  .emoji-modal > p { margin: 0 0 4px; }
+  .emoji-modal .modal-actions { margin-top: 6px; }
+  .emoji-modal .management-actions { margin-top: 6px; padding-top: 6px; }
+}
+@media (max-width: 600px) and (orientation: portrait) and (max-height: 560px) {
+  .launcher-modal.emoji-modal { padding: 12px; }
+  .emoji-modal .emoji-grid { max-width: min(100%, 13rem); gap: 3px; padding: 4px; }
+  .emoji-modal .emoji-btn { font-size: clamp(0.8rem, 5vw, 1.2rem); }
+}
+@media (max-width: 600px) and (orientation: portrait) and (max-height: 490px) {
+  .emoji-modal .emoji-grid { max-width: min(100%, 11.5rem); }
+}
+/* The last step, for a portrait window shorter than any phone really gives: below this the
+ * dialog scrolls, which is the fallback the rules above deliberately keep. */
+@media (max-width: 600px) and (orientation: portrait) and (max-height: 460px) {
+  .emoji-modal .emoji-grid { max-width: min(100%, 10.5rem); }
+}

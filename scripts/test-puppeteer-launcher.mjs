@@ -1774,8 +1774,8 @@ try {
   assert.equal(pickerOpen.preview, '🌺', 'and previews it');
   assert.equal(
     pickerOpen.line,
-    'This icon belongs to the instance. Everyone who opens this address sees it.',
-    'and says whose icon it is, which is what makes the choice a setting rather than a theme'
+    'Select an icon to personalize this Lithic instance.',
+    'and says what the choice is for, which is what makes the icon a setting rather than a theme'
   );
   // The instance's icon is not in the shortlist any more (that is the point of the cull),
   // and the dialog still has to show it as the chosen one: the choice leads the grid.
@@ -1804,21 +1804,73 @@ try {
   await iconPage.setViewport({ width: 390, height: 700 });
   const phonePickerGeometry = await iconPage.evaluate(measurePicker);
   assert.deepEqual(phonePickerGeometry, { columns: 5, rows: 5, square: true }, 'The phone uses the same exact five-by-five square');
-  const mobileDialog = await iconPage.evaluate(() => {
+  const measureDialog = () => {
     const modal = document.querySelector('.emoji-modal');
     const title = document.querySelector('#emoji-title').getBoundingClientRect();
     const close = modal.querySelector('.modal-close').getBoundingClientRect();
     const actions = modal.querySelector('.management-actions').getBoundingClientRect();
+    const footnote = modal.querySelector('.modal-footnote-link').getBoundingClientRect();
     const modalBox = modal.getBoundingClientRect();
     return {
       titleOverlapsClose: title.right > close.left && title.bottom > close.top,
       actionsReachable: actions.bottom <= modalBox.bottom + 1,
-      scrollable: modal.scrollHeight > modal.clientHeight
+      footnoteReachable: footnote.bottom <= modalBox.bottom + 1,
+      scrollable: modal.scrollHeight > modal.clientHeight,
+      scrollH: modal.scrollHeight,
+      clientH: modal.clientHeight
     };
-  });
+  };
+  const mobileDialog = await iconPage.evaluate(measureDialog);
   assert.equal(mobileDialog.titleOverlapsClose, false, 'The mobile title clears its close control');
   assert.equal(mobileDialog.actionsReachable, true, 'The mobile management buttons remain visible and reachable');
+  assert.equal(mobileDialog.footnoteReachable, true, 'and the project footnote sits inside the dialog as well');
   assert.equal(mobileDialog.scrollable, false, 'The compact mobile dialog fits without requiring nested scrolling');
+  // The project link is a footnote rather than a third action: smaller than the button
+  // beside it and at the end of that row, not in a row of its own, which is what makes it
+  // cost no height. It is still the desktop app's only way out to the repository.
+  const docsLink = await iconPage.evaluate(() => {
+    const link = document.querySelector('.emoji-modal .modal-footnote-link');
+    const action = document.querySelector('.emoji-modal .management-actions button');
+    const l = link.getBoundingClientRect();
+    const a = action.getBoundingClientRect();
+    return {
+      text: link.textContent.trim(),
+      isAction: link.classList.contains('modal-action'),
+      smaller: parseFloat(getComputedStyle(link).fontSize) < parseFloat(getComputedStyle(action).fontSize),
+      rightOfAction: l.left >= a.right,
+      sharesRow: l.top < a.bottom && l.bottom > a.top
+    };
+  });
+  assert.equal(docsLink.text, 'View Docs on GitHub', 'The dialog still offers the project link');
+  assert.equal(docsLink.isAction, false, 'but no longer as a full-size action');
+  assert.equal(docsLink.smaller, true, 'The link is drawn smaller than the action beside it');
+  assert.equal(docsLink.rightOfAction, true, 'and sits at the end of that row');
+  assert.equal(docsLink.sharesRow, true, 'sharing it rather than taking a row of its own');
+  // Portrait is meant to fit and landscape is not, which is the pair the three viewports
+  // below hold: a small phone in portrait shows all of it, the smallest portrait window the
+  // dialog is built for shows all of it too, and a phone held sideways scrolls instead of
+  // shrinking its grid to unreadable cells.
+  await iconPage.setViewport({ width: 320, height: 568 });
+  const smallPhoneDialog = await iconPage.evaluate(measureDialog);
+  assert.equal(
+    smallPhoneDialog.scrollable,
+    false,
+    `A small phone in portrait still fits without scrolling: ${JSON.stringify(smallPhoneDialog)}`
+  );
+  await iconPage.setViewport({ width: 320, height: 460 });
+  const tinyPhoneDialog = await iconPage.evaluate(measureDialog);
+  assert.equal(
+    tinyPhoneDialog.scrollable,
+    false,
+    `The smallest supported portrait window still fits: ${JSON.stringify(tinyPhoneDialog)}`
+  );
+  await iconPage.setViewport({ width: 700, height: 360 });
+  const landscapeDialog = await iconPage.evaluate(measureDialog);
+  assert.equal(
+    landscapeDialog.scrollable,
+    true,
+    `A landscape window scrolls rather than clipping the controls: ${JSON.stringify(landscapeDialog)}`
+  );
   await iconPage.setViewport({ width: 1000, height: 700 });
   await iconPage.evaluate(() => window.scrollTo(0, 0));
   await iconPage.evaluate(() => {
@@ -1892,6 +1944,16 @@ try {
     null,
     'and the browser that made the choice stops mirroring it'
   );
+  // The dialog stays open, so it has to say what the icon is now: the emoji that was just
+  // given up is no longer selected or previewed, and the shipped mark stands in its place.
+  const restoredPicker = await iconPage.evaluate(() => ({
+    selected: document.querySelectorAll('.emoji-btn.selected').length,
+    glyph: document.querySelector('.emoji-preview-glyph')?.textContent?.trim() ?? null,
+    mark: Boolean(document.querySelector('.emoji-preview-mark'))
+  }));
+  assert.equal(restoredPicker.selected, 0, 'Restore Default leaves nothing selected in the grid');
+  assert.equal(restoredPicker.glyph, null, 'and stops previewing the emoji that was given up');
+  assert.equal(restoredPicker.mark, true, 'showing the shipped mark as what the icon is now');
 
   // A third browser, on an instance whose choice has just been removed: it is told there is
   // nothing to inherit, and the shipped mark is what it draws — the other half of "the

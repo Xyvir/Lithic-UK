@@ -3879,6 +3879,10 @@ import { backupFileName, collectInstanceBackup, mergeBookmarks, parseInstanceBac
   async function restoreDefaultInstanceIcon(): Promise<void> {
     clearInstanceEmoji();
     brandEmoji = '';
+    // The dialog stays open, so it has to say what the icon is now: nothing selected in
+    // the grid, and the preview above it showing the shipped mark instead of the emoji
+    // that was just given up.
+    emojiChoice = '';
     applyFavicon(null);
     // The set changed here too, and the header and the tab read those files rather than the
     // choice: the same doorbell the save path rings, for the same reason. The delay inside
@@ -6413,7 +6417,13 @@ import { backupFileName, collectInstanceBackup, mergeBookmarks, parseInstanceBac
         -->
         {#if isSelfHost()}
         <p>{copy.dialogs.icon.intro}</p>
-        <div class="emoji-preview" aria-hidden="true">{emojiChoice || '🎨'}</div>
+        <div class="emoji-preview" aria-hidden="true">
+          {#if emojiChoice}
+            <span class="emoji-preview-glyph">{emojiChoice}</span>
+          {:else}
+            <img class="emoji-preview-mark" src={mstile150} alt="" />
+          {/if}
+        </div>
         <div class="emoji-grid" role="listbox" aria-label={copy.dialogs.icon.chooseAria}>
           {#each emojiGrid as emoji}
             <button
@@ -6437,8 +6447,14 @@ import { backupFileName, collectInstanceBackup, mergeBookmarks, parseInstanceBac
           its business rather than as part of the icon choice above.
         -->
         <div class="modal-actions management-actions">
-          <a class="modal-action secondary" href={PROJECT_URL} target="_blank" rel="noreferrer" title={copy.dialogs.icon.docsTitle} on:click={(event) => openExternalLink(event, PROJECT_URL)}>{copy.dialogs.icon.docs}</a>
           <button class="modal-action secondary" disabled={backupBusy} on:click={() => downloadInstanceBackup('manage')} title={copy.dialogs.icon.backupTitle}>{backupBusy ? '…' : copy.dialogs.icon.backup}</button>
+          <!--
+            The way out to the project as a small link at the end of the row rather than a
+            third full-width button: the dialog has two jobs (the icon and the backup) and
+            this is neither of them. It is drawn in every mode, so it stays the desktop
+            app's only way out, since that mode draws no footer link.
+          -->
+          <a class="modal-footnote-link" href={PROJECT_URL} target="_blank" rel="noreferrer" title={copy.dialogs.icon.docsTitle} on:click={(event) => openExternalLink(event, PROJECT_URL)}>{copy.dialogs.icon.docs}</a>
         </div>
         {#if backupStatus}<p class="status-line" role="status">{backupStatus}</p>{/if}
       </div>

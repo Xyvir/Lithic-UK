@@ -324,7 +324,7 @@ const en = {
     icon: {
       closeAria: 'Close instance management',
       title: 'Instance Management',
-      intro: 'This icon belongs to the instance. Everyone who opens this address sees it.',
+      intro: 'Select an icon to personalize this Lithic instance.',
       chooseAria: 'Choose an instance icon',
       saving: 'Saving…',
       savingProgress: (saved: number, total: number) => `Saving… (${saved} of ${total})`,
