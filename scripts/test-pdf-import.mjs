@@ -55,8 +55,8 @@ function loadPdfImportPlugin() {
       drawImage: () => {},
       getImageData: () => ({ data: [220, 25, 20, 255] }),
     }),
-    toDataURL(type) {
-      canvasRequests.push(type);
+    toDataURL(type, quality) {
+      canvasRequests.push([type, quality]);
       return `data:${type};base64,rasterized-pdf-page`;
     },
   };
@@ -100,7 +100,7 @@ function loadPdfImportPlugin() {
   return { listeners, tiddlers, canvasRequests, errors, canvas };
 }
 
-test('PDF import embeds a broadly supported raster image in its whiteboard page', async () => {
+test('PDF import embeds a compressed raster image in its whiteboard page', async () => {
   const { listeners, tiddlers, canvasRequests, errors, canvas } = loadPdfImportPlugin();
   const file = {
     name: 'raster-regression.pdf',
@@ -121,7 +121,7 @@ test('PDF import embeds a broadly supported raster image in its whiteboard page'
   }
 
   assert.deepEqual(errors, [], 'the importer should finish without reporting an error');
-  assert.deepEqual(canvasRequests, ['image/png'], 'PDF pages must use the universally supported PNG canvas output');
+  assert.deepEqual(canvasRequests, [['image/webp', 0.75]], 'PDF pages must use WebP so a deck does not embed PNG-sized pages');
   assert.deepEqual(canvas.getContext('2d').getImageData().data, [220, 25, 20, 255], 'the canvas should contain rendered page pixels');
 
   const container = tiddlers.get('raster-regression');
@@ -135,8 +135,8 @@ test('PDF import embeds a broadly supported raster image in its whiteboard page'
   const document = JSON.parse(whiteboard.fields.text).document;
   const asset = Object.values(document.assets)[0];
   const shape = Object.values(document.pages.page.shapes)[0];
-  assert.equal(asset.fileName, 'page_1.png');
-  assert.match(asset.src, /^data:image\/png;base64,/);
+  assert.equal(asset.fileName, 'page_1.webp');
+  assert.match(asset.src, /^data:image\/webp;base64,/);
   assert.deepEqual(shape.size, [600, 800]);
   assert.equal(document.assets[shape.assetId].src, asset.src);
 });

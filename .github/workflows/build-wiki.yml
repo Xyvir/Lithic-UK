@@ -184,6 +184,13 @@ jobs:
             echo "::error::wikitext uglifier damaged $WIKITEXT_DAMAGE tiddler sites (collapsed attribute/macro whitespace) - \$:/config/flibbles/uglify/text/vnd.tiddlywiki must be 'no'. See agents.md."
             exit 1
           fi
+          # The PDF import plugin carries its own pdfjs-dist bundles, already minified by
+          # terser. Re-minifying them is what turned every imported PDF page white from
+          # build-2026.09.16-1658 onward, so $:/config/flibbles/uglify/blacklist keeps the
+          # three tiddlers out of the pass. A blacklist entry matches an exact title, so
+          # the plugin's own text is what gets asserted: rename a tiddler, or lose the
+          # config tiddler, and this fails here rather than in somebody's whiteboard.
+          node scripts/check-pdf-plugin-unminified.mjs wiki/output/index.html
 
       - name: Rename Output
         if: ${{ env.BUILD_CONFIG != 'light' }}
