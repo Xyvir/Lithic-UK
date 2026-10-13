@@ -24,8 +24,14 @@ echo ""
 
 # --- Install core dependencies ---
 echo "Installing core dependencies..."
-apt-get update -qq
-apt-get install -y -qq curl tar jq git inotify-tools
+# A failing third-party apt source must not abort the install: the packages
+# below are served by Debian's own mirrors.
+apt-get update -qq || echo "WARNING: Some apt sources failed to update (errors above); continuing."
+if ! apt-get install -y -qq curl tar jq git inotify-tools; then
+  echo "ERROR: Could not install required packages (curl tar jq git inotify-tools)."
+  echo "        Check your network and apt sources, then re-run this installer."
+  exit 1
+fi
 
 # --- Fetch latest release URL ---
 echo "Fetching latest release from GitHub..."
