@@ -460,11 +460,17 @@ try {
       const first = card?.querySelector('.action-button');
       if (!card || !tile || !first) return null;
       const tileBox = tile.getBoundingClientRect();
+      const labelFont = (selector) => {
+        const node = card.querySelector(selector);
+        return node ? getComputedStyle(node).fontSize : null;
+      };
       return {
         overflow: card.scrollWidth - card.clientWidth,
         tileWidth: Math.round(tileBox.width),
         sameLine: Math.round(tileBox.top) === Math.round(first.getBoundingClientRect().top),
-        insideCard: tileBox.right <= card.getBoundingClientRect().right + 0.5
+        insideCard: tileBox.right <= card.getBoundingClientRect().right + 0.5,
+        mountFont: labelFont('.mount-label'),
+        newBlankFont: labelFont('.new-blank-label')
       };
     });
   };
@@ -476,6 +482,20 @@ try {
   assert.equal(tinyRow?.insideCard, true, 'At 320px the tile stays inside the card rather than hanging past its edge');
   assert.equal(tinyRow?.sameLine, false, '...by taking a line of its own, since the text buttons do not shrink below their labels');
   assert.equal(tinyRow?.overflow, 0, '...and the row still does not overflow');
+
+  // The two text buttons are one pair of prongs, so the row sets them in one size. The
+  // mount label shrank first, because the tile shares its row, and the new blank label
+  // used to keep the card's own size beside it: a step larger than its neighbour, crowded
+  // in its own box on the one width where the row has least room. Whether the tile is in
+  // the row is a fact about the page, so neither label's size waits on it.
+  assert.equal(phoneRow?.newBlankFont, phoneRow?.mountFont, 'At phone width the two labels are set in one size');
+  assert.equal(tinyRow?.newBlankFont, tinyRow?.mountFont, '...and at 320px, the narrowest the pair gets');
+  const wideRow = await readActionRow(900);
+  assert.equal(wideRow?.newBlankFont, wideRow?.mountFont, 'A wide launcher sets both labels in the card\u2019s own size');
+  assert.ok(
+    parseFloat(phoneRow?.newBlankFont) < parseFloat(wideRow?.newBlankFont),
+    `...which is a step larger than the phone row\u2019s (${phoneRow?.newBlankFont} against ${wideRow?.newBlankFont})`
+  );
 
   // While a title is being typed the two tiles above stand down and the field takes
   // the row. They are not dropped from the app, only lent out for the length of that

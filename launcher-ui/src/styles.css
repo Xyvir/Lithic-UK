@@ -1384,7 +1384,12 @@ a.modal-action { text-decoration: none; text-align: center; color: var(--lithic-
   .action-pair .action-button { flex: 1 1 auto; }
   .action-pair .bookmark-button { flex: 0 0 44px; width: 44px; }
   .action-pair .mount-button { flex: 1 1 0; min-width: 0; padding-right: 6px; padding-left: 6px; font-size: 0.82rem; }
-  .action-pair .new-blank-button { flex: 1 1 0; min-width: 0; }
+  /* The two text buttons are one pair, so both labels are set at the size the mount button
+   * already uses here: this row is at its narrowest, and a label a step larger than its
+   * neighbour's crowds its own box and makes the pair read as two different controls. Set
+   * unconditionally, because whether the bookmark tile is in the row is a fact about the
+   * page rather than a reason for the two labels to differ. */
+  .action-pair .new-blank-button { flex: 1 1 0; min-width: 0; font-size: 0.82rem; }
   /*
    * A title being typed is the whole point of the row while that dialog is up, so
    * the mount button and the bookmark tile stand down and the field takes their
