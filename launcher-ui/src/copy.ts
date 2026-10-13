@@ -239,6 +239,18 @@ const en = {
         loading: 'Reading the history…',
         none: 'No commits yet.',
         unreadable: 'The history could not be read.',
+        /**
+         * The three pills a row wears, in place of the sentence git stored with it. They are
+         * tags rather than sentences, which is why they are one word long; each title carries
+         * the explanation and then the commit's own message as the raw fact behind it.
+         */
+        pillAuto: 'auto',
+        pillAutoTitle: (message: string) => `Lithic made this save on its own. ${message}`,
+        pillRevert: 'Revert',
+        pillRevertTitle: (message: string) =>
+          `Lithic made this save to go back to an earlier version. ${message}`,
+        pillOther: 'other',
+        pillOtherTitle: (message: string) => `Lithic did not make this save. ${message}`,
         revertAria: (commit: string, when: string) => `Revert the instance to ${commit} from ${when}`,
         revertTitle: 'Revert to this commit',
         confirmTitle: (commit: string) => `Revert to ${commit}?`,
@@ -907,6 +919,14 @@ const es: Copy = {
         loading: 'Leyendo el historial…',
         none: 'Aún no hay commits.',
         unreadable: 'No se pudo leer el historial.',
+        /** The three pills, and the commit's own message after each explanation. */
+        pillAuto: 'auto',
+        pillAutoTitle: (message: string) => `Lithic hizo este guardado por su cuenta. ${message}`,
+        pillRevert: 'vuelta',
+        pillRevertTitle: (message: string) =>
+          `Lithic lo escribió al volver a una versión anterior. ${message}`,
+        pillOther: 'otro',
+        pillOtherTitle: (message: string) => `Este guardado no lo hizo Lithic. ${message}`,
         revertAria: (commit: string, when: string) => `Volver la instancia a ${commit} desde ${when}`,
         revertTitle: 'Volver a este commit',
         confirmTitle: (commit: string) => `¿Volver a ${commit}?`,
@@ -1516,6 +1536,14 @@ const fr: Copy = {
         loading: 'Lecture de l’historique…',
         none: 'Aucun commit pour l’instant.',
         unreadable: 'L’historique n’a pas pu être lu.',
+        /** The three pills, and the commit's own message after each explanation. */
+        pillAuto: 'auto',
+        pillAutoTitle: (message: string) => `Lithic a fait cet enregistrement de lui-même. ${message}`,
+        pillRevert: 'retour',
+        pillRevertTitle: (message: string) =>
+          `Lithic l’a écrit en revenant à une version antérieure. ${message}`,
+        pillOther: 'autre',
+        pillOtherTitle: (message: string) => `Cet enregistrement ne vient pas de Lithic. ${message}`,
         revertAria: (commit: string, when: string) => `Revenir l’instance à ${commit} depuis ${when}`,
         revertTitle: 'Revenir à ce commit',
         confirmTitle: (commit: string) => `Revenir à ${commit} ?`,
@@ -2122,6 +2150,14 @@ const de: Copy = {
         loading: 'Verlauf wird gelesen…',
         none: 'Noch keine Commits.',
         unreadable: 'Der Verlauf konnte nicht gelesen werden.',
+        /** The three pills, and the commit's own message after each explanation. */
+        pillAuto: 'auto',
+        pillAutoTitle: (message: string) => `Lithic hat diese Speicherung selbst gemacht. ${message}`,
+        pillRevert: 'zurück',
+        pillRevertTitle: (message: string) =>
+          `Lithic hat sie beim Zurückgehen geschrieben. ${message}`,
+        pillOther: 'andere',
+        pillOtherTitle: (message: string) => `Diese Speicherung kam nicht von Lithic. ${message}`,
         revertAria: (commit: string, when: string) => `Instanz auf ${commit} vom ${when} zurücksetzen`,
         revertTitle: 'Auf diesen Commit zurücksetzen',
         confirmTitle: (commit: string) => `Auf ${commit} zurücksetzen?`,

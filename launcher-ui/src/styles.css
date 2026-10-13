@@ -1933,11 +1933,13 @@ body.drag-over::after {
  * The entry box, the chevron, the distance beside it and the stamp are the version list's own
  * rules (`.history-entry`, `.history-link`, `.history-gap`, `.history-time`, and the download
  * icon's box), because the two lists are the same kind of thing read for the same reason. What
- * a commit adds is the id git names it by and the sentence stored with it, which is all this
- * sheet adds: the id in the faint grey the size column wears, the subject in the ink the stamp
- * wears, and the stamp demoted to the second size because it is the row's third fact rather
- * than its first. The list is capped shorter than the version list's own because this one sits
- * under the sync controls instead of being the whole dialog.
+ * a commit adds is the id git names it by and the pill its message earns it, which is all this
+ * sheet adds: the id in the faint grey the size column wears, and the pill in the version
+ * trail's own badge (`.history-badge` and its two tones), because a message Lithic wrote
+ * itself says which kind of save a row is and the sentence is worth less than the kind. The
+ * stamp is demoted to the second size for the same reason: with the pill in the row it is no
+ * longer the first thing read. The list is capped shorter than the version list's own because
+ * this one sits under the sync controls instead of being the whole dialog.
  */
 .trail-panel { margin-top: 16px; }
 .trail-title {
@@ -1950,11 +1952,14 @@ body.drag-over::after {
 .trail-list { list-style: none; margin: 0; padding: 0; max-height: 34vh; overflow: auto; }
 .trail-note { margin: 0; color: var(--lithic-ink-faint); font-size: 0.8em; }
 .trail-hash { flex: none; color: var(--lithic-ink-faint); font-size: 0.76em; white-space: nowrap; }
-.trail-subject {
-  flex: 1; min-width: 0;
-  color: var(--lithic-ink); font-size: 0.84em;
-  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
-}
+/*
+ * The pill, and the row's slack. It is the flexible cell the sentence used to be, without
+ * being flexible itself: a one-word tag stretched across the row would read as a field rather
+ * than as a pill, so the badge keeps its own width and the room left over is taken by its
+ * right margin. Which is what leaves the id and the pill together on the left, where the row
+ * is read from, and the stamp and the revert mark pinned to the right.
+ */
+.trail-badge { margin-right: auto; }
 /* Written after `.history-time`, which it shares an element with: the two declarations it
    changes are the ones that matter (the stamp is not the flexible cell here, and it is the
    quieter of the row's three facts). */
@@ -2158,12 +2163,13 @@ body.drag-over::after {
 .emoji-modal .emoji-grid + .status-line { margin: 4px 0 0; }
 .emoji-modal .modal-actions { margin-top: 10px; }
 .emoji-modal .management-actions { margin-top: 10px; padding-top: 10px; }
-/* The project link, the one control in this dialog that is not one of its jobs: a small
- * link at the end of the row rather than a third full-width button. The action beside it
- * grows to fill what is left, which is what puts this in the corner, and `margin-left:
- * auto` keeps it there if the row wraps on a narrow phone. */
-.modal-footnote-link { flex: 0 0 auto; margin-left: auto; align-self: center; font-size: 0.75rem; line-height: 1.2; color: var(--lithic-ink-muted); text-decoration: none; }
-.modal-footnote-link:hover, .modal-footnote-link:focus-visible { color: var(--lithic-ink); text-decoration: underline; }
+/* The project link, the one control in this dialog that is not one of its jobs: a footnote on
+ * a line of its own under the backup button, at the dialog's bottom right, rather than a third
+ * full-width button or a word hung off the end of somebody else's row. `flex: 1 1 100%` is what
+ * puts it on that line at every width, `text-align: right` puts it at that line's right end,
+ * and the light blue is the tone the launcher reads as a link, so it needs no underline. */
+.modal-footnote-link { flex: 1 1 100%; margin: 0; text-align: right; font-size: 0.75rem; line-height: 1.2; color: var(--lithic-accent-light); text-decoration: none; }
+.modal-footnote-link:hover, .modal-footnote-link:focus-visible { color: var(--lithic-accent); text-decoration: underline; }
 .emoji-btn {
   display: grid; place-items: center; width: 100%; aspect-ratio: 1; min-width: 0; padding: 0; border: 1px solid transparent;
   border-radius: 6px; background: transparent; font-size: clamp(0.9rem, 6vw, 1.4rem); line-height: 1; cursor: pointer;
@@ -2210,4 +2216,43 @@ body.drag-over::after {
  * dialog scrolls, which is the fallback the rules above deliberately keep. */
 @media (max-width: 600px) and (orientation: portrait) and (max-height: 460px) {
   .emoji-modal .emoji-grid { max-width: min(100%, 10.5rem); }
+}
+/*
+ * Instance Management, centred rather than hung from the top. It is the one dialog that fits a
+ * portrait phone whole, because the steps above give its grid back height until it does, so it
+ * is the one where equal space above and below is the right answer: a dialog smaller than the
+ * screen reads as an object placed in it. Every other dialog keeps the overlay's top alignment
+ * (`@media (max-width: 600px)`), since a list that scrolls wants its first row where the eye
+ * already is. A window too short for it has already stepped it down rather than overflowing it,
+ * and `.launcher-modal` still scrolls as the last resort, so nothing is pushed out of reach.
+ */
+@media (max-width: 600px) and (orientation: portrait) {
+  .modal-overlay.emoji-overlay { align-items: center; }
+}
+/*
+ * The sync dialog with a trail in it, on a portrait phone: the modal takes the whole window and
+ * hands the height that is left to the list. The trail is the only thing in this dialog that
+ * scrolls, so the space under a short modal was space nobody was using, and here it becomes rows
+ * instead of a dim band below the Disconnect button. The panel is the flexible child because
+ * every line above it (the heading, the folder, the repository, the last sync) is a fixed one,
+ * and the list keeps a floor of a few rows: a window too short for even that scrolls the dialog
+ * rather than crushing the history into a sliver.
+ */
+@media (max-width: 600px) and (orientation: portrait) {
+  .launcher-modal.git-sync-modal.has-trail {
+    display: flex;
+    flex-direction: column;
+    height: calc(100dvh - 24px);
+  }
+  .git-sync-modal.has-trail .trail-panel {
+    display: flex;
+    flex-direction: column;
+    flex: 1 1 auto;
+    min-height: 0;
+  }
+  .git-sync-modal.has-trail .trail-list {
+    flex: 1 1 auto;
+    min-height: 7rem;
+    max-height: none;
+  }
 }

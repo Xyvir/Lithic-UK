@@ -51,7 +51,7 @@ import { backupFileName, collectInstanceBackup, mergeBookmarks, parseInstanceBac
   import { copyText } from './clipboard';
   import { syncIndicator, shouldHeartbeat, healthFailure, verifiedAge, SYNC_PULSE_MS, type SyncIndicator, type HealthState } from './git-sync-health';
   import { gapCount, versionGap } from './history-gap';
-  import { TRAIL_LIMIT, parseTrailCommits, trailGapLabel, trailRows as trailRowList, type TrailCommit, type TrailRow } from './instance-trail';
+  import { TRAIL_LIMIT, parseTrailCommits, trailGapLabel, trailRows as trailRowList, type TrailCommit, type TrailPill, type TrailRow } from './instance-trail';
   import { createServerRepo, disconnectServerSync, fetchServerSyncHistory, fetchServerSyncStatus, listServerRepos, pollServerDeviceToken, requestServerDeviceCode, revertServerSync, serverSyncIndicator, setupServerSync, type ServerSyncStatus } from './server-git-sync';
   import { serializeJsonToLith, parseLithToJSON } from './lithic-format';
   // Inlined as a base64 data URL (assetsInlineLimit: Infinity) so the brand
@@ -1409,8 +1409,27 @@ import { backupFileName, collectInstanceBackup, mergeBookmarks, parseInstanceBac
   /** Which repository the rows in hand came from, so a reopen does not re-read it. */
   let trailSource = '';
 
-  /** The rows the list draws: each commit stamped, and its distance from the row above. */
-  $: trailRows = trailRowList(trailCommits);
+  /**
+   * A row's pill: what the commit was, in one of three words.
+   *
+   * The tones are the version trail's own badge tones, so the two lists are not learnt twice:
+   * green for a save Lithic made on its own, the accent blue for a deliberate go-back, and the
+   * quiet grey for a commit nothing here recognises. Each title carries the explanation and then
+   * the commit's own message, which is the fact a pill cannot state and the row no longer prints.
+   */
+  function trailBadge(kind: TrailPill, message: string) {
+    const trail = copy.dialogs.gitSync.trail;
+    const raw = message.trim();
+    if (kind === 'auto') return { label: trail.pillAuto, tone: 'sync', title: trail.pillAutoTitle(raw).trim() };
+    if (kind === 'revert') return { label: trail.pillRevert, tone: '', title: trail.pillRevertTitle(raw).trim() };
+    return { label: trail.pillOther, tone: 'delta', title: trail.pillOtherTitle(raw).trim() };
+  }
+
+  /**
+   * The rows the list draws: each commit stamped, its distance from the row above, and the pill
+   * its own message earns it.
+   */
+  $: trailRows = trailRowList(trailCommits).map((row) => ({ ...row, badge: trailBadge(row.pill, row.summary) }));
 
   /**
    * Whether there is a screen to draw a trail on.
@@ -5973,7 +5992,14 @@ import { backupFileName, collectInstanceBackup, mergeBookmarks, parseInstanceBac
               {/if}
               <li class="history-entry">
                 <span class="trail-hash" title={row.hash}>{row.short}</span>
-                <span class="trail-subject" title={row.summary || row.short}>{row.summary}</span>
+                <!--
+                  What the commit was, rather than the sentence git stored with it: every
+                  message in this history was written by Lithic itself, so the row can say
+                  which kind of save it was at a glance. The sentence is still there on the
+                  pill's own tooltip, which is where a message nobody can read at a glance
+                  belongs. The words and their tones are the deck's (`trailBadge`).
+                -->
+                <span class="history-badge trail-badge {row.badge.tone}" title={row.badge.title}>{row.badge.label}</span>
                 <span class="history-time trail-time">{row.stamp}</span>
                 <!--
                   The revert glyph, supplied as artwork rather than redrawn: the history trail's
@@ -6002,7 +6028,7 @@ import { backupFileName, collectInstanceBackup, mergeBookmarks, parseInstanceBac
   {/snippet}
   {#if showGitSyncModal}
     <div class="modal-overlay" role="presentation" on:click={(event) => event.currentTarget === event.target && closeGitSyncModal()}>
-      <div class="launcher-modal git-sync-modal" role="dialog" aria-modal="true" aria-labelledby="gitsync-title">          <button class="modal-close" aria-label={copy.dialogs.gitSync.closeAria} on:click={closeGitSyncModal}>×</button>
+      <div class="launcher-modal git-sync-modal" class:has-trail={trailOffered && trailRows.length > 0} role="dialog" aria-modal="true" aria-labelledby="gitsync-title">          <button class="modal-close" aria-label={copy.dialogs.gitSync.closeAria} on:click={closeGitSyncModal}>×</button>
         <h2 id="gitsync-title">{copy.dialogs.gitSync.title}</h2>
         {#if gitSyncFolderEditable}
           <!--
@@ -6534,7 +6560,7 @@ import { backupFileName, collectInstanceBackup, mergeBookmarks, parseInstanceBac
     </div>
   {/if}
   {#if showEmojiPicker}
-    <div class="modal-overlay" role="presentation" on:click={(event) => event.currentTarget === event.target && closeInstanceManagement()}>
+    <div class="modal-overlay emoji-overlay" role="presentation" on:click={(event) => event.currentTarget === event.target && closeInstanceManagement()}>
       <div class="launcher-modal emoji-modal" role="dialog" aria-modal="true" aria-labelledby="emoji-title">
         <button class="modal-close" aria-label={copy.dialogs.icon.closeAria} on:click={closeInstanceManagement}>×</button>
         <h2 id="emoji-title">{copy.dialogs.icon.title}</h2>

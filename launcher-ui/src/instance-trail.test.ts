@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { parseTrailCommits, trailGapLabel, trailRows } from './instance-trail.ts';
+import { parseTrailCommits, trailGapLabel, trailPill, trailRows } from './instance-trail.ts';
 import { utcStamp } from './wiki-history.ts';
 
 /** The newest commit in every fixture below, so the timestamps are readable as a story. */
@@ -62,6 +62,49 @@ test('rows carry the wiki trail stamp, and the gap is measured from the row abov
   assert.equal(rows[0].gap, null);
   // Ten minutes separate the two, stated as the newer row's own distance.
   assert.deepEqual(rows[1].gap, { unit: 'minutes', value: 10 });
+  // And each row carries the kind its own message earns it, so the list draws a pill rather
+  // than a sentence that has to be read to be understood. "Second" is nobody's shape.
+  assert.equal(rows[0].pill, 'other');
+  assert.equal(rows[1].pill, 'other');
+});
+
+test('a commit wears the pill its own message earns it', () => {
+  // Lithic's own writers, each spelled the way the thing that writes it spells it: the
+  // self-host timer, the first push, the setup commits, the shim's save, a safety copy taken
+  // before a clobber, a Lith copied into the folder, and one file saved by the server.
+  for (const message of [
+    'Automated Sync: 2026-10-11 12:00:00',
+    'Automated Sync: GitHub Clobber (Source of Truth applied)',
+    'Initial Sync: notes.lith',
+    'Initial sync from Lithic',
+    'System: Initialize .gitignore',
+    'System: finalize GitHub sync',
+    'Lithic backup',
+    'CONFLICT BACKUP: Local state at 2026-10-11 12:00:00',
+    'Add three.lith from Lithic',
+    'Save notes.lith',
+    'Save diary.tid'
+  ]) {
+    assert.equal(trailPill(message), 'auto', `${message} is a save Lithic made on its own`);
+  }
+  // A go-back is two commits, one of them the save made so the move cannot discard an edit,
+  // and the server's restore of a single file to an earlier revision is the same act.
+  for (const message of ['Revert to bbbbbbb', 'Save before revert', 'Restore notes.lith to abc1234']) {
+    assert.equal(trailPill(message), 'revert', `${message} is part of a go-back`);
+  }
+  // Everything else is somebody's own commit, which is the only safe reading of a message
+  // this module does not recognise: a wrong "Lithic did this" is worse than a plain word.
+  for (const message of [
+    'Fix the typo in chapter three',
+    'wip',
+    '',
+    '   ',
+    'Save',
+    'Reverted the settings change',
+    'automated sync: lower case'
+  ]) {
+    assert.equal(trailPill(message), 'other', `${JSON.stringify(message)} is not a message Lithic writes`);
+  }
 });
 
 test('the distance is one unit, the greatest that fits, and nothing when there is no gap', () => {

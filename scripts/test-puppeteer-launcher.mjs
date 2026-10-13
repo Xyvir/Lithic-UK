@@ -952,9 +952,10 @@ try {
    * The instance's history trail as the dialog draws it.
    *
    * Read from the DOM rather than from the stub's state, because what this section is about is
-   * what a person sees: the id git prints, the sentence stored with it, the stamp, the distance
-   * between two rows, and the aria-label each revert button carries. The glyph's own viewBox is
-   * read too, since "the same size as the download icon" is a claim about the box it is drawn in.
+   * what a person sees: the id git prints, the pill its own message earns it (with the message
+   * still readable on that pill's tooltip), the stamp, the distance between two rows, and the
+   * aria-label each revert button carries. The glyph's own viewBox is read too, since "the same
+   * size as the download icon" is a claim about the box it is drawn in.
    */
   const readTrail = (page) => page.evaluate(() => {
     const panel = document.querySelector('.git-sync-modal .trail-panel');
@@ -968,7 +969,8 @@ try {
         return {
           hash: row.querySelector('.trail-hash')?.textContent?.trim() ?? '',
           whole: row.querySelector('.trail-hash')?.getAttribute('title') ?? '',
-          subject: row.querySelector('.trail-subject')?.textContent?.trim() ?? '',
+          badge: row.querySelector('.trail-badge')?.textContent?.trim() ?? '',
+          badgeTitle: row.querySelector('.trail-badge')?.getAttribute('title') ?? '',
           stamp: row.querySelector('.history-time')?.textContent?.trim() ?? '',
           revert: button?.getAttribute('aria-label') ?? null,
           glyph: button?.querySelector('svg')?.getAttribute('viewBox') ?? null,
@@ -1090,13 +1092,18 @@ try {
     `Live self-host: the trail names itself above the rows: ${JSON.stringify(unsyncedTrail)}`
   );
   assert.deepEqual(
-    unsyncedTrail.rows.map((row) => [row.hash, row.subject, row.stamp]),
+    unsyncedTrail.rows.map((row) => [row.hash, row.badge, row.stamp]),
     [
-      ['ccccccc', 'Add three.lith from Lithic', '2026-10-11 14:30:00 UTC'],
-      ['bbbbbbb', 'Automated Sync: 2026-10-11 12:00:00', '2026-10-11 12:00:00 UTC'],
-      ['aaaaaaa', 'Initial Sync: notes.lith', '2026-10-10 09:15:00 UTC']
+      ['ccccccc', 'auto', '2026-10-11 14:30:00 UTC'],
+      ['bbbbbbb', 'auto', '2026-10-11 12:00:00 UTC'],
+      ['aaaaaaa', 'auto', '2026-10-10 09:15:00 UTC']
     ],
-    'Live self-host: the commits newest first, by the id git prints, the sentence stored with it, and the version trail’s own stamp'
+    'Live self-host: the commits newest first, by the id git prints, the pill its own message earns it rather than the sentence itself, and the version trail’s own stamp'
+  );
+  assert.equal(
+    unsyncedTrail.rows[1].badgeTitle,
+    'Lithic made this save on its own. Automated Sync: 2026-10-11 12:00:00',
+    `Live self-host: with the sentence git stored with the commit kept on the pill's own tooltip, so a row can say more than its kind: ${unsyncedTrail.rows[1].badgeTitle}`
   );
   assert.equal(
     unsyncedTrail.rows[0].whole,
@@ -1712,9 +1719,19 @@ try {
   );
   const afterRevert = await readTrail(livePage);
   assert.equal(
-    afterRevert.rows[0].subject,
-    'Revert to bbbbbbb',
-    `Live self-host: and the commit it added is the newest row: ${JSON.stringify(afterRevert.rows.map((row) => row.subject))}`
+    afterRevert.rows[0].badge,
+    'Revert',
+    `Live self-host: and the commit it added is the newest row, wearing the revert pill rather than being read out: ${JSON.stringify(afterRevert.rows.map((row) => row.badge))}`
+  );
+  assert.equal(
+    afterRevert.rows[0].badgeTitle,
+    'Lithic made this save to go back to an earlier version. Revert to bbbbbbb',
+    `Live self-host: with the commit it went back to named on that pill's tooltip: ${afterRevert.rows[0].badgeTitle}`
+  );
+  assert.deepEqual(
+    afterRevert.rows.slice(1).map((row) => row.badge),
+    ['auto', 'auto', 'auto'],
+    `Live self-host: and the three it went back over are still Lithic's own saves, so nothing in the history was rewritten: ${JSON.stringify(afterRevert.rows.map((row) => row.badge))}`
   );
   assert.equal(
     afterRevert.rows.length,
@@ -1952,27 +1969,50 @@ try {
   assert.equal(mobileDialog.actionsReachable, true, 'The mobile management buttons remain visible and reachable');
   assert.equal(mobileDialog.footnoteReachable, true, 'and the project footnote sits inside the dialog as well');
   assert.equal(mobileDialog.scrollable, false, 'The compact mobile dialog fits without requiring nested scrolling');
-  // The project link is a footnote rather than a third action: smaller than the button
-  // beside it and at the end of that row, not in a row of its own, which is what makes it
-  // cost no height. It is still the desktop app's only way out to the repository.
+  // The project link is a footnote rather than a third action: smaller than the buttons
+  // above it, on a line of its own at the dialog's bottom right, and in the palette's light
+  // accent so that it reads as a link without an underline. It is still the desktop app's
+  // only way out to the repository.
   const docsLink = await iconPage.evaluate(() => {
     const link = document.querySelector('.emoji-modal .modal-footnote-link');
     const action = document.querySelector('.emoji-modal .management-actions button');
     const l = link.getBoundingClientRect();
     const a = action.getBoundingClientRect();
+    // The colour the link is meant to wear, resolved from the palette block rather than
+    // written here, so a palette change moves the expectation with the sheet.
+    const probe = document.createElement('span');
+    probe.style.color = 'var(--lithic-accent-light)';
+    document.body.appendChild(probe);
+    const accent = getComputedStyle(probe).color;
+    probe.remove();
     return {
       text: link.textContent.trim(),
       isAction: link.classList.contains('modal-action'),
       smaller: parseFloat(getComputedStyle(link).fontSize) < parseFloat(getComputedStyle(action).fontSize),
-      rightOfAction: l.left >= a.right,
-      sharesRow: l.top < a.bottom && l.bottom > a.top
+      color: getComputedStyle(link).color,
+      accent,
+      belowAction: l.top >= a.bottom - 1,
+      // The link's own text rather than its box: the anchor is a full-width flex item, so its border box spans the row at either edge and only a Range shows where the words landed. The right edge is what the sheet asks for; the left edge is the proof the text moved.
+      textEdges: (() => { const range = document.createRange(); range.selectNodeContents(link); const t = range.getBoundingClientRect(); return { left: Math.round(t.left), right: Math.round(t.right), rowLeft: Math.round(a.left), rowRight: Math.round(a.right) }; })()
     };
   });
   assert.equal(docsLink.text, 'View Docs on GitHub', 'The dialog still offers the project link');
   assert.equal(docsLink.isAction, false, 'but no longer as a full-size action');
-  assert.equal(docsLink.smaller, true, 'The link is drawn smaller than the action beside it');
-  assert.equal(docsLink.rightOfAction, true, 'and sits at the end of that row');
-  assert.equal(docsLink.sharesRow, true, 'sharing it rather than taking a row of its own');
+  assert.equal(docsLink.smaller, true, 'The link is drawn smaller than the action above it');
+  assert.equal(docsLink.belowAction, true, 'and sits on a line of its own below that action rather than in its row');
+  assert.ok(
+    Math.abs(docsLink.textEdges.right - docsLink.textEdges.rowRight) <= 1,
+    `lined up with the right edge of the row it answers, which is the dialog's bottom right: ${JSON.stringify(docsLink.textEdges)}`
+  );
+  assert.ok(
+    docsLink.textEdges.left > docsLink.textEdges.rowLeft + 8,
+    `and standing clear of that row's left edge, so the text is what moved rather than the box: ${JSON.stringify(docsLink.textEdges)}`
+  );
+  assert.equal(
+    docsLink.color,
+    docsLink.accent,
+    `and drawn in the palette\u2019s light accent, so the footnote reads as a link without an underline: ${docsLink.color}`
+  );
   // Portrait is meant to fit and landscape is not, which is the pair the three viewports
   // below hold: a small phone in portrait shows all of it, the smallest portrait window the
   // dialog is built for shows all of it too, and a phone held sideways scrolls instead of
