@@ -3,7 +3,7 @@
   // Every word this component shows. Nothing below spells copy of its own.
   import { LOCALE_TAG, copy, type LaunchEntry } from './copy';
   import { declaresBrowserOnly, handoffQuery, LAUNCHER_QUERY_PARAM, launcherReturn, withLauncherHandoff, type LauncherMode } from './mode';
-  import { armStatusDeadlines, armStatusHold } from './status-lifetime';
+  import { armStatusClear, armStatusHold } from './status-lifetime';
   import { createFileBridge, tauriInvoke, tauriListen, saveTextVerifiably } from './file-bridge';
   import { opensInstanceInBrowser, type PlatformCapabilities } from './platform-capabilities';
   import { backupGate, orphanPill, orphanDownloadNote, type OrphanDownloadState } from './orphan-download';
@@ -228,16 +228,16 @@ import { backupFileName, collectInstanceBackup, mergeBookmarks, parseInstanceBac
   let filePath: string | undefined;
   let status = '';
   /**
-   * Whether the line has stood long enough that it is no longer claiming to be busy.
+   * Whether a line that has to stand has stopped claiming that work is happening.
    *
-   * The animated dots beside a status are the launcher saying work is happening, and every
-   * writer leaves them running, because nothing ends a sentence: a mount that succeeded, an
-   * error that was already explained, a file with no path. Past the settle time that claim is
-   * false whether or not the sentence is, so the movement stops and the sentence stays where it
-   * can still be read.
+   * The animated dots beside a status are the launcher saying work is happening. An ordinary
+   * line needs nothing done to them: it is cleared at the deadline, dots and all. A held line
+   * stays past that deadline, and this is the half of it that still has to end, because a
+   * failure that stood for the rest of the session would read as work that never finished. So
+   * the movement stops at the deadline and the sentence stays where it can still be read.
    */
   let statusSettled = false;
-  let cancelStatusDeadlines: (() => void) | null = null;
+  let cancelStatusDeadline: (() => void) | null = null;
   /**
    * The sentence the line is holding, or '' while it is an ordinary one.
    *
@@ -248,23 +248,23 @@ import { backupFileName, collectInstanceBackup, mergeBookmarks, parseInstanceBac
   let heldStatus = '';
 
   /**
-   * Start the deadlines the line now lives by, and take back the pair armed for the line it
-   * replaced. See `status-lifetime.ts` for why they exist and what they cost.
+   * Start the deadline the line now lives by, and take back the one armed for the line it
+   * replaced. See `status-lifetime.ts` for why it exists and what it costs.
    *
-   * A held line keeps the settle deadline alone and then stands until something replaces it; an
-   * ordinary one is cleared on its own. The clear is guarded by the text, like
-   * `reportAndRetire`, so an older line's deadline arriving late can never take away a sentence
-   * that arrived after it.
+   * An ordinary line is cleared at the deadline. A held line keeps that deadline's settle half
+   * alone, so the movement stops there and the sentence stands until something replaces it. The
+   * clear is guarded by the text, like `reportAndRetire`, so an older line's deadline arriving
+   * late can never take away a sentence that arrived after it.
    */
   function syncStatusDeadlines(text: string, held: string): void {
-    cancelStatusDeadlines?.();
-    cancelStatusDeadlines = null;
+    cancelStatusDeadline?.();
+    cancelStatusDeadline = null;
     statusSettled = false;
     if (!text) return;
     const settle = () => { statusSettled = true; };
-    cancelStatusDeadlines = text === held
+    cancelStatusDeadline = text === held
       ? armStatusHold({ settle })
-      : armStatusDeadlines({ settle, clear: () => { if (status === text) status = ''; } });
+      : armStatusClear({ clear: () => { if (status === text) status = ''; } });
   }
 
   /**

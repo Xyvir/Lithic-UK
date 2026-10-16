@@ -1,19 +1,18 @@
 /**
- * The status line's two deadlines.
+ * The status line's one deadline.
  *
- * The thresholds are the contract this file exists to hold, so they are asserted rather than
- * left to the source: a status line is transient by definition, and the moment it may stand for
- * longer than a minute it is the stuck line the deadline was added to prevent. The timers are
- * injected, so nothing here waits on a clock.
+ * The threshold is the contract this file exists to hold, so it is asserted rather than left to
+ * the source: a status line is transient by definition, and the moment it may stand for longer
+ * than a minute it is the stuck line the deadline was added to prevent. It also has a floor,
+ * because a line that vanishes before a reader can take it in is not a status either. The timers
+ * are injected, so nothing here waits on a clock.
  */
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
-  armStatusDeadlines,
+  armStatusClear,
   armStatusHold,
-  STATUS_CLEAR_MS,
-  STATUS_SETTLE_MS,
-  statusPhase,
+  STATUS_LIFETIME_MS,
   type StatusTimers
 } from './status-lifetime.ts';
 
@@ -51,42 +50,32 @@ function fakeTimers(): StatusTimers & {
   };
 }
 
-test('a status is transient: the line cannot outlive a minute', () => {
-  assert.ok(STATUS_SETTLE_MS > 0, 'a line must not settle before it has been drawn');
-  assert.ok(STATUS_SETTLE_MS < STATUS_CLEAR_MS, 'the movement stops before the sentence goes');
+test('a status is transient: the line cannot outlive a minute, and is not gone in a blink', () => {
+  assert.ok(STATUS_LIFETIME_MS > 0, 'a line must not go before it has been drawn');
   assert.ok(
-    STATUS_CLEAR_MS >= 30_000,
-    `clearing inside ${STATUS_CLEAR_MS}ms would take lines away while they are still being read`
+    STATUS_LIFETIME_MS >= 10_000,
+    `clearing inside ${STATUS_LIFETIME_MS}ms would take lines away before they are read`
   );
   assert.ok(
-    STATUS_CLEAR_MS <= 60_000,
-    `a status line may stand for at most a minute, and this one stands ${STATUS_CLEAR_MS}ms`
+    STATUS_LIFETIME_MS <= 60_000,
+    `a status line may stand for at most a minute, and this one stands ${STATUS_LIFETIME_MS}ms`
   );
 });
 
-test('the phase follows the two thresholds, not the animation', () => {
-  assert.equal(statusPhase(0), 'fresh');
-  assert.equal(statusPhase(STATUS_SETTLE_MS - 1), 'fresh');
-  assert.equal(statusPhase(STATUS_SETTLE_MS), 'settled');
-  assert.equal(statusPhase(STATUS_CLEAR_MS - 1), 'settled');
-  assert.equal(statusPhase(STATUS_CLEAR_MS), 'expired');
-  assert.equal(statusPhase(STATUS_CLEAR_MS * 100), 'expired');
-});
-
-test('arming a line sets both deadlines, and settling leaves the sentence alone', () => {
+test('an ordinary line arms one deadline, and clearing is the whole of it', () => {
   const timers = fakeTimers();
-  const seen: string[] = [];
-  armStatusDeadlines({ settle: () => seen.push('settle'), clear: () => seen.push('clear') }, timers);
-  assert.deepEqual(
-    timers.pending().sort((a, b) => a - b),
-    [STATUS_SETTLE_MS, STATUS_CLEAR_MS]
-  );
+  let cleared = 0;
+  armStatusClear({ clear: () => (cleared += 1) }, timers);
 
-  timers.run(STATUS_SETTLE_MS);
-  assert.deepEqual(seen, ['settle'], 'settling must stop the dots and keep the line');
+  assert.deepEqual(timers.pending(), [STATUS_LIFETIME_MS], 'an ordinary line has a single deadline');
+  assert.equal(cleared, 0, 'and it has not fired yet');
 
-  timers.run(STATUS_CLEAR_MS);
-  assert.deepEqual(seen, ['settle', 'clear']);
+  timers.run(STATUS_LIFETIME_MS);
+  assert.equal(cleared, 1, 'the line goes at the deadline, with no second stage before it');
+
+  timers.run(STATUS_LIFETIME_MS * 10);
+  assert.equal(cleared, 1, 'and nothing is left armed that could fire again');
+  assert.deepEqual(timers.pending(), []);
 });
 
 test('a held line stops moving and is never taken away on a clock', () => {
@@ -96,16 +85,16 @@ test('a held line stops moving and is never taken away on a clock', () => {
 
   assert.deepEqual(
     timers.pending(),
-    [STATUS_SETTLE_MS],
-    'a held line keeps the settle deadline and no clear deadline at all'
+    [STATUS_LIFETIME_MS],
+    'a held line arms the same single deadline as any other'
   );
 
-  timers.run(STATUS_SETTLE_MS);
+  timers.run(STATUS_LIFETIME_MS);
   assert.equal(settled, 1, 'the movement still stops, so a standing line never reads as busy');
   assert.deepEqual(timers.pending(), [], 'and nothing is left armed that could end the sentence');
 
-  // Ten clear times later, an ordinary line would have gone long ago, and this one has not.
-  timers.run(STATUS_CLEAR_MS * 10);
+  // Ten lifetimes later, an ordinary line would have gone long ago, and this one has not.
+  timers.run(STATUS_LIFETIME_MS * 10);
   assert.equal(settled, 1, 'a held line must not wake again after its one deadline');
 
   // The cancel is what a caller uses when the line is replaced, and a hold has one timer.
@@ -114,15 +103,15 @@ test('a held line stops moving and is never taken away on a clock', () => {
   assert.equal(timers.pending().length, 0);
 });
 
-test('a replaced line cancels both of its deadlines', () => {
+test('a replaced line cancels its deadline', () => {
   const timers = fakeTimers();
   let cleared = 0;
-  const cancel = armStatusDeadlines({ settle: () => undefined, clear: () => (cleared += 1) }, timers);
+  const cancel = armStatusClear({ clear: () => (cleared += 1) }, timers);
 
   cancel();
-  assert.equal(timers.cancelled.length, 2, 'both deadlines of a replaced line must be cancelled');
+  assert.equal(timers.cancelled.length, 1, 'a replaced line gives back its deadline');
   assert.equal(timers.pending().length, 0);
 
-  timers.run(STATUS_CLEAR_MS * 4);
+  timers.run(STATUS_LIFETIME_MS * 4);
   assert.equal(cleared, 0, 'a cancelled line must never clear the one that replaced it');
 });
