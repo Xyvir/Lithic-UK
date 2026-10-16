@@ -7,13 +7,21 @@ title: $:/plugins/lithic/lithic-import-handler/pdf-open-request.js
 type: application/javascript
 module-type: startup
 
-Renders a PDF into a new Lith when the desktop app opens one by file association.
+Opens the PDF the desktop app was handed: as a new Lith when none sits beside it, and as the
+board of the Lith that does.
 
 The launcher cannot render a PDF, because the renderer lives in this wiki, so it reads the
 file's bytes, hands them over on the window, and mounts the new Lith. This module takes that
 payload and calls the same converter a dropped PDF goes through, then shows the whiteboard
 full screen, then leaves the Lith saved. A drop and a double-click therefore produce the
 same tiddlers from the same code.
+
+The other shape is a PDF that has already become a Lith, which the launcher opens as it
+stands: importing again would replace everything written in that copy since it was made.
+There are no bytes to hand over in that case, only the container the import named after the
+file, because the gesture is still `open the PDF` and what a double-click on a PDF means is
+the board laid over its pages rather than whatever layout that Lith happened to be saved in.
+A Lith opened on its own carries no request and keeps what it says.
 \*/
 (function(){
 
@@ -33,25 +41,87 @@ exports.synchronous = true;
 // document.open/write boot for the same reason the file handle does.
 var REQUEST_GLOBAL = "__LITHIC_PDF_IMPORT__";
 
+// The same window, when the PDF already became a Lith. One gesture is one of these two and
+// never both, so this is read only when there are no bytes to convert, and it names the
+// container the import wrote rather than any board, because the wiki is what knows how a
+// container and its board are related.
+var BOARD_REQUEST = "__LITHIC_OPEN_BOARD__";
+
 // Where the full screen board lives, and the state that says which board it shows. These are
 // the four tiddlers `$:/lithic/buttons/FullscreenWhiteboard` sets, so a PDF opened by the
 // desktop app lands where the button lands rather than inventing a second way in.
 var WHITEBOARD_LAYOUT = "$:/plugins/linonetwo/tw-whiteboard/tiddlywiki-ui/PageLayout/WhiteBoard";
 var BOARD_STATE = "$:/state/Whiteboard/PageLayout/tiddler";
+// The document type a board is, which is also how the layout finds the boards to offer.
+var BOARD_TYPE = "application/tldr";
 
 /**
  * Show one board full screen: the two sidebars out of the way, the white board page layout
  * in place of the page template, and the board named as the one it draws.
+ *
+ * The board is left unnamed when nothing could be found to name, which is the layout's own
+ * fallback rather than a gap: an empty state tiddler is what it already reads as "draw the
+ * newest board this wiki holds".
  */
 function openFullscreenBoard(title) {
-    [
+    var fields = [
         ["$:/state/sidebar", "no"],
         ["$:/state/notebook-sidebar", "no"],
-        ["$:/layout", WHITEBOARD_LAYOUT],
-        [BOARD_STATE, title]
-    ].forEach(function(pair){
+        ["$:/layout", WHITEBOARD_LAYOUT]
+    ];
+    if (title) {
+        fields.push([BOARD_STATE, title]);
+    }
+    fields.forEach(function(pair){
         $tw.wiki.addTiddler(new $tw.Tiddler({title: pair[0], text: pair[1]}));
     });
+}
+
+/**
+ * Open one board: it full screen, and the story list left holding it.
+ *
+ * The story list is set beside the layout because leaving the full screen board hands the
+ * river back, and this is what it hands it to: the board, not the empty page the PDF came
+ * from.
+ */
+function openBoard(title) {
+    if (!title) {
+        return;
+    }
+    $tw.wiki.addTiddler(new $tw.Tiddler({
+        title: "$:/StoryList",
+        list: $tw.utils.stringifyList([title])
+    }));
+    openFullscreenBoard(title);
+}
+
+/**
+ * Which board a request means.
+ *
+ * The import names a PDF's tiddlers after the file, so `thesis.pdf` becomes a container
+ * called `thesis` whose `stream-list` holds `thesis-text` and `thesis-whiteboard`, and that
+ * container is what the launcher passes along. A Lith rearranged since still gets an answer
+ * rather than none, because the newest board it holds is the fallback.
+ *
+ * Only the file's own tiddlers count as boards, which is the line between this and the
+ * layout's own fallback: every wiki carries the whiteboard plugin's blank template as a
+ * shadow, and answering with that would draw an empty canvas over a Lith that holds no board
+ * at all, such as an import interrupted between the file being made and the pages landing.
+ */
+function boardOf(container) {
+    var isBoard = function(title) {
+        var tiddler = $tw.wiki.getTiddler(title);
+        return !!tiddler && tiddler.fields.type === BOARD_TYPE;
+    };
+    var holder = container ? $tw.wiki.getTiddler(container) : null;
+    var children = holder ? $tw.utils.parseStringArray(holder.fields["stream-list"] || "") : [];
+    for (var i = 0; i < children.length; i++) {
+        if (isBoard(children[i])) {
+            return children[i];
+        }
+    }
+    var newest = $tw.wiki.filterTiddlers("[all[tiddlers]field:type[" + BOARD_TYPE + "]!prefix[$:/temp]!sort[modified]first[]]");
+    return newest.length ? newest[0] : "";
 }
 
 function base64ToArrayBuffer(base64) {
@@ -63,14 +133,15 @@ function base64ToArrayBuffer(base64) {
     return bytes.buffer;
 }
 
-exports.startup = function() {
-    var request = typeof window !== "undefined" ? window[REQUEST_GLOBAL] : null;
-    if (!request) {
-        return;
-    }
-    // Taken off the window immediately: nothing else in this document has any business
-    // reading a whole PDF, and a later mount in this window must not find it again.
-    window[REQUEST_GLOBAL] = null;
+/**
+ * The PDF itself: convert it, open the board it produced, and write the new Lith back.
+ *
+ * The copy on disk is the point of the gesture, so the new Lith is saved rather than left
+ * for the user to save: the launcher created the file beside the PDF and this is what fills
+ * it. A save is also what the wiki would do for any other open document, and it goes to the
+ * file the launcher named, never back to the PDF.
+ */
+function openRequestedPdf(request) {
     var base64 = request.base64;
     var filename = request.filename || "document.pdf";
     var convert = $tw.lithic && $tw.lithic.convertPdfToTiddlers;
@@ -97,30 +168,19 @@ exports.startup = function() {
                 $tw.wiki.getModificationFields(),
                 fields
             ));
-            if (fields.type === "application/tldr") {
+            if (fields.type === BOARD_TYPE) {
                 whiteboard = fields.title;
             }
         });
         $tw.wiki.deleteTiddler(alertTitle);
         if (whiteboard) {
             // The board is the point of the gesture, so it is what opens. The container and
-            // its extracted text stay in the wiki beside it. The story list is set beside the
-            // layout because leaving the full screen board hands the river back, and this is
-            // what it hands it to: the board, not the empty page the PDF came from.
-            $tw.wiki.addTiddler(new $tw.Tiddler({
-                title: "$:/StoryList",
-                list: $tw.utils.stringifyList([whiteboard])
-            }));
-            // A PDF is opened to be written on, and a board the height of the window is the
-            // shape that asks for, so a double-click lands in the full screen layout rather
-            // than on a tiddler in the river, the way the Fullscreen Whiteboard page control
-            // and a stream node's handle land there.
-            openFullscreenBoard(whiteboard);
+            // its extracted text stay in the wiki beside it, and a PDF is opened to be
+            // written on, so a double-click lands in the full screen layout rather than on a
+            // tiddler in the river, the way the Fullscreen Whiteboard page control and a
+            // stream node's handle land there.
+            openBoard(whiteboard);
         }
-        // The copy on disk is the point of the gesture, so the new Lith is saved rather than
-        // left for the user to save: the launcher created the file beside the PDF and this is
-        // what fills it. A save is also what the wiki would do for any other open document,
-        // and it goes to the file the launcher named, never back to the PDF.
         if ($tw.rootWidget && typeof $tw.rootWidget.dispatchEvent === "function") {
             $tw.rootWidget.dispatchEvent({ type: "tm-save-wiki" });
         }
@@ -128,6 +188,40 @@ exports.startup = function() {
         $tw.wiki.deleteTiddler(alertTitle);
         setProgress("Could not open the PDF: " + (error && error.message ? error.message : error));
     });
+}
+
+/**
+ * The Lith beside the PDF, opened as the board its pages are under.
+ *
+ * Nothing is saved: this mount is the file's own text, unchanged, so a save would write the
+ * file over itself for nothing. The layout is set rather than respected, which is the whole
+ * point of the ask -- a Lith saved from the story river opens in the river -- and only the
+ * Lith that arrived this way is forced, because every other mount carries no request. A Lith
+ * with no board in it is left as it stands: there is nothing to open, and an empty board
+ * layout would be a worse answer than the file's own.
+ */
+function openRequestedBoard(board) {
+    openBoard(boardOf(board.container));
+}
+
+exports.startup = function() {
+    if (typeof window === "undefined") {
+        return;
+    }
+    var request = window[REQUEST_GLOBAL];
+    if (request) {
+        // Taken off the window immediately: nothing else in this document has any business
+        // reading a whole PDF, and a later mount in this window must not find it again.
+        window[REQUEST_GLOBAL] = null;
+        openRequestedPdf(request);
+        return;
+    }
+    var board = window[BOARD_REQUEST];
+    if (!board) {
+        return;
+    }
+    window[BOARD_REQUEST] = null;
+    openRequestedBoard(board);
 };
 
 })();

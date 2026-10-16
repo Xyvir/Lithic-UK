@@ -62,6 +62,21 @@ const OPEN_REQUEST = '$:/plugins/lithic/lithic-import-handler/pdf-open-request.j
 // Where a board is drawn full screen. The importer sets this layout, and the whiteboard
 // plugin owns it, so it is named here rather than read out of the module under test.
 const WHITEBOARD_LAYOUT = '$:/plugins/linonetwo/tw-whiteboard/tiddlywiki-ui/PageLayout/WhiteBoard';
+// The layout every Lith is saved in unless something moved it, which is the state the sibling
+// cases below have to overrule (or deliberately leave alone).
+const PAGE_TEMPLATE = '$:/core/ui/PageTemplate';
+// A board document with one empty page, which is all the layout needs to draw a canvas.
+const BOARD_JSON = JSON.stringify({
+  document: {
+    id: 'doc',
+    name: 'sibling-paper',
+    version: 15.5,
+    pages: { page: { id: 'page', name: 'Page 1', childIndex: 1, shapes: {}, bindings: {} } },
+    pageStates: { page: { id: 'page', selectedIds: [], camera: { point: [0, 0], zoom: 1 } } },
+    assets: {}
+  },
+  updatedCount: 1
+});
 
 const artifactHtml = readFileSync(artifact, 'utf8');
 const storeMatch = /<script class="tiddlywiki-tiddler-store" type="application\/json">([\s\S]*?)<\/script>/.exec(artifactHtml);
@@ -181,6 +196,9 @@ const OPEN_DRIVER = async ([layout, progressTitle]) => {
   stats.progress = progress();
   if (!wiki) return { ...stats, status: 'no-wiki' };
   stats.consumed = window.__LITHIC_PDF_IMPORT__ === null;
+  // The other ask, and the one the sibling case carries: it is taken off the window the same
+  // way, so the same reading says whether the engine answered it.
+  stats.boardConsumed = window.__LITHIC_OPEN_BOARD__ === null;
   stats.layout = wiki.getTiddlerText('$:/layout') || '';
   stats.board = wiki.getTiddlerText('$:/state/Whiteboard/PageLayout/tiddler') || '';
   stats.sidebar = wiki.getTiddlerText('$:/state/sidebar') || '';
@@ -203,6 +221,36 @@ const OPEN_DRIVER = async ([layout, progressTitle]) => {
   stats.canvas = Boolean(document.querySelector('.tw-whiteboard-layout-main-area .tl-canvas'));
   stats.river = Boolean(document.querySelector('.tc-story-river'));
   return { ...stats, status: 'ok' };
+};
+
+/**
+ * Runs inside the page: waits for the boot sequence to settle, then reports what a mount that
+ * asked for nothing left behind.
+ *
+ * There is no layout to wait on here -- the answer is that it did not move -- so the only thing
+ * to wait out is the boot itself. The boot-delay flag is the engine's own end-of-startup signal,
+ * and it is also what the whiteboard widget waits for before drawing, so a board that should be
+ * there is given the same moment the readings above get.
+ */
+const SETTLED_DRIVER = async () => {
+  const wikiOf = () => window.$tw?.wiki;
+  const deadline = Date.now() + 60000;
+  while (Date.now() < deadline) {
+    if (wikiOf()?.getTiddlerText('$:/state/Lithic/BootComplete') === 'yes') break;
+    await new Promise((done) => setTimeout(done, 100));
+  }
+  await new Promise((done) => setTimeout(done, 500));
+  const wiki = wikiOf();
+  if (!wiki) return { status: 'no-wiki' };
+  return {
+    status: 'ok',
+    settled: wiki.getTiddlerText('$:/state/Lithic/BootComplete') || '',
+    layout: wiki.getTiddlerText('$:/layout') || '',
+    board: wiki.getTiddlerText('$:/state/Whiteboard/PageLayout/tiddler') || '',
+    boardArea: Boolean(document.querySelector('.tw-whiteboard-layout-main-area')),
+    canvas: Boolean(document.querySelector('.tw-whiteboard-layout-main-area .tl-canvas')),
+    river: Boolean(document.querySelector('.tc-story-river'))
+  };
 };
 
 console.log(`artifact: ${path.relative(repoRoot, artifact)}`);
@@ -317,6 +365,97 @@ try {
   );
 
   console.log(`PASS: a PDF opened by file association lands full screen on its own board`);
+
+  /*
+   * The second visit to a PDF. The Lith beside it already exists, so the launcher mounts that file
+   * rather than importing over it, and what it hands over is the container the import wrote
+   * instead of any bytes. The tiddlers below are that file as it stands: a container holding a
+   * board and a text child, and a `$:/layout` that says the story river, which is exactly the
+   * state the ask exists to overrule. `$tw.preloadTiddlers` is how they are in place before the
+   * boot reads them, since the engine would otherwise boot the empty store it ships.
+   */
+  const lithTiddlers = [
+    { title: '$:/layout', text: PAGE_TEMPLATE },
+    { title: 'sibling-paper', 'stream-list': 'sibling-paper-text sibling-paper-whiteboard', 'stream-type': 'default', text: '' },
+    { title: 'sibling-paper-text', type: 'text/x-markdown', text: '## sibling-paper' },
+    { title: 'sibling-paper-whiteboard', type: 'application/tldr', 'whiteboard-height': '540px', text: BOARD_JSON }
+  ];
+
+  /** Boot the artifact as one Lith's own file, with (or without) the ask a launcher would hand it. */
+  const mountLith = async (tiddlers, request) => {
+    const page = await browser.newPage();
+    page.on('pageerror', (error) => pageErrors.push(error.message));
+    page.on('console', (message) => {
+      if (message.type() === 'error') pageErrors.push(message.text());
+    });
+    await page.evaluateOnNewDocument(
+      (payload) => {
+        window.$tw = { preloadTiddlers: payload.tiddlers };
+        if (payload.request) window.__LITHIC_OPEN_BOARD__ = payload.request;
+      },
+      { tiddlers, request: request ?? null }
+    );
+    await page.goto(pathToFileURL(artifact).href, { waitUntil: 'domcontentloaded', timeout: 120000 });
+    await page.waitForFunction(() => Boolean(window.$tw?.wiki), { timeout: 60000 });
+    return page;
+  };
+
+  const siblingPage = await mountLith(lithTiddlers, { container: 'sibling-paper' });
+  const sibling = await siblingPage.evaluate(OPEN_DRIVER, [WHITEBOARD_LAYOUT, '$:/temp/alerts/lithic-import-progress']);
+  console.log(
+    `sibling status: ${sibling.status}\n` +
+      `  layout ${sibling.layout}\n  board  ${sibling.board} (${sibling.boardType}, ${sibling.boardPages} pages)\n` +
+      `  drawn  board area ${sibling.boardArea}, tldraw canvas ${sibling.canvas}, story river ${sibling.river}\n` +
+      `  sidebars ${JSON.stringify(sibling.sidebar)} ${JSON.stringify(sibling.notebookSidebar)}, story list ${JSON.stringify(sibling.story)}\n` +
+      `  ask taken off the window ${sibling.boardConsumed}`
+  );
+  assert.equal(sibling.status, 'ok', `the Lith beside the PDF did not reach its board: ${JSON.stringify(sibling)}`);
+  assert.equal(sibling.boardConsumed, true, 'the ask is taken off the window, so it cannot fire twice');
+  assert.equal(sibling.layout, WHITEBOARD_LAYOUT, 'the board layout overrules the river that Lith was saved in');
+  assert.equal(sibling.board, 'sibling-paper-whiteboard', 'and it is the board the pages are under, not just any board');
+  assert.equal(sibling.boardType, 'application/tldr', 'the board the layout names is a whiteboard document');
+  assert.equal(sibling.boardPages, 1, 'the board it opened is the file\'s own, not a template');
+  assert.equal(sibling.sidebar, 'no', 'the sidebar is out of the way, the way the Fullscreen Whiteboard control leaves it');
+  assert.equal(sibling.notebookSidebar, 'no', 'and so is the notebook sidebar');
+  assert.equal(sibling.boardArea, true, 'the layout that is up is the white board one');
+  assert.equal(sibling.canvas, true, 'a board is actually drawn in it, not an empty layout');
+  assert.equal(sibling.river, false, 'and the story river is not on screen behind it');
+  console.log('PASS: a PDF whose Lith already exists opens that Lith on the board its pages are under');
+
+  /*
+   * And the half that keeps it honest. The same Lith opened on its own -- a Mount or a recents row
+   * -- carries no ask, so the layout it was saved in stands. `SETTLED_DRIVER` is what can see
+   * this, because there is no layout to wait on, only the boot to wait out.
+   */
+  const directPage = await mountLith(lithTiddlers, null);
+  const direct = await directPage.evaluate(SETTLED_DRIVER);
+  console.log(`direct status: ${direct.status} (boot flag ${JSON.stringify(direct.settled)})`);
+  console.log(`  layout ${direct.layout}\n  board  ${JSON.stringify(direct.board)}\n  drawn  board area ${direct.boardArea}, story river ${direct.river}`);
+  assert.equal(direct.status, 'ok', `the Lith opened on its own did not settle: ${JSON.stringify(direct)}`);
+  assert.equal(direct.layout, PAGE_TEMPLATE, 'a Lith opened on its own keeps the layout it was saved in');
+  assert.equal(direct.boardArea, false, 'and no board is forced over it');
+  assert.equal(direct.river, true, 'the story river is what draws it');
+  console.log('PASS: the same Lith opened on its own is left exactly as it says');
+
+  /*
+   * The interrupted import: the launcher makes the file before the pages land, so a Lith can sit
+   * beside a PDF with nothing in it. The ask names a container with no board under it, and the
+   * answer is to leave the file as it stands rather than to draw the plugin's blank template over
+   * it, which is what the layout's own newest-board fallback would find.
+   */
+  const emptyPage = await mountLith(
+    [
+      { title: '$:/layout', text: PAGE_TEMPLATE },
+      { title: 'half-imported-paper', text: '' }
+    ],
+    { container: 'half-imported-paper' }
+  );
+  const empty = await emptyPage.evaluate(SETTLED_DRIVER);
+  console.log(`empty status: ${empty.status}, layout ${empty.layout}, board ${JSON.stringify(empty.board)}`);
+  assert.equal(empty.status, 'ok', `the boardless Lith did not settle: ${JSON.stringify(empty)}`);
+  assert.equal(empty.layout, PAGE_TEMPLATE, 'a Lith with no board in it is left as it stands');
+  assert.equal(empty.boardArea, false, 'nothing is forced over a Lith that has no board');
+  console.log('PASS: an ask for a board that is not there leaves the Lith alone');
 } catch (error) {
   failure = error;
   console.error(`\nFAIL: ${error.message}`);

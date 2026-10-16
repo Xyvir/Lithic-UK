@@ -603,6 +603,49 @@ test('the engine mount records the save target rather than the document', async 
   assert.ok(pointer.length < 1024, `the entry is a pointer and not a document: ${pointer.length} bytes`);
 });
 
+// A PDF's own open asks the engine for the board its pages are under, and the ask travels on the
+// window because that is what survives `document.open`/`write`. The teeth are in the second half:
+// a mount that asks for nothing must clear the ask rather than leave it, or the next Lith opened
+// in this window would be forced into the board layout by the PDF before it.
+test('a PDF open asks the engine for its board, and every other mount clears the ask', async () => {
+  const engineStub = '<html><head></head><body><script class="tiddlywiki-tiddler-store" type="application/json">[]</script></body></html>';
+  const globals = globalThis as any;
+  const saved = {
+    window: globals.window,
+    localStorage: globals.localStorage,
+    sessionStorage: globals.sessionStorage,
+    fetch: globals.fetch,
+    document: globals.document
+  };
+  const windowStub: any = { location: { href: 'file:///src/launcher.html' } };
+  globals.window = windowStub;
+  globals.localStorage = {
+    getItem: (key: string) => (key === 'cachedOnlineCoreEngine' ? engineStub : null),
+    setItem: () => {}
+  };
+  globals.sessionStorage = { setItem: () => {}, getItem: () => null, removeItem: () => {} };
+  globals.fetch = async () => { throw new Error('network unavailable'); };
+  globals.document = { open() {}, write() {}, close() {} };
+  try {
+    await bootLegacyWiki(
+      { name: 'paper.lith', path: 'C:/docs/paper.lith', text: '' },
+      [],
+      {},
+      { openBoardFor: 'paper' }
+    );
+    assert.deepEqual(windowStub.__LITHIC_OPEN_BOARD__, { container: 'paper' });
+
+    await bootLegacyWiki({ name: 'notes.lith', path: 'C:/docs/notes.lith', text: '' });
+    assert.equal('__LITHIC_OPEN_BOARD__' in windowStub, false, 'a plain mount leaves no ask behind');
+  } finally {
+    if (saved.window !== undefined) globals.window = saved.window; else delete globals.window;
+    if (saved.localStorage !== undefined) globals.localStorage = saved.localStorage; else delete globals.localStorage;
+    if (saved.sessionStorage !== undefined) globals.sessionStorage = saved.sessionStorage; else delete globals.sessionStorage;
+    if (saved.fetch !== undefined) globals.fetch = saved.fetch; else delete globals.fetch;
+    if (saved.document !== undefined) globals.document = saved.document; else delete globals.document;
+  }
+});
+
 // The launcher's own handoff key, which is what the reported failure named. It is bookkeeping (
 // the engine boots from the page this launcher writes, not from this key) so a store that will
 // not take it may not cost the mount. The teeth: with the write unguarded this throws, and the

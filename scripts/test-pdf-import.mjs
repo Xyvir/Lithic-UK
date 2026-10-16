@@ -67,6 +67,16 @@ function createPdfContext() {
     },
     getCreationFields: () => ({}),
     getModificationFields: () => ({}),
+    // The boards a Lith carries, which is the fallback the importer's open request asks for when
+    // the container it was given holds none. Only real tiddlers count, never the whiteboard
+    // plugin's blank template, so it is asked for the file's own boards rather than every board
+    // this wiki can see.
+    filterTiddlers: (filter) => {
+      assert.match(filter, /\[all\[tiddlers\]field:type\[application\/tldr\]/);
+      return [...tiddlers.values()]
+        .filter((tiddler) => tiddler.fields.type === 'application/tldr')
+        .map((tiddler) => tiddler.fields.title);
+    },
   };
   const canvas = {
     getContext: () => ({
@@ -137,18 +147,32 @@ function loadPdfImportPlugin() {
 
 /**
  * Both modules run in one context, in boot order: the drop handler's module scope publishes
- * the render path, and the open-request module is the one whose `startup` is called. The
- * payload is what the launcher leaves on the window for the importer to find.
+ * the render path, and the open-request module is the one whose `startup` is called.
+ *
+ * `handoff` is what the launcher leaves on the window: the PDF's bytes when it is importing one,
+ * the container the import wrote when the Lith beside the PDF is what opens, and nothing at all
+ * when that Lith is opened on its own. `tiddlers` is the file being opened, standing in for the
+ * store the launcher would have written it from.
  */
-function loadPdfOpenRequest({ base64 = 'AAAAAQ==' } = {}) {
+function loadPdfOpenRequest({
+  handoff = { __LITHIC_PDF_IMPORT__: { filename: 'imported-doc.pdf', base64: 'AAAAAQ==' } },
+  tiddlers = [],
+} = {}) {
   const loaded = createPdfContext();
-  loaded.context.window = {
-    __LITHIC_PDF_IMPORT__: { filename: 'imported-doc.pdf', base64 },
-  };
+  tiddlers.forEach((fields) => loaded.tiddlers.set(fields.title, { fields }));
+  loaded.context.window = handoff;
   vm.runInNewContext(moduleBody(dropHandlerPath), loaded.context, { filename: dropHandlerPath });
   vm.runInNewContext(moduleBody(openRequestPath), loaded.context, { filename: openRequestPath });
   return loaded;
 }
+
+/** The Lith a PDF's pages were imported into, as its own file holds it. */
+const SIBLING_LITH = [
+  { title: '$:/layout', text: '$:/core/ui/PageTemplate' },
+  { title: 'thesis', 'stream-list': 'thesis-text thesis-whiteboard', 'stream-type': 'default', text: '' },
+  { title: 'thesis-text', type: 'text/x-markdown', text: '## thesis' },
+  { title: 'thesis-whiteboard', type: 'application/tldr', 'whiteboard-height': '1056px', text: '{"document":{}}' },
+];
 
 // The white board page layout, and the state that says which board it shows. Named here
 // rather than imported from the module under test: this is the contract with the whiteboard
@@ -251,4 +275,82 @@ test('a PDF the desktop app opens becomes a new Lith beside it, saved and full s
   assert.equal(whiteboard.fields.type, 'application/tldr');
   assert.equal(whiteboard.fields['whiteboard-height'], '1056px', 'the page height follows the page shape, the same rule a drop takes');
   assert.match(tiddlers.get('imported-doc-text').fields.text, /Rasterized PDF text/);
+});
+
+// The PDF on its second visit. The Lith beside it already exists, so the launcher mounts that file
+// rather than importing over it and hands over the container the import wrote instead of any bytes.
+// The gesture is still opening the PDF, so the board the pages are under is what opens, over
+// whatever layout that Lith was last saved in -- the river, here.
+test('a PDF whose Lith already exists opens on the board its pages are under', () => {
+  const { context, tiddlers, saves } = loadPdfOpenRequest({
+    handoff: { __LITHIC_OPEN_BOARD__: { container: 'thesis' } },
+    tiddlers: SIBLING_LITH,
+  });
+
+  context.exports.startup();
+
+  assert.equal(
+    context.window.__LITHIC_OPEN_BOARD__,
+    null,
+    'the ask is taken off the window, so it cannot fire a second time'
+  );
+  assert.equal(
+    tiddlers.get('$:/layout')?.fields.text,
+    FULLSCREEN_LAYOUT,
+    'the board layout overrules the layout the Lith was saved in'
+  );
+  assert.equal(
+    tiddlers.get(BOARD_STATE)?.fields.text,
+    'thesis-whiteboard',
+    'and the board named is the one the pages are under, rather than whichever board is newest'
+  );
+  assert.equal(
+    tiddlers.get('$:/StoryList')?.fields.list,
+    'thesis-whiteboard',
+    'leaving the board hands the river back to the board, not to the page the PDF came from'
+  );
+  assert.deepEqual(
+    [tiddlers.get('$:/state/sidebar')?.fields.text, tiddlers.get('$:/state/notebook-sidebar')?.fields.text],
+    ['no', 'no'],
+    'both sidebars are out of the way, the way the control leaves them'
+  );
+  assert.equal(tiddlers.get('thesis-text')?.fields.text, '## thesis', 'the text child is left alone');
+  assert.deepEqual(
+    saves,
+    [],
+    'nothing is saved: the file is its own text, so a save would write it over itself for nothing'
+  );
+});
+
+// A Lith with no board in it: an import interrupted between the file being made and the pages
+// landing, which the launcher's create-then-fill order makes possible. There is nothing to open, so
+// the file is left as it stands rather than being given the plugin's blank template to draw.
+test('an ask for a board the Lith does not hold leaves it as it stands', () => {
+  const { context, tiddlers, saves } = loadPdfOpenRequest({
+    handoff: { __LITHIC_OPEN_BOARD__: { container: 'half-imported' } },
+    tiddlers: [
+      { title: '$:/layout', text: '$:/core/ui/PageTemplate' },
+      { title: 'half-imported', text: '' },
+    ],
+  });
+
+  context.exports.startup();
+
+  assert.equal(tiddlers.get('$:/layout')?.fields.text, '$:/core/ui/PageTemplate', 'the layout is not touched');
+  assert.equal(tiddlers.has(BOARD_STATE), false, 'and no board is named');
+  assert.equal(tiddlers.has('$:/StoryList'), false, 'nor is the river moved');
+  assert.deepEqual(saves, [], 'and the file is not written');
+});
+
+// And the half that keeps the forcing honest: the same Lith opened on its own, from the launcher or
+// a recents row, is not a PDF being opened and carries no ask, so it keeps what it says.
+test('a Lith opened on its own keeps the layout it was saved in', () => {
+  const { context, tiddlers, saves } = loadPdfOpenRequest({ handoff: {}, tiddlers: SIBLING_LITH });
+
+  context.exports.startup();
+
+  assert.equal(tiddlers.get('$:/layout')?.fields.text, '$:/core/ui/PageTemplate', 'the saved layout stands');
+  assert.equal(tiddlers.has(BOARD_STATE), false, 'no board is forced on it');
+  assert.equal(tiddlers.has('$:/StoryList'), false, 'and the river is left as the file left it');
+  assert.deepEqual(saves, [], 'a plain mount writes nothing by itself');
 });

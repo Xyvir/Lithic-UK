@@ -188,6 +188,18 @@ export type MountSaveOptions = {
    * carried the meta tag, and it is what lets a save write back through the shim's wire.
    */
   shimToken?: string | null;
+  /**
+   * The container a PDF's own open asked the engine to draw, when this mount opens the Lith
+   * beside that PDF (see `pdf-open-request.js` in the import handler). It is the file's own
+   * name without its extension, which is what the import names the container after, and the
+   * engine turns it into the board those pages are under.
+   *
+   * Every other boot leaves it undefined, which clears the ask rather than leaving the last
+   * one in place: a boot always answers this question, so a request can only ever apply to
+   * the mount that made it. That matters because a request outlives its own document -- the
+   * engine boots into the same window, which keeps its globals.
+   */
+  openBoardFor?: string;
 };
 
 function injectSaverBootstrap(
@@ -1308,6 +1320,7 @@ export async function bootLegacyWiki(
   engineGlobals: Record<string, string> = {},
   options: MountSaveOptions = {}
 ): Promise<void> {
+  publishBoardRequest(options.openBoardFor);
   const engine = await fetchEngine();
   const html = buildEngineHtml(engine, handoff, extraTiddlers, engineGlobals, options);
 
@@ -1393,6 +1406,26 @@ export function readHandoff(): LauncherHandoff | null {
  */
 export function writeHandoff(handoff: LauncherHandoff): void {
   storeInSession(HANDOFF_KEY, handoff);
+}
+
+/**
+ * The window property a mounted engine reads when a PDF's own file association opened the Lith
+ * beside it: the container the import wrote, or nothing.
+ *
+ * A property rather than a tiddler because the ask is about the mount rather than about the
+ * document: this launcher writes it, the engine reads it during startup and takes it off the
+ * window, and the in-place boot (`document.open`/`write`) keeps the window it was written on.
+ * It is written on every boot, with nothing to say when there is nothing, because a window
+ * outlives the document mounted into it and the last mount's ask must not be inherited by the
+ * next: a Lith opened on its own carries no request and keeps the layout it was saved in.
+ */
+function publishBoardRequest(container?: string): void {
+  const root = (typeof window === 'undefined' ? globalThis : window) as any;
+  if (container) {
+    root.__LITHIC_OPEN_BOARD__ = { container };
+  } else {
+    delete root.__LITHIC_OPEN_BOARD__;
+  }
 }
 
 /**

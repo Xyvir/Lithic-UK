@@ -3214,7 +3214,11 @@ import { backupFileName, collectInstanceBackup, mergeBookmarks, parseInstanceBac
     extraTiddlers: Array<Record<string, string>> = [],
     // Self-host mounts carry the text and digest the saver diffs against, so a
     // save sends only changed lines instead of re-serializing the whole wiki.
-    remote: RemoteTarget | null = null
+    remote: RemoteTarget | null = null,
+    // The container a PDF's own open asked the engine to draw, when this mount is the Lith
+    // beside that PDF. Every other mount leaves it undefined, and the boot answers the
+    // question either way (see publishBoardRequest), so a request cannot outlive its mount.
+    openBoardFor?: string
   ) {
     mountError = '';
     // A complete wiki page rather than a Lithic document: served as-is, with
@@ -3293,7 +3297,7 @@ import { backupFileName, collectInstanceBackup, mergeBookmarks, parseInstanceBac
     await bootLegacyWiki(handoff, [...pendingImports, ...extraTiddlers], {
       __EPHEMERAL_MODE__: mode === 'self-host' ? 'self-host' : 'paper-light',
       __LITHIC_LAUNCHER_MODE__: mode
-    }, { driftedFromHead, scratchMode, remote, browserOnly: indexDbOnly, shimToken });
+    }, { driftedFromHead, scratchMode, remote, browserOnly: indexDbOnly, shimToken, openBoardFor });
     pendingImports = [];
   }
 
@@ -3567,6 +3571,19 @@ import { backupFileName, collectInstanceBackup, mergeBookmarks, parseInstanceBac
   }
 
   /**
+   * The container the import names after a PDF: its file name without the extension.
+   *
+   * The importer derives its own titles from the file the same way (`paper.pdf` becomes a
+   * container `paper` holding `paper-text` and `paper-whiteboard`), so this is that name and
+   * not a second rule. It travels with the mount so the engine can open the board those pages
+   * are under when the PDF is the file a person opened (see `openBoardFor`).
+   */
+  function pdfContainerTitle(path: string): string {
+    const name = path.split(/[\\/]/).pop() || '';
+    return name.replace(/\.pdf$/i, '');
+  }
+
+  /**
    * Render a PDF's pages into the Lith that sits beside it.
    *
    * Nothing here renders anything: the renderer lives in the wiki, so the launcher reads the
@@ -3597,7 +3614,7 @@ import { backupFileName, collectInstanceBackup, mergeBookmarks, parseInstanceBac
    * bridge; a shim reads through its own wire, which is the same shape of answer: a name, the
    * path and the text. Callable while a mount is already in flight.
    */
-  async function mountDiskPath(path: string) {
+  async function mountDiskPath(path: string, openBoardFor?: string) {
     try {
       if (isPdfPath(path)) {
         // Before the text read below, which a PDF has no business going through: its pages
@@ -3606,7 +3623,13 @@ import { backupFileName, collectInstanceBackup, mergeBookmarks, parseInstanceBac
         if (target.exists) {
           // This PDF has already become a Lith, so the copy opens as it stands. Re-importing
           // would replace whatever has been written in it since it was made.
-          return await mountDiskPath(target.path);
+          //
+          // The gesture was still `open the PDF` though, and what that means is the board laid
+          // over its pages rather than the layout that Lith was last saved in, so the container
+          // the import wrote travels along and the engine opens the board. Opening that same
+          // Lith on its own, from the recents list or a Mount, carries no container and leaves
+          // it exactly as it says.
+          return await mountDiskPath(target.path, pdfContainerTitle(path));
         }
         await importPdfIntoNewLith(path, target.path);
         status = copy.status.mounted(fileName);
@@ -3623,7 +3646,7 @@ import { backupFileName, collectInstanceBackup, mergeBookmarks, parseInstanceBac
       lithText = result.text;
       fileName = result.name;
       filePath = result.path;
-      await mountWiki(result.text, result.name, result.path);
+      await mountWiki(result.text, result.name, result.path, undefined, [], null, openBoardFor);
       status = copy.status.mounted(result.name);
     } catch (error) {
       reportHeld(copy.status.openFailed(error instanceof Error ? error.message : String(error)));
