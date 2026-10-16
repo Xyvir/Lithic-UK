@@ -5,6 +5,16 @@ name: Android Manual Release
 # once the release exists, so a build's download page carries every platform a Lithic
 # can be installed on.
 #
+# THE LAUNCHER IS NOT BUILT HERE. The Svelte launcher (`launcher-ui/`) is built once per
+# release, by `build-wiki.yml`, and committed to `src/launcher.html`, which is the copy this
+# checkout carries and the copy `tauri.conf.json` embeds as its `src/` frontend. A build
+# here would be the same build again, and it could only make the launcher inside this APK
+# differ from the `launcher.html` published beside it on the release page. The launcher's
+# own unit tests run in `build-wiki.yml`, in the same job as the build they guard.
+# A dispatch from a tree that carries no `src/launcher.html` builds one rather than
+# stranding the job; a dispatch from a branch whose `launcher-ui/` changed without a
+# `build-wiki.yml` run packages that branch's committed launcher.
+#
 # WHY THIS IS A WORKFLOW OF ITS OWN rather than a fifth job beside the four in
 # `desktop-release.yaml`: those four are one subject (a machine that installs by putting a
 # file somewhere) and this is another (a package a store or a phone's own installer
@@ -102,8 +112,8 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout Code
-        uses: actions/checkout@v5
+      - name: Checkout and set up Node
+        uses: $/.github/actions/setup
 
       # Optional by design. Chained from publish-release.yml this artifact belongs to a
       # different run, so the download finds nothing; the committed src/lithic.html is then
@@ -111,7 +121,7 @@ jobs:
       - name: Download Built Wiki Artifact
         if: ${{ inputs.tag_name != '' }}
         continue-on-error: true
-        uses: actions/download-artifact@v5
+        uses: actions/download-artifact@v7
         with:
           name: built-wiki
           path: src
@@ -120,28 +130,15 @@ jobs:
         if: ${{ inputs.tag_name != '' && hashFiles('src/lith.html') != '' }}
         run: mv src/lith.html src/lithic.html
 
-      - name: Setup Node.js
-        uses: actions/setup-node@v5
-        with:
-          node-version: 22
-
       # Gradle runs on a JVM and the Android Gradle plugin is fussy about which. 17 is what
       # Tauri's own Android template targets, and pinning it here is the same decision as
       # pinning the Linux jobs to 22.04: the toolchain that produces a release should not
       # change because a runner image was rolled forward.
       - name: Setup Java
-        uses: actions/setup-java@v4
+        uses: actions/setup-java@v6
         with:
           distribution: temurin
           java-version: 17
-
-      - name: Cache NPM dependencies
-        uses: actions/cache@v5
-        with:
-          path: ~/.npm
-          key: ${{ runner.os }}-node-${{ hashFiles('package-lock.json', 'launcher-ui/package-lock.json') }}
-          restore-keys: |
-            ${{ runner.os }}-node-
 
       - name: Rust Cache
         uses: swatinem/rust-cache@v2
@@ -187,15 +184,17 @@ jobs:
           echo "Using NDK $ndk"
 
       - name: Install Dependencies
-        run: |
-          npm ci
-          npm --prefix launcher-ui ci
+        run: npm ci
 
-      - name: Run Launcher UI Tests
-        run: npm --prefix launcher-ui test
-
-      - name: Build Launcher (Svelte Launcher Bundle)
-        run: node scripts/build-launcher.mjs
+      # NO LAUNCHER BUILD HERE. The Svelte launcher is built once per release, in
+      # build-wiki.yml, and committed to src/launcher.html, which is the copy this workflow's
+      # checkout carries and the copy tauri.conf.json embeds as `src/`. Rebuilding it per
+      # platform is the same build again, and it could only make the phone's launcher differ
+      # from the launcher.html published on the release page beside this APK. The guarded step
+      # below is for a hand-dispatch from a tree that carries none.
+      - name: Build Launcher (only if the checkout carries none)
+        if: ${{ hashFiles('src/launcher.html') == '' }}
+        run: npm run build:launcher
 
       # Same rule as the desktop jobs: regenerate the icon set from the one source image, so
       # the launcher icon on the phone is the same drawing as the one in the taskbar. This has

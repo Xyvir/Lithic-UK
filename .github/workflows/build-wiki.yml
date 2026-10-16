@@ -103,17 +103,11 @@ jobs:
       config: ${{ env.BUILD_CONFIG }}
       release: ${{ env.CREATE_RELEASE }}
     steps:
-      - name: Checkout Code
-        uses: actions/checkout@v5
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v5
-        with:
-          node-version: '20'
-          cache: npm
-          cache-dependency-path: |
-            package-lock.json
-            launcher-ui/package-lock.json
+      # Checkout, Node and the npm cache in one step, defined once for the whole repository in
+      # .github/actions/setup/action.yml. The Node version lives in that file and nowhere else,
+      # which is what makes bumping it one edit instead of eleven.
+      - name: Checkout and set up Node
+        uses: $/.github/actions/setup
 
       - name: Audit Hardcoded Colors
         run: node scripts/check-colors.js
@@ -137,6 +131,21 @@ jobs:
       - name: Build Launcher (Svelte)
         if: env.BUILD_CONFIG == 'prod'
         run: npm run build:launcher
+
+      # IMMEDIATELY AFTER THE BUILD, IN THE SAME JOB, and that adjacency is the point. These
+      # are the launcher's own unit tests (launcher-ui/src/*.test.ts, about the sources rather
+      # than about the artifact), so they belong beside the step that builds the launcher out
+      # of those sources rather than in a platform job that has already spent ten minutes
+      # installing GTK before it finds out. No install is needed: the build above ran
+      # `npm --prefix launcher-ui ci` for its own vite dependency.
+      #
+      # Prod only, because that is the config that builds the launcher. A variant build
+      # (pre/dev/all/light) skips the build and so has no launcher-ui dependencies to run
+      # against. Failing here fails the build job, which happens before the release pull
+      # request is opened, so a broken launcher is caught before the merge that would tag it.
+      - name: Run Launcher UI Tests (prod only)
+        if: env.BUILD_CONFIG == 'prod'
+        run: npm --prefix launcher-ui test
 
       - name: Verify Launcher Artifact (prod only)
         if: env.BUILD_CONFIG == 'prod'
@@ -321,9 +330,15 @@ jobs:
       # four desktop installers attached to it. The wiki artifact is still uploaded, both
       # because the chained workflows look for it and because it is the cheapest way to
       # look at what a wrong build actually produced.
+      # THE ARTIFACT ACTIONS ARE PINNED PAST THE OBVIOUS MAJOR, and it is worth knowing why
+      # before anyone "tidies" them: upload-artifact@v6 and download-artifact@v7 are the first
+      # releases of each that declare `runs.using: node24`. upload-artifact@v5, and
+      # download-artifact both @v5 AND @v6, declare node20, so the natural bump leaves the
+      # runner's Node 20 deprecation warning exactly where it was. The same trap sits in
+      # build-server.yml, where docker/build-push-action@v6 is still node20 and only @v7 is not.
       - name: Upload Built Wiki Artifact
         if: ${{ env.CREATE_RELEASE == 'true' && env.BUILD_CONFIG == 'prod' }}
-        uses: actions/upload-artifact@v5
+        uses: actions/upload-artifact@v6
         with:
           name: built-wiki
           path: wiki/output/lith.html
@@ -337,7 +352,7 @@ jobs:
 
       - name: Upload Build Artifacts (Dry Run)
         if: ${{ env.CREATE_RELEASE == 'false' }}
-        uses: actions/upload-artifact@v5
+        uses: actions/upload-artifact@v6
         with:
           name: build-artifacts-dry-run
           path: |
@@ -347,7 +362,7 @@ jobs:
 
       - name: Upload Built Launcher (prod only)
         if: env.BUILD_CONFIG == 'prod'
-        uses: actions/upload-artifact@v5
+        uses: actions/upload-artifact@v6
         with:
           name: launcher-html
           path: src/launcher.html
@@ -355,7 +370,7 @@ jobs:
 
       - name: Upload Debug Logs
         if: always()
-        uses: actions/upload-artifact@v5
+        uses: actions/upload-artifact@v6
         with:
           name: debug-logs
           path: |
@@ -397,15 +412,8 @@ jobs:
     permissions:
       contents: write
     steps:
-      - name: Checkout Code
-        uses: actions/checkout@v5
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v5
-        with:
-          node-version: '24'
-          cache: npm
-          cache-dependency-path: package-lock.json
+      - name: Checkout and set up Node
+        uses: $/.github/actions/setup
 
       - name: Install repository dependencies
         run: npm ci
@@ -422,7 +430,7 @@ jobs:
       # upload-artifact stores a single file at the artifact's root and a directory keeps
       # its shape.
       - name: Take the built launcher
-        uses: actions/download-artifact@v5
+        uses: actions/download-artifact@v7
         with:
           name: launcher-html
           path: .launcher-artifact
@@ -508,7 +516,7 @@ jobs:
       # and no pull request, so this artifact is how its pictures are looked at.
       - name: Upload the deck report
         if: always()
-        uses: actions/upload-artifact@v5
+        uses: actions/upload-artifact@v6
         with:
           name: deck-report
           path: |-
@@ -531,16 +539,11 @@ jobs:
       contents: write
       pull-requests: write
     steps:
-      - name: Checkout Code
-        uses: actions/checkout@v5
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v5
-        with:
-          node-version: '24'
+      - name: Checkout and set up Node
+        uses: $/.github/actions/setup
 
       - name: Take the deck's report
-        uses: actions/download-artifact@v5
+        uses: actions/download-artifact@v7
         continue-on-error: true
         with:
           name: deck-report

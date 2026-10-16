@@ -1,0 +1,51 @@
+name: 'Lithic setup'
+description: >-
+  Check out the repository, install Node and restore the npm cache in one step, so the
+  Node version and the cache key each exist once in the repository instead of once per job.
+
+# WHY THIS FILE EXISTS. Eleven jobs across six workflows each carried the same three things:
+# a checkout, a `node-version`, and an npm cache. Writing a version out eleven times is how it
+# drifts, and it had: the two release workflows were on Node 20 while the platform jobs were
+# on 22. The cache was worse than duplicated, because one job had two mechanisms for it: some
+# jobs used setup-node's own npm cache and others carried a hand-written `actions/cache` step
+# keyed on `hashFiles('package-lock.json', 'launcher-ui/package-lock.json')`. A cache key is a
+# promise that the bytes it holds are still valid, and a promise copied per job is one that
+# drifts; the same hash expression was already wrong in the workflow that carries only the
+# repository's own lockfile.
+#
+# WHY THE CHECKOUT IS IN HERE, AND WHY `$/`. A composite action can own the checkout only if
+# it can be resolved before the workspace exists, and `./path` cannot: it is relative to
+# `github.workspace`, so the repository has to be checked out before the step's own action.yml
+# can be read, which makes a checkout inside it impossible. `$/path` is GitHub's self-repository
+# reference, documented as resolving to this repository at the running commit with no checkout
+# required, and GitHub recommends it over `./` for an action in the same repository. The one
+# caveat is GitHub Enterprise Server, which has no `$/`: this repository runs on github.com, but
+# a GHES mirror would need these jobs to spell out `actions/checkout` followed by
+# `./.github/actions/setup`.
+#
+# NO INPUTS, ON PURPOSE. Every job that uses this wants the same thing: a depth-1 checkout,
+# Node, and the npm cache. The four jobs that need the files without a toolchain keep a plain
+# `actions/checkout` and do not use this action, which is why there is nothing to configure
+# here: the release gate and the PWA bump both want a full history (fetch-depth 0), and the
+# server image and the LXC installer test are shell and Docker only.
+
+runs:
+  using: composite
+  steps:
+    - name: Checkout
+      uses: actions/checkout@v5
+
+    # The one copy of the Node version in this repository. 24 is the line that does not need
+    # revisiting: Node 20 reached end of life on 2026-04-30 and 22 follows on 2027-04-30.
+    - name: Set up Node
+      uses: actions/setup-node@v5
+      with:
+        node-version: '24'
+        # One caching mechanism, and it is setup-node's own: it caches the same directory the
+        # hand-written steps did (~/.npm) and keys it on these two files. The first run of a job
+        # that used the old key restores nothing, which is a one-off miss rather than a change
+        # in what is cached.
+        cache: npm
+        cache-dependency-path: |
+          package-lock.json
+          launcher-ui/package-lock.json

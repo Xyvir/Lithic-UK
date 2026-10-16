@@ -146,15 +146,12 @@ jobs:
     outputs:
       tag_name: ${{ steps.stamp.outputs.tag }}
     steps:
-      - name: Checkout Code
-        uses: actions/checkout@v5
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v5
-        with:
-          node-version: '20'
-          cache: npm
-          cache-dependency-path: package-lock.json
+      # The same setup the build and the platform jobs use, from one definition: this job
+      # regenerates the light build's gzip and wiki.zip from the merged tree, so it wants the
+      # Node the tree was built and tested with, and that version lives in
+      # .github/actions/setup/action.yml.
+      - name: Checkout and set up Node
+        uses: $/.github/actions/setup
 
       - name: Resolve the tag
         id: stamp

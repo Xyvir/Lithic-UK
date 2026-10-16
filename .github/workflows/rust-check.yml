@@ -31,19 +31,14 @@ jobs:
     # 22.04 existed only because v1 wanted the 4.0 headers Ubuntu 24.04 dropped.
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout Code
-        uses: actions/checkout@v5
+      # Checkout plus Node, the latter because the android-face step at the bottom is a Node
+      # script like the repository's other gates. The version is the repository's one and lives
+      # in .github/actions/setup/action.yml.
+      - name: Checkout and set up Node
+        uses: $/.github/actions/setup
 
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
-
-      # The android-face step is a Node script, like the repository's other gates. Node is
-      # already on the runner; naming the version keeps this job's answer the same one the
-      # build workflow and a developer's machine give.
-      - name: Setup Node.js
-        uses: actions/setup-node@v5
-        with:
-          node-version: '24'
 
       - name: Rust Cache
         uses: swatinem/rust-cache@v2

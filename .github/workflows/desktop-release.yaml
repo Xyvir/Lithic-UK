@@ -10,6 +10,25 @@ name: Desktop Manual Release
 # so a build's download page carries every desktop platform beside the wiki
 # artifacts.
 #
+# THE LAUNCHER IS BUILT ONCE, NOT ONCE PER JOB. The Svelte launcher (`launcher-ui/`)
+# is built by `build-wiki.yml`, in the job that stages the release, and its output is
+# committed to `src/launcher.html` and reviewed on the release pull request. Every job
+# here checks out the merge that carried it, and `tauri.conf.json` embeds `src/` exactly
+# as it finds it, so a build in each job would be four identical builds of one artifact
+# and would risk the launcher inside a download differing from the `launcher.html` asset
+# published beside it. The launcher's own unit tests do not run here either: they run in
+# `build-wiki.yml`, in the same job as the build they guard, so no job here reads
+# `launcher-ui` at all any more.
+# A dispatch from a tree that carries no `src/launcher.html` builds one so the job is not
+# stranded; a dispatch from a branch whose `launcher-ui/` changed without a `build-wiki.yml`
+# run packages that branch's committed launcher, so run the wiki build first when a fresh
+# launcher is what is meant.
+#
+# ONE SETUP STEP IN EVERY JOB HERE, and it is the one the rest of the pipeline uses:
+# `$/.github/actions/setup` checks out the repository, installs Node and restores the npm
+# cache. The Node version and the cache key live in that action and nowhere else, so this
+# file names no Node version at all.
+#
 # macOS is the one platform with two downloads, and the reason is Gatekeeper. These
 # builds are unsigned: a Developer ID and the notarization that needs it are a paid
 # annual membership, and nothing here is worth one yet. The consequence is bounded and
@@ -49,8 +68,8 @@ jobs:
     runs-on: windows-latest
 
     steps:
-      - name: Checkout Code
-        uses: actions/checkout@v5
+      - name: Checkout and set up Node
+        uses: $/.github/actions/setup
 
       # Optional by design. Chained from publish-release.yml this artifact belongs to a
       # different run, so the download finds nothing; the committed src/lithic.html is then
@@ -58,7 +77,7 @@ jobs:
       - name: Download Built Wiki Artifact
         if: ${{ inputs.tag_name != '' }}
         continue-on-error: true
-        uses: actions/download-artifact@v5
+        uses: actions/download-artifact@v7
         with:
           name: built-wiki
           path: src
@@ -66,22 +85,6 @@ jobs:
       - name: Rename Downloaded Wiki
         if: ${{ inputs.tag_name != '' && hashFiles('src/lith.html') != '' }}
         run: Move-Item -Force src/lith.html src/lithic.html
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v5
-        with:
-          node-version: 22
-
-
-      # Keyed on the lockfiles, not package.json: the pins are what decide which
-      # toolchain emits the artifacts, so a pin change has to invalidate the cache.
-      - name: Cache NPM dependencies
-        uses: actions/cache@v5
-        with:
-          path: ~/.npm
-          key: ${{ runner.os }}-node-${{ hashFiles('package-lock.json', 'launcher-ui/package-lock.json') }}
-          restore-keys: |
-            ${{ runner.os }}-node-
 
       - name: Rust Cache
         uses: swatinem/rust-cache@v2
@@ -92,15 +95,18 @@ jobs:
         uses: dtolnay/rust-toolchain@stable
 
       - name: Install Dependencies
-        run: |
-          npm ci
-          npm --prefix launcher-ui ci
+        run: npm ci
 
-      - name: Run Launcher UI Tests
-        run: npm --prefix launcher-ui test
-
-      - name: Build Launcher (Svelte Launcher Bundle)
-        run: node scripts/build-launcher.mjs
+      # NO LAUNCHER BUILD HERE, and the absence is the point. The Svelte launcher is built
+      # ONCE per release, in build-wiki.yml, and the bytes it produced were committed to
+      # src/launcher.html and reviewed on the release pull request this run is publishing.
+      # tauri.conf.json embeds src/ as it finds it, so a build here would be the same build
+      # a second time, and it could only make the launcher inside this executable differ
+      # from the src/launcher.html published beside it on the same release page. The
+      # guarded step below is for a hand-dispatch from a tree that carries none.
+      - name: Build Launcher (only if the checkout carries none)
+        if: ${{ hashFiles('src/launcher.html') == '' }}
+        run: npm run build:launcher
 
       # --- DEBUG STEP ---
       - name: Debug - List Files & Tauri Info
@@ -223,8 +229,8 @@ jobs:
     runs-on: ubuntu-22.04
 
     steps:
-      - name: Checkout Code
-        uses: actions/checkout@v5
+      - name: Checkout and set up Node
+        uses: $/.github/actions/setup
 
       # Optional by design. Chained from publish-release.yml this artifact belongs to a
       # different run, so the download finds nothing; the committed src/lithic.html is then
@@ -232,7 +238,7 @@ jobs:
       - name: Download Built Wiki Artifact
         if: ${{ inputs.tag_name != '' }}
         continue-on-error: true
-        uses: actions/download-artifact@v5
+        uses: actions/download-artifact@v7
         with:
           name: built-wiki
           path: src
@@ -240,19 +246,6 @@ jobs:
       - name: Rename Downloaded Wiki
         if: ${{ inputs.tag_name != '' && hashFiles('src/lith.html') != '' }}
         run: mv src/lith.html src/lithic.html
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v5
-        with:
-          node-version: 22
-
-      - name: Cache NPM dependencies
-        uses: actions/cache@v5
-        with:
-          path: ~/.npm
-          key: ${{ runner.os }}-node-${{ hashFiles('package-lock.json', 'launcher-ui/package-lock.json') }}
-          restore-keys: |
-            ${{ runner.os }}-node-
 
       - name: Rust Cache
         uses: swatinem/rust-cache@v2
@@ -286,16 +279,19 @@ jobs:
             build-essential \
             libfuse2
 
+      # No launcher-ui install and no launcher-ui test run: both moved into build-wiki.yml, into
+      # the job that builds the launcher, so the suite and the build it guards travel together
+      # and a failure is found before the release pull request is opened rather than here, after
+      # this job has spent its minutes installing GTK and WebKit.
       - name: Install Dependencies
-        run: |
-          npm ci
-          npm --prefix launcher-ui ci
+        run: npm ci
 
-      - name: Run Launcher UI Tests
-        run: npm --prefix launcher-ui test
-
-      - name: Build Launcher (Svelte Launcher Bundle)
-        run: node scripts/build-launcher.mjs
+      # NO LAUNCHER BUILD HERE (the Windows job carries the whole note): the launcher was
+      # built once by build-wiki.yml, its bytes were reviewed on the release pull request,
+      # and tauri.conf.json embeds src/ as it finds it.
+      - name: Build Launcher (only if the checkout carries none)
+        if: ${{ hashFiles('src/launcher.html') == '' }}
+        run: npm run build:launcher
 
       # Same rule as the Windows job: regenerate the icon set from the one source
       # image so the AppImage's icon, the desktop entry and the taskbar icon are
@@ -408,8 +404,8 @@ jobs:
     runs-on: ubuntu-22.04
 
     steps:
-      - name: Checkout Code
-        uses: actions/checkout@v5
+      - name: Checkout and set up Node
+        uses: $/.github/actions/setup
 
       # Optional by design. Chained from publish-release.yml this artifact belongs to a
       # different run, so the download finds nothing; the committed src/lithic.html is then
@@ -417,7 +413,7 @@ jobs:
       - name: Download Built Wiki Artifact
         if: ${{ inputs.tag_name != '' }}
         continue-on-error: true
-        uses: actions/download-artifact@v5
+        uses: actions/download-artifact@v7
         with:
           name: built-wiki
           path: src
@@ -425,19 +421,6 @@ jobs:
       - name: Rename Downloaded Wiki
         if: ${{ inputs.tag_name != '' && hashFiles('src/lith.html') != '' }}
         run: mv src/lith.html src/lithic.html
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v5
-        with:
-          node-version: 22
-
-      - name: Cache NPM dependencies
-        uses: actions/cache@v5
-        with:
-          path: ~/.npm
-          key: ${{ runner.os }}-node-${{ hashFiles('package-lock.json', 'launcher-ui/package-lock.json') }}
-          restore-keys: |
-            ${{ runner.os }}-node-
 
       # The shim is a crate of its own beside src-tauri, so its build cache is
       # its own as well.
@@ -466,16 +449,16 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y libssl-dev pkg-config
 
-      # No launcher-ui test run here. The AppImage job runs them from the same
-      # commit, and the launcher this job packages is the same build of the same
-      # forty odd files, so a second run would only be a second way to fail.
+      # No launcher build here, and no launcher-ui work of any kind: the launcher's tests run
+      # in build-wiki.yml, in the same job as the build they guard, and the launcher this job
+      # packages is the same bytes the release carried: built once by build-wiki.yml, committed
+      # to src/launcher.html, and reviewed on the pull request this run is publishing.
       - name: Install Dependencies
-        run: |
-          npm ci
-          npm --prefix launcher-ui ci
+        run: npm ci
 
-      - name: Build Launcher (Svelte Launcher Bundle)
-        run: node scripts/build-launcher.mjs
+      - name: Build Launcher (only if the checkout carries none)
+        if: ${{ hashFiles('src/launcher.html') == '' }}
+        run: npm run build:launcher
 
       - name: Generate Date-Based Tag
         id: tag
@@ -563,8 +546,8 @@ jobs:
     runs-on: macos-15
 
     steps:
-      - name: Checkout Code
-        uses: actions/checkout@v5
+      - name: Checkout and set up Node
+        uses: $/.github/actions/setup
 
       # Optional by design. Chained from publish-release.yml this artifact belongs to a
       # different run, so the download finds nothing; the committed src/lithic.html is then
@@ -572,7 +555,7 @@ jobs:
       - name: Download Built Wiki Artifact
         if: ${{ inputs.tag_name != '' }}
         continue-on-error: true
-        uses: actions/download-artifact@v5
+        uses: actions/download-artifact@v7
         with:
           name: built-wiki
           path: src
@@ -580,19 +563,6 @@ jobs:
       - name: Rename Downloaded Wiki
         if: ${{ inputs.tag_name != '' && hashFiles('src/lith.html') != '' }}
         run: mv src/lith.html src/lithic.html
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v5
-        with:
-          node-version: 22
-
-      - name: Cache NPM dependencies
-        uses: actions/cache@v5
-        with:
-          path: ~/.npm
-          key: ${{ runner.os }}-node-${{ hashFiles('package-lock.json', 'launcher-ui/package-lock.json') }}
-          restore-keys: |
-            ${{ runner.os }}-node-
 
       - name: Rust Cache
         uses: swatinem/rust-cache@v2
@@ -615,15 +585,15 @@ jobs:
       # to find) and keeps a Homebrew path out of the app.
 
       - name: Install Dependencies
-        run: |
-          npm ci
-          npm --prefix launcher-ui ci
+        run: npm ci
 
-      - name: Run Launcher UI Tests
-        run: npm --prefix launcher-ui test
-
-      - name: Build Launcher (Svelte Launcher Bundle)
-        run: node scripts/build-launcher.mjs
+      # NO LAUNCHER BUILD HERE (the Windows job carries the whole note): the launcher was
+      # built once by build-wiki.yml, its bytes were reviewed on the release pull request,
+      # and tauri.conf.json embeds src/ as it finds it. The guarded step below is for a
+      # hand-dispatch from a tree that carries none.
+      - name: Build Launcher (only if the checkout carries none)
+        if: ${{ hashFiles('src/launcher.html') == '' }}
+        run: npm run build:launcher
 
       # Same rule as the other jobs: regenerate the icon set from the one source image, so
       # the icon in the dock and the icon in Finder are the same drawing.
