@@ -1258,6 +1258,19 @@ try {
     ['Disconnect'],
     'Live self-host: a connected instance offers only the one thing left to want, which is stopping'
   );
+  // And the one button says what it costs before it is pressed. Stopping the backup is undoable,
+  // so it is not the red `.modal-action.danger` claims for an act that cannot be undone, and it is
+  // not the neutral it used to wear either, which read as an ordinary next step. Amber is this
+  // sheet's word for flagged rather than refused, so the ink, the border and the wash are read as
+  // the computed pair rather than trusted to the class name.
+  const disconnectLook = await livePage.evaluate(() => {
+    const button = [...document.querySelectorAll('.git-sync-modal .modal-action')].find((node) => node.textContent.trim() === 'Disconnect');
+    const style = getComputedStyle(button);
+    return { ink: style.color, border: style.borderTopColor, background: style.backgroundColor };
+  });
+  assert.equal(disconnectLook.ink, 'rgb(226, 192, 124)', 'Disconnect wears amber ink, not the red of an act that cannot be undone');
+  assert.equal(disconnectLook.border, 'rgb(226, 192, 124)', '...the same tone on its border, so it reads as one control');
+  assert.equal(disconnectLook.background, 'rgba(226, 192, 124, 0.12)', '...over the amber wash the danger shape gives its own family');
   assert.ok(stub.state.asked.includes('POST /api/github/create-repo'), 'Live self-host: creating the repository is a route of its own');
   assert.ok(stub.state.asked.includes('POST /api/github/setup'), 'Live self-host: and the setup is the one that lands it');
 

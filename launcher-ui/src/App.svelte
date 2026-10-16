@@ -6310,7 +6310,7 @@ import { backupFileName, collectInstanceBackup, mergeBookmarks, parseInstanceBac
             {#if !isSelfHost() && gitSyncHealthBroken}
               <button class="modal-action" disabled={gitSyncBusy || gitAuthActive} on:click={reconnectGitSync}>{gitAuthActive ? copy.dialogs.gitSync.waitingForGitHub : copy.dialogs.gitSync.reconnect}</button>
             {/if}
-            <button class="modal-action secondary" disabled={gitSyncBusy} on:click={disconnectGitSync}>{copy.dialogs.gitSync.disconnect}</button>
+            <button class="modal-action warn" disabled={gitSyncBusy} on:click={disconnectGitSync}>{copy.dialogs.gitSync.disconnect}</button>
           </div>
         {/if}
       </div>
@@ -6876,7 +6876,14 @@ import { backupFileName, collectInstanceBackup, mergeBookmarks, parseInstanceBac
         <div class="modal-actions">
           <button class="modal-action" on:click={() => resolveDirtyModal('merge')}>{copy.dialogs.dirty.recover}</button>
           <button class="modal-action secondary" on:click={() => resolveDirtyModal('later')}>{copy.dialogs.dirty.later}</button>
-          <button class="modal-action secondary" on:click={() => resolveDirtyModal('discard')}>{copy.dialogs.dirty.discard}</button>
+          <!--
+            The one answer here that cannot be taken back, so the one that wears the red: merging
+            folds the edits into the mount and deciding later leaves the question open, where
+            discarding clears the copy of them that exists nowhere else (see
+            `prepareDirtyRecovery`). The dialog is the three-way prompt with no × and no Cancel,
+            so the cost has to be on the button rather than on a second window behind it.
+          -->
+          <button class="modal-action danger" on:click={() => resolveDirtyModal('discard')}>{copy.dialogs.dirty.discard}</button>
         </div>
       </div>
     </div>

@@ -77,7 +77,9 @@
   --lithic-accent-wash-20: rgb(138 180 248 / 20%);
   --lithic-accent-wash-70: rgb(138 180 248 / 70%);
   --lithic-amber-wash-10: rgb(224 179 65 / 10%);
+  --lithic-amber-wash-12: rgb(226 192 124 / 12%);
   --lithic-amber-wash-16: rgb(255 183 77 / 16%);
+  --lithic-amber-wash-20: rgb(226 192 124 / 20%);
   --lithic-amber-wash-45: rgb(224 179 65 / 45%);
   --lithic-ok-wash-22: rgb(123 168 111 / 22%);
   --lithic-danger-wash-12: rgb(224 138 122 / 12%);
@@ -981,6 +983,18 @@ a.modal-action { text-decoration: none; text-align: center; color: var(--lithic-
  */
 .modal-action.danger { border-color: var(--lithic-danger-soft); background: var(--lithic-danger-wash-12); color: var(--lithic-danger-soft); }
 .modal-action.danger:hover:not(:disabled) { background: var(--lithic-danger-wash-20); color: var(--lithic-danger-soft); }
+/*
+ * The middle case: an act the reader can undo, but not one to hand out unremarked. The blue
+ * primary would read as an ordinary next step and the red above claims the act cannot be
+ * undone, which stopping a backup is not. Amber is this sheet's own word for flagged rather
+ * than refused (`.amber.progress`: work in flight, edits not saved, a row that is only
+ * partly covered), so a control that costs something and can be taken back wears it. The
+ * shape is the pair above to the pixel, because the shape says which act it is and only the
+ * family says what it costs: a caller asks for this one for the same reason it asks for
+ * that one, because only the caller knows what its own button costs.
+ */
+.modal-action.warn { border-color: var(--lithic-amber-soft); background: var(--lithic-amber-wash-12); color: var(--lithic-amber-soft); }
+.modal-action.warn:hover:not(:disabled) { background: var(--lithic-amber-wash-20); color: var(--lithic-amber-soft); }
 .recent-modal { position: relative; width: min(100%, 700px); max-height: 80vh; padding: 20px; border: 1px solid var(--lithic-line); border-radius: 10px; background: var(--lithic-surface-panel); box-shadow: 0 12px 40px var(--lithic-shadow); }
 .recent-modal h2 { margin: 0 0 14px; font-size: 1.5rem; }
 /* The ×, and the only dismiss a dialog carries. Whatever the label would have been. A

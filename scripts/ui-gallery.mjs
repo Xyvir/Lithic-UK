@@ -1198,7 +1198,55 @@ const DIALOG_STATES = [
       await settle(page, 300);
     },
     clip: '.dirty-modal',
-    expect: '.dirty-tiddler-list li'
+    expect: '.dirty-tiddler-list li',
+    // Three answers to one question, and only the last of them cannot be taken back: merging
+    // folds the edits into the mount and deciding later leaves the question open, where
+    // discarding clears the copy of them that exists nowhere else. The dialog is the one with
+    // no × and no Cancel, so the cost has to be on the button, and which of the three buttons
+    // it is on is what a picture cannot prove: a row of three warnings reads as a dead end
+    // rather than as a choice, and a row of three ordinary ones hides the only one that
+    // destroys something. So the red is read off the render, and the other two are read as
+    // not red.
+    verify: async (page) => {
+      const looks = await page.evaluate(() => {
+        const buttons = [...document.querySelectorAll('.dirty-modal .modal-action')];
+        return buttons.map((node) => {
+          const style = getComputedStyle(node);
+          return {
+            label: node.textContent.trim(),
+            ink: style.color,
+            border: style.borderTopColor,
+            background: style.backgroundColor
+          };
+        });
+      });
+      if (looks.length !== 3) {
+        throw new Error(
+          `the unsaved-edits dialog draws ${looks.length} answers to a three-way question; it is the one dialog with no × and no Cancel, so the three are the whole of it`
+        );
+      }
+      const labels = looks.map((button) => button.label).join(' / ');
+      if (labels !== 'Recover edits / Decide later / Discard') {
+        throw new Error(`the three answers read "${labels}", and the way out of the question is last`);
+      }
+      const [recover, later, discard] = looks;
+      if (discard.ink !== 'rgb(224, 138, 122)' || discard.border !== 'rgb(224, 138, 122)') {
+        throw new Error(
+          `Discard is drawn in ${discard.ink} on a ${discard.border} border, and it is the answer that cannot be taken back`
+        );
+      }
+      if (discard.background !== 'rgba(224, 138, 122, 0.12)') {
+        throw new Error(`Discard's fill is ${discard.background}, and the destructive answers wear the danger wash`);
+      }
+      for (const [what, button] of [
+        ['recovering the same edits', recover],
+        ['deciding later', later]
+      ]) {
+        if (button.ink === 'rgb(224, 138, 122)') {
+          throw new Error(`${what} is drawn in the same red as Discard, so the row reads as three warnings`);
+        }
+      }
+    }
   },
   {
     // A Lith's own versions, which is the longest list the launcher draws and the one that has
