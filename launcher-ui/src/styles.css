@@ -742,6 +742,11 @@ h1 { flex: none; min-width: 0; margin: 0; color: var(--lithic-ink-strong); font-
 }
 .activity-dots i:nth-child(2) { animation-delay: 0.12s; }
 .activity-dots i:nth-child(3) { animation-delay: 0.24s; }
+/* Past its settle time a line no longer claims to be busy, so the dots stop moving while the
+ * sentence stays where it can still be read. It is the same shape as the reduced-motion rule
+ * below, which is where a reader who cannot use motion already lands. Armed by
+ * status-lifetime.ts. */
+.activity-dots.settled i { animation: none; }
 @keyframes status-wave {
   0%, 60%, 100% { transform: translateY(0); opacity: 0.45; }
   30% { transform: translateY(-3px); opacity: 1; }

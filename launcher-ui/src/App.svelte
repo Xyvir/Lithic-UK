@@ -3,6 +3,7 @@
   // Every word this component shows. Nothing below spells copy of its own.
   import { LOCALE_TAG, copy, type LaunchEntry } from './copy';
   import { declaresBrowserOnly, handoffQuery, LAUNCHER_QUERY_PARAM, launcherReturn, withLauncherHandoff, type LauncherMode } from './mode';
+  import { armStatusDeadlines } from './status-lifetime';
   import { createFileBridge, tauriInvoke, tauriListen, saveTextVerifiably } from './file-bridge';
   import { opensInstanceInBrowser, type PlatformCapabilities } from './platform-capabilities';
   import { backupGate, orphanPill, orphanDownloadNote, type OrphanDownloadState } from './orphan-download';
@@ -226,6 +227,37 @@ import { backupFileName, collectInstanceBackup, mergeBookmarks, parseInstanceBac
   let fileName = 'untitled.lith';
   let filePath: string | undefined;
   let status = '';
+  /**
+   * Whether the line has stood long enough that it is no longer claiming to be busy.
+   *
+   * The animated dots beside a status are the launcher saying work is happening, and every
+   * writer leaves them running, because nothing ends a sentence: a mount that succeeded, an
+   * error that was already explained, a file with no path. Past the settle time that claim is
+   * false whether or not the sentence is, so the movement stops and the sentence stays where it
+   * can still be read.
+   */
+  let statusSettled = false;
+  let cancelStatusDeadlines: (() => void) | null = null;
+
+  /**
+   * Start the two deadlines a line lives by, and take back the pair armed for the line it
+   * replaced. See `status-lifetime.ts` for why they exist and what they cost.
+   *
+   * The clear is guarded by the text, like `reportAndRetire`, so an older line's deadline
+   * arriving late can never take away a sentence that arrived after it.
+   */
+  function syncStatusDeadlines(text: string): void {
+    cancelStatusDeadlines?.();
+    cancelStatusDeadlines = null;
+    statusSettled = false;
+    if (!text) return;
+    cancelStatusDeadlines = armStatusDeadlines({
+      settle: () => { statusSettled = true; },
+      clear: () => { if (status === text) status = ''; }
+    });
+  }
+
+  $: syncStatusDeadlines(status);
   let busy = false;
   let pendingImports: PendingTiddler[] = [];
   let introBusy = false;
@@ -5942,7 +5974,7 @@ import { backupFileName, collectInstanceBackup, mergeBookmarks, parseInstanceBac
       {/if}
       {#if remoteNotice && !offlineLauncher}<div class="status-line">{remoteNotice}</div>{/if}
       {#if remoteError && !offlineLauncher}<div class="status-line error" role="alert">{remoteError}</div>{/if}
-      {#if status}<div class="status-line" role="status"><span class="status-label">{status.replace(/[…\.\s]+$/, '')}</span><span class="activity-dots" aria-hidden="true"><i></i><i></i><i></i></span></div>{/if}
+      {#if status}<div class="status-line" role="status"><span class="status-label">{status.replace(/[…\.\s]+$/, '')}</span><span class="activity-dots" class:settled={statusSettled} aria-hidden="true"><i></i><i></i><i></i></span></div>{/if}
       {#if mountError}<div class="status-line error" role="alert">{mountError}</div>{/if}
     </div>
     <div class="heading-actions">
