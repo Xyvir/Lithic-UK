@@ -30,6 +30,9 @@ function createPdfContext() {
   const canvasRequests = [];
   const errors = [];
   const saves = [];
+  // What the screen looked like at the moment of each save: the layout, and the board it
+  // names. A Lith keeps the layout, so this is the half of the open path a file can show.
+  const saveStates = [];
   let uuid = 0;
 
   class Tiddler {
@@ -86,8 +89,16 @@ function createPdfContext() {
       Tiddler,
       wiki,
       // A save is how the new Lith lands on disk, so the test watches for the dispatch the
-      // importer makes after it has finished rendering.
-      rootWidget: { dispatchEvent: (event) => saves.push(event && event.type) },
+      // importer makes after it has finished rendering, and records the state it was taken of.
+      rootWidget: {
+        dispatchEvent: (event) => {
+          saves.push(event && event.type);
+          saveStates.push({
+            layout: tiddlers.get('$:/layout')?.fields.text ?? null,
+            board: tiddlers.get('$:/state/Whiteboard/PageLayout/tiddler')?.fields.text ?? null,
+          });
+        },
+      },
       utils: {
         stringifyList: (items) => items.join(' '),
         parseStringArray: (value) => value ? value.split(/\s+/) : [],
@@ -114,7 +125,7 @@ function createPdfContext() {
     setTimeout,
   };
 
-  return { context, listeners, tiddlers, canvasRequests, errors, saves, canvas };
+  return { context, listeners, tiddlers, canvasRequests, errors, saves, saveStates, canvas };
 }
 
 function loadPdfImportPlugin() {
@@ -138,6 +149,12 @@ function loadPdfOpenRequest({ base64 = 'AAAAAQ==' } = {}) {
   vm.runInNewContext(moduleBody(openRequestPath), loaded.context, { filename: openRequestPath });
   return loaded;
 }
+
+// The white board page layout, and the state that says which board it shows. Named here
+// rather than imported from the module under test: this is the contract with the whiteboard
+// plugin, so the test is the second place it is written down.
+const FULLSCREEN_LAYOUT = '$:/plugins/linonetwo/tw-whiteboard/tiddlywiki-ui/PageLayout/WhiteBoard';
+const BOARD_STATE = '$:/state/Whiteboard/PageLayout/tiddler';
 
 test('PDF import embeds a compressed raster image in its whiteboard page', async () => {
   const { listeners, tiddlers, canvasRequests, errors, canvas } = loadPdfImportPlugin();
@@ -178,10 +195,14 @@ test('PDF import embeds a compressed raster image in its whiteboard page', async
   assert.match(asset.src, /^data:image\/webp;base64,/);
   assert.deepEqual(shape.size, [600, 800]);
   assert.equal(document.assets[shape.assetId].src, asset.src);
+  // A drop is an edit to the wiki already on screen, so it stays on the page it was dropped
+  // on. Only a file the desktop app opened in a window of its own takes the screen over.
+  assert.equal(tiddlers.has('$:/layout'), false, 'a drop leaves the layout alone, so the river keeps the page');
+  assert.equal(tiddlers.has(BOARD_STATE), false, 'and names no board, because no board is full screen');
 });
 
-test('a PDF the desktop app opens becomes a new Lith beside it, saved and on screen', async () => {
-  const { context, tiddlers, saves } = loadPdfOpenRequest();
+test('a PDF the desktop app opens becomes a new Lith beside it, saved and full screen', async () => {
+  const { context, tiddlers, saves, saveStates } = loadPdfOpenRequest();
 
   context.exports.startup();
   for (let attempt = 0; attempt < 100 && !tiddlers.has('$:/StoryList'); attempt++) {
@@ -202,6 +223,28 @@ test('a PDF the desktop app opens becomes a new Lith beside it, saved and on scr
     saves,
     ['tm-save-wiki'],
     'the new Lith is written to disk rather than left unsaved, so the copy exists as soon as it opens'
+  );
+  // The board opens full screen: the same four tiddlers `$:/lithic/buttons/FullscreenWhiteboard`
+  // sets, so a double-click lands where the button lands rather than on a tiddler in the river.
+  assert.equal(
+    tiddlers.get('$:/layout')?.fields.text,
+    FULLSCREEN_LAYOUT,
+    'the white board layout is what draws the page, not the story river'
+  );
+  assert.equal(
+    tiddlers.get(BOARD_STATE)?.fields.text,
+    'imported-doc-whiteboard',
+    'and the layout is told which board to draw, rather than falling back to the newest one'
+  );
+  assert.deepEqual(
+    [tiddlers.get('$:/state/sidebar')?.fields.text, tiddlers.get('$:/state/notebook-sidebar')?.fields.text],
+    ['no', 'no'],
+    'both sidebars are out of the way, the way the control leaves them'
+  );
+  assert.deepEqual(
+    saveStates,
+    [{ layout: FULLSCREEN_LAYOUT, board: 'imported-doc-whiteboard' }],
+    'the save is taken while the board is full screen, which is the layout state the Lith keeps'
   );
   assert.ok(tiddlers.get('imported-doc'), 'the container tiddler still exists beside the board');
   const whiteboard = tiddlers.get('imported-doc-whiteboard');

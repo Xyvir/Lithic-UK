@@ -10,6 +10,12 @@
  * handler wrote, and measures the pixels of every page image it embedded. White
  * pages (or a page that failed to decode) fail the test.
  *
+ * The second half drives the other way in: a PDF the desktop app opened by file
+ * association, whose bytes arrive on the window before the wiki boots. That gesture
+ * is not a drop and does not end in the same place, so what it is required to do is
+ * asserted on the built page: the board it produced is drawn full screen, in the
+ * white board layout, and the story river is not on screen at all.
+ *
  * The companion check scripts/check-pdf-plugin-unminified.mjs asserts the same
  * artifact still carries the plugin's text unmodified, which is the mechanism the
  * white pages came from.
@@ -53,6 +59,9 @@ const PDFJS = '$:/plugins/lithic/lithic-import-handler/pdf.js';
 // handler, so an artifact without this one would still import on a drop and quietly do nothing
 // on a double-click.
 const OPEN_REQUEST = '$:/plugins/lithic/lithic-import-handler/pdf-open-request.js';
+// Where a board is drawn full screen. The importer sets this layout, and the whiteboard
+// plugin owns it, so it is named here rather than read out of the module under test.
+const WHITEBOARD_LAYOUT = '$:/plugins/linonetwo/tw-whiteboard/tiddlywiki-ui/PageLayout/WhiteBoard';
 
 const artifactHtml = readFileSync(artifact, 'utf8');
 const storeMatch = /<script class="tiddlywiki-tiddler-store" type="application\/json">([\s\S]*?)<\/script>/.exec(artifactHtml);
@@ -151,6 +160,51 @@ const DRIVER = async ([bytes, name]) => {
   return { ...stats, status: 'ok' };
 };
 
+/**
+ * Runs inside the page: the bytes are already on the window (see `evaluateOnNewDocument`
+ * below), so this waits for the importer to produce a board and move the page onto it, then
+ * reports both the wiki state and what the browser was asked to draw from it. `layout` is the
+ * test's expectation, passed in so the wait ends on the state being asserted rather than on a
+ * timeout.
+ */
+const OPEN_DRIVER = async ([layout, progressTitle]) => {
+  const stats = { status: 'running', progress: '' };
+  const wikiOf = () => window.$tw?.wiki;
+  const progress = () => wikiOf()?.getTiddlerText(progressTitle) || '';
+  const deadline = Date.now() + 120000;
+  while (Date.now() < deadline) {
+    const wiki = wikiOf();
+    if (wiki?.getTiddlerText('$:/layout') === layout) break;
+    await new Promise((done) => setTimeout(done, 200));
+  }
+  const wiki = wikiOf();
+  stats.progress = progress();
+  if (!wiki) return { ...stats, status: 'no-wiki' };
+  stats.consumed = window.__LITHIC_PDF_IMPORT__ === null;
+  stats.layout = wiki.getTiddlerText('$:/layout') || '';
+  stats.board = wiki.getTiddlerText('$:/state/Whiteboard/PageLayout/tiddler') || '';
+  stats.sidebar = wiki.getTiddlerText('$:/state/sidebar') || '';
+  stats.notebookSidebar = wiki.getTiddlerText('$:/state/notebook-sidebar') || '';
+  // A story list is a `list` field, not text, which is why it is read as one.
+  stats.story = wiki.getTiddler('$:/StoryList')?.fields.list || '';
+  // Whether the board mounted before or after the engine's own boot-delay flag landed: the
+  // whiteboard is a React widget and that flag is what keeps one from rendering into a page
+  // the core is still building, so this is the number to look at if the deck ever goes odd.
+  stats.bootComplete = wiki.getTiddlerText('$:/state/Lithic/BootComplete') || '';
+  if (stats.layout !== layout) return { ...stats, status: 'timeout' };
+  // The board itself, and how many pages the document it points at carries.
+  const board = wiki.getTiddler(stats.board);
+  stats.boardType = board?.fields.type || '';
+  stats.boardPages = board ? Object.keys(JSON.parse(board.fields.text).document.pages).length : 0;
+  // The layout draws the board in its own main area, and the river is not in the document at
+  // all while it is up. `.tl-canvas` is tldraw's own canvas, so it is the board being drawn
+  // rather than the shell around it.
+  stats.boardArea = Boolean(document.querySelector('.tw-whiteboard-layout-main-area'));
+  stats.canvas = Boolean(document.querySelector('.tw-whiteboard-layout-main-area .tl-canvas'));
+  stats.river = Boolean(document.querySelector('.tc-story-river'));
+  return { ...stats, status: 'ok' };
+};
+
 console.log(`artifact: ${path.relative(repoRoot, artifact)}`);
 console.log(`pdf:      ${path.relative(repoRoot, fixturePath)}`);
 const browser = await puppeteer.launch({
@@ -210,6 +264,59 @@ try {
   }
 
   console.log(`PASS: every imported page carries rendered ink`);
+
+  /*
+   * The other gesture. A double-click is not a drop: the launcher reads the file's bytes,
+   * hands them to the document it mounts, and the page the person is looking at is the board
+   * the import produced rather than the river it landed in. `evaluateOnNewDocument` is what
+   * puts the payload in place before the wiki boots, which is the only order that works: the
+   * importer reads the property during startup and clears it.
+   */
+  const openPayload = {
+    filename: 'opened-by-association.pdf',
+    base64: readFileSync(fixturePath).toString('base64')
+  };
+  const openPage = await browser.newPage();
+  openPage.on('pageerror', (error) => pageErrors.push(error.message));
+  openPage.on('console', (message) => {
+    if (message.type() === 'error') pageErrors.push(message.text());
+  });
+  await openPage.evaluateOnNewDocument((payload) => {
+    window.__LITHIC_PDF_IMPORT__ = payload;
+  }, openPayload);
+  await openPage.goto(pathToFileURL(artifact).href, { waitUntil: 'domcontentloaded', timeout: 120000 });
+  await openPage.waitForFunction(() => Boolean(window.$tw?.wiki), { timeout: 60000 });
+  const opened = await openPage.evaluate(OPEN_DRIVER, [WHITEBOARD_LAYOUT, '$:/temp/alerts/lithic-import-progress']);
+
+  console.log(`open status: ${opened.status}${opened.progress ? ` (${opened.progress})` : ''}`);
+  console.log(
+    `  layout ${opened.layout}\n  board  ${opened.board} (${opened.boardType}, ${opened.boardPages} pages)\n` +
+      `  drawn  board area ${opened.boardArea}, tldraw canvas ${opened.canvas}, story river ${opened.river}\n` +
+      `  sidebars ${JSON.stringify(opened.sidebar)} ${JSON.stringify(opened.notebookSidebar)}, story list ${JSON.stringify(opened.story)}\n` +
+      `  boot flag at that moment ${JSON.stringify(opened.bootComplete)}`
+  );
+
+  assert.equal(opened.status, 'ok', `the opened PDF did not reach the full screen board: ${JSON.stringify(opened)}`);
+  assert.equal(opened.consumed, true, 'the payload is taken off the window, so it cannot be read twice or saved into the Lith');
+  assert.equal(opened.layout, WHITEBOARD_LAYOUT, 'the white board layout is what draws the page');
+  assert.equal(opened.boardType, 'application/tldr', 'the board the layout names is a whiteboard document');
+  if (!suppliedPdf) {
+    assert.match(opened.board, /^opened-by-association(-whiteboard)?$/, `the board is named after the file that was opened: ${opened.board}`);
+    assert.equal(opened.boardPages, FIXTURE_PAGES, `the open path imports the same pages a drop does: ${opened.boardPages}`);
+  }
+  assert.equal(opened.sidebar, 'no', 'the sidebar is out of the way, the way the Fullscreen Whiteboard control leaves it');
+  assert.equal(opened.notebookSidebar, 'no', 'and so is the notebook sidebar');
+  assert.equal(opened.boardArea, true, 'the layout that is up is the white board one');
+  assert.equal(opened.canvas, true, 'a board is actually drawn in it, not an empty layout');
+  assert.equal(opened.river, false, 'and the story river is not on screen behind it');
+  // The story list arrives as the array the field is parsed into, so it is joined before it
+  // is matched rather than handed to `assert.match`, which insists on a string.
+  assert.ok(
+    String(opened.story).includes(opened.board),
+    `the board is what the river holds, so leaving the board lands on it: ${JSON.stringify(opened.story)}`
+  );
+
+  console.log(`PASS: a PDF opened by file association lands full screen on its own board`);
 } catch (error) {
   failure = error;
   console.error(`\nFAIL: ${error.message}`);
