@@ -3,7 +3,7 @@
   // Every word this component shows. Nothing below spells copy of its own.
   import { LOCALE_TAG, copy, type LaunchEntry } from './copy';
   import { declaresBrowserOnly, handoffQuery, LAUNCHER_QUERY_PARAM, launcherReturn, withLauncherHandoff, type LauncherMode } from './mode';
-  import { armStatusDeadlines } from './status-lifetime';
+  import { armStatusDeadlines, armStatusHold } from './status-lifetime';
   import { createFileBridge, tauriInvoke, tauriListen, saveTextVerifiably } from './file-bridge';
   import { opensInstanceInBrowser, type PlatformCapabilities } from './platform-capabilities';
   import { backupGate, orphanPill, orphanDownloadNote, type OrphanDownloadState } from './orphan-download';
@@ -238,26 +238,51 @@ import { backupFileName, collectInstanceBackup, mergeBookmarks, parseInstanceBac
    */
   let statusSettled = false;
   let cancelStatusDeadlines: (() => void) | null = null;
+  /**
+   * The sentence the line is holding, or '' while it is an ordinary one.
+   *
+   * Held by its text rather than by a flag, so an ordinary writer that runs after a failure
+   * cannot inherit the exemption by writing next: a line is held only while it is the exact
+   * sentence a hold was asked for.
+   */
+  let heldStatus = '';
 
   /**
-   * Start the two deadlines a line lives by, and take back the pair armed for the line it
+   * Start the deadlines the line now lives by, and take back the pair armed for the line it
    * replaced. See `status-lifetime.ts` for why they exist and what they cost.
    *
-   * The clear is guarded by the text, like `reportAndRetire`, so an older line's deadline
-   * arriving late can never take away a sentence that arrived after it.
+   * A held line keeps the settle deadline alone and then stands until something replaces it; an
+   * ordinary one is cleared on its own. The clear is guarded by the text, like
+   * `reportAndRetire`, so an older line's deadline arriving late can never take away a sentence
+   * that arrived after it.
    */
-  function syncStatusDeadlines(text: string): void {
+  function syncStatusDeadlines(text: string, held: string): void {
     cancelStatusDeadlines?.();
     cancelStatusDeadlines = null;
     statusSettled = false;
     if (!text) return;
-    cancelStatusDeadlines = armStatusDeadlines({
-      settle: () => { statusSettled = true; },
-      clear: () => { if (status === text) status = ''; }
-    });
+    const settle = () => { statusSettled = true; };
+    cancelStatusDeadlines = text === held
+      ? armStatusHold({ settle })
+      : armStatusDeadlines({ settle, clear: () => { if (status === text) status = ''; } });
   }
 
-  $: syncStatusDeadlines(status);
+  /**
+   * Say something the launcher cannot finish for the person, and let it stand.
+   *
+   * A failure is not a status report. "Open failed: ..." and "No file path recorded" name
+   * something the person has to act on, so the line stops claiming to be busy at the same moment
+   * any other line does and then keeps standing until the next thing replaces it, which is how
+   * the error lines beside it have always behaved. A clock cannot tell a failure from a success,
+   * so the writers that report one say so here, one site at a time, and every other writer stays
+   * transient by default.
+   */
+  function reportHeld(message: string): void {
+    heldStatus = message;
+    status = message;
+  }
+
+  $: syncStatusDeadlines(status, heldStatus);
   let busy = false;
   let pendingImports: PendingTiddler[] = [];
   let introBusy = false;
@@ -3279,7 +3304,7 @@ import { backupFileName, collectInstanceBackup, mergeBookmarks, parseInstanceBac
       await mountWiki('', 'new.lith');
     } catch (error) {
       mountError = error instanceof Error ? error.message : String(error);
-      status = copy.status.blankLithFailed;
+      reportHeld(copy.status.blankLithFailed);
       busy = false;
     }
   }
@@ -3323,7 +3348,7 @@ import { backupFileName, collectInstanceBackup, mergeBookmarks, parseInstanceBac
       await mountWiki('', safeName, undefined, undefined, [{ title: '$:/SiteTitle', text: siteTitle }]);
     } catch (error) {
       mountError = error instanceof Error ? error.message : String(error);
-      status = copy.status.blankLithFailed;
+      reportHeld(copy.status.blankLithFailed);
       busy = false;
     }
   }
@@ -3373,7 +3398,7 @@ import { backupFileName, collectInstanceBackup, mergeBookmarks, parseInstanceBac
       // No full stop: the status line strips trailing punctuation, because the
       // activity dots sit right after it.
       status = copy.status.added(picks.length);
-    } catch (error) { status = copy.status.openFailed(error instanceof Error ? error.message : String(error)); }
+    } catch (error) { reportHeld(copy.status.openFailed(error instanceof Error ? error.message : String(error))); }
     finally { busy = false; }
   }
 
@@ -3465,12 +3490,12 @@ import { backupFileName, collectInstanceBackup, mergeBookmarks, parseInstanceBac
       if (mode === 'tauri' && !rawHandle?.getFile) {
         // A handle-less or pseudo-handle row with no path can't be opened:
         // browser handles don't exist in this WebView.
-        status = copy.status.noPath;
+        reportHeld(copy.status.noPath);
         return;
       }
       // The same dead end on a shim: a handle with no resolvable path has nothing to read.
       if (shimToken !== null && rawHandle && !rawHandle.getFile) {
-        status = copy.status.noPath;
+        reportHeld(copy.status.noPath);
         return;
       }
       const handle = rawHandle;
@@ -3504,10 +3529,10 @@ import { backupFileName, collectInstanceBackup, mergeBookmarks, parseInstanceBac
         // no body to mount. The case a store too small to mirror a large Lith leaves
         // behind (`persistRecentRows`). Said out loud rather than left as a click that
         // does nothing, which is what it looked like from the outside.
-        status = copy.status.noPath;
+        reportHeld(copy.status.noPath);
       }
     } catch (error) {
-      status = copy.status.openFailed(error instanceof Error ? error.message : String(error));
+      reportHeld(copy.status.openFailed(error instanceof Error ? error.message : String(error)));
     } finally {
       busy = false;
       showRecent = false;
@@ -3601,7 +3626,7 @@ import { backupFileName, collectInstanceBackup, mergeBookmarks, parseInstanceBac
       await mountWiki(result.text, result.name, result.path);
       status = copy.status.mounted(result.name);
     } catch (error) {
-      status = copy.status.openFailed(error instanceof Error ? error.message : String(error));
+      reportHeld(copy.status.openFailed(error instanceof Error ? error.message : String(error)));
     }
   }
 
@@ -4220,7 +4245,7 @@ import { backupFileName, collectInstanceBackup, mergeBookmarks, parseInstanceBac
     // the legacy launcher can hold a path rather than a bare origin, and what the user
     // just threw away is the row they clicked, whatever its address looks like.
     const note = copyDropNote(label, await forgetInstanceCopy(origin));
-    if (note) status = note;
+    if (note) reportHeld(note);
   }
 
   /**
@@ -4340,7 +4365,7 @@ import { backupFileName, collectInstanceBackup, mergeBookmarks, parseInstanceBac
       const cached = (await getSearchCacheText(name)) || fallbackText;
       if (!cached) {
         setOrphanDownload(name, 'failed');
-        status = copy.status.noCachedCopy(name);
+        reportHeld(copy.status.noCachedCopy(name));
         return;
       }
       // The copy keeps the extension it came with, so a saved page is written as a page rather
@@ -5578,7 +5603,7 @@ import { backupFileName, collectInstanceBackup, mergeBookmarks, parseInstanceBac
       try {
         await tauriInvoke('open_external', { url: addressed });
       } catch (error) {
-        status = copy.status.openFailed(error instanceof Error ? error.message : String(error));
+         reportHeld(copy.status.openFailed(error instanceof Error ? error.message : String(error)));
       }
       return;
     }

@@ -20,12 +20,21 @@
  * so the movement stops first and the sentence stays, where a user can still read it. The
  * sentence is information, so it is given longer before it goes.
  *
- * THE COST, named because it is real. A line that used to stand until the next action now goes
- * on a clock, including the ones worth reading twice: an error naming a file the user needs to
- * act on disappears after the clear time. That is the trade taken on purpose here. A message
- * that matters should be carried by something durable (the row's own pill, a dialog), not by a
- * transient line, and `reportAndRetire` remains the way for a writer that knows its sentence is
- * worth keeping to hold it longer.
+ * TWO CLASSES OF LINE, and the writer says which one it is rather than the text. An ordinary
+ * status reports what the launcher just did, so it settles and then goes. A line that names
+ * something the person has to act on (an open that failed, a file with no path recorded, a
+ * cached copy that is not there to download) is reported through `reportHeld` in App.svelte,
+ * and that one keeps the settle deadline alone: the movement stops, which is the whole of what
+ * the settle was ever for, and the sentence then stands until the next thing replaces it,
+ * exactly as the error lines beside it (`mountError`, `remoteError`) have always done. The
+ * exemption is asked for at the writer, one site at a time, so a new status is transient by
+ * default and cannot become a permanent line by accident.
+ *
+ * THE COST OF THE CATCH-ALL, named because it is real. The clear is a clock rather than a
+ * judgement, so it also ends a sentence that reported a success and would have been worth
+ * another read a minute later. That is the trade taken on purpose: one deadline is one place to
+ * be right, where every writer that forgets is a new bug. `reportAndRetire` remains the way for
+ * a writer whose sentence should go sooner than the catch-all does.
  *
  * THE THRESHOLDS ARE THE CONTRACT, which is why they are exported and asserted in the test
  * beside this file: a status is transient by definition, and a minute is the outside of that.
@@ -87,4 +96,19 @@ export function armStatusDeadlines(on: StatusDeadlines, timers: StatusTimers = s
     timers.cancel(settleId);
     timers.cancel(clearId);
   };
+}
+
+/**
+ * Arm the settle deadline for one line, and no other.
+ *
+ * A held line is one that names something the person has to act on, so the sentence stays where
+ * it can be read until the next thing replaces it. What it does not keep is the claim that work
+ * is happening: the movement stops at the same moment it stops for any other line. That is what
+ * makes the exemption safe rather than a hole in the rule, and it is why a held line is not the
+ * same thing as no deadline at all: an unending pulse reading "work in progress" is the bug
+ * this file exists to prevent, and a standing sentence is not that.
+ */
+export function armStatusHold(on: { settle(): void }, timers: StatusTimers = systemTimers): () => void {
+  const settleId = timers.after(on.settle, STATUS_SETTLE_MS);
+  return () => timers.cancel(settleId);
 }

@@ -10,6 +10,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
   armStatusDeadlines,
+  armStatusHold,
   STATUS_CLEAR_MS,
   STATUS_SETTLE_MS,
   statusPhase,
@@ -86,6 +87,31 @@ test('arming a line sets both deadlines, and settling leaves the sentence alone'
 
   timers.run(STATUS_CLEAR_MS);
   assert.deepEqual(seen, ['settle', 'clear']);
+});
+
+test('a held line stops moving and is never taken away on a clock', () => {
+  const timers = fakeTimers();
+  let settled = 0;
+  const cancel = armStatusHold({ settle: () => (settled += 1) }, timers);
+
+  assert.deepEqual(
+    timers.pending(),
+    [STATUS_SETTLE_MS],
+    'a held line keeps the settle deadline and no clear deadline at all'
+  );
+
+  timers.run(STATUS_SETTLE_MS);
+  assert.equal(settled, 1, 'the movement still stops, so a standing line never reads as busy');
+  assert.deepEqual(timers.pending(), [], 'and nothing is left armed that could end the sentence');
+
+  // Ten clear times later, an ordinary line would have gone long ago, and this one has not.
+  timers.run(STATUS_CLEAR_MS * 10);
+  assert.equal(settled, 1, 'a held line must not wake again after its one deadline');
+
+  // The cancel is what a caller uses when the line is replaced, and a hold has one timer.
+  cancel();
+  assert.equal(timers.cancelled.length, 1, 'cancelling a hold returns its single deadline');
+  assert.equal(timers.pending().length, 0);
 });
 
 test('a replaced line cancels both of its deadlines', () => {
