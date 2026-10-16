@@ -106,8 +106,19 @@ export function resolveDefaultPlugins(): string[] {
 export const LITHIC_INJECTED_EXCLUSIONS =
   '-[prefix[~]] -[prefix[$:/plugins/lithic/ephemeral/]] -[[$:/config/OfficialPluginLibrary]]';
 
+/**
+ * The floor of every save: what belongs to the document and what belongs to the view.
+ *
+ * `$:/layout` is excluded by name, and that is a decision rather than tidiness. The
+ * whiteboard's fullscreen buttons, the board's own exit, and the PDF open path each write it
+ * on a press, so a save that kept it rewrote the file every time the user changed view, and
+ * every mount then opened in whatever layout the file happened to be saved in. The layout a
+ * Lith carries in the engine is what it opens with; the one a user is looking at now is not
+ * part of the document. The same name is subtracted in the wiki's own save filters, so both
+ * halves of a mount agree (`$:/core/save/all` and the two exporters).
+ */
 export const LITHIC_BASE_FILTER =
-  `[all[tiddlers]!is[system]] [all[tiddlers]is[system]!prefix[$:/core]!prefix[$:/themes]!prefix[$:/temp]!prefix[$:/state]!prefix[$:/HistoryList]] [is[shadow]] -[prefix[$:/boot/]] -[[$:/isEncrypted]] -[[$:/library/sjcl.js]] -[[$:/status/RequireReloadDueToPluginChange]] -[[$:/StoryList]] -[[$:/config/PageControlButtons/Visibility/$:/core/ui/Buttons/new-journal]] -[[$:/lithic/startup/webdav-utils.js]] ${LITHIC_INJECTED_EXCLUSIONS}`;
+  `[all[tiddlers]!is[system]] [all[tiddlers]is[system]!prefix[$:/core]!prefix[$:/themes]!prefix[$:/temp]!prefix[$:/state]!prefix[$:/HistoryList]] [is[shadow]] -[prefix[$:/boot/]] -[[$:/isEncrypted]] -[[$:/library/sjcl.js]] -[[$:/status/RequireReloadDueToPluginChange]] -[[$:/StoryList]] -[[$:/layout]] -[[$:/config/PageControlButtons/Visibility/$:/core/ui/Buttons/new-journal]] -[[$:/lithic/startup/webdav-utils.js]] ${LITHIC_INJECTED_EXCLUSIONS}`;
 
 /**
  * The filter a save runs over the wiki: what is the user's document and what is the base's.

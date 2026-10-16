@@ -6,7 +6,7 @@ filename: lith_<<now "0MM-0DD-YY_0hh꞉0mm_0ss">>s
 code-body: yes
 
 \define saveTiddlerFilter()
-[[$:/core]] [all[shadows+tiddlers]has[plugin-type]] [all[tiddlers]prefix[$:/]] -[prefix[$:/temp/]] -[prefix[$:/state/]] -[prefix[$:/status/]] -[prefix[$:/HistoryList]] -[[$:/StoryList]] -[[$:/boot/boot.css]] -[type[application/javascript]library[yes]] -[[$:/boot/boot.js]] -[[$:/boot/bootprefix.js]] -[has[plugin-type]field:platform[server]] [subfilter<exportFilter>] +[sort[title]]
+[[$:/core]] [all[shadows+tiddlers]has[plugin-type]] [all[tiddlers]prefix[$:/]] -[prefix[$:/temp/]] -[prefix[$:/state/]] -[prefix[$:/status/]] -[prefix[$:/HistoryList]] -[[$:/StoryList]] -[[$:/layout]] -[[$:/boot/boot.css]] -[type[application/javascript]library[yes]] -[[$:/boot/boot.js]] -[[$:/boot/bootprefix.js]] -[has[plugin-type]field:platform[server]] [subfilter<exportFilter>] +[sort[title]]
 \end
 
 {{$:/core/templates/tiddlywiki5.html}}

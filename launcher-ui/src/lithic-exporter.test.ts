@@ -48,6 +48,14 @@ test('baseline exclusions are source-qualified so shadows are subtracted too', (
   assert.ok(!/-\s*\[prefix\[/.test(body), 'a bare -[prefix[..]] run is evaluated against tiddlers only and misses every shadow');
 });
 
+// The layout is view state: which layout a Lith was last looked at in says nothing about
+// what the document holds, and the whiteboard writes `$:/layout` on every press. A separate
+// filter (the engine's `$:/config/SaverFilter`, `$:/core/save/all`, and the launcher's own
+// save filter) carries the same exclusion; this pins the export half.
+test('the export drops the layout, which is view state rather than content', () => {
+  assert.match(body, /-\[\[\$:\/layout\]\]/, 'the exported document must not carry the layout it was viewed in');
+});
+
 test('the exported file is named after the query, never "tiddlers"', () => {
   assert.ok(fields.filename, 'the exporter declares a filename');
   assert.match(fields.filename, /prefix\[\$:\/config\/TiddlyTools\/Filters\/\]/, 'a saved query supplies the name');

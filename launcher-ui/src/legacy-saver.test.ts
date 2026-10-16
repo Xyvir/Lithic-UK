@@ -43,6 +43,15 @@ test('a save excludes what the launcher itself injects', () => {
   assert.match(filter, /-\[\[\$:\/config\/OfficialPluginLibrary\]\]/, 'the bootstrap sets this flag itself');
 });
 
+// View state, not content: the layout a Lith was last looked at in must not travel in the file.
+// Four writers set `$:/layout` on a press (the fullscreen whiteboard buttons, the board's own
+// exit, the streams row's whiteboard action, and the PDF open handoff), so a save that kept it
+// rewrote the file on every view change and the next mount inherited whichever layout the file
+// happened to be saved in.
+test('a save excludes the layout, which belongs to the view and not the file', () => {
+  assert.match(getLithicUserFilter(), /-\[\[\$:\/layout\]\]/);
+});
+
 // The list is hand-maintained while the engine's plugin set is whatever the wiki
 // build produced, so they drift silently. Lithic-patch-mermaid and lithic-save
 // were both shipped in lithic.html and both absent here, which is how two plugin

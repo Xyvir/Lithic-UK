@@ -31,7 +31,9 @@ function createPdfContext() {
   const errors = [];
   const saves = [];
   // What the screen looked like at the moment of each save: the layout, and the board it
-  // names. A Lith keeps the layout, so this is the half of the open path a file can show.
+  // names. This records the live view rather than what the file ends up carrying: a save drops
+  // `$:/layout` (view state, not document state), so a written Lith is not where a layout is
+  // read back from. A file that carries one is read on mount, which is what the open path shows.
   const saveStates = [];
   let uuid = 0;
 
@@ -268,7 +270,7 @@ test('a PDF the desktop app opens becomes a new Lith beside it, saved and full s
   assert.deepEqual(
     saveStates,
     [{ layout: FULLSCREEN_LAYOUT, board: 'imported-doc-whiteboard' }],
-    'the save is taken while the board is full screen, which is the layout state the Lith keeps'
+    'the save is taken while the board is full screen, which is the view the import sets before writing'
   );
   assert.ok(tiddlers.get('imported-doc'), 'the container tiddler still exists beside the board');
   const whiteboard = tiddlers.get('imported-doc-whiteboard');
