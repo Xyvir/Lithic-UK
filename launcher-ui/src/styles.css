@@ -1605,7 +1605,16 @@ a.modal-action { text-decoration: none; text-align: center; color: var(--lithic-
     /* The heading keeps the row it had (the band's own height), because the mark and the
        title are measured against it; the notice takes its own height off the bottom. */
     flex: 1 1 auto;
-    min-height: 0;
+    /*
+     * The mark's own floor, rather than zero. The wrapper below asks for 36px and says it raises
+     * the band's floor rather than letting the mark spill out of a row thinner than it, and
+     * `min-height: 0` here is why it did not: at 880 by 360 the band's row came to 30px and the
+     * icon was drawn 6px into the notice's top line (measured, 16px in at 950 by 320). 43px is
+     * that 36 plus the 6px inset and the 1px rule that live inside this box, so the box cannot be
+     * thinner than the mark it holds. The notice is what gives below this (see `.offline-banner`),
+     * and a mode without a notice simply has slack here.
+     */
+    min-height: 43px;
     margin-bottom: 0;
     padding-bottom: 6px;
   }
@@ -1816,8 +1825,33 @@ a.modal-action { text-decoration: none; text-align: center; color: var(--lithic-
    * inside the band (see `.heading-band` above). No margin, because the heading's own rule
    * line is what separates it from the title. Offline mode always has the panel (an instance
    * is enough to show one), so there is no second placement to state.
+   *
+   * It is drawn smaller here than the page draws it, because in this layout the band's row is
+   * 92.5px at 844 by 390 and the heading's own floor is 43 of that: the notice is what gives the
+   * rest. So its inset and its type are a notch tighter, which is 55px of banner turned into 39
+   * (0.8rem/1.15 over 0.72rem/1.15, 4px of inset). `flex: none` is the other half of that and not
+   * a detail: left shrinkable it was squeezed instead of yielding, which closed its two lines on
+   * each other and hung the copy's own box out of the banner's bottom. Those two lines are the
+   * sentence, so the notice yields as one height rather than losing its second line to the row.
    */
-  main.container .offline-banner { margin: 0; }
+  main.container .offline-banner { margin: 0; padding: 4px 10px; gap: 8px; flex: none; }
+  main.container .offline-banner-icon { flex: 0 0 15px; width: 15px; height: 15px; margin-top: 1px; }
+  main.container .offline-banner-copy strong { font-size: 0.8rem; line-height: 1.15; }
+  main.container .offline-banner-copy span { font-size: 0.72rem; line-height: 1.15; }
+  /*
+   * The last step, for the window shape that cannot hold both lines: a phone narrow enough that
+   * the notice's sentence wraps to three (the band's column is half the window, so below about
+   * 600px wide it is two lines of body at 0.7rem) and short enough that the band's row is under
+   * the 95px the heading's floor and that notice come to. Measured at 568 by 320 the row is 75px
+   * for a 52px notice and a 43px heading, and the 20px of overflow landed 10px into the search
+   * box below it. The band is the row that gives and the notice is what it spends its slack on,
+   * so the notice gives again here rather than being drawn over a control. What it drops is the
+   * second telling of a fact every row on screen already carries: each local-only row keeps its
+   * own mark, whose tooltip is this same sentence's read-only half (OFFLINE_ROW_OPEN_TITLE).
+   */
+  @media (max-width: 600px) and (max-height: 340px) {
+    main.container .offline-banner-copy span { display: none; }
+  }
 }
 
 /* --- PENDING IMPORTS WINDOW (legacy parity) --- */

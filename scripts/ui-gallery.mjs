@@ -1769,10 +1769,22 @@ const SHEETS = [
               const rect = node.getBoundingClientRect();
               return { top: rect.top, bottom: rect.bottom, left: rect.left, right: rect.right };
             };
+            // The floors the band is laid out from, as the page computes them: the heading's box
+            // and the mark's own minimum. Read rather than assumed, because it is a floor and not
+            // a size, and see the check below for what it is asserted for.
+            const minHeight = (selector) => {
+              const node = document.querySelector(selector);
+              if (!node) return null;
+              return Number.parseFloat(getComputedStyle(node).minHeight) || 0;
+            };
             return {
               title: box('.heading h1'),
+              brand: box('.brand-icon'),
               banner: box('.offline-banner'),
+              copy: box('.offline-banner-copy'),
               search: box('.recent-search-wrap'),
+              headingMinHeight: minHeight('.heading'),
+              markMinHeight: minHeight('.brand-icon-wrap'),
               card: box('.action-card'),
               list: box('.recent-list'),
               windowHeight: window.innerHeight,
@@ -1784,12 +1796,49 @@ const SHEETS = [
               controlDisabled: document.querySelector('.recent-foot .reset-cache')?.disabled ?? true
             };
           });
-          if (!measured.title || !measured.banner || !measured.search || !measured.card || !measured.list) {
+          if (
+            !measured.title ||
+            !measured.brand ||
+            !measured.banner ||
+            !measured.copy ||
+            !measured.search ||
+            !measured.card ||
+            !measured.list ||
+            measured.headingMinHeight === null ||
+            measured.markMinHeight === null
+          ) {
             throw new Error('the offline landscape state did not draw the boxes this pane asserts on');
           }
           if (measured.banner.top < measured.title.bottom) {
             throw new Error(
               `the notice starts at ${measured.banner.top.toFixed(1)}px, above the title's own bottom at ${measured.title.bottom.toFixed(1)}px`
+            );
+          }
+          // The mark is the other thing the band is short of room for, and the row that gives is
+          // the band rather than the icon: a mark drawn over the notice's top line (measured at
+          // 880 by 360: 6px in, 16px in at 950 by 320) is what this state looked like before the
+          // notice took the smaller sizes above. Both are asserted here rather than only the box
+          // that moved, because it is the mark's floor that the notice measures itself against.
+          if (measured.brand.bottom > measured.banner.top + 0.5) {
+            throw new Error(
+              `the mark ends at ${measured.brand.bottom.toFixed(1)}px, over the notice that starts at ${measured.banner.top.toFixed(1)}px`
+            );
+          }
+          // And that collision is only reachable below this pane's own window, so the floor that
+          // makes it unreachable is asserted as a floor: the heading may never be allowed to be
+          // shorter than the mark it holds, which is how the mark came to spill instead of the
+          // notice giving. The heading's floor has to cover the mark plus the inset and rule that
+          // sit inside its box, so compare against the mark's own minimum and not a sum of them.
+          if (measured.headingMinHeight < measured.markMinHeight) {
+            throw new Error(
+              `the heading's floor is ${measured.headingMinHeight}px and the mark asks for ${measured.markMinHeight}px, so a window shorter than this one draws the mark over the notice`
+            );
+          }
+          // And the notice's own two lines stay inside it: shrinking the banner is only a fix if
+          // the sentence it carries moves with it rather than being squeezed into the box.
+          if (measured.copy.bottom > measured.banner.bottom + 0.5) {
+            throw new Error(
+              `the notice's copy ends at ${measured.copy.bottom.toFixed(1)}px, past the notice's own bottom at ${measured.banner.bottom.toFixed(1)}px`
             );
           }
           if (measured.banner.bottom > measured.search.top) {
