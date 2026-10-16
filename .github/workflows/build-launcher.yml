@@ -12,6 +12,12 @@ on:
 permissions:
   contents: write
 
+# The smoke tests below drive Chrome and install it in the step that uses it, so the install
+# would otherwise fetch the same browser twice: once as a side effect of `npm ci` and once on
+# purpose. Nothing else in this workflow uses a browser.
+env:
+  PUPPETEER_SKIP_DOWNLOAD: 'true'
+
 jobs:
   build-launcher:
     runs-on: ubuntu-latest
@@ -28,8 +34,11 @@ jobs:
       - name: Build launcher
         run: npm run build:launcher
 
+      # One definition for the browser a job drives, with a cache under it: see
+      # `.github/actions/browser`. It has to come after `npm ci`, because the command it runs
+      # is the repository's own puppeteer rather than one fetched from the registry.
       - name: Install Puppeteer browser
-        run: npx puppeteer browsers install chrome
+        uses: $/.github/actions/browser
 
       - name: Run Puppeteer launcher smoke test
         run: npm run test:puppeteer

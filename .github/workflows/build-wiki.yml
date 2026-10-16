@@ -78,6 +78,10 @@ permissions:
 env:
   BUILD_CONFIG: ${{ github.event_name == 'push' && 'prod' || inputs.build_config }}
   CREATE_RELEASE: ${{ github.event_name == 'push' || inputs.create_release }}
+  # The build job installs the root dependencies and drives no browser, so puppeteer's install
+  # step is told not to fetch Chrome. The deck job below DOES drive one, and installs it in the
+  # step that uses it, which is why this is a skip rather than a disable.
+  PUPPETEER_SKIP_DOWNLOAD: 'true'
 
 # One writer to main at a time, repo-wide: concurrency groups are shared across
 # workflows, and bump-pwa-version.yml deliberately names this same group.
@@ -418,8 +422,11 @@ jobs:
       - name: Install repository dependencies
         run: npm ci
 
+      # One definition for the browser a job drives, with a cache under it: see
+      # `.github/actions/browser`. It has to come after `npm ci`, because the command it runs
+      # is the repository's own puppeteer rather than one fetched from the registry.
       - name: Install Puppeteer browser
-        run: npx puppeteer browsers install chrome
+        uses: $/.github/actions/browser
 
       - name: Install ImageMagick 7
         run: bash scripts/install-imagemagick7.sh

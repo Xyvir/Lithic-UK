@@ -29,6 +29,20 @@ name: Desktop Manual Release
 # cache. The Node version and the cache key live in that action and nowhere else, so this
 # file names no Node version at all.
 #
+# THE TOOLCHAIN AND THE SYSTEM PACKAGES ARE SHARED THE SAME WAY, and for the same reason.
+# The Rust toolchain and its build cache are `$/.github/actions/rust`, with the shim naming its
+# own workspace and macOS its two slices; the apt packages are
+# `$/.github/actions/linux-deps`, with the package list as an input and the downloads cached
+# across runs, because two of these jobs install the same webkit set. Six jobs in the pipeline
+# used to carry those two steps written out by hand, and the copies had already drifted: the
+# Rust Check job installed its toolchain before its cache while every job here did the
+# opposite.
+#
+# AND NO JOB HERE DOWNLOADS A BROWSER. `npm ci` at the root installs puppeteer, whose install
+# step fetches Chrome unless PUPPETEER_SKIP_DOWNLOAD is set, and nothing in a desktop build
+# drives a browser. The two jobs that do (the launcher smoke suite and the UI gallery) install
+# Chrome in the step that uses it, so the download happens where it is needed and nowhere else.
+#
 # macOS is the one platform with two downloads, and the reason is Gatekeeper. These
 # builds are unsigned: a Developer ID and the notarization that needs it are a paid
 # annual membership, and nothing here is worth one yet. The consequence is bounded and
@@ -63,6 +77,11 @@ on:
 permissions:
   contents: write
 
+# See the note above: the browser download is skipped for every job in this file. A step that
+# needs Chrome installs it explicitly, which is what the smoke suite and the gallery do.
+env:
+  PUPPETEER_SKIP_DOWNLOAD: 'true'
+
 jobs:
   build-windows:
     runs-on: windows-latest
@@ -86,13 +105,10 @@ jobs:
         if: ${{ inputs.tag_name != '' && hashFiles('src/lith.html') != '' }}
         run: Move-Item -Force src/lith.html src/lithic.html
 
-      - name: Rust Cache
-        uses: swatinem/rust-cache@v2
-        with:
-          workspaces: 'src-tauri -> target'
-
-      - name: Install Rust
-        uses: dtolnay/rust-toolchain@stable
+      # The toolchain and its build cache, from one definition: see
+      # `.github/actions/rust`, which every Rust job in the pipeline now uses.
+      - name: Set up Rust
+        uses: $/.github/actions/rust
 
       - name: Install Dependencies
         run: npm ci
@@ -118,13 +134,17 @@ jobs:
           Write-Host "`n--- TAURI INFO ---"
           npm run tauri info
 
-      - name: Generate Icons
-        run: |
-          if (Test-Path "src/app-icon.png") {
-            npm run tauri icon src/app-icon.json
-          } else {
-            Write-Host "Icon file 'src/app-icon.png' not found, skipping icon generation."
-          }
+      # NO ICON STEP HERE, and the reason is a measurement rather than a mood. A release build
+      # regenerated the icon set from `src/app-icon.png` in this job and in three others, and
+      # measured against what is committed the result is the same drawing every time: all
+      # sixteen files pixel-identical (only the encoder's bytes differ, the fresh set a little
+      # smaller), which the round log of 2026-10-16 records. Four regenerations of one drawing
+      # per release bought nothing, so this build embeds the committed set, which is the set the
+      # release pull request reviewed. `npm run tauri icon src/app-icon.json` is still what to
+      # run by hand when `src/app-icon.png` changes, and the command is guarded in the same
+      # sentence in `agents.md`. The Android job still generates, because the icon set it needs
+      # is not the committed one: `scripts/patch-android.mjs` copies
+      # `src-tauri/icons/android/**`, which no commit carries.
 
       - name: Generate Date-Based Tag
         id: tag
@@ -247,13 +267,10 @@ jobs:
         if: ${{ inputs.tag_name != '' && hashFiles('src/lith.html') != '' }}
         run: mv src/lith.html src/lithic.html
 
-      - name: Rust Cache
-        uses: swatinem/rust-cache@v2
-        with:
-          workspaces: 'src-tauri -> target'
-
-      - name: Install Rust
-        uses: dtolnay/rust-toolchain@stable
+      # The toolchain and its build cache, from one definition: see
+      # `.github/actions/rust`, which every Rust job in the pipeline now uses.
+      - name: Set up Rust
+        uses: $/.github/actions/rust
 
       # Everything a Linux Tauri build needs that the runner does not already
       # carry. webkit2gtk-4.1 is the v2 webview (22.04 keeps it in the standard
@@ -264,20 +281,11 @@ jobs:
       # is the FUSE 2 library linuxdeploy's own AppImage mounts through, installed
       # beside APPIMAGE_EXTRACT_AND_RUN below rather than instead of it.
       - name: Install System Dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y \
-            libwebkit2gtk-4.1-dev \
-            libgtk-3-dev \
-            libayatana-appindicator3-dev \
-            librsvg2-dev \
-            libssl-dev \
-            libxdo-dev \
-            patchelf \
-            file \
-            wget \
-            build-essential \
-            libfuse2
+        uses: $/.github/actions/linux-deps
+        with:
+          packages: >-
+            libwebkit2gtk-4.1-dev libgtk-3-dev libayatana-appindicator3-dev librsvg2-dev
+            libssl-dev libxdo-dev patchelf file wget build-essential libfuse2
 
       # No launcher-ui install and no launcher-ui test run: both moved into build-wiki.yml, into
       # the job that builds the launcher, so the suite and the build it guards travel together
@@ -293,16 +301,8 @@ jobs:
         if: ${{ hashFiles('src/launcher.html') == '' }}
         run: npm run build:launcher
 
-      # Same rule as the Windows job: regenerate the icon set from the one source
-      # image so the AppImage's icon, the desktop entry and the taskbar icon are
-      # the same drawing as the executable's.
-      - name: Generate Icons
-        run: |
-          if [ -f src/app-icon.png ]; then
-            npm run tauri icon src/app-icon.json
-          else
-            echo "Icon file 'src/app-icon.png' not found, skipping icon generation."
-          fi
+      # No icon step: the AppImage's icon, the desktop entry and the taskbar icon are the
+      # committed set, and the Windows job's note carries the measurement behind that.
 
       - name: Generate Date-Based Tag
         id: tag
@@ -422,15 +422,12 @@ jobs:
         if: ${{ inputs.tag_name != '' && hashFiles('src/lith.html') != '' }}
         run: mv src/lith.html src/lithic.html
 
-      # The shim is a crate of its own beside src-tauri, so its build cache is
-      # its own as well.
-      - name: Rust Cache
-        uses: swatinem/rust-cache@v2
+      # The shim is a crate of its own beside src-tauri, so its build cache is its own as well,
+      # which is the one thing this job says about the shared Rust setup.
+      - name: Set up Rust
+        uses: $/.github/actions/rust
         with:
           workspaces: 'shim -> target'
-
-      - name: Install Rust
-        uses: dtolnay/rust-toolchain@stable
 
       # The one system package this job needs, and it is a deliberate posture
       # rather than an oversight: the shim links the SYSTEM OpenSSL, for libgit2's
@@ -445,9 +442,9 @@ jobs:
       # current distribution ships, which is what keeps the artifact runnable on
       # everything newer.
       - name: Install System Dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y libssl-dev pkg-config
+        uses: $/.github/actions/linux-deps
+        with:
+          packages: libssl-dev pkg-config
 
       # No launcher build here, and no launcher-ui work of any kind: the launcher's tests run
       # in build-wiki.yml, in the same job as the build they guard, and the launcher this job
@@ -564,16 +561,11 @@ jobs:
         if: ${{ inputs.tag_name != '' && hashFiles('src/lith.html') != '' }}
         run: mv src/lith.html src/lithic.html
 
-      - name: Rust Cache
-        uses: swatinem/rust-cache@v2
-        with:
-          workspaces: 'src-tauri -> target'
-
       # Both slices, named: the universal build is one cargo build per target plus a lipo
       # over the two, and a target that is not installed is a build that fails rather than a
       # download that is quietly single-architecture.
-      - name: Install Rust
-        uses: dtolnay/rust-toolchain@stable
+      - name: Set up Rust
+        uses: $/.github/actions/rust
         with:
           targets: aarch64-apple-darwin,x86_64-apple-darwin
 
@@ -595,15 +587,8 @@ jobs:
         if: ${{ hashFiles('src/launcher.html') == '' }}
         run: npm run build:launcher
 
-      # Same rule as the other jobs: regenerate the icon set from the one source image, so
-      # the icon in the dock and the icon in Finder are the same drawing.
-      - name: Generate Icons
-        run: |
-          if [ -f src/app-icon.png ]; then
-            npm run tauri icon src/app-icon.json
-          else
-            echo "Icon file 'src/app-icon.png' not found, skipping icon generation."
-          fi
+      # No icon step: the icon in the dock and the icon in Finder are the committed set, and
+      # the Windows job's note carries the measurement behind that.
 
       - name: Generate Date-Based Tag
         id: tag

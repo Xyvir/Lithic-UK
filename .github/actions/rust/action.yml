@@ -1,0 +1,50 @@
+name: Set up Rust
+description: >-
+  The Rust toolchain and its build cache, from one definition, with the crate it caches and any
+  cross targets named by the caller.
+
+# WHY THIS EXISTS: six jobs (the four desktop builds, the Android build, and the Rust Check
+# workflow) each carried the same two steps. They differed in two things only: which crate's
+# target directory is cached, `src-tauri -> target` for five of them and `shim -> target` for the
+# shim's AppImage, and the rustup targets the two jobs that cross-compile install. Written out
+# six times, the rule about what gets cached and which toolchain builds it is six statements
+# that can drift; here they are inputs.
+#
+# `swatinem/rust-cache` caches the compiled artifacts keyed on the toolchain and the lockfile,
+# and `dtolnay/rust-toolchain@stable` is the toolchain every job builds with. One key is
+# deliberate: a job that wants a different cache scope says so, and nothing installs a second
+# Rust.
+
+inputs:
+  workspaces:
+    description: >-
+      What rust-cache caches, in that action's `crate -> target` form. The shim is a crate of
+      its own beside src-tauri, so it caches a directory of its own.
+    required: false
+    default: 'src-tauri -> target'
+  targets:
+    description: >-
+      Comma-separated rustup targets to install. The default is empty, which installs the host
+      target only: that is every job except the macOS universal build and the phone.
+    required: false
+    default: ''
+
+runs:
+  using: composite
+  steps:
+    - name: Rust Cache
+      uses: swatinem/rust-cache@v2
+      with:
+        workspaces: ${{ inputs.workspaces }}
+
+    # Two steps rather than one with an empty `targets`, because the toolchain action appends
+    # whatever it is given: an empty list and no list are not the same instruction to it.
+    - name: Install Rust
+      if: inputs.targets == ''
+      uses: dtolnay/rust-toolchain@stable
+
+    - name: Install Rust (with cross targets)
+      if: inputs.targets != ''
+      uses: dtolnay/rust-toolchain@stable
+      with:
+        targets: ${{ inputs.targets }}

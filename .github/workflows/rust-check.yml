@@ -37,21 +37,18 @@ jobs:
       - name: Checkout and set up Node
         uses: $/.github/actions/setup
 
-      - name: Install Rust
-        uses: dtolnay/rust-toolchain@stable
-
-      - name: Rust Cache
-        uses: swatinem/rust-cache@v2
-        with:
-          workspaces: 'src-tauri -> target'
+      # The same toolchain-and-cache step the release jobs use, from one definition: see
+      # `.github/actions/rust`. The order was the one thing this job had differently (toolchain
+      # first, cache second, where all four desktop jobs had it the other way round), and that
+      # kind of drift is exactly what sharing the step removes.
+      - name: Set up Rust
+        uses: $/.github/actions/rust
 
       # Type/borrow-check the crate without linking. System deps for tauri v2
       # on Linux (webkit2gtk 4.1 etc.) are needed to compile the glib/gtk FFI
       # bindings that cargo check must expand, plus git2's `https` transport, which is WinHTTP on Windows but OpenSSL here.
       - name: Install System Dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y libwebkit2gtk-4.1-dev libgtk-3-dev libayatana-appindicator3-dev librsvg2-dev libssl-dev
+        uses: $/.github/actions/linux-deps
 
       - name: cargo check
         working-directory: src-tauri

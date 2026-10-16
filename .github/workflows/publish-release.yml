@@ -71,6 +71,12 @@ concurrency:
   group: release-publishers
   cancel-in-progress: false
 
+# The publish job installs the root dependencies for `npm run mirror` and the flatten, and
+# neither of those drives a browser: puppeteer's install step would fetch Chrome here for
+# nothing. The platform builds are chained below and skip it for the same reason.
+env:
+  PUPPETEER_SKIP_DOWNLOAD: 'true'
+
 jobs:
   # Is this push a release at all? The paths above are a superset, and this is the part that
   # reads the commit rather than its file list. It runs on every event and answers for a

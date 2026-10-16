@@ -107,6 +107,12 @@ on:
 permissions:
   contents: write
 
+# No job here drives a browser, so puppeteer's install step is told not to fetch Chrome: the
+# launcher is built once elsewhere and this job embeds the committed bytes. See
+# `.github/actions/setup` for the rest of what is shared.
+env:
+  PUPPETEER_SKIP_DOWNLOAD: 'true'
+
 jobs:
   build-android:
     runs-on: ubuntu-latest
@@ -140,17 +146,12 @@ jobs:
           distribution: temurin
           java-version: 17
 
-      - name: Rust Cache
-        uses: swatinem/rust-cache@v2
-        with:
-          workspaces: 'src-tauri -> target'
-
-      # The two phone ABIs, named rather than left to `android build` to install for
-      # itself: a target that is not installed is a build that fails rather than a download
-      # that quietly carries fewer architectures than its name claims. The x86 pair is not
-      # here on purpose, and the header has the measurement behind that choice.
-      - name: Install Rust
-        uses: dtolnay/rust-toolchain@stable
+      # The two phone ABIs, named rather than left to `android build` to install for itself: a
+      # target that is not installed is a build that fails rather than a download that quietly
+      # carries fewer architectures than its name claims. The x86 pair is not here on purpose,
+      # and the header has the measurement behind that choice.
+      - name: Set up Rust
+        uses: $/.github/actions/rust
         with:
           targets: aarch64-linux-android,armv7-linux-androideabi
 
@@ -196,12 +197,17 @@ jobs:
         if: ${{ hashFiles('src/launcher.html') == '' }}
         run: npm run build:launcher
 
-      # Same rule as the desktop jobs: regenerate the icon set from the one source image, so
-      # the launcher icon on the phone is the same drawing as the one in the taskbar. This has
-      # to run before the patch step below, which is what actually puts the set into the Gradle
-      # project: `android init` does NOT copy `src-tauri/icons/android/`, whatever an earlier
-      # version of this comment claimed. Measured on the installed APK: the icon resources were
-      # the template's, so the launcher icon was generic.
+      # THIS JOB STILL GENERATES THE ICON SET, and since 2026-10-16 it is the only one that
+      # does. The desktop jobs stopped when regenerating was measured against what is committed
+      # and found to be the same drawing every time (all sixteen files pixel-identical, only the
+      # encoder's bytes smaller), so four regenerations of one drawing per release were buying
+      # nothing. What this job cannot borrow is the part it needs: `scripts/patch-android.mjs`
+      # copies `src-tauri/icons/android/**`, which no commit carries, so the set has to be
+      # produced here or the APK keeps the template's icon. This has to run before the patch
+      # step below, which is what actually puts the set into the Gradle project: `android init`
+      # does NOT copy `src-tauri/icons/android/`, whatever an earlier version of this comment
+      # claimed. Measured on the installed APK: the icon resources were the template's, so the
+      # launcher icon was generic.
       - name: Generate Icons
         run: |
           if [ -f src/app-icon.png ]; then

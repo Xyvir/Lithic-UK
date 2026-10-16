@@ -1,0 +1,56 @@
+name: Linux system dependencies
+description: >-
+  The apt packages a Linux build needs, from one definition, with the downloads kept across runs.
+
+# WHY THIS EXISTS: three jobs install system packages (the two AppImage builds and the Rust Check
+# workflow), and two of them install the same webkit/GTK set word for word while the shim's needs
+# one package. The list is an input rather than three copies, which is the same reason the Rust
+# setup is an action.
+#
+# THE CACHE IS THE OTHER HALF, and it is the mechanism rather than a measured number: an
+# `apt-get install` of these packages spends most of its time fetching archives the previous run
+# had already fetched, where installing from a warm archive directory is seconds of unpacking.
+# What that is worth on a runner is not measured in this checkout, because no machine here can
+# time a GitHub job: the first run after this change is what shows it, and an empty cache costs
+# exactly what this action cost before it. `apt-get` (not `apt`, which cleans up after itself)
+# leaves the downloaded .debs in the archive directory, so caching that directory turns the fetch
+# into a file copy. Two choices in the key are deliberate: it is keyed on this file's own
+# contents, because the package list lives here and a changed list wants a fresh cache, and it is
+# not keyed on anything else, because the packages are the same ones release after release.
+#
+# ONLY THE ARCHIVES ARE CACHED, NEVER THE PACKAGE LISTS. `apt-get update` still runs on every
+# call, so a cached .deb is used only when the current index still names that version, and a
+# stale cache costs a download rather than a wrong package. The failure mode of the cache being
+# empty is the behaviour this action had before the cache existed.
+
+inputs:
+  packages:
+    description: Space-separated apt packages to install.
+    required: false
+    default: >-
+      libwebkit2gtk-4.1-dev libgtk-3-dev libayatana-appindicator3-dev librsvg2-dev libssl-dev
+
+runs:
+  using: composite
+  steps:
+    # The cache action runs as the runner user and writes into this directory, which apt owns as
+    # root. Handing it over first is what makes a restore land rather than fail, and it costs
+    # about a second. Nothing further is needed for the save: the files apt leaves behind are
+    # world-readable.
+    - name: Hand the package cache to the runner
+      shell: bash
+      run: |
+        sudo mkdir -p /var/cache/apt/archives/partial
+        sudo chown -R "$(id -u):$(id -g)" /var/cache/apt/archives
+
+    - name: Cache the downloaded packages
+      uses: actions/cache@v5
+      with:
+        path: /var/cache/apt/archives
+        key: apt-${{ runner.os }}-${{ hashFiles('.github/actions/linux-deps/action.yml') }}
+
+    - name: Install System Dependencies
+      shell: bash
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y ${{ inputs.packages }}

@@ -1,0 +1,39 @@
+name: Puppeteer browser
+description: >-
+  The browser a launcher job drives, restored from the cache and installed if it is not already
+  there, from one definition.
+
+# WHY THIS EXISTS: two jobs drive a browser (build-launcher.yml's smoke suite and build-wiki.yml's
+# deck) and both carried the same two-line install step. What a bare cache step could not carry is
+# the ordering rule, and it is load bearing: the command below comes from the repository's own
+# puppeteer, so it has to run AFTER the calling job's `npm ci`. Putting it here rather than in
+# `setup` is what makes that impossible to get wrong, since `setup` runs before anything is
+# installed.
+#
+# THE CACHE IS THE OTHER REASON IT IS AN ACTION. Nothing cached a browser before, so each of those
+# two jobs fetched Chrome on every run (the directory one such download leaves behind in this
+# checkout measures 681 MB unpacked), while `PUPPETEER_SKIP_DOWNLOAD` at the top of the four
+# workflows that drive no browser means the rest of the pipeline never fetches one at all. The key
+# is the lockfile, because the browser build is a function of the puppeteer version: a cached build
+# that no longer matches is not used by mistake, since the install below resolves the exact build it
+# wants and downloads it when the cache does not hold it. No restore-key is deliberately set, so a
+# version bump is a miss rather than a hit with a stale browser inside it.
+
+inputs:
+  browser:
+    description: The browser to install, named as `puppeteer browsers install` names it.
+    required: false
+    default: chrome
+
+runs:
+  using: composite
+  steps:
+    - name: Cache the browser
+      uses: actions/cache@v5
+      with:
+        path: ~/.cache/puppeteer
+        key: puppeteer-${{ runner.os }}-${{ hashFiles('package-lock.json') }}
+
+    - name: Install Puppeteer browser
+      shell: bash
+      run: npx puppeteer browsers install ${{ inputs.browser }}
