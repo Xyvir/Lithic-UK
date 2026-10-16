@@ -62,20 +62,38 @@ pub const LIVE_MS: u64 = 6000;
 /// here; this only keeps the folder from collecting them.
 pub const SWEEP_MS: u64 = 60_000;
 
-/// How long an install waits for the windows it asked to close. Long enough for a few beats
-/// plus the time it takes a window to shut down, and short enough not to look hung.
-pub const WAIT_MS: u64 = 3000;
+/// How long a window is given to hear that it has been asked to close, and then to close.
+///
+/// Two things in sequence, and neither is the other: the request is only heard on the window's
+/// next beat, which can be a whole [`BEAT_MS`] away, and the close itself is a webview, an event
+/// loop, and a process letting go of the file it was running out of.
+pub const CLOSE_MS: u64 = 5_000;
+
+/// How long an install waits for the windows it asked to close, and for the copy they were
+/// holding to be let go.
+///
+/// A ceiling rather than a delay: the wait ends the moment nothing is still closing (see
+/// [`still_closing`]), so it can be generous without anybody watching it. It used to be one beat
+/// and a bit, which is shorter than the close it was waiting for: a window hears the request on
+/// its next beat, and the beat it hears it on can be almost the whole of that wait, so an update
+/// pressed shortly after a beat could be refused while the other window was already on its way
+/// out, and the refusal was a sentence about a window that no longer existed by the time it was
+/// read.
+pub const WAIT_MS: u64 = BEAT_MS + CLOSE_MS;
 
 /// How often the waiting install looks again.
 pub const POLL_MS: u64 = 100;
 
-// The three clocks are one decision, so their relationship is a compile error rather than a
-// test: the page beats every `BEAT_MS` (handed to it by `launcher_stage`, so the two cannot
-// drift), a word is believed for `LIVE_MS`, and an install waits `WAIT_MS` for the windows it
-// asked. A single missed beat must not read as a window that has gone, and the wait has to
-// outlast the beat it is waiting on.
+// The clocks are one decision, so their relationship is a compile error rather than a test: the
+// page beats every `BEAT_MS` (handed to it by `launcher_stage`, so the two cannot drift), a word
+// is believed for `LIVE_MS`, and an install waits `WAIT_MS` for the windows it asked. A single
+// missed beat must not read as a window that has gone, and the wait has to outlast the beat it
+// is waiting on by enough for the close that beat begins: the allowance for the close is the
+// whole point of the arrangement, so lowering it to make an install feel snappier is this
+// compile error rather than a race somebody has to reproduce.
 const _: () = assert!(LIVE_MS >= BEAT_MS * 2);
-const _: () = assert!(WAIT_MS > BEAT_MS);
+const _: () = assert!(WAIT_MS == BEAT_MS + CLOSE_MS);
+const _: () = assert!(CLOSE_MS >= 5_000);
 
 /// A window that is sitting on a launcher, which is the one state it is safe to close.
 pub const STAGE_LAUNCHER: &str = "launcher";
@@ -319,6 +337,59 @@ pub fn is_locked(path: &Path) -> bool {
 /// which is also what a dozen unrelated refusals answer with.
 const SHARING_VIOLATION: i32 = 32;
 
+/// Whether an install that has asked the other windows to close still has something to wait on.
+///
+/// Two things have to be true before the copy may be written, and the second is the one the wait
+/// used to leave out. The windows it asked have to be done saying they are on a launcher, *and*
+/// the installed copy has to be free. Those are two moments rather than one: a window's entry is
+/// removed as its event loop ends, and the operating system releases the file it was running out
+/// of when the process goes, a couple of milliseconds later on Windows and not necessarily at all
+/// in the same order on a machine with more to tear down. Waiting for the copy is also the honest
+/// question, rather than the convenient one: it is what the install needs, so a window that has
+/// said goodbye while its process still holds the file cannot satisfy the wait.
+///
+/// `held` is the caller's own look at that file ([`is_locked`]) rather than taken here, because a
+/// running executable is the one thing a test cannot build, and every branch of this decision is
+/// worth a test: three of the four are a different outcome for the person who pressed the button.
+///
+/// The one hold a wait cannot end is a window nobody asked to close. A window inside a Lith keeps
+/// the copy for as long as its user keeps that Lith open, which is a decision at that other window
+/// rather than something to stand and wait for, so this answers `false` and the install's refusal,
+/// naming the Lith, is the response.
+pub fn still_closing(
+    entries: &[Presence],
+    now: u64,
+    target: Option<&Path>,
+    held: bool,
+    asked: &[u32],
+) -> bool {
+    if !askable(entries, now).is_empty() {
+        return true;
+    }
+    if !held {
+        return false;
+    }
+    let Some(target) = target else {
+        return false;
+    };
+    !held_by_unasked(entries, target, asked)
+}
+
+/// Whether the copy is run by a window this install did not ask to close, which is the one
+/// explanation of a held copy that no amount of waiting ends.
+///
+/// Liveness is deliberately not asked here, the way it is everywhere else in this module: a
+/// window that has stopped answering cannot be asked to close either, so waiting for it is the
+/// same dead time as waiting for a Lith, and the refusal sentence covers both. That the copy is
+/// genuinely held is what makes an entry evidence at all, which is the caller's own look at the
+/// file, so a stale record of a window that is truly gone is already outside this question.
+fn held_by_unasked(entries: &[Presence], target: &Path, asked: &[u32]) -> bool {
+    entries
+        .iter()
+        .filter(|entry| same_file(Path::new(&entry.image), target))
+        .any(|entry| !asked.contains(&entry.pid))
+}
+
 /// How long an install waits between looks, as a duration.
 pub fn poll_interval() -> Duration {
     Duration::from_millis(POLL_MS)
@@ -422,6 +493,58 @@ mod tests {
             ..held(STAGE_WIKI, Some("old.lith"), "/programs/Lithic-installed")
         }];
         assert_eq!(holder(&quiet, now, target), None);
+    }
+
+    /// The waiting rule, branch by branch: this is the decision the copy is attempted on, and
+    /// three of its four answers are a different outcome for the person who pressed the button.
+    /// The third case is the bug the rule was written for: a window that has stopped saying it is
+    /// there has not necessarily let go of the copy yet, so an install that stopped waiting at
+    /// that moment refused an update whose close was already under way.
+    #[test]
+    fn a_wait_ends_when_nothing_is_still_closing() {
+        let now = 1_000_000;
+        let target = Path::new("/programs/Lithic-installed");
+        let asked = vec![10u32];
+        let running = |pid: u32, stage: &str, image: &str| Presence {
+            pid,
+            stage: stage.to_string(),
+            wiki: None,
+            image: image.to_string(),
+            seen_ms: now,
+        };
+
+        // The window this install asked is still saying it is on a launcher, so the close is
+        // still going on.
+        let closing = vec![running(10, STAGE_LAUNCHER, "/programs/Lithic-installed")];
+        assert!(still_closing(&closing, now, Some(target), true, &asked));
+
+        // Its entry is gone and the copy is still held: the close is in its last moment.
+        assert!(still_closing(&[], now, Some(target), true, &asked));
+
+        // A window inside a Lith holds the copy and was never asked: no wait ends that, so the
+        // refusal is the answer rather than seconds of standing there.
+        let open = vec![running(11, STAGE_WIKI, "/programs/Lithic-installed")];
+        assert!(!still_closing(&open, now, Some(target), true, &asked));
+
+        // The copy is free and nobody this install asked is still closing, so there is nothing
+        // left to wait for, whatever else is on the machine.
+        assert!(!still_closing(&open, now, Some(target), false, &asked));
+        assert!(!still_closing(&[], now, Some(target), false, &asked));
+
+        // A window holding it that has gone quiet cannot be asked either, which is the same
+        // answer for the same reason.
+        let mut silent = running(12, STAGE_LAUNCHER, "/programs/Lithic-installed");
+        silent.seen_ms = now - LIVE_MS - 1;
+        assert!(!still_closing(&[silent], now, Some(target), true, &asked));
+
+        // A window running a different file holds nothing at all, so a lock nothing on this
+        // machine explains is still worth waiting on.
+        let elsewhere = vec![running(13, STAGE_WIKI, "/downloads/Lithic-new.exe")];
+        assert!(still_closing(&elsewhere, now, Some(target), true, &asked));
+
+        // With no install target there is no copy to wait for, only the windows.
+        assert!(!still_closing(&[], now, None, false, &asked));
+        assert!(still_closing(&closing, now, None, false, &asked));
     }
 
     /// A Lith with no name in it is not a name to quote, and a stage that is not a Lith has
@@ -545,6 +668,22 @@ mod tests {
         assert!(
             !is_locked(&dir.join("absent.bin")),
             "a file that is not there is not locked"
+        );
+    }
+
+    /// The probe's one real case, and the fact the whole install wait rests on: neither operating
+    /// system lets a program open its own running image for writing (a sharing violation on
+    /// Windows, `ETXTBSY` on Unix), which is why a window lets go of the copy only as its process
+    /// ends. This test is its own subject, so the running program is the test binary, and it is
+    /// asserted rather than assumed because a probe that quietly stopped answering `true` here
+    /// would leave the wait with nothing to wait for and hand the refusal back to the copy's own
+    /// raw sharing violation, which is the sentence no user can act on.
+    #[test]
+    fn a_running_program_holds_the_file_it_is_running_from() {
+        let running = std::env::current_exe().expect("a test binary has a path");
+        assert!(
+            is_locked(&running),
+            "the file this test is running from is still held"
         );
     }
 }

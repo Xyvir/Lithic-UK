@@ -426,9 +426,10 @@ struct InstallPreflight {
 /// Ask the other windows to close, and report what an install is walking into.
 ///
 /// Async, and that is load-bearing rather than stylistic: a sync command runs on the main
-/// thread, and this one waits (up to `instances::WAIT_MS`) for windows to finish closing. The
-/// copy itself is separate and unchanged (`install_monolith`): this is the courtesy before
-/// it, so the copy is never the thing that has to explain a locked file.
+/// thread, and this one waits (up to `instances::WAIT_MS`) for windows to finish closing *and*
+/// for the copy they were holding to come free. The copy itself is separate and unchanged
+/// (`install_monolith`): this is the courtesy before it, so the copy is never the thing that
+/// has to explain a locked file.
 #[tauri::command]
 async fn install_preflight() -> InstallPreflight {
     tauri::async_runtime::spawn_blocking(install_preflight_blocking)
@@ -447,10 +448,24 @@ fn install_preflight_blocking() -> InstallPreflight {
     for peer in &asked {
         registry.ask_to_quit(peer.pid);
     }
+    // Resolved before the wait rather than after it, because the copy is half of what the wait is
+    // waiting on: a window that has stopped saying it is on a launcher has not necessarily let go
+    // of the file it was running out of.
+    let target = platform::install_target();
     if !asked.is_empty() {
+        // The wait is for the close to be *over*, which is two things and not one, so both are
+        // asked in one condition (see `instances::still_closing`) and the wait ends the moment the
+        // last of them is true: the windows this install asked have to stop saying they are on a
+        // launcher, and the installed copy has to be free. Asking only for the first is what cut
+        // off a close that was already under way: the copy was still held, so the update was
+        // refused, and the window finished closing a moment later. A window inside a Lith is the
+        // one hold this cannot end, and it is refused rather than waited on.
+        let asked_pids: Vec<u32> = asked.iter().map(|peer| peer.pid).collect();
         let deadline = instances::now_ms() + instances::WAIT_MS;
         while instances::now_ms() < deadline {
-            if instances::askable(&registry.entries(), instances::now_ms()).is_empty() {
+            let entries = registry.entries();
+            let held = target.as_deref().is_some_and(instances::is_locked);
+            if !instances::still_closing(&entries, instances::now_ms(), target.as_deref(), held, &asked_pids) {
                 break;
             }
             std::thread::sleep(instances::poll_interval());
@@ -464,7 +479,6 @@ fn install_preflight_blocking() -> InstallPreflight {
     }
     let entries = registry.entries();
     let now = instances::now_ms();
-    let target = platform::install_target();
     let blocked = target.as_deref().is_some_and(instances::is_locked);
     InstallPreflight {
         asked: asked.len(),
