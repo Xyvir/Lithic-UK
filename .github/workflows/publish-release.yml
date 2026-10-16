@@ -232,10 +232,11 @@ jobs:
             wiki/flatten-manifest.log
 
   # The four desktop distributions, chained once the release exists so the installers are
-  # added to a download page that is already there. Each of these downloads the
-  # `built-wiki` artifact when one is present in the run and falls back to the committed
-  # src/lithic.html when it is not, which is the case here: the bytes came through the
-  # merge, so the checkout is the artifact.
+  # added to a download page that is already there. The engine each one embeds is the
+  # committed src/lithic.html, which came through the merge: the checkout IS the artifact,
+  # because the pull request this run is publishing carried the reviewed build. Nothing is
+  # fetched from another run, and nothing needs to be; see the note at the top of every job
+  # in desktop-release.yaml.
   build-desktop:
     needs: publish
     uses: ./.github/workflows/desktop-release.yaml

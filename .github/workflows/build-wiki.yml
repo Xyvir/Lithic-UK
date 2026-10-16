@@ -331,9 +331,12 @@ jobs:
       # The tag, the GitHub Release and the desktop/server chains used to be here. They
       # moved to publish-release.yml, which runs when the staged pull request is merged: a
       # build nobody approved must not have a tag, a download page, a container image or
-      # four desktop installers attached to it. The wiki artifact is still uploaded, both
-      # because the chained workflows look for it and because it is the cheapest way to
-      # look at what a wrong build actually produced.
+      # four desktop installers attached to it. The wiki artifact is still uploaded because
+      # it is the cheapest way to look at what a wrong build actually produced, with a
+      # day's retention. Nothing downloads it: every chained job runs in the
+      # publish-release run rather than this one, and an artifact only reaches the run that
+      # uploaded it, so those jobs read the src/lithic.html this run committed instead (the
+      # same bytes, since the copy onto src/lithic.html is what is uploaded here).
       # THE ARTIFACT ACTIONS ARE PINNED PAST THE OBVIOUS MAJOR, and it is worth knowing why
       # before anyone "tidies" them: upload-artifact@v6 and download-artifact@v7 are the first
       # releases of each that declare `runs.using: node24`. upload-artifact@v5, and

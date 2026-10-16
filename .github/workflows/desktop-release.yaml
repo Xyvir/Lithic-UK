@@ -90,20 +90,15 @@ jobs:
       - name: Checkout and set up Node
         uses: $/.github/actions/setup
 
-      # Optional by design. Chained from publish-release.yml this artifact belongs to a
-      # different run, so the download finds nothing; the committed src/lithic.html is then
-      # the release's own bytes, because that is what the merged pull request carried.
-      - name: Download Built Wiki Artifact
-        if: ${{ inputs.tag_name != '' }}
-        continue-on-error: true
-        uses: actions/download-artifact@v7
-        with:
-          name: built-wiki
-          path: src
-
-      - name: Rename Downloaded Wiki
-        if: ${{ inputs.tag_name != '' && hashFiles('src/lith.html') != '' }}
-        run: Move-Item -Force src/lith.html src/lithic.html
+      # NO WIKI ARTIFACT IS DOWNLOADED HERE, and it is not because the bytes are somewhere
+      # else: they are already in the tree. The engine this bundle embeds is the committed
+      # src/lithic.html, and that file IS the artifact, because build-wiki.yml copies
+      # wiki/output/lith.html onto it before it commits and publish-release.yml attaches
+      # those same bytes to the release page. The `built-wiki` download and rename that used
+      # to sit here could never find anything: an artifact belongs to the run that uploaded
+      # it, and these jobs run in the publish-release run rather than the build one. It only
+      # ever replaced src/lithic.html with a copy of itself, so it is gone from all four
+      # desktop jobs. Do not restore it.
 
       # The toolchain and its build cache, from one definition: see
       # `.github/actions/rust`, which every Rust job in the pipeline now uses.
@@ -252,20 +247,15 @@ jobs:
       - name: Checkout and set up Node
         uses: $/.github/actions/setup
 
-      # Optional by design. Chained from publish-release.yml this artifact belongs to a
-      # different run, so the download finds nothing; the committed src/lithic.html is then
-      # the release's own bytes, because that is what the merged pull request carried.
-      - name: Download Built Wiki Artifact
-        if: ${{ inputs.tag_name != '' }}
-        continue-on-error: true
-        uses: actions/download-artifact@v7
-        with:
-          name: built-wiki
-          path: src
-
-      - name: Rename Downloaded Wiki
-        if: ${{ inputs.tag_name != '' && hashFiles('src/lith.html') != '' }}
-        run: mv src/lith.html src/lithic.html
+      # NO WIKI ARTIFACT IS DOWNLOADED HERE, and it is not because the bytes are somewhere
+      # else: they are already in the tree. The engine this bundle embeds is the committed
+      # src/lithic.html, and that file IS the artifact, because build-wiki.yml copies
+      # wiki/output/lith.html onto it before it commits and publish-release.yml attaches
+      # those same bytes to the release page. The `built-wiki` download and rename that used
+      # to sit here could never find anything: an artifact belongs to the run that uploaded
+      # it, and these jobs run in the publish-release run rather than the build one. It only
+      # ever replaced src/lithic.html with a copy of itself, so it is gone from all four
+      # desktop jobs. Do not restore it.
 
       # The toolchain and its build cache, from one definition: see
       # `.github/actions/rust`, which every Rust job in the pipeline now uses.
@@ -407,20 +397,15 @@ jobs:
       - name: Checkout and set up Node
         uses: $/.github/actions/setup
 
-      # Optional by design. Chained from publish-release.yml this artifact belongs to a
-      # different run, so the download finds nothing; the committed src/lithic.html is then
-      # the release's own bytes, because that is what the merged pull request carried.
-      - name: Download Built Wiki Artifact
-        if: ${{ inputs.tag_name != '' }}
-        continue-on-error: true
-        uses: actions/download-artifact@v7
-        with:
-          name: built-wiki
-          path: src
-
-      - name: Rename Downloaded Wiki
-        if: ${{ inputs.tag_name != '' && hashFiles('src/lith.html') != '' }}
-        run: mv src/lith.html src/lithic.html
+      # NO WIKI ARTIFACT IS DOWNLOADED HERE, and it is not because the bytes are somewhere
+      # else: they are already in the tree. The engine this bundle embeds is the committed
+      # src/lithic.html, and that file IS the artifact, because build-wiki.yml copies
+      # wiki/output/lith.html onto it before it commits and publish-release.yml attaches
+      # those same bytes to the release page. The `built-wiki` download and rename that used
+      # to sit here could never find anything: an artifact belongs to the run that uploaded
+      # it, and these jobs run in the publish-release run rather than the build one. It only
+      # ever replaced src/lithic.html with a copy of itself, so it is gone from all four
+      # desktop jobs. Do not restore it.
 
       # The shim is a crate of its own beside src-tauri, so its build cache is its own as well,
       # which is the one thing this job says about the shared Rust setup.
@@ -546,20 +531,15 @@ jobs:
       - name: Checkout and set up Node
         uses: $/.github/actions/setup
 
-      # Optional by design. Chained from publish-release.yml this artifact belongs to a
-      # different run, so the download finds nothing; the committed src/lithic.html is then
-      # the release's own bytes, because that is what the merged pull request carried.
-      - name: Download Built Wiki Artifact
-        if: ${{ inputs.tag_name != '' }}
-        continue-on-error: true
-        uses: actions/download-artifact@v7
-        with:
-          name: built-wiki
-          path: src
-
-      - name: Rename Downloaded Wiki
-        if: ${{ inputs.tag_name != '' && hashFiles('src/lith.html') != '' }}
-        run: mv src/lith.html src/lithic.html
+      # NO WIKI ARTIFACT IS DOWNLOADED HERE, and it is not because the bytes are somewhere
+      # else: they are already in the tree. The engine this bundle embeds is the committed
+      # src/lithic.html, and that file IS the artifact, because build-wiki.yml copies
+      # wiki/output/lith.html onto it before it commits and publish-release.yml attaches
+      # those same bytes to the release page. The `built-wiki` download and rename that used
+      # to sit here could never find anything: an artifact belongs to the run that uploaded
+      # it, and these jobs run in the publish-release run rather than the build one. It only
+      # ever replaced src/lithic.html with a copy of itself, so it is gone from all four
+      # desktop jobs. Do not restore it.
 
       # Both slices, named: the universal build is one cargo build per target plus a lipo
       # over the two, and a target that is not installed is a build that fails rather than a

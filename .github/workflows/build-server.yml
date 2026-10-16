@@ -24,20 +24,10 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v5
 
-      # --- Download built wiki if chained from build-wiki ---
-      - name: Download Built Wiki Artifact
-        if: ${{ inputs.tag_name != '' }}
-        uses: actions/download-artifact@v7
-        with:
-          name: built-wiki
-          path: build/wiki-artifact
-        continue-on-error: true
-
-      - name: Use Downloaded Wiki
-        if: ${{ inputs.tag_name != '' }}
-        run: |
-          cp build/wiki-artifact/lith.html src/lithic.html || echo "Skipped: Artifact not found"
-
+      # NO WIKI ARTIFACT IS DOWNLOADED HERE: the image is assembled from the checkout, whose
+      # src/lithic.html is the build the merged pull request carried. The `built-wiki` download
+      # and the copy that used to sit here could never find anything, because an artifact
+      # belongs to the run that uploaded it (desktop-release.yaml carries the long form).
       # --- Bump PWA Version ---
       - name: Bump PWA Version
         run: |
