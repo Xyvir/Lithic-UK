@@ -1,0 +1,105 @@
+title: $:/plugins/lithic/lithic-import-handler/pdf-open-request.js
+type: application/javascript
+module-type: startup
+
+/*\
+title: $:/plugins/lithic/lithic-import-handler/pdf-open-request.js
+type: application/javascript
+module-type: startup
+
+Renders a PDF into a new Lith when the desktop app opens one by file association.
+
+The launcher cannot render a PDF, because the renderer lives in this wiki, so it reads the
+file's bytes, hands them over on the window, and mounts the new Lith. This module takes that
+payload and calls the same converter a dropped PDF goes through, then opens the whiteboard
+page in the story river, then leaves the Lith saved. A drop and a double-click therefore
+produce the same tiddlers from the same code.
+\*/
+(function(){
+
+/*jslint node: true, browser: true */
+/*global $tw: false */
+"use strict";
+
+exports.name = "import-handler-open-request";
+exports.platforms = ["browser"];
+// The converter itself is published by `pdf-drop-handler.js`, and this names it so the two
+// are read in a known order rather than whichever the boot happened to reach first.
+exports.after = ["import-handler"];
+exports.synchronous = true;
+
+// The launcher's half of the handoff. A window property rather than a tiddler, because the
+// payload is a whole PDF and the store is not a place to carry one; it survives the
+// document.open/write boot for the same reason the file handle does.
+var REQUEST_GLOBAL = "__LITHIC_PDF_IMPORT__";
+
+function base64ToArrayBuffer(base64) {
+    var binary = atob(base64);
+    var bytes = new Uint8Array(binary.length);
+    for (var i = 0; i < binary.length; i++) {
+        bytes[i] = binary.charCodeAt(i);
+    }
+    return bytes.buffer;
+}
+
+exports.startup = function() {
+    var request = typeof window !== "undefined" ? window[REQUEST_GLOBAL] : null;
+    if (!request) {
+        return;
+    }
+    // Taken off the window immediately: nothing else in this document has any business
+    // reading a whole PDF, and a later mount in this window must not find it again.
+    window[REQUEST_GLOBAL] = null;
+    var base64 = request.base64;
+    var filename = request.filename || "document.pdf";
+    var convert = $tw.lithic && $tw.lithic.convertPdfToTiddlers;
+    if (typeof base64 !== "string" || base64 === "" || typeof convert !== "function") {
+        return;
+    }
+
+    var alertTitle = "$:/temp/alerts/lithic-import-progress";
+    function setProgress(msg) {
+        $tw.wiki.addTiddler(new $tw.Tiddler({
+            title: alertTitle,
+            text: msg,
+            component: "import-handler",
+            tags: "$:/tags/Alert",
+            modified: new Date()
+        }));
+    }
+
+    Promise.resolve(convert(base64ToArrayBuffer(base64), filename, setProgress)).then(function(tiddlers){
+        var whiteboard = null;
+        tiddlers.forEach(function(fields){
+            $tw.wiki.addTiddler(new $tw.Tiddler(
+                $tw.wiki.getCreationFields(),
+                $tw.wiki.getModificationFields(),
+                fields
+            ));
+            if (fields.type === "application/tldr") {
+                whiteboard = fields.title;
+            }
+        });
+        $tw.wiki.deleteTiddler(alertTitle);
+        if (whiteboard) {
+            // The board is the point of the gesture, so it is what opens. The container and
+            // its extracted text stay in the wiki beside it.
+            $tw.wiki.addTiddler(new $tw.Tiddler({
+                title: "$:/StoryList",
+                list: $tw.utils.stringifyList([whiteboard])
+            }));
+        }
+        // The copy on disk is the point of the gesture, so the new Lith is saved rather than
+        // left for the user to save: the launcher created the file beside the PDF and this is
+        // what fills it. A save is also what the wiki would do for any other open document,
+        // and it goes to the file the launcher named, never back to the PDF.
+        if ($tw.rootWidget && typeof $tw.rootWidget.dispatchEvent === "function") {
+            $tw.rootWidget.dispatchEvent({ type: "tm-save-wiki" });
+        }
+    }).catch(function(error){
+        $tw.wiki.deleteTiddler(alertTitle);
+        setProgress("Could not open the PDF: " + (error && error.message ? error.message : error));
+    });
+};
+
+})();

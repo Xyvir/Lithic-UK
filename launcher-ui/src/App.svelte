@@ -3499,12 +3499,62 @@ import { backupFileName, collectInstanceBackup, mergeBookmarks, parseInstanceBac
   }
 
   /**
+   * Whether the desktop app was asked to open a PDF rather than a wiki.
+   *
+   * A PDF is the one associated file this app does not edit: it is rendered into a new Lith
+   * and the file it came from is only ever read, so it has to be told apart before anything
+   * reads it as a document body.
+   */
+  function isPdfPath(path: string): boolean {
+    return /\.pdf$/i.test(path);
+  }
+
+  /**
+   * Render a PDF's pages into the Lith that sits beside it.
+   *
+   * Nothing here renders anything: the renderer lives in the wiki, so the launcher reads the
+   * PDF's bytes, hands them to the mounted document, and the importer's own startup turns them
+   * into the pages. The target is created empty first because that is the file the import's
+   * save writes back to, which is what makes a sibling exist from the first moment. The PDF
+   * itself is only ever read.
+   */
+  async function importPdfIntoNewLith(pdfPath: string, lithPath: string) {
+    const pdfName = pdfPath.split(/[\\/]/).pop() || 'document.pdf';
+    const lithName = lithPath.split(/[\\/]/).pop() || `${pdfName.replace(/\.pdf$/i, '') || 'document'}.lith`;
+    // The bytes are read before anything is written, so a PDF this process cannot read leaves
+    // no half-made Lith beside it.
+    const base64 = await tauriInvoke<string>('read_file_base64', { path: pdfPath });
+    await tauriInvoke('save_lith_file', { text: '', suggestedName: lithName, path: lithPath });
+    // The importer runs inside the mounted document, which cannot reach this process's bridge
+    // any other way, so the payload travels on the window. A window property survives the
+    // engine's document.open/write boot, which is the same reason the file handle is left there.
+    (window as any).__LITHIC_PDF_IMPORT__ = { filename: pdfName, base64 };
+    lithText = '';
+    fileName = lithName;
+    filePath = lithPath;
+    await mountWiki('', lithName, lithPath);
+  }
+
+  /**
    * Read a path through whichever process can, then mount it. The app reads through its Rust
    * bridge; a shim reads through its own wire, which is the same shape of answer: a name, the
    * path and the text. Callable while a mount is already in flight.
    */
   async function mountDiskPath(path: string) {
     try {
+      if (isPdfPath(path)) {
+        // Before the text read below, which a PDF has no business going through: its pages
+        // are rendered into the Lith beside it instead of being mounted as a body.
+        const target = await tauriInvoke<{ path: string; exists: boolean }>('pdf_lith_target', { pdf: path });
+        if (target.exists) {
+          // This PDF has already become a Lith, so the copy opens as it stands. Re-importing
+          // would replace whatever has been written in it since it was made.
+          return await mountDiskPath(target.path);
+        }
+        await importPdfIntoNewLith(path, target.path);
+        status = copy.status.mounted(fileName);
+        return;
+      }
       const result =
         mode === 'tauri'
           ? await tauriInvoke<{ name: string; path: string; text: string }>('read_lith_path', { path })

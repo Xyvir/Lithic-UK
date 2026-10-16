@@ -6,15 +6,30 @@ import vm from 'node:vm';
 import { fileURLToPath } from 'node:url';
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-const pluginPath = path.join(repoRoot, 'wiki/local-plugins/lithic-import-handler/pdf-drop-handler.js.tid');
+const pluginDir = path.join(repoRoot, 'wiki/local-plugins/lithic-import-handler');
+const dropHandlerPath = path.join(pluginDir, 'pdf-drop-handler.js.tid');
+const openRequestPath = path.join(pluginDir, 'pdf-open-request.js.tid');
 
-function loadPdfImportPlugin() {
-  const source = readFileSync(pluginPath, 'utf8').replace(/\r\n/g, '\n');
-  const body = source.slice(source.indexOf('\n\n') + 2);
+/**
+ * The module body of a `.js.tid`: everything after its plain-text header. Both files are
+ * CRLF in the repo, and the VM only ever sees the JavaScript.
+ */
+function moduleBody(file) {
+  const source = readFileSync(file, 'utf8').replace(/\r\n/g, '\n');
+  return source.slice(source.indexOf('\n\n') + 2);
+}
+
+/**
+ * A booted-enough wiki for the importer: a store, a canvas that reports pixels, and a pdf.js
+ * that renders one page of text. Shared by both tests so the drop and the open-request are
+ * judged against the same engine.
+ */
+function createPdfContext() {
   const listeners = {};
   const tiddlers = new Map();
   const canvasRequests = [];
   const errors = [];
+  const saves = [];
   let uuid = 0;
 
   class Tiddler {
@@ -70,6 +85,9 @@ function loadPdfImportPlugin() {
     $tw: {
       Tiddler,
       wiki,
+      // A save is how the new Lith lands on disk, so the test watches for the dispatch the
+      // importer makes after it has finished rendering.
+      rootWidget: { dispatchEvent: (event) => saves.push(event && event.type) },
       utils: {
         stringifyList: (items) => items.join(' '),
         parseStringArray: (value) => value ? value.split(/\s+/) : [],
@@ -89,15 +107,36 @@ function loadPdfImportPlugin() {
     },
     crypto: { randomUUID: () => `test-uuid-${++uuid}` },
     console: { error: (...args) => errors.push(args), log: () => {} },
+    atob,
     Date,
     Math,
     Promise,
     setTimeout,
   };
 
-  vm.runInNewContext(body, context, { filename: pluginPath });
-  context.exports.startup();
-  return { listeners, tiddlers, canvasRequests, errors, canvas };
+  return { context, listeners, tiddlers, canvasRequests, errors, saves, canvas };
+}
+
+function loadPdfImportPlugin() {
+  const loaded = createPdfContext();
+  vm.runInNewContext(moduleBody(dropHandlerPath), loaded.context, { filename: dropHandlerPath });
+  loaded.context.exports.startup();
+  return loaded;
+}
+
+/**
+ * Both modules run in one context, in boot order: the drop handler's module scope publishes
+ * the render path, and the open-request module is the one whose `startup` is called. The
+ * payload is what the launcher leaves on the window for the importer to find.
+ */
+function loadPdfOpenRequest({ base64 = 'AAAAAQ==' } = {}) {
+  const loaded = createPdfContext();
+  loaded.context.window = {
+    __LITHIC_PDF_IMPORT__: { filename: 'imported-doc.pdf', base64 },
+  };
+  vm.runInNewContext(moduleBody(dropHandlerPath), loaded.context, { filename: dropHandlerPath });
+  vm.runInNewContext(moduleBody(openRequestPath), loaded.context, { filename: openRequestPath });
+  return loaded;
 }
 
 test('PDF import embeds a compressed raster image in its whiteboard page', async () => {
@@ -139,4 +178,34 @@ test('PDF import embeds a compressed raster image in its whiteboard page', async
   assert.match(asset.src, /^data:image\/webp;base64,/);
   assert.deepEqual(shape.size, [600, 800]);
   assert.equal(document.assets[shape.assetId].src, asset.src);
+});
+
+test('a PDF the desktop app opens becomes a new Lith beside it, saved and on screen', async () => {
+  const { context, tiddlers, saves } = loadPdfOpenRequest();
+
+  context.exports.startup();
+  for (let attempt = 0; attempt < 100 && !tiddlers.has('$:/StoryList'); attempt++) {
+    await new Promise((resolve) => setTimeout(resolve, 0));
+  }
+
+  assert.equal(
+    context.window.__LITHIC_PDF_IMPORT__,
+    null,
+    'the payload is taken off the window, so it cannot be read a second time or saved into the Lith'
+  );
+  assert.equal(
+    tiddlers.get('$:/StoryList')?.fields.list,
+    'imported-doc-whiteboard',
+    'the board is what opens, because it is the whole point of the double-click'
+  );
+  assert.deepEqual(
+    saves,
+    ['tm-save-wiki'],
+    'the new Lith is written to disk rather than left unsaved, so the copy exists as soon as it opens'
+  );
+  assert.ok(tiddlers.get('imported-doc'), 'the container tiddler still exists beside the board');
+  const whiteboard = tiddlers.get('imported-doc-whiteboard');
+  assert.equal(whiteboard.fields.type, 'application/tldr');
+  assert.equal(whiteboard.fields['whiteboard-height'], '1056px', 'the page height follows the page shape, the same rule a drop takes');
+  assert.match(tiddlers.get('imported-doc-text').fields.text, /Rasterized PDF text/);
 });

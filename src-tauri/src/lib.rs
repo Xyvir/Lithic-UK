@@ -71,6 +71,57 @@ fn read_lith_path(app: tauri::AppHandle, path: String) -> Result<LithFile, Strin
     })
 }
 
+/// A file's bytes, base64-encoded.
+///
+/// The launcher's half of opening a PDF: this process is the only one that can name the
+/// file, and the importer that renders its pages runs inside the mounted document rather
+/// than here, so the bytes are read here and handed to the page (`importPdfIntoNewLith` in
+/// the launcher). Nothing writes back to the source: a PDF is read once to make a new Lith, and
+/// the file it came from is not a document this app edits.
+#[tauri::command]
+fn read_file_base64(path: String) -> Result<String, String> {
+    platform::read_document_base64(&path)
+}
+
+/// Where a PDF's pages are written, and whether that file is already there.
+///
+/// The Lith beside the PDF: `thesis.pdf` becomes `thesis.lith` in the same folder, which is
+/// the shape an annotation app uses and the reason a PDF is never a save target. The flag is
+/// answered here because it decides the whole gesture: an existing Lith is opened as it
+/// stands, since the import is a copy of the PDF and running it again would replace whatever
+/// has been written in that copy since.
+#[derive(serde::Serialize)]
+struct PdfTarget {
+    path: String,
+    exists: bool,
+}
+
+/// The sibling rule, kept pure so it can be pinned without a file on disk.
+fn lith_sibling_of(pdf: &Path) -> Option<(PathBuf, bool)> {
+    let stem = pdf.file_stem()?;
+    if stem.is_empty() {
+        return None;
+    }
+    let target = pdf.with_extension("lith");
+    // A path whose extension is already `lith` is not a PDF, and answering with itself
+    // would point the import's save at the file it is reading.
+    if target == pdf {
+        return None;
+    }
+    let exists = target.is_file();
+    Some((target, exists))
+}
+
+#[tauri::command]
+fn pdf_lith_target(pdf: String) -> Result<PdfTarget, String> {
+    let (target, exists) = lith_sibling_of(Path::new(&pdf))
+        .ok_or_else(|| format!("{pdf} has no name to write a Lith beside"))?;
+    Ok(PdfTarget {
+        path: target.to_string_lossy().into_owned(),
+        exists,
+    })
+}
+
 // The dialog commands are async, and that is load-bearing: a sync command runs
 // on the main thread, and Tauri 2's blocking file pickers must not be called
 // there. An async command gets a worker thread, so it can park on a channel
@@ -3285,6 +3336,8 @@ pub fn run() {
             get_startup_file,
             get_cli_args,
             read_lith_path,
+            read_file_base64,
+            pdf_lith_target,
             open_lith_file,
             open_lith_files,
             save_lith_file,
@@ -3390,6 +3443,36 @@ mod tests {
 
         // Nothing usable at all is no offer.
         assert!(!install_update_from(&serde_json::json!({}), built).available);
+    }
+
+    /// A PDF's pages land beside it, and the flag says whether that Lith is already there:
+    /// that answer is what keeps an import from replacing a Lith the user has been writing in.
+    #[test]
+    fn a_pdf_import_targets_the_lith_beside_it() {
+        let folder = std::env::temp_dir().join(format!("lithic-pdf-sibling-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&folder);
+        fs::create_dir_all(&folder).unwrap();
+
+        let pdf = folder.join("thesis.pdf");
+        let (target, exists) = lith_sibling_of(&pdf).expect("a named PDF has a sibling");
+        assert_eq!(target, folder.join("thesis.lith"));
+        assert!(!exists, "nothing has been written beside it yet");
+
+        fs::write(&target, "existing").unwrap();
+        let (same, exists) = lith_sibling_of(&pdf).expect("the rule does not change once the Lith exists");
+        assert_eq!(same, target);
+        assert!(exists, "a Lith that is already there is what opens instead of a re-import");
+
+        // The extension is replaced rather than extended, and a path with no stem has
+        // nowhere to write.
+        assert_eq!(
+            lith_sibling_of(&folder.join("paper.PDF")).map(|(path, _)| path),
+            Some(folder.join("paper.lith"))
+        );
+        assert!(lith_sibling_of(Path::new("")).is_none());
+        assert!(lith_sibling_of(Path::new("notes.lith")).is_none(), "a Lith is not a PDF to import");
+
+        let _ = fs::remove_dir_all(&folder);
     }
 
     /// The verdicts a saved login can get, each one a case a real deployment

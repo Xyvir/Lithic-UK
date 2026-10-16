@@ -258,6 +258,20 @@ pub fn write_document(app: &tauri::AppHandle, document: &str, text: &str) -> Res
     }
 }
 
+/// A document's bytes, base64-encoded, for the one file this app opens without reading it
+/// as text.
+///
+/// Android has no answer and says so rather than guessing: its picker hands back a
+/// `content://` reference whose reader returns a string (`android::read`), and the PDF
+/// association this serves is a desktop gesture to begin with. Every desktop goes through
+/// `documents`, which reads the bytes and encodes them for the IPC bridge.
+pub fn read_document_base64(document: &str) -> Result<String, String> {
+    match current() {
+        Os::Android => Err("this platform cannot read a document's bytes".to_string()),
+        _ => documents::read_base64(document),
+    }
+}
+
 /// The name a row shows for a document.
 pub fn document_name(app: &tauri::AppHandle, document: &str) -> String {
     match current() {

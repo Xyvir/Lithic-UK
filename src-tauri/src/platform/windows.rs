@@ -121,6 +121,11 @@ pub fn install_launch_entry(exe: &Path) -> Result<Option<PathBuf>, String> {
 }
 
 /// Extensions the desktop app opens, with their Open With descriptions.
+///
+/// `pdf` is the one type here that is not a document this app edits: the app renders its
+/// pages into a new Lith (see `read_file_base64` in `lib.rs` and the import handler's
+/// open-request startup), and the PDF itself is only ever read. It is registered the same
+/// way as the rest, which is an Open With entry rather than a default association.
 const ASSOCIATION_TYPES: &[(&str, &str)] = &[
     ("lith", "Lithic Wiki"),
     ("md", "Lithic Markdown"),
@@ -129,6 +134,7 @@ const ASSOCIATION_TYPES: &[(&str, &str)] = &[
     ("json", "Lithic JSON"),
     ("ipynb", "Lithic Notebook"),
     ("html", "Lithic HTML"),
+    ("pdf", "Lithic PDF"),
 ];
 
 /// Per-user (HKCU) Open With registration: a ProgID per extension whose

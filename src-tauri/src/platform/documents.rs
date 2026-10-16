@@ -89,6 +89,20 @@ pub fn read(document: &str) -> Result<String, String> {
     fs::read_to_string(document).map_err(|error| error.to_string())
 }
 
+/// A document's bytes, base64-encoded, for the one file this app opens without reading it
+/// as text.
+///
+/// A `.pdf` is that file. Its pages are rendered by the wiki's own importer, which runs
+/// inside the mounted document rather than in this process, so the bytes have to travel to
+/// the page and base64 is the shape the IPC bridge carries them in. Nothing here parses the
+/// PDF; reading it as text would only produce a lossy string, which is why `read` is not the
+/// function for it.
+pub fn read_base64(document: &str) -> Result<String, String> {
+    use base64::Engine;
+    let bytes = fs::read(document).map_err(|error| error.to_string())?;
+    Ok(base64::engine::general_purpose::STANDARD.encode(bytes))
+}
+
 /// Replace a document's text.
 pub fn write(document: &str, text: &str) -> Result<(), String> {
     fs::write(document, text).map_err(|error| error.to_string())

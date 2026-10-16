@@ -56,8 +56,11 @@ fn mime_xml() -> String {
 /// `shared-mime-info` package knows the type, which is a distribution's job rather than
 /// a running app's. The rest are standard, so "Open With Lithic" works for them as soon
 /// as the entry is installed, with no default association stolen.
+///
+/// `application/pdf` is the one type here that is not a document this app edits: the app
+/// renders its pages into a new Lith, so the association opens rather than overwrites.
 fn mime_types() -> &'static str {
-    "application/x-lith;text/markdown;text/plain;text/vnd.tiddlywiki;application/json;application/x-ipynb+json;text/html;"
+    "application/x-lith;text/markdown;text/plain;text/vnd.tiddlywiki;application/json;application/x-ipynb+json;text/html;application/pdf;"
 }
 
 /// Open an address in whatever the desktop has registered as its browser.
@@ -293,6 +296,7 @@ mod tests {
             "application/json",
             "application/x-ipynb+json",
             "text/html",
+            "application/pdf",
         ] {
             assert!(entry.contains(mime), "{mime} is a type this app opens and the entry has to say so");
         }

@@ -49,6 +49,10 @@ assert.ok(existsSync(fixturePath), `no fixture at ${fixturePath}`);
 // requires by name. The plugin root (xyvir) is a different title again.
 const PLUGIN_ROOT = '$:/plugins/xyvir/lithic-import-handler';
 const PDFJS = '$:/plugins/lithic/lithic-import-handler/pdf.js';
+// The association path's own module: a PDF opened from the desktop app never reaches the drop
+// handler, so an artifact without this one would still import on a drop and quietly do nothing
+// on a double-click.
+const OPEN_REQUEST = '$:/plugins/lithic/lithic-import-handler/pdf-open-request.js';
 
 const artifactHtml = readFileSync(artifact, 'utf8');
 const storeMatch = /<script class="tiddlywiki-tiddler-store" type="application\/json">([\s\S]*?)<\/script>/.exec(artifactHtml);
@@ -58,6 +62,7 @@ const pluginEntry = store.find((tiddler) => tiddler.title === PLUGIN_ROOT);
 assert.ok(pluginEntry, `${PLUGIN_ROOT} is not in ${path.basename(artifact)}; this artifact has no PDF import`);
 const inner = JSON.parse(pluginEntry.text).tiddlers;
 assert.ok(inner[PDFJS], `${PDFJS} is missing from the plugin bundle`);
+assert.ok(inner[OPEN_REQUEST], `${OPEN_REQUEST} is missing from the plugin bundle`);
 
 const pdfBytes = [...readFileSync(fixturePath)];
 

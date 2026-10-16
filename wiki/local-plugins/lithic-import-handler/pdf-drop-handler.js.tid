@@ -238,6 +238,14 @@ async function convertPdfDataToTiddlers(arrayBuffer, fileName, setProgress) {
     return tiddlers;
 }
 
+// The render path, published for the one other caller: a PDF the desktop app was asked to
+// open by file association. The launcher cannot render a PDF (the renderer lives in this
+// wiki), so it mounts a blank Lith with a request tiddler naming the file and a reader for
+// its bytes; `pdf-open-request.js` takes that and calls this, so a double-click and a drop
+// produce the same tiddlers from the same code.
+$tw.lithic = $tw.lithic || {};
+$tw.lithic.convertPdfToTiddlers = convertPdfDataToTiddlers;
+
 exports.startup = function() {
     var alertTitle = "$:/temp/alerts/lithic-import-progress";
     function setProgress(msg) {
