@@ -59,12 +59,6 @@
     "lastModified": null,
     "updatedAt": "2026-09-16T16:36:00.649Z"
   },
-  "mermaid-tw5": {
-    "url": "https://xyvir.github.io/tiny-mermaid11-tw5/",
-    "etag": "6a63a6d3-4f0c3b",
-    "lastModified": "Fri, 24 Jul 2026 17:54:27 GMT",
-    "updatedAt": "2026-09-15T13:54:33.847Z"
-  },
   "advanced-search": {
     "url": "https://b-yp.github.io/tiddlywiki-plugins/",
     "etag": "6a068243-2cdd3d",
@@ -73,8 +67,8 @@
   },
   "uglify": {
     "url": "https://github.com/flibbles/tw5-uglify/archive/refs/heads/master.zip",
-    "etag": "cc4c94614d5538bda0b21f73d72a462308df18340358cda398bb97fa53651e8e",
+    "etag": "dd5b5adc5432236d6ddf988198576797f2651725e5c2a2864155280abf838b88",
     "lastModified": null,
-    "updatedAt": "2026-09-16T15:03:24.216Z"
+    "updatedAt": "2026-10-19T19:39:16.241Z"
   }
 }

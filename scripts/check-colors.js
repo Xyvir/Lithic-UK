@@ -97,8 +97,12 @@ var ALLOWLIST = [
   },
   {
     file: /lithic-patch-mermaid\/\$__plugins_orange_mermaid-tw5_styles\.tid/,
-    line: /--lithic-c-|background:\s*#ffffff/,
-    reason: 'Media-print override block: re-pins the contrast roles to print values (same rationale as printstyle.css).'
+    line: /--(lithic-c|pele)-|background:\s*#ffffff/,
+    reason: 'Media-print override block: re-pins the palette roles and the pele --pele-* variables to print values (same rationale as printstyle.css).'
+  },
+  {
+    file: /lithic-patch-mermaid\/\$__plugins_xyvir_lithic-patch-mermaid_pele\.js\.tid/,
+    reason: 'Vendored pele 1.7.0 engine (MIT, unmodified). Its colour-name tables and var(--pele-*, #hex) fallbacks are never painted: the wiki sets every --pele-* colour role that carries a fallback (styles tiddler).'
   },
   {
     file: /lithic-richlinks\/\$__plugins_richlink_txtviewer-widget\.js\.tid/,

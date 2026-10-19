@@ -7,32 +7,27 @@ title: $:/plugins/orange/mermaid-tw5/wrapper.js
 type: application/javascript
 module-type: widget
 author: Nathaniel Jones 2017-05-26
-modified: E Furlan 2022-05-08; Lithic 2026-09-14 (re-applied D3 pan/zoom from xyvir/lithic-patch-mermaid); Lithic 2026-09-15 (style gating: self-styled diagrams opt out of palette default CSS; palette-responsiveness lives in the stylesheet via <<colour>>); Lithic 2026-09-16 (font-only init no longer flags mm-user; render gated on document.fonts.ready so label measure == label paint; site-wide Vollkorn default via buildSiteConfig); Lithic 2026-09-16b (robustness: own lossless source extractor -- upstream tree-walk only decodes 5 entities and drops the rest as literal poison text; poison-char sanitizer for paste/markdown/import artifacts; self-heal render retry ladder + global-config reset after a failed directive)
+modified: Lithic 2026-10-19 (engine swap: diagrams render through the vendored pele engine instead of mermaid.js; pele owns layout, zoom controls and font-aware sizing; the Mermaid-only rocklib, d3 and render queue are gone; source handling and the self-heal ladder are unchanged)
 */
 (function() {
     // jslint node: true, browser: true
     // global $tw: false
     'use strict';
 
-    // Soft dependency: if the parent mermaid-tw5 plugin (or the wiki core) is
-    // missing, bail at load time with a warning instead of crashing the whole
-    // TiddlyWiki boot. A hard throw during module registration aborts every
-    // module loaded after this one (seen in CI as 'Error executing boot
-    // module' + a completely empty build output).
-    var Rocklib, Widget, rocklib;
+    // Soft dependency: if the pele engine or the wiki core is missing, bail at
+    // load time with a warning instead of aborting the whole TiddlyWiki boot.
+    var Widget, pele;
     try {
-        Rocklib = require('$:/plugins/orange/mermaid-tw5/widget-tools.js').rocklib;
         Widget = require('$:/core/modules/widgets/widget.js').widget;
-        rocklib = new Rocklib();
+        pele = require('$:/plugins/xyvir/lithic-patch-mermaid/pele.js').pele;
     } catch (bootDepErr) {
-        console.warn('[lithic-patch-mermaid] $:/plugins/orange/mermaid-tw5 not available; mermaid patch disabled.');
+        console.warn('[lithic-patch-mermaid] pele engine not available; <$mermaid> disabled.');
         return;
     }
-    var mermaidModule = null,
-        mermaidAPI = null,
-        d3 = null,
-        isZoomEnabled = false,
-        siteFontFamily = 'Vollkorn'; // plain Vollkorn: digits inside this family now carry KaTeX-derived outlines (see $:/lithic/fonts/vollkorn + scripts/merge-vollkorn-digits.py); overridable via $:/plugins/orange/mermaid-tw5/config
+
+    var CONFIG_TITLE = '$:/plugins/orange/mermaid-tw5/config',
+        DEFAULT_FONT = 'Vollkorn',
+        uniqueID = 1;
 
     function escapeHtml(text) {
         if (text === null || text === undefined) {
@@ -52,45 +47,10 @@ modified: E Furlan 2022-05-08; Lithic 2026-09-14 (re-applied D3 pan/zoom from xy
         return el.value !== undefined ? el.value : (el.innerHTML || text);
     }
 
-    function getSimpleStack(ex) {
-        if (!ex || !ex.stack) {
-            return '';
-        }
-        var lines = String(ex.stack).split('\n');
-        var frames = [];
-        for (var i = 0; i < lines.length && frames.length < 3; i++) {
-            var line = lines[i].trim();
-            if (line.indexOf('at ') === 0) {
-                var match = line.match(/at\s+(?:[^\s(]+\s+\()?([^)]+)\)?/);
-                if (match) {
-                    var loc = match[1];
-                    var fileName = loc.split('/').pop().split(':')[0];
-                    frames.push(fileName);
-                }
-            }
-        }
-        return frames.join('\n');
-    }
-
-    function cleanupStrayErrorSVGs() {
-        if (typeof document === 'undefined') return;
-        try {
-            var errorSvgs = document.querySelectorAll('svg[aria-roledescription="error"], svg.error-icon');
-            for (var i = 0; i < errorSvgs.length; i++) {
-                if (errorSvgs[i] && errorSvgs[i].parentNode) {
-                    errorSvgs[i].parentNode.removeChild(errorSvgs[i]);
-                }
-            }
-        } catch (e) {}
-    }
-
     // ---- ROBUST SOURCE EXTRACTION --------------------------------------
-    // Replaces rocklib.getScriptBody. The upstream tree-walk hard-codes only
-    // FIVE entities (&ndash; &gt; &lt; &amp; &quot;) and passes every OTHER
-    // entity through as LITERAL TEXT -- so a diagram containing &nbsp;,
-    // &#45;, &rsquo;, or any numeric reference inside a label hands mermaid
-    // garbage it rejects with a parse error ("poison characters"). This
-    // variant decodes ALL entities and preserves line structure.
+    // Decodes every entity (the upstream tree-walk only knew five and passed the
+    // rest through as literal text, which then failed to parse) and keeps line
+    // structure.
     function decodeEntity(entity) {
         if (!entity) return '';
         var named = {
@@ -120,11 +80,9 @@ modified: E Furlan 2022-05-08; Lithic 2026-09-14 (re-applied D3 pan/zoom from xy
         }
         // any other named entity: let the DOM decode it; unparseable stays literal
         try {
-            if (typeof document !== 'undefined') {
-                var el = document.createElement('textarea');
-                el.innerHTML = entity;
-                if (el.value !== undefined && el.value !== '') return el.value;
-            }
+            var el = document.createElement('textarea');
+            el.innerHTML = entity;
+            if (el.value !== undefined && el.value !== '') return el.value;
         } catch (e) {}
         return entity;
     }
@@ -160,11 +118,9 @@ modified: E Furlan 2022-05-08; Lithic 2026-09-14 (re-applied D3 pan/zoom from xy
 
     // ---- POISON-CHARACTER SANITIZER -------------------------------------
     // Diagram sources reach this widget via typing, paste, tiddler import and
-    // markdown transclusion; any of those paths can leave characters that are
-    // invisible (or semantically inert) to a human but reject mermaid's
-    // grammar outright. Every replacement below maps a character that is
-    // INVALID or meaningless in mermaid syntax onto its plain-ASCII meaning,
-    // so sanitizing can never corrupt a diagram that already parses.
+    // markdown transclusion; those paths can leave invisible or typographic
+    // characters the diagram grammar rejects. Each replacement maps such a
+    // character onto its plain-ASCII meaning.
     function sanitizeDiagramSource(src) {
         if (!src) return src;
         var s = String(src);
@@ -172,178 +128,70 @@ modified: E Furlan 2022-05-08; Lithic 2026-09-14 (re-applied D3 pan/zoom from xy
         s = s.replace(/^\uFEFF/, '').replace(/\u2028|\u2029/g, '\n').replace(/\r\n?/g, '\n');
         // zero-width characters and bidi controls (invisible paste artifacts)
         s = s.replace(/[\u200B-\u200D\u2060\uFEFF\u202A-\u202E\u2066-\u2069]/g, '');
-        // every Unicode whitespace variant -> plain space (nbsp, narrow nbsp,
-        // en/em quad, math space, ideographic space...)
+        // every Unicode whitespace variant -> plain space
         s = s.replace(/[\u00A0\u1680\u2000-\u200A\u202F\u205F\u3000]/g, ' ');
         // C0 controls (except tab/newline) and DEL -- pure poison, no meaning
         s = s.replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/g, '');
-        // typographic punctuation that mermaid's grammar never accepts
-        s = s.replace(/\u2212/g, '-')            // unicode minus
-             .replace(/[\u2010\u2011]/g, '-')    // hyphen variants
-             .replace(/[\u2018\u2019\u201B]/g, "'")  // smart single quotes
-             .replace(/[\u201C\u201D]/g, '"')    // smart double quotes
-             .replace(/\u2032/g, "'")            // prime
-             .replace(/\u2033/g, '"')            // double prime
-             .replace(/\u2026/g, '...');         // ellipsis
+        // typographic punctuation the grammar never accepts
+        s = s.replace(/\u2212/g, '-')
+             .replace(/[\u2010\u2011]/g, '-')
+             .replace(/[\u2018\u2019\u201B]/g, "'")
+             .replace(/[\u201C\u201D]/g, '"')
+             .replace(/\u2032/g, "'")
+             .replace(/\u2033/g, '"')
+             .replace(/\u2026/g, '...');
         return s;
     }
 
     // ---- SELF-HEAL RENDER LADDER -----------------------------------------
-    // Attempt 1 is the sanitized source; attempt 2 (only if attempt 1 failed)
-    // drops ALL %%{...}%% directives -- a malformed/stale init directive is
-    // the most common hand-edit failure, and palette-default rendering beats
-    // an error box. Each rung must be semantics-preserving enough that
-    // rendering it beats showing an error.
-    function buildRenderAttempts(scriptBody) {
-        var attempts = [{ label: 'sanitized', text: scriptBody }];
-        if (/%%\{[\s\S]*?%%/.test(scriptBody)) {
+    // Attempt 1 is the sanitized source; attempt 2 (only if attempt 1 fails)
+    // drops every %%{...}%% directive, since a malformed directive is the most
+    // common hand-edit failure and default rendering beats an error box.
+    function buildRenderAttempts(source) {
+        var attempts = [{ label: 'sanitized', text: source }];
+        if (/%%\{[\s\S]*?%%/.test(source)) {
             attempts.push({
                 label: 'directives-stripped',
-                text: scriptBody.replace(/%%\{[\s\S]*?}%%/g, '').trim()
+                text: source.replace(/%%\{[\s\S]*?}%%/g, '').trim()
             });
         }
         return attempts;
     }
 
-    function attemptText(task) {
-        var idx = task.attemptIndex || 0;
-        if (task.attempts && task.attempts[idx]) return task.attempts[idx].text;
-        return task.scriptBody;
-    }
-
-    // A failed %%{init}%% directive can leave mermaid's global config polluted
-    // (directive parsing mutates state before the parse error surfaces), which
-    // then breaks SUBSEQUENT diagrams on the page. Restore known-good config.
-    function resetMermaidToSiteConfig() {
-        try {
-            if (mermaidAPI && typeof mermaidAPI.initialize === 'function') {
-                mermaidAPI.initialize(buildSiteConfig());
-            }
-        } catch (e) {}
-    }
-
-    // START ZOOM LOGIC: Enable zooming/panning the mermaid diagram with D3.
-    // by fkmiec 2023-05-21 (originally shipped via xyvir/lithic-patch-mermaid on
-    // the mm9 wrapper); re-applied here against the Mermaid 11 wrapper.
-    // Click a diagram to toggle zoom/pan; re-click to release (so page scroll
-    // and text selection are not hijacked while zoom is off).
-    function hookupZoom(node) {
-        try {
-            if (!d3 || !node ||
-                !node.firstChild || typeof node.firstChild.setAttribute !== 'function') {
-                return;
-            }
-            // Keep Mermaid's own svg id: Mermaid 11 scopes its entire internal
-            // stylesheet under that id (#id .node rect {...}). Re-assigning a
-            // random id orphans the stylesheet and silently strips all
-            // %%{init}%%-declared colors (masked for years by the old !important
-            // default CSS, which painted every node regardless).
-            var svgEl = (node.firstChild && node.firstChild.tagName &&
-                node.firstChild.tagName.toLowerCase() === 'svg')
-                ? node.firstChild
-                : node.querySelector('svg');
-            if (!svgEl) return;
-            var id = svgEl.getAttribute('id');
-            if (!id) {
-                id = Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 7);
-                svgEl.setAttribute('id', id);
-            }
-            var svg = d3.select('#' + id);
-            svg.html('<g>' + svg.html() + '</g>');
-            var inner = svg.select('g');
-            var zoom = d3.zoom().filter(function() { return isZoomEnabled; }).on('zoom', function(event) {
-                inner.attr('transform', event.transform);
-            });
-            svg.call(zoom);
-            node.addEventListener('click', function() {
-                isZoomEnabled = !isZoomEnabled;
-            });
-        } catch (zoomErr) {
-            console.error('[mermaid-tw5] zoom hookup error:', zoomErr);
-        }
-    }
-
-    var SECURE_KEYS = ['secure', 'securityLevel', 'startOnLoad',
-                       'maxTextSize', 'maxEdges', 'suppressErrorRendering'];
-
-    var CONFIG_WHITELIST = [
-        'theme', 'themeVariables', 'themeCSS', 'look', 'handDrawnSeed',
-        'fontFamily', 'altFontFamily', 'fontSize', 'darkMode', 'wrap',
-        'htmlLabels', 'markdownAutoWrap', 'logLevel',
-        'arrowMarkerAbsolute', 'deterministicIds', 'deterministicIDSeed',
-        'flowchart', 'sequence', 'gantt', 'pie', 'class', 'state', 'er',
-        'journey', 'gitGraph', 'quadrantChart', 'xyChart', 'sankey',
-        'timeline', 'mindmap', 'packet', 'block', 'architecture', 'kanban',
-        'c4', 'requirement', 'radar',
-        'securityLevel', 'maxTextSize', 'maxEdges', 'suppressErrorRendering'
-    ];
-
-    var NON_SECURE_INJECT_KEYS = ['theme', 'look', 'fontFamily', 'fontSize',
-                                   'themeVariables', 'darkMode'];
-
-    function buildSiteConfig() {
-        var config = {
-            startOnLoad: false,
-            securityLevel: 'loose',
-            suppressErrorRendering: true,
-            deterministicIds: true,
-            // Site-wide label typeface: Vollkorn is embedded locally in
-            // $:/lithic/fonts/vollkorn. NOTE: mermaid 11 does NOT honor the
-            // fontFamily given to initialize() for flowchart label styling
-            // (field-probed: the internal stylesheet falls back to sans-serif);
-            // the effective delivery path is the per-widget %%{init}%%
-            // directive injected in buildPerWidgetInit. This entry still
-            // matters for diagram types that do read site config, and the
-            // $:/plugins/orange/mermaid-tw5/config data tiddler can override it.
-            fontFamily: 'Vollkorn',
-            altFontFamily: 'Vollkorn',
-            flowchart: { useMaxWidth: true, htmlLabels: true }
-        };
-        var configTitle = '$:/plugins/orange/mermaid-tw5/config';
-        var data = $tw.wiki.getTiddlerData(configTitle, {});
-        for (var k in data) {
-            if (Object.prototype.hasOwnProperty.call(data, k) &&
-                CONFIG_WHITELIST.indexOf(k) !== -1) {
-                if (k === 'startOnLoad') continue;  // D-07: never allow override
-                config[k] = data[k];                // shallow replace per D-04
-            }
-        }
-        return config;
-    }
-
-    function buildPerWidgetInit(options) {
-        var init = {};
-        for (var i = 0; i < NON_SECURE_INJECT_KEYS.length; i++) {
-            var k = NON_SECURE_INJECT_KEYS[i];
-            if (options[k] !== undefined && options[k] !== '') {
-                init[k] = options[k];
-            }
-        }
-        if (init.fontFamily === undefined) {
-            // Default every diagram to the site typeface through the PROVEN
-            // path: mermaid 11 ignores initialize()-time fontFamily for
-            // flowchart labels, but honors a per-widget %%{init}%% directive
-            // (this is exactly how the Pyramid sidebar pins Vollkorn).
-            // A font-only init is deliberately NOT self-styling (see the
-            // fontOnly exception below), so palette theming still applies.
-            init.fontFamily = siteFontFamily;
-        }
-        return Object.keys(init).length > 0 ? init : null;
-    }
-
-    // Style gating: a diagram that carries its own styling must keep it.
-    // Mermaid applies flowchart colors through its internal stylesheet, which
-    // loses to the plugin's palette-default CSS (element rules with
-    // !important). So when the author declares styling - a %%{init}/%%{config}
-    // directive, style/classDef/linkStyle statements, or per-widget theme
-    // attributes - we tag the container `mm-user` and the default CSS opts
-    // out (see $:/plugins/orange/mermaid-tw5/styles). Over-detection is safe:
-    // worst case a diagram just gets Mermaid's own rendering.
-    function hasSelfStyling(body) {
-        if (!body) return false;
-        if (/%%\s*\{\s*(init|config)\s*:/i.test(body)) return true;
-        if (/^\s*(style|classDef|linkStyle)\s+\S/m.test(body)) return true;
+    // Style gating: a diagram that declares its own styling keeps it. The
+    // container gets `mm-user`, which opts it out of the palette defaults in
+    // the stylesheet. Over-detection is safe: the diagram just keeps the
+    // engine's own colours.
+    function hasSelfStyling(source) {
+        if (!source) return false;
+        if (/%%\s*\{\s*(init|config)\s*:/i.test(source)) return true;
+        if (/^\s*(style|classDef|linkStyle)\s+\S/m.test(source)) return true;
         return false;
+    }
+
+    // Site typeface: the Pyramid pins Vollkorn per widget; other diagrams read
+    // the config tiddler and fall back to Vollkorn. Only a plain family name is
+    // accepted, since it is handed to the measurer and to a CSS font list.
+    function siteFontFamily() {
+        var data = $tw.wiki.getTiddlerData(CONFIG_TITLE, {});
+        var family = data && typeof data.fontFamily === 'string' ? data.fontFamily : '';
+        return (/^[\w\s,'-]+$/.test(family) && family) || DEFAULT_FONT;
+    }
+
+    function errorBox(source, ex) {
+        var name = (ex && ex.name) || 'Error';
+        var message = (ex && ex.message) || String(ex);
+        return '<div style="border-left:3px solid var(--lithic-c-code-warn);background:var(--lithic-c-note-bg);padding:8px 12px;">' +
+            '<p><strong>Mermaid diagram could not be rendered.</strong> The diagram syntax may contain an error.</p>' +
+            '<pre style="margin:8px 0;padding:6px;background:var(--lithic-c-code-bg);border:1px solid var(--lithic-c-code-border);overflow:auto;">' +
+            escapeHtml(source) +
+            '</pre>' +
+            '<details>' +
+            '<summary style="cursor:pointer;color:var(--lithic-c-foreground-muted);font-size:12px;">Technical details</summary>' +
+            '<p style="margin:8px 0 0 0;font-size:12px;"><strong>' + escapeHtml(name) + ':</strong> ' +
+            escapeHtml(message) + '</p>' +
+            '</details>' +
+            '</div>';
     }
 
     var MermaidWidget = function(parseTreeNode, options) {
@@ -351,284 +199,110 @@ modified: E Furlan 2022-05-08; Lithic 2026-09-14 (re-applied D3 pan/zoom from xy
     };
     MermaidWidget.prototype = new Widget();
 
-    // Render this widget into the DOM
     MermaidWidget.prototype.render = function(parent, nextSibling) {
         this.parentDomNode = parent;
         this.computeAttributes();
         this.execute();
-        var tag = 'mermaid',
-            rawBody = extractDiagramSource(this) || '',
-            scriptBody = (typeof rawBody === 'string' ? rawBody : String(rawBody)).trim(),
-            divNode = rocklib.getCanvas(this, tag);
-        // Marker consumed by the default-theming CSS: rules are scoped to
-        // div.mm-themed so they only ever affect diagrams this wrapper drew.
-        if (divNode && divNode.classList) {
-            divNode.classList.add('mm-themed');
-            // Visible version stamp for meatspace debugging: which wrapper is
-            // actually running? Inspect a rendered diagram div for this attr.
-            divNode.setAttribute('data-mmwrapver', '2026-09-16.4');
-        }
-        var _insertSVG = function(svgCode, bindFunctions) {
-            divNode.innerHTML = svgCode;
-            if (bindFunctions) {
-                try {
-                    bindFunctions(divNode);
-                } catch (bfErr) {
-                    console.error('[mermaid-tw5] bindFunctions error:', bfErr);
-                }
-            }
-        };
+
+        var rawBody = extractDiagramSource(this) || '';
+        var source = String(rawBody).trim();
+        // Entities first, then the dash repair TiddlyWiki's parser applies to
+        // widget attribute values, then the poison-character pass.
+        source = decodeHtmlEntities(source).trim();
+        source = source.replace(/\u2013/g, '--').replace(/\u2014/g, '---');
+        source = sanitizeDiagramSource(source).trim();
+
+        var divNode = this.document.createElement('div');
+        divNode.id = 'mermaid_' + (uniqueID++) + '_' + Math.random().toString(36).slice(2, 7);
+        divNode.className = 'mm-themed' + (hasSelfStyling(source) ? ' mm-user' : '');
+        // Visible version stamp for debugging: which wrapper drew this diagram?
+        divNode.setAttribute('data-mmwrapver', '2026-10-19.pele');
+        parent.insertBefore(divNode, nextSibling);
+        this.domNodes.push(divNode);
 
         // Skip rendering during static HTML generation (Node.js build).
-        // Mermaid 11 requires a browser DOM (document) to render diagrams.
         if (!$tw.browser) {
             divNode.innerHTML = '<div style="border-left:3px solid var(--lithic-c-accent);background:var(--lithic-c-note-bg);padding:8px 12px;">' +
                 '<strong>Mermaid diagram</strong> (interactive rendering requires a browser)' +
                 '</div>';
-            parent.insertBefore(divNode, nextSibling);
-            this.domNodes.push(divNode);
             return;
         }
 
-        try {
-            // Lazy-load mermaid and D3 on first render
-            if (!mermaidAPI) {
-                divNode.innerHTML = '<div style="border-left:3px solid var(--lithic-c-cluster-border);background:var(--lithic-c-note-bg);padding:8px 12px;">Loading diagram…</div>';
-                var loadedLib = require('$:/plugins/orange/mermaid-tw5/mermaid.min.js');
-                mermaidModule = (loadedLib && (loadedLib.mermaid || loadedLib.default || (typeof loadedLib.initialize === 'function' ? loadedLib : null)));
-                if (!mermaidModule && typeof window !== 'undefined') {
-                    mermaidModule = window.mermaid || (window.__esbuild_esm_mermaid_nm && (window.__esbuild_esm_mermaid_nm.default || window.__esbuild_esm_mermaid_nm.mermaid));
-                }
-                if (!mermaidModule) {
-                    mermaidModule = loadedLib;
-                }
-                mermaidAPI = (mermaidModule && mermaidModule.mermaidAPI) ? mermaidModule.mermaidAPI : mermaidModule;
-                try {
-                    d3 = require('$:/plugins/orange/mermaid-tw5/d3.v6.min.js');
-                } catch (d3Err) {
-                    console.warn('[mermaid-tw5] d3 unavailable; zoom disabled.');
-                    d3 = null;
-                }
-                if (mermaidAPI && typeof mermaidAPI.initialize === 'function') {
-                    var siteConfig = buildSiteConfig();  // D-05: once per page load
-                    mermaidAPI.initialize(siteConfig);
-                    if (siteConfig.fontFamily) siteFontFamily = siteConfig.fontFamily;
-                }
-            }
+        var fontFamily = this.getAttribute('fontFamily', siteFontFamily());
+        if (!/^[\w\s,'-]+$/.test(fontFamily)) fontFamily = DEFAULT_FONT;
 
-            var options = {
-                theme: ''
-            };
-            rocklib.getOptions(this, tag, options);
-
-            scriptBody = decodeHtmlEntities(scriptBody).trim();
-            // TiddlyWiki's WikiText parser converts -- to en-dash and --- to em-dash
-            // in widget attribute values. Normalize them back for Mermaid arrow syntax.
-            scriptBody = scriptBody.replace(/\u2013/g, '--').replace(/\u2014/g, '---');
-            // Poison-character pass: invisible/typographic characters picked up
-            // from paste, import or markdown transclusion are normalized to
-            // what mermaid's grammar accepts (see sanitizeDiagramSource).
-            scriptBody = sanitizeDiagramSource(scriptBody);
-
-            // D-02: per-widget non-secure config injection
-            var perWidgetInit = buildPerWidgetInit(options);
-
-            // Self-styled diagrams (explicit directive/statements/attributes)
-            // render with Mermaid's own colors; palette defaults stand down.
-            // Detect BODY self-styling BEFORE prepending our own %%{init}%%
-            // directive below -- otherwise the injected directive would always
-            // trip the %%{init}%% regex and every diagram would be mm-user.
-            // EXCEPTION: a fontFamily-only init just selects the label typeface
-            // (e.g. the Pyramid sidebar pins Vollkorn); it must NOT count as
-            // self-styling or the palette colors would silently stand down.
-            var fontOnly = perWidgetInit &&
-                Object.keys(perWidgetInit).length === 1 &&
-                Object.prototype.hasOwnProperty.call(perWidgetInit, 'fontFamily');
-            var selfStyled = (!!perWidgetInit && !fontOnly) || hasSelfStyling(scriptBody);
-
-            // D-02: inject per-widget non-secure config as %%{init}%% PREPENDED
-            if (perWidgetInit) {
-                scriptBody = '%%{init: ' + JSON.stringify(perWidgetInit) + '}%%\n' + scriptBody;
-            }
-
-            var renderDiagram = function() {
-                var svgId = divNode.id + '_svg';
-                
-                // Mermaid 10/11 async render() is not thread-safe.
-                // We must queue render requests to prevent concurrent execution.
-                if (typeof window !== 'undefined') {
-                    window.$tw_mermaid_queue = window.$tw_mermaid_queue || [];
-                    window.$tw_mermaid_is_rendering = window.$tw_mermaid_is_rendering || false;
-                }
-                
-                var queue = (typeof window !== 'undefined') ? window.$tw_mermaid_queue : [];
-                
-                var task = {
-                    svgId: svgId,
-                    scriptBody: scriptBody,
-                    attempts: buildRenderAttempts(scriptBody),
-                    attemptIndex: 0,
-                    onSuccess: function(res) {
-                        _insertSVG(res.svg, res.bindFunctions);
-                        if (selfStyled && divNode.classList) {
-                            divNode.classList.add('mm-user');
-                        }
-                        hookupZoom(divNode);
-                    },
-                    onError: function(ex) {
-                        // Self-heal ladder: if the current attempt failed, retry
-                        // with the next (more forgiving) source variant before
-                        // surfacing an error box.
-                        var next = (task.attemptIndex || 0) + 1;
-                        if (task.attempts && next < task.attempts.length) {
-                            task.attemptIndex = next;
-                            task.scriptBody = task.attempts[next].text;
-                            if (typeof window !== 'undefined') {
-                                window.$tw_mermaid_queue.unshift(task);
-                            }
-                            console.warn('[mermaid-tw5] render failed (attempt: ' + task.attempts[next - 1].label + '), retrying with ' + task.attempts[next].label);
-                            if (typeof window !== 'undefined') {
-                                setTimeout(processQueue, 0);
-                            }
-                            return;
-                        }
-                        // All attempts exhausted. A failed %%{init}%% directive can
-                        // leave mermaid's global config polluted (directive parsing
-                        // mutates state before the parse error surfaces), which then
-                        // breaks SUBSEQUENT diagrams on the page. Restore known-good.
-                        resetMermaidToSiteConfig();
-                        cleanupStrayErrorSVGs();
-                        var errorHtml = '<div style="border-left:3px solid var(--lithic-c-code-warn);background:var(--lithic-c-note-bg);padding:8px 12px;">' +
-                            '<p><strong>Mermaid diagram could not be rendered.</strong> The diagram syntax may contain an error.</p>' +
-                            '<pre style="margin:8px 0;padding:6px;background:var(--lithic-c-code-bg);border:1px solid var(--lithic-c-code-border);overflow:auto;">' +
-                            escapeHtml(scriptBody) +
-                            '</pre>' +
-                            '<details>' +
-                            '<summary style="cursor:pointer;color:#666;font-size:12px;">Technical details</summary>' +
-                            '<p style="margin:8px 0 0 0;font-size:12px;"><strong>' + escapeHtml(ex.name || 'Error') + ':</strong> ' +
-                            escapeHtml(ex.message || String(ex)) + '</p>' +
-                            '<pre style="margin:4px 0 0 0;font-size:11px;overflow:auto;">' + escapeHtml(getSimpleStack(ex)) + '</pre>' +
-                            '</details>' +
-                            '</div>';
-                        divNode.innerHTML = errorHtml;
-                    }
-                };
-
-                var processQueue = function() {
-                    if (typeof window === 'undefined') return;
-                    if (window.$tw_mermaid_is_rendering || window.$tw_mermaid_queue.length === 0) return;
-                    
-                    window.$tw_mermaid_is_rendering = true;
-                    var currentTask = window.$tw_mermaid_queue.shift();
-                    
-                    var result;
-                    try {
-                        result = mermaidAPI.render(currentTask.svgId, currentTask.scriptBody);
-                    } catch (ex) {
-                        currentTask.onError(ex);
-                        window.$tw_mermaid_is_rendering = false;
-                        setTimeout(processQueue, 0);
-                        return;
-                    }
-
-                    if (result && typeof result.then === 'function') {
-                        result.then(function(res) {
-                            currentTask.onSuccess(res);
-                        }).catch(function(err) {
-                            currentTask.onError(err);
-                        }).finally(function() {
-                            window.$tw_mermaid_is_rendering = false;
-                            setTimeout(processQueue, 0);
-                        });
-                    } else {
-                        currentTask.onSuccess({ svg: result });
-                        window.$tw_mermaid_is_rendering = false;
-                        setTimeout(processQueue, 0);
-                    }
-                };
-
-                if (typeof window !== 'undefined') {
-                    window.$tw_mermaid_queue.push(task);
-                    processQueue();
-                } else {
-                    // Fallback for node environment (though we abort earlier for node)
-                    try {
-                        var res = mermaidAPI.render(svgId, scriptBody);
-                        if (res && res.then) res.then(task.onSuccess).catch(task.onError);
-                        else task.onSuccess({ svg: res });
-                    } catch (e) {
-                        task.onError(e);
-                    }
-                }
-            };
-
+        // pele.render is synchronous and throws a PeleError on bad syntax, so
+        // the self-heal ladder can pick a source variant before anything is mounted.
+        var attempts = buildRenderAttempts(source),
+            chosen = null,
+            lastError = null;
+        for (var i = 0; i < attempts.length; i++) {
             try {
-                // Mermaid measures node labels with its own offscreen probe while
-                // rendering. If the webfont named in fontFamily hasn't finished
-                // loading yet, the probe silently falls back and boxes get sized
-                // for the fallback metrics while the labels PAINT in the loaded
-                // webfont -- the mismatch shows up as clipped label edges. Wait
-                // for document.fonts.ready before the first render (per render,
-                // not per page load: @font-face sheets can land mid-session).
-                var startRender = function() { renderDiagram(); };
-                if (typeof document !== 'undefined' && document.fonts && typeof document.fonts.ready.then === 'function') {
-                    var started = false;
-                    var go = function() {
-                        if (started) return;
-                        started = true;
-                        try {
-                            renderDiagram();
-                        } catch (ex) {
-                            cleanupStrayErrorSVGs();
-                            throw ex;
-                        }
-                    };
-                    // Request both faces in the stack so the numerals face
-                    // (digits-only unicode-range) is forced to load before the
-                    // offscreen measure probe runs -- otherwise the probe
-                    // measures digits in Vollkorn while paint uses the wider
-                    // KaTeX digits and labels clip.
-                    try {
-                        if (document.fonts.load) {
-                            var ff = (/^[\w\s,'-]+$/.test(siteFontFamily) && siteFontFamily) || '';
-                            if (ff) {
-                                document.fonts.load('16px ' + ff, '0123456789');
-                                document.fonts.load('16px ' + ff, 'R(s)');
-                            }
-                        }
-                    } catch (flErr) { /* font loading is best-effort */ }
-                    document.fonts.ready.then(go, go);
-                    // Belt and braces: never let a hung font block the diagram
-                    setTimeout(go, 3000);
-                } else {
-                    startRender();
-                }
-            } catch (ex) {
-                cleanupStrayErrorSVGs();
-                throw ex;
+                pele.render(attempts[i].text, { fontFamily: fontFamily });
+                chosen = attempts[i];
+                break;
+            } catch (renderErr) {
+                lastError = renderErr;
+                console.warn('[lithic-patch-mermaid] render failed (attempt: ' + attempts[i].label + ')');
             }
-
-        } catch (ex) {
-            cleanupStrayErrorSVGs();
-            var errorHtml = '<div style="border-left:3px solid var(--lithic-c-code-warn);background:var(--lithic-c-note-bg);padding:8px 12px;">' +
-                '<p><strong>Mermaid diagram could not be rendered.</strong> The diagram syntax may contain an error.</p>' +
-                '<pre style="margin:8px 0;padding:6px;background:var(--lithic-c-code-bg);border:1px solid var(--lithic-c-code-border);overflow:auto;">' +
-                escapeHtml(scriptBody) +
-                '</pre>' +
-                '<details>' +
-                '<summary style="cursor:pointer;color:#666;font-size:12px;">Technical details</summary>' +
-                '<p style="margin:8px 0 0 0;font-size:12px;"><strong>' + escapeHtml(ex.name || 'Error') + ':</strong> ' +
-                escapeHtml(ex.message || String(ex)) + '</p>' +
-                '<pre style="margin:4px 0 0 0;font-size:11px;overflow:auto;">' + escapeHtml(getSimpleStack(ex)) + '</pre>' +
-                '</details>' +
-                '</div>';
-            divNode.innerHTML = errorHtml;
         }
-        parent.insertBefore(divNode, nextSibling);
-        this.domNodes.push(divNode);
+        if (!chosen) {
+            divNode.innerHTML = errorBox(source, lastError);
+            return;
+        }
+
+        var self = this;
+        var mountNow = function() {
+            // Removed from the page before the fonts settled: nothing to draw into.
+            if (self.mounted || !divNode.isConnected) return;
+            try {
+                self.mounted = pele.mount(divNode, chosen.text, {
+                    fontFamily: fontFamily,
+                    zoom: 'auto',
+                    onError: function(err) {
+                        divNode.innerHTML = errorBox(source, err);
+                    }
+                });
+            } catch (mountErr) {
+                divNode.innerHTML = errorBox(source, mountErr);
+            }
+        };
+
+        // Measure labels only once the webfont is loaded, so the measured box and
+        // the painted label use the same face. Bounded by a 3s fallback.
+        if (document.fonts && document.fonts.ready && typeof document.fonts.ready.then === 'function') {
+            var started = false;
+            var go = function() {
+                if (started) return;
+                started = true;
+                mountNow();
+            };
+            try {
+                if (document.fonts.load) {
+                    document.fonts.load('16px ' + fontFamily, '0123456789');
+                    document.fonts.load('16px ' + fontFamily, 'R(s)');
+                }
+            } catch (flErr) { /* font loading is best-effort */ }
+            document.fonts.ready.then(go, go);
+            setTimeout(go, 3000);
+        } else {
+            mountNow();
+        }
     };
+
+    // Tear the engine down before TiddlyWiki replaces this widget's DOM, so
+    // pele's resize observer does not outlive the diagram it watches.
+    MermaidWidget.prototype.removeChildDomNodes = function() {
+        if (this.mounted) {
+            try { this.mounted.destroy(); } catch (destroyErr) { /* already gone */ }
+            this.mounted = null;
+        }
+        Widget.prototype.removeChildDomNodes.call(this);
+    };
+
     MermaidWidget.prototype.execute = function() {
         // Nothing to do
     };
+
     exports.mermaid = MermaidWidget;
 })();

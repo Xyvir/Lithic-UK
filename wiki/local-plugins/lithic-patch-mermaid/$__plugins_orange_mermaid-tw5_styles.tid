@@ -1,156 +1,53 @@
 tags: $:/tags/Stylesheet
 title: $:/plugins/orange/mermaid-tw5/styles
-type: text/vnd.tiddlywiki
+type: text/css
 
-\rules only filteredtranscludeinline transcludeinline macrodef macrocallinline
+/* Theming for Mermaid diagrams drawn by the pele engine.
 
-/* Palette-default theming for Mermaid diagrams, gated so it can never
-   override an author's declared styling.
+   pele reads its colours from --pele-* custom properties on the diagram's
+   container. Those are mapped onto the palette's contrast roles here, so a
+   palette switch re-themes every diagram without re-rendering it. Diagrams that
+   declare their own styling (container class mm-user) keep their own colours on
+   the parts the author styled, and pele's theme still covers the rest.
 
-   The wrapper tags every diagram container `mm-themed`, and additionally
-   `mm-user` when the diagram carries its own styling (a %%{init}/%%{config}
-   directive, style/classDef/linkStyle statements, or per-widget theme
-   attributes) -- then Mermaid's own rendering is authoritative and these
-   defaults stand down. Mermaid applies flowchart colors via its internal stylesheet
-   or presentation attributes -- both lose to element rules with !important.
-   So every color rule below is scoped to `div.mm-themed:not(.mm-user)`:
-   diagrams that declare their own colors keep Mermaid's rendering untouched;
-   diagrams without any declared styling keep the sane palette defaults.
+   The variables are read from the --lithic-c-* palette published by
+   $:/plugins/xyvir/lithic-core/contrast-publisher.js. */
 
-   All colors come from the shared lithic-core contrast variables
-   (--lithic-c-*, computed with WCAG-contrast math from the live palette
-   by $:/plugins/xyvir/lithic-core/contrast-publisher.js and re-published
-   on palette switch). Each var() carries a <<colour>> fallback so the
-   sheet still renders sane values before startup / without the core
-   plugin. */
-
-/* -- Hide stray Mermaid error SVGs (applies regardless of gating) -- */
-svg[aria-roledescription="error"],
-svg.error-icon,
-svg:has(.error-icon) {
-    display: none !important;
-}
-
-/* -- Node fills & borders (gated) --
-   fill = muted-foreground (subtle lift off the page), border = primary
-   (the palette accent -- the "Contrast-locked" signature). */
-div.mm-themed:not(.mm-user) .node rect,
-div.mm-themed:not(.mm-user) .node polygon,
-div.mm-themed:not(.mm-user) .node circle,
-div.mm-themed:not(.mm-user) .node ellipse,
-div.mm-themed:not(.mm-user) .node path {
-    fill: var(--lithic-c-node-bg, <<colour muted-foreground>>) !important;
-    stroke: var(--lithic-c-node-border, <<colour primary>>) !important;
-    stroke-width: 1.5px !important;
-}
-
-/* -- Node text (inside filled nodes) --
-   foreground over the muted-foreground fill: readable on light AND dark
-   palettes, and the palette author only ever picks sensible fg shades. */
-div.mm-themed:not(.mm-user) .node .label,
-div.mm-themed:not(.mm-user) .node text,
-div.mm-themed:not(.mm-user) .node tspan,
-div.mm-themed:not(.mm-user) .node foreignObject div,
-div.mm-themed:not(.mm-user) .node foreignObject span {
-    fill: var(--lithic-c-node-fg, <<colour foreground>>) !important;
-    color: var(--lithic-c-node-fg, <<colour foreground>>) !important;
-}
-
-/* -- Edge lines -- */
-div.mm-themed:not(.mm-user) .edgePath .path,
-div.mm-themed:not(.mm-user) .edge-path path,
-div.mm-themed:not(.mm-user) .flowchart-link,
-div.mm-themed:not(.mm-user) path.path,
-div.mm-themed:not(.mm-user) .link,
-div.mm-themed:not(.mm-user) g.edgePaths path {
-    stroke: var(--lithic-c-line, <<colour foreground>>) !important;
-    stroke-width: 1.5px !important;
-}
-
-/* -- Arrowhead markers -- */
-div.mm-themed:not(.mm-user) marker path {
-    fill: var(--lithic-c-line, <<colour foreground>>) !important;
-    stroke: var(--lithic-c-line, <<colour foreground>>) !important;
-}
-
-/* -- Edge labels --
-   Text ink = node-fg. The little backing box mermaid draws behind edge
-   labels (a rect in svg-label mode, an inline background-color on the
-   span in html-label mode) must be themed TOO: mermaid's default
-   edgeLabelBackground is light grey, which read as light-ink-on-light on
-   dark palettes. Painting the box with node-bg keeps the "cut out of the
-   line" effect AND guarantees the ink's contrast pair -- node-fg is
-   WCAG-derived against exactly this fill (>=4.5:1) by contrast.js. */
-div.mm-themed:not(.mm-user) .edgeLabel,
-div.mm-themed:not(.mm-user) .edgeLabel text,
-div.mm-themed:not(.mm-user) .edgeLabel tspan,
-div.mm-themed:not(.mm-user) .edgeLabel foreignObject div,
-div.mm-themed:not(.mm-user) .edgeLabel foreignObject span,
-div.mm-themed:not(.mm-user) .label text,
-div.mm-themed:not(.mm-user) .label tspan {
-    fill: var(--lithic-c-node-fg, <<colour foreground>>) !important;
-    color: var(--lithic-c-node-fg, <<colour foreground>>) !important;
-}
-div.mm-themed:not(.mm-user) .edgeLabel rect,
-div.mm-themed:not(.mm-user) .edgeLabel foreignObject div,
-div.mm-themed:not(.mm-user) .edgeLabel foreignObject span,
-div.mm-themed:not(.mm-user) .edgeLabel foreignObject p,
-div.mm-themed:not(.mm-user) .edgeLabel .labelBkg {
-    fill: var(--lithic-c-node-bg, <<colour muted-foreground>>) !important;
-    background-color: var(--lithic-c-node-bg, <<colour muted-foreground>>) !important;
-}
-
-/* -- Subgraph / cluster -- */
-div.mm-themed:not(.mm-user) .cluster rect {
-    fill: var(--lithic-c-cluster-bg, <<colour page-background>>) !important;
-    stroke: var(--lithic-c-cluster-border, <<colour muted-foreground>>) !important;
-}
-div.mm-themed:not(.mm-user) .cluster text,
-div.mm-themed:not(.mm-user) .cluster tspan {
-    fill: var(--lithic-c-cluster-fg, <<colour foreground>>) !important;
+div.mm-themed {
+    --pele-bg: var(--lithic-c-page);
+    --pele-fg: var(--lithic-c-node-fg);
+    --pele-muted: var(--lithic-c-foreground-muted);
+    --pele-line: var(--lithic-c-line);
+    --pele-surface: var(--lithic-c-node-bg);
+    --pele-surface-alt: var(--lithic-c-cluster-bg);
+    --pele-border: var(--lithic-c-node-border);
+    --pele-accent: var(--lithic-c-accent);
+    --pele-critical: var(--lithic-c-code-warn);
+    --pele-error: var(--lithic-c-code-warn);
+    --pele-radius: 4px;
 }
 
 /* =========================================================
    PRINT: greyscale for all mermaid diagrams
 
-   Diagrams should never print palette colors: baseline diagrams
-   get print-grey variable overrides (black lines/text, light-ink
-   fills, white diagram background) via the same --lithic-c-* vars
-   they consume on screen -- redefining the vars on the container
-   re-themes every rule above with zero selector duplication.
-   Self-styled diagrams (mm-user, pies, git graphs) carry inline
-   colors the vars can't reach, so the whole container is passed
-   through a CSS grayscale filter instead. Ink usage stays sane
-   even when printing from a dark palette.
+   Diagrams should never print palette colours. Redefining the
+   --pele-* variables to print greys re-themes the whole diagram
+   with no selector duplication, and the grayscale filter catches
+   anything an author styled with explicit colours.
    ========================================================= */
 @media print {
-    /* -- baseline diagrams: print-grey variable overrides -- */
-    div.mm-themed:not(.mm-user) {
-        --lithic-c-surface: #ffffff;
-        --lithic-c-page: #ffffff;
-        --lithic-c-foreground: #000000;
-        --lithic-c-foreground-muted: #444444;
-        --lithic-c-node-bg: #f2f2f2;
-        --lithic-c-node-fg: #000000;
-        --lithic-c-node-border: #000000;
-        --lithic-c-line: #000000;
-        --lithic-c-cluster-bg: #ffffff;
-        --lithic-c-cluster-border: #666666;
-        --lithic-c-cluster-fg: #000000;
-        --lithic-c-note-bg: #fafafa;
-        --lithic-c-note-fg: #000000;
-        --lithic-c-note-border: #666666;
-        --lithic-c-accent: #000000;
-        --lithic-c-accent-fg: #ffffff;
-        background: #ffffff !important;
-    }
-
-    /* -- all diagrams: monochrome + make the greys actually print --
-       (print-color-adjust exact overrides the browser's default
-       background-suppression so the fills/underlines carry ink;
-       the fork's $:/lithic/styles/printstyle.css already sets this
-       for svg, repeated here so this sheet is self-contained) */
     div.mm-themed {
+        --pele-bg: #ffffff;
+        --pele-fg: #000000;
+        --pele-muted: #444444;
+        --pele-line: #000000;
+        --pele-surface: #f2f2f2;
+        --pele-surface-alt: #ffffff;
+        --pele-border: #000000;
+        --pele-accent: #000000;
+        --pele-critical: #000000;
+        --pele-error: #000000;
+        background: #ffffff !important;
         filter: grayscale(1) !important;
         -webkit-print-color-adjust: exact !important;
         print-color-adjust: exact !important;

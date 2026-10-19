@@ -39,7 +39,6 @@
         "xyvir/lithic-python-codeblocks",
         "xyvir/lithic-import-handler",
         "xyvir/lithic-patch-appear",
-        "orange/mermaid-tw5",
         "xyvir/lithic-patch-mermaid",
         "byper/advanced-search",
         "xyvir/tw-jspython"
