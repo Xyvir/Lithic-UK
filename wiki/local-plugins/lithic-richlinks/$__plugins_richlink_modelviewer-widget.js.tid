@@ -52,6 +52,8 @@ var Widget = require("$:/core/modules/widgets/widget.js").widget;
 
 var scriptPromise = null;
 
+var MODEL_VIEWER_TITLE = "$:/plugins/richlink/vendor/model-viewer.min.js";
+
 function loadModelViewer(document, statusCallback) {
     if(window.customElements && customElements.get("model-viewer")) {
         statusCallback("model-viewer already registered");
@@ -65,55 +67,29 @@ function loadModelViewer(document, statusCallback) {
 
     statusCallback("loading model-viewer script");
 
+    // The library ships inside this plugin, so it runs from the wiki's own text and is never fetched.
+    // An inline module script fires no load event, so registration is checked once it has had time to run.
     scriptPromise = new Promise(function(resolve,reject) {
+        var text = $tw.wiki.getTiddlerText(MODEL_VIEWER_TITLE);
+        if(!text) {
+            statusCallback("model-viewer script is missing from the wiki");
+            reject(new Error("model-viewer script is missing from the wiki"));
+            return;
+        }
         var script = document.createElement("script");
         script.type = "module";
-
-        // Primary CDN
-        script.src = "https://ajax.googleapis.com/ajax/libs/model-viewer/3.3.0/model-viewer.min.js";
         script.setAttribute("data-tw-modelviewer","yes");
-
-        script.onload = function() {
-            setTimeout(function() {
-                if(window.customElements && customElements.get("model-viewer")) {
-                    statusCallback("model-viewer registered");
-                    resolve();
-                } else {
-                    statusCallback("script loaded, but model-viewer not registered");
-                    reject(new Error("model-viewer custom element was not registered"));
-                }
-            },500);
-        };
-
-        script.onerror = function() {
-            statusCallback("primary CDN failed; trying unpkg");
-
-            var fallback = document.createElement("script");
-            fallback.type = "module";
-            fallback.src = "https://unpkg.com/@google/model-viewer@3.3.0/dist/model-viewer.min.js";
-            fallback.setAttribute("data-tw-modelviewer","yes");
-
-            fallback.onload = function() {
-                setTimeout(function() {
-                    if(window.customElements && customElements.get("model-viewer")) {
-                        statusCallback("model-viewer registered from fallback CDN");
-                        resolve();
-                    } else {
-                        statusCallback("fallback script loaded, but model-viewer not registered");
-                        reject(new Error("model-viewer custom element was not registered from fallback"));
-                    }
-                },500);
-            };
-
-            fallback.onerror = function() {
-                statusCallback("model-viewer script failed to load");
-                reject(new Error("model-viewer script failed to load"));
-            };
-
-            document.head.appendChild(fallback);
-        };
-
+        script.textContent = text;
         document.head.appendChild(script);
+        setTimeout(function() {
+            if(window.customElements && customElements.get("model-viewer")) {
+                statusCallback("model-viewer registered");
+                resolve();
+            } else {
+                statusCallback("script ran, but model-viewer not registered");
+                reject(new Error("model-viewer custom element was not registered"));
+            }
+        },500);
     });
 
     return scriptPromise;

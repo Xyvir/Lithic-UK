@@ -6,6 +6,16 @@ Please note, the below instructions are loosely organized by priority, with most
 **CRITICAL RULE FOR ALL AGENTS:**
 If you need source context that is NOT available locally within this repository (such as vanilla TiddlyWiki core files or external third-party plugins), **DO NOT** attempt to find or download it yourself. Instead, you MUST explicitly **ASK THE USER (THE DEVELOPER)** to provide the relevant context manually. 
 
+# Every Plugin Works Offline, From Inside the Wiki (CRITICAL)
+
+**PHILOSOPHY:** Lithic is one portable file. A wiki must open and work with no network at all, on a USB stick, over `file://`, or on a machine that has never been online.
+
+**REQUIREMENT:**
+1. **No runtime loads from another host.** No plugin, widget, theme or library may fetch a script, stylesheet, font, model, or data file from a CDN or any other URL when the wiki runs. This includes `<script src>`, `<link>`, `@import`, `import()`, `fetch()` of a remote URL, and web fonts.
+2. **Vendor every dependency into the repository.** Third-party code is either a pinned entry in `external.yml` (fetched at build time and bundled into the artifact) or a copy tracked under `wiki/local-plugins/`. Never leave a live external URL in a tiddler, and never rely on a host being reachable.
+3. **Bundled means embedded.** The shipped artifact must carry every file it needs. Check this in the built output, not just the source, because a CDN URL can hide inside a minified bundle.
+4. **A new plugin is judged by this first.** Before adding or keeping a plugin, confirm its assets are bundled and that it opens with the network disconnected. A plugin that cannot is not accepted until it is vendored.
+
 # Do Not Watch CI/CD Runs (IMPORTANT)
 
 **CONTEXT:**

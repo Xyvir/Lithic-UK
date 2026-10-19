@@ -105,6 +105,10 @@ var ALLOWLIST = [
     reason: 'Vendored pele 1.7.0 engine (MIT, unmodified). Its colour-name tables and var(--pele-*, #hex) fallbacks are never painted: the wiki sets every --pele-* colour role that carries a fallback (styles tiddler).'
   },
   {
+    file: /lithic-richlinks\/\$__plugins_richlink_vendor_model-viewer\.min\.js\.tid/,
+    reason: 'Vendored @google/model-viewer 3.3.0 (BSD-3, unmodified). Its colour literals are the viewer\u2019s own default UI in its shadow DOM (progress bar, poster, controls); the wiki palette does not reach into it.'
+  },
+  {
     file: /lithic-richlinks\/\$__plugins_richlink_txtviewer-widget\.js\.tid/,
     reason: 'Text-file iframe gets a light color-scheme on purpose: the fetched document brings its own (dark-on-light) styling.'
   },
