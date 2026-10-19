@@ -1,0 +1,418 @@
+title: Pele diagram test
+type: text/vnd.tiddlywiki
+
+''Pele diagram test'' — one sample per diagram type pele supports, with lorem ipsum labels. Check the palette, the node and edge colours, the active node and the fonts on each one.
+⁂⁂⁂
+title: 01 Flowchart
+type: text/vnd.tiddlywiki
+
+''Flowchart'' — lorem ipsum dolor sit amet.
+<$mermaid>
+flowchart LR
+    A[Lorem ipsum] -->|dolor| B{Sit amet?}
+    B -->|yes| C[Consectetur]
+    B -->|no| D([Adipiscing])
+    C --> E[(Elit sed)]
+    D --> E
+</$mermaid>
+⁂⁂⁂
+title: 02 Flowchart ELK
+type: text/vnd.tiddlywiki
+
+''Flowchart (ELK layout)'' — lorem ipsum dolor sit amet.
+<$mermaid>
+flowchart-elk LR
+    A[Lorem ipsum] --> B[Dolor sit]
+    A --> C[Amet consectetur]
+    B --> D[Adipiscing elit]
+    C --> D
+</$mermaid>
+⁂⁂⁂
+title: 03 Mindmap
+type: text/vnd.tiddlywiki
+
+''Mindmap'' — lorem ipsum dolor sit amet.
+<$mermaid>
+mindmap
+  root((Lorem))
+    Ipsum
+      dolor sit
+      amet
+    Consectetur
+      adipiscing
+      elit
+</$mermaid>
+⁂⁂⁂
+title: 04 Architecture
+type: text/vnd.tiddlywiki
+
+''Architecture'' — lorem ipsum dolor sit amet.
+<$mermaid>
+architecture-beta
+    group api(cloud)[Api]
+    service db(database)[Dolor] in api
+    service server(server)[Ipsum] in api
+    server:R --> L:db
+</$mermaid>
+⁂⁂⁂
+title: 05 Agent flow
+type: text/vnd.tiddlywiki
+
+''Agent flow'' — lorem ipsum dolor sit amet.
+<$mermaid>
+agentflow-beta
+    Lorem[Lorem ipsum]
+    Dolor[Dolor sit]
+    Lorem --> Dolor
+</$mermaid>
+⁂⁂⁂
+title: 06 C4 context
+type: text/vnd.tiddlywiki
+
+''C4 context'' — lorem ipsum dolor sit amet.
+<$mermaid>
+C4Context
+    title Lorem ipsum
+    Person(user, "Dolor User", "Sit amet")
+    System(sys, "Consectetur System", "Adipiscing elit")
+    Rel(user, sys, "Uses")
+</$mermaid>
+⁂⁂⁂
+title: 07 Kanban
+type: text/vnd.tiddlywiki
+
+''Kanban'' — lorem ipsum dolor sit amet.
+<$mermaid>
+kanban
+  Todo
+    [Lorem ipsum]
+    [Dolor sit]
+  Doing
+    [Amet consectetur]
+  Done
+    [Adipiscing elit]
+</$mermaid>
+⁂⁂⁂
+title: 08 Class diagram
+type: text/vnd.tiddlywiki
+
+''Class diagram'' — lorem ipsum dolor sit amet.
+<$mermaid>
+classDiagram
+    class Lorem {
+      +int ipsum
+      +dolor() void
+    }
+    class Amet
+    Lorem <|-- Amet
+</$mermaid>
+⁂⁂⁂
+title: 09 Entity relationship
+type: text/vnd.tiddlywiki
+
+''Entity relationship'' — lorem ipsum dolor sit amet.
+<$mermaid>
+erDiagram
+    CUSTOMER ||--o{ ORDER : places
+    ORDER ||--|{ LINE_ITEM : contains
+    CUSTOMER {
+        string name
+    }
+</$mermaid>
+⁂⁂⁂
+title: 10 Gantt
+type: text/vnd.tiddlywiki
+
+''Gantt'' — lorem ipsum dolor sit amet.
+<$mermaid>
+gantt
+    title Lorem plan
+    dateFormat YYYY-MM-DD
+    section Ipsum
+    Dolor :a1, 2026-10-01, 5d
+    Sit amet :after a1, 3d
+</$mermaid>
+⁂⁂⁂
+title: 11 Info
+type: text/vnd.tiddlywiki
+
+''Info'' — lorem ipsum dolor sit amet.
+<$mermaid>
+info
+showInfo
+</$mermaid>
+⁂⁂⁂
+title: 12 Pie
+type: text/vnd.tiddlywiki
+
+''Pie'' — lorem ipsum dolor sit amet.
+<$mermaid>
+pie title Lorem ipsum
+    "Dolor" : 42
+    "Sit" : 28
+    "Amet" : 30
+</$mermaid>
+⁂⁂⁂
+title: 13 Requirement
+type: text/vnd.tiddlywiki
+
+''Requirement'' — lorem ipsum dolor sit amet.
+<$mermaid>
+requirementDiagram
+    requirement req1 {
+    id: 1
+    text: Lorem ipsum
+    risk: high
+    verifymethod: test
+    }
+    element el1 {
+    type: simulation
+    }
+    el1 - satisfies -> req1
+</$mermaid>
+⁂⁂⁂
+title: 14 Sequence
+type: text/vnd.tiddlywiki
+
+''Sequence'' — lorem ipsum dolor sit amet.
+<$mermaid>
+sequenceDiagram
+    participant A as Lorem
+    participant B as Ipsum
+    A->>B: Dolor sit?
+    B-->>A: Amet
+</$mermaid>
+⁂⁂⁂
+title: 15 Swimlane
+type: text/vnd.tiddlywiki
+
+''Swimlane'' — lorem ipsum dolor sit amet.
+<$mermaid>
+swimlane-beta
+    Lorem["Lorem"]
+    Ipsum["Ipsum dolor"]
+    Lorem --> Ipsum
+</$mermaid>
+⁂⁂⁂
+title: 16 Timeline
+type: text/vnd.tiddlywiki
+
+''Timeline'' — lorem ipsum dolor sit amet.
+<$mermaid>
+timeline
+    title Lorem history
+    2026 : Ipsum
+         : Dolor
+    2027 : Sit amet
+</$mermaid>
+⁂⁂⁂
+title: 17 Git graph
+type: text/vnd.tiddlywiki
+
+''Git graph'' — lorem ipsum dolor sit amet.
+<$mermaid>
+gitGraph
+    commit id: "lorem"
+    branch dev
+    commit id: "ipsum"
+    checkout main
+    merge dev
+</$mermaid>
+⁂⁂⁂
+title: 18 State
+type: text/vnd.tiddlywiki
+
+''State'' — lorem ipsum dolor sit amet.
+<$mermaid>
+stateDiagram-v2
+    [*] --> Lorem
+    Lorem --> Ipsum : dolor
+    Ipsum --> [*]
+</$mermaid>
+⁂⁂⁂
+title: 19 Journey
+type: text/vnd.tiddlywiki
+
+''Journey'' — lorem ipsum dolor sit amet.
+<$mermaid>
+journey
+    title Lorem day
+    section Morning
+      Wake up: 5: Me
+      Coffee: 3: Me
+</$mermaid>
+⁂⁂⁂
+title: 20 Quadrant
+type: text/vnd.tiddlywiki
+
+''Quadrant'' — lorem ipsum dolor sit amet.
+<$mermaid>
+quadrantChart
+    title Lorem ipsum
+    x-axis Low --> High
+    y-axis Low --> High
+    quadrant-1 Dolor
+    quadrant-2 Sit
+    quadrant-3 Amet
+    quadrant-4 Consectetur
+    Point A: [0.3, 0.6]
+    Point B: [0.8, 0.2]
+</$mermaid>
+⁂⁂⁂
+title: 21 Sankey
+type: text/vnd.tiddlywiki
+
+''Sankey'' — lorem ipsum dolor sit amet.
+<$mermaid>
+sankey-beta
+    Lorem,Ipsum,10
+    Ipsum,Dolor,6
+    Ipsum,Sit,4
+</$mermaid>
+⁂⁂⁂
+title: 22 Packet
+type: text/vnd.tiddlywiki
+
+''Packet'' — lorem ipsum dolor sit amet.
+<$mermaid>
+packet-beta
+  0-15: "Lorem"
+  16-31: "Ipsum"
+</$mermaid>
+⁂⁂⁂
+title: 23 XY chart
+type: text/vnd.tiddlywiki
+
+''XY chart'' — lorem ipsum dolor sit amet.
+<$mermaid>
+xychart-beta
+    title "Lorem"
+    x-axis [jan, feb, mar]
+    y-axis "Ipsum" 0 --> 100
+    bar [30, 60, 90]
+    line [20, 50, 80]
+</$mermaid>
+⁂⁂⁂
+title: 24 Block
+type: text/vnd.tiddlywiki
+
+''Block'' — lorem ipsum dolor sit amet.
+<$mermaid>
+block-beta
+    columns 3
+    a["Lorem"] b["Ipsum"] c["Dolor"]
+</$mermaid>
+⁂⁂⁂
+title: 25 Tree view
+type: text/vnd.tiddlywiki
+
+''Tree view'' — lorem ipsum dolor sit amet.
+<$mermaid>
+treeView-beta
+    "root"
+        "lorem"
+        "ipsum"
+            "dolor"
+</$mermaid>
+⁂⁂⁂
+title: 26 Radar
+type: text/vnd.tiddlywiki
+
+''Radar'' — lorem ipsum dolor sit amet.
+<$mermaid>
+radar-beta
+    title Lorem
+    axis a["Ipsum"], b["Dolor"], c["Sit"]
+    curve d["Amet"]{ 3, 2, 4 }
+    max 5
+</$mermaid>
+⁂⁂⁂
+title: 27 Ishikawa
+type: text/vnd.tiddlywiki
+
+''Ishikawa'' — lorem ipsum dolor sit amet.
+<$mermaid>
+ishikawa-beta
+    Lorem ipsum
+    Dolor
+        Sit
+        Amet
+    Consectetur
+        Adipiscing
+</$mermaid>
+⁂⁂⁂
+title: 28 Treemap
+type: text/vnd.tiddlywiki
+
+''Treemap'' — lorem ipsum dolor sit amet.
+<$mermaid>
+treemap-beta
+    "Lorem"
+        "Ipsum": 30
+        "Dolor": 20
+</$mermaid>
+⁂⁂⁂
+title: 29 Railroad
+type: text/vnd.tiddlywiki
+
+''Railroad'' — lorem ipsum dolor sit amet.
+<$mermaid>
+railroad-ebnf-beta
+    title "Lorem"
+    Lorem = "ipsum" , Dolor ;
+</$mermaid>
+⁂⁂⁂
+title: 30 Venn
+type: text/vnd.tiddlywiki
+
+''Venn'' — lorem ipsum dolor sit amet.
+<$mermaid>
+venn-beta
+    set A["Lorem"]
+    set B["Ipsum"]
+    union A,B["Shared"]
+</$mermaid>
+⁂⁂⁂
+title: 31 Wardley
+type: text/vnd.tiddlywiki
+
+''Wardley'' — lorem ipsum dolor sit amet.
+<$mermaid>
+wardley-beta
+    title Lorem
+    component Ipsum [0.2, 0.3]
+    component Dolor [0.7, 0.6]
+    Ipsum -> Dolor
+</$mermaid>
+⁂⁂⁂
+title: 32 Cynefin
+type: text/vnd.tiddlywiki
+
+''Cynefin'' — lorem ipsum dolor sit amet.
+<$mermaid>
+cynefin-beta
+    title "Lorem"
+    clear "Ipsum" "Lorem"
+    complex "Dolor"
+    clear --> complex
+</$mermaid>
+⁂⁂⁂
+title: 33 Use case
+type: text/vnd.tiddlywiki
+
+''Use case'' — lorem ipsum dolor sit amet.
+<$mermaid>
+usecase-beta
+    actor User
+    User --> Lorem
+</$mermaid>
+⁂⁂⁂
+title: 34 Event modeling
+type: text/vnd.tiddlywiki
+
+''Event modeling'' — lorem ipsum dolor sit amet.
+<$mermaid>
+eventmodeling
+    tf 01 cmd Lorem
+    tf 02 evt Ipsum
+</$mermaid>

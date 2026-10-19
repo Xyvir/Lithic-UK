@@ -258,7 +258,8 @@ modified: Lithic 2026-10-19 (engine swap: diagrams render through the vendored p
             try {
                 self.mounted = pele.mount(divNode, chosen.text, {
                     fontFamily: fontFamily,
-                    zoom: 'auto',
+                    // Diagrams are static: no pele zoom buttons, and no wheel, pinch or keyboard zoom.
+                    zoom: false,
                     onError: function(err) {
                         divNode.innerHTML = errorBox(source, err);
                     }
