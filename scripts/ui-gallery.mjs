@@ -1810,6 +1810,24 @@ const SHEETS = [
         drive: goOffline,
         expect: '.offline-banner',
         verify: async (page) => {
+          // The banner is what `expect` waits for, but the search box and the rows are read from the
+          // device's cache after it, so they can land a beat later. Wait for the boxes this pane
+          // measures rather than reading them before they exist; the checks below are unchanged.
+          await page.evaluate(
+            () =>
+              new Promise((done, fail) => {
+                const started = Date.now();
+                const tick = () => {
+                  if (['.heading h1', '.brand-icon-wrap', '.offline-banner', '.offline-banner-copy', '.recent-search-wrap', '.action-card', '.recent-list'].every((selector) => document.querySelector(selector))) return done();
+                  if (Date.now() - started > 8000) {
+                    const missing = ['.heading h1', '.brand-icon-wrap', '.offline-banner', '.offline-banner-copy', '.recent-search-wrap', '.action-card', '.recent-list'].filter((selector) => !document.querySelector(selector));
+                    return fail(new Error(`the offline landscape state never drew ${missing.join(', ')}`));
+                  }
+                  setTimeout(tick, 100);
+                };
+                tick();
+              })
+          );
           const measured = await page.evaluate(() => {
             const box = (selector) => {
               const node = document.querySelector(selector);
@@ -1827,7 +1845,7 @@ const SHEETS = [
             };
             return {
               title: box('.heading h1'),
-              brand: box('.brand-icon'),
+              brand: box('.brand-icon-wrap'),
               banner: box('.offline-banner'),
               copy: box('.offline-banner-copy'),
               search: box('.recent-search-wrap'),
