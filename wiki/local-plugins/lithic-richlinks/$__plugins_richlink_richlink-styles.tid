@@ -7,7 +7,6 @@ type: text/vnd.tiddlywiki
 
 /* ---- Generic richlink card shell ---- */
 
-.rl-3dmodel,
 .rl-iframe-card,
 .rl-txt {
     display: block;
@@ -20,7 +19,6 @@ type: text/vnd.tiddlywiki
     color: <<colour foreground>>;
 }
 
-.rl-3dmodel-header,
 .rl-iframe-credit {
     display: flex;
     align-items: baseline;
@@ -29,19 +27,12 @@ type: text/vnd.tiddlywiki
     margin-bottom: 0.45em;
 }
 
-.rl-3dmodel-icon {
-    color: <<colour muted-foreground>>;
-    font-size: 0.9em;
-}
-
-.rl-3dmodel-link,
 .rl-txt-fallback a {
     color: <<colour primary>>;
     text-decoration: none;
     word-break: break-word;
 }
 
-.rl-3dmodel-link:hover,
 .rl-txt-fallback a:hover {
     text-decoration: underline;
 }
