@@ -1481,12 +1481,16 @@ try {
     const transfer = new DataTransfer();
     transfer.items.add(make('one.lith', 'drop one'));
     transfer.items.add(make('two.lith', 'drop two'));
+    // A third file carrying a title already in the gesture: the queue keeps the first copy and
+    // says so, because the wiki stores one tiddler per title and the last writer would win.
+    transfer.items.add(make('again.lith', 'drop one'));
     window.dispatchEvent(new DragEvent('drop', { dataTransfer: transfer, bubbles: true, cancelable: true }));
   });
   await livePage.waitForFunction(() => document.querySelectorAll('.pending-imports li').length === 3, POLL);
   const droppedRows = await livePage.evaluate(() => ({
     titles: [...document.querySelectorAll('.pending-imports .pending-title')].map((node) => node.textContent.trim()),
-    label: document.querySelectorAll('.pending-imports li')[1]?.querySelector('.pending-remove')?.getAttribute('aria-label') ?? null
+    label: document.querySelectorAll('.pending-imports li')[1]?.querySelector('.pending-remove')?.getAttribute('aria-label') ?? null,
+    note: document.querySelector('.pending-imports .pending-note')?.textContent?.trim() ?? null
   }));
   assert.deepEqual(
     droppedRows.titles,
@@ -1498,17 +1502,28 @@ try {
     'Remove drop one',
     `Live self-host: each row's ✕ names the row it removes: ${JSON.stringify(droppedRows)}`
   );
+  assert.equal(
+    droppedRows.note,
+    'drop one is already queued, so remove it first.',
+    `Live self-host: a repeated title is refused rather than queued twice, and the copy that did not arrive is named: ${JSON.stringify(droppedRows)}`
+  );
   await livePage.evaluate(() => {
     document.querySelectorAll('.pending-imports li')[1]?.querySelector('.pending-remove')?.click();
   });
   await livePage.waitForFunction(() => document.querySelectorAll('.pending-imports li').length === 2, POLL);
-  const remainingRows = await livePage.evaluate(() =>
-    [...document.querySelectorAll('.pending-imports .pending-title')].map((node) => node.textContent.trim())
-  );
+  const remainingRows = await livePage.evaluate(() => ({
+    titles: [...document.querySelectorAll('.pending-imports .pending-title')].map((node) => node.textContent.trim()),
+    note: document.querySelector('.pending-imports .pending-note')?.textContent?.trim() ?? null
+  }));
   assert.deepEqual(
-    remainingRows,
+    remainingRows.titles,
     ['arrived', 'drop two'],
     `Live self-host: ...by position, so the rows beside it stay queued: ${JSON.stringify(remainingRows)}`
+  );
+  assert.equal(
+    remainingRows.note,
+    null,
+    `Live self-host: ...and removing the row that blocked a copy takes the note with it, which is the remedy the note names: ${JSON.stringify(remainingRows)}`
   );
   await livePage.waitForFunction(
     () => [...document.querySelectorAll('.status-line.error')].some((line) => line.textContent.includes('arrived.lith')),
@@ -6210,6 +6225,57 @@ try {
     1,
     'One trip through the picker for all three, which is the whole point of the change'
   );
+
+  // A queued tiddler that would replace one in the file being opened is asked about first,
+  // and declining keeps the file closed and the queue as it was. Only the queue can cause a
+  // replacement on an ordinary open, so the question is this merge's rather than every open's.
+  // The two clicks are dispatched from script: the panel this leg queues is drawn over the
+  // corner the actions sit in, and a press into the panel would test the overlay, not the merge.
+  await mountPage.evaluate(() => {
+    const text = 'title: Solo note\ntype: text/vnd.tiddlywiki\n\nqueued body';
+    const transfer = new DataTransfer();
+    transfer.items.add(new File([text], 'merge.lith', { type: 'application/x-lith' }));
+    window.dispatchEvent(new DragEvent('drop', { dataTransfer: transfer, bubbles: true, cancelable: true }));
+  });
+  await mountPage.waitForSelector('.pending-imports .pending-title', { timeout: 5000 });
+  await mountPage.evaluate((text) => {
+    window.__lithicMountPicks = [{ name: 'solo.lith', path: 'C:/fixture/solo.lith', text }];
+  }, 'title: Solo note\ntype: text/vnd.tiddlywiki\n\nmy own body');
+  await mountPage.evaluate(() => document.querySelector('.mount-button')?.click());
+  await mountPage.waitForSelector('.confirm-modal', { timeout: 5000 });
+  const mergeAsk = await mountPage.evaluate(() => ({
+    title: document.querySelector('.confirm-modal h2')?.textContent?.trim() ?? null,
+    body: document.querySelector('.confirm-modal p')?.textContent?.trim() ?? null,
+    actions: [...document.querySelectorAll('.confirm-modal .modal-action')].map((node) => node.textContent.trim())
+  }));
+  assert.deepEqual(
+    mergeAsk,
+    {
+      title: 'Replace a tiddler in this Lith?',
+      body: 'The queued Solo note would replace the one in solo.lith.',
+      actions: ['Replace', 'Cancel']
+    },
+    `Opening a Lith that already holds a queued title asks before it costs the stored copy: ${JSON.stringify(mergeAsk)}`
+  );
+  await mountPage.evaluate(() => {
+    [...document.querySelectorAll('.confirm-modal .modal-action')]
+      .find((node) => node.textContent.trim() === 'Cancel')
+      ?.click();
+  });
+  await mountPage.waitForFunction(() => document.querySelector('.confirm-modal') === null, POLL);
+  assert.equal(
+    await mountPage.$('.mount-button') === null,
+    false,
+    'Declining the replacement leaves the launcher as the page, so nothing was opened'
+  );
+  assert.deepEqual(
+    await mountPage.$$eval('.pending-imports .pending-title', (nodes) => nodes.map((node) => node.textContent.trim())),
+    ['Solo note'],
+    '...and the queue is exactly as it was'
+  );
+  // The legs below open files with nothing queued, which is what those legs are about.
+  await mountPage.evaluate(() => document.querySelector('.pending-imports-header button')?.click());
+  await mountPage.waitForSelector('.pending-imports', { hidden: true });
 
   // One file: added and opened, exactly as the button has always promised, and the row
   // it leaves is the one on top.

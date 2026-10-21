@@ -131,7 +131,14 @@ const en = {
     heading: 'Pending Imports',
     clear: 'Clear pending imports',
     remove: (title: string) => `Remove ${title}`,
-    untitled: 'Untitled Payload'
+    untitled: 'Untitled Payload',
+    skippedOne: (title: string) => `${title} is already queued, so remove it first.`,
+    skippedMany: (count: number) => `${count} copies skipped: their titles are already queued.`,
+    replaceTitleOne: 'Replace a tiddler in this Lith?',
+    replaceTitleMany: 'Replace tiddlers in this Lith?',
+    replaceBodyOne: (title: string, name: string) => `The queued ${title} would replace the one in ${name}.`,
+    replaceBodyMany: (count: number, name: string) => `${count} queued tiddlers would replace ones in ${name}.`,
+    replaceConfirm: 'Replace'
   },
 
   common: {
@@ -858,7 +865,14 @@ const es: Copy = {
     heading: 'Importaciones pendientes',
     clear: 'Borrar las importaciones pendientes',
     remove: (title: string) => `Quitar ${title}`,
-    untitled: 'Contenido sin título'
+    untitled: 'Contenido sin título',
+    skippedOne: (title: string) => `${title} ya está en la cola, quítalo primero.`,
+    skippedMany: (count: number) => `${count} copias omitidas: sus títulos ya están en la cola.`,
+    replaceTitleOne: '¿Reemplazar un tiddler de este Lith?',
+    replaceTitleMany: '¿Reemplazar tiddlers de este Lith?',
+    replaceBodyOne: (title: string, name: string) => `El ${title} en cola reemplazaría el de ${name}.`,
+    replaceBodyMany: (count: number, name: string) => `${count} tiddlers en cola reemplazarían los de ${name}.`,
+    replaceConfirm: 'Reemplazar'
   },
 
   common: {
@@ -1492,7 +1506,14 @@ const fr: Copy = {
     heading: 'Importations en attente',
     clear: 'Effacer les importations en attente',
     remove: (title: string) => `Retirer ${title}`,
-    untitled: 'Contenu sans titre'
+    untitled: 'Contenu sans titre',
+    skippedOne: (title: string) => `${title} est déjà dans la file, retire-le d'abord.`,
+    skippedMany: (count: number) => `${count} copies ignorées : leurs titres sont déjà dans la file.`,
+    replaceTitleOne: 'Remplacer un tiddler de ce Lith ?',
+    replaceTitleMany: 'Remplacer des tiddlers de ce Lith ?',
+    replaceBodyOne: (title: string, name: string) => `Le ${title} en attente remplacerait celui de ${name}.`,
+    replaceBodyMany: (count: number, name: string) => `${count} tiddlers en attente remplaceraient ceux de ${name}.`,
+    replaceConfirm: 'Remplacer'
   },
 
   common: {
@@ -2123,7 +2144,14 @@ const de: Copy = {
     heading: 'Ausstehende Importe',
     clear: 'Ausstehende Importe verwerfen',
     remove: (title: string) => `${title} entfernen`,
-    untitled: 'Inhalt ohne Titel'
+    untitled: 'Inhalt ohne Titel',
+    skippedOne: (title: string) => `${title} steht schon in der Warteschlange, entferne es zuerst.`,
+    skippedMany: (count: number) => `${count} Kopien übersprungen: ihre Titel stehen schon in der Warteschlange.`,
+    replaceTitleOne: 'Einen Tiddler in diesem Lith ersetzen?',
+    replaceTitleMany: 'Tiddler in diesem Lith ersetzen?',
+    replaceBodyOne: (title: string, name: string) => `Der eingereihte ${title} würde den in ${name} ersetzen.`,
+    replaceBodyMany: (count: number, name: string) => `${count} eingereihte Tiddler würden die in ${name} ersetzen.`,
+    replaceConfirm: 'Ersetzen'
   },
 
   common: {

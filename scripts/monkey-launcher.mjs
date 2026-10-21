@@ -1475,23 +1475,29 @@ async function runOpenings(browser, served) {
         },
         [
           { url: `${origin}/fuzz/valid`, name: 'first.lith' },
-          { url: `${origin}/fuzz/controls`, name: 'second.lith' }
+          { url: `${origin}/fuzz/controls`, name: 'second.lith' },
+          // The same fixture again: its three titles are already queued, and the panel has to
+          // refuse them rather than draw six rows for four tiddlers.
+          { url: `${origin}/fuzz/valid`, name: 'third.lith' }
         ]
       );
       await sleep(page, 600);
       const queued = await safeEvaluate(page, () => ({
         titles: [...document.querySelectorAll('.pending-imports .pending-title')].map((node) => node.textContent.trim()),
         label: document.querySelector('.pending-imports .pending-remove')?.getAttribute('aria-label') ?? null,
+        note: document.querySelector('.pending-imports .pending-note')?.textContent?.trim() ?? null,
         launcher: Boolean(document.querySelector('main.container'))
       }));
       const expected = ['Getting Started', 'Notes', 'Code', 'ctl'];
       const problems = [];
       if (queued.unreadable) problems.push(`the page could not be read after the drop: ${queued.unreadable}`);
-      else if (!queued.launcher) problems.push('a drop carrying two documents took the launcher away');
+      else if (!queued.launcher) problems.push('a drop carrying three documents took the launcher away');
       else if (JSON.stringify(queued.titles) !== JSON.stringify(expected)) {
-        problems.push(`a drop carrying two documents queued ${JSON.stringify(queued.titles)} rather than ${JSON.stringify(expected)}`);
+        problems.push(`a drop carrying three documents queued ${JSON.stringify(queued.titles)} rather than ${JSON.stringify(expected)}`);
       } else if (queued.label !== 'Remove Getting Started') {
         problems.push(`the first row's ✕ named ${JSON.stringify(queued.label)} rather than the row it removes`);
+      } else if (queued.note !== '3 copies skipped: their titles are already queued.') {
+        problems.push(`a repeated file's copies were ${JSON.stringify(queued.note)} rather than named as three skipped`);
       }
       // The row's own control, not the header's: removing one must leave the others queued.
       await page.evaluate(() => document.querySelector('.pending-imports .pending-remove')?.click());
@@ -1507,9 +1513,78 @@ async function runOpenings(browser, served) {
       }
       edgeRow({
         id: 'drop-many',
-        label: 'a drop carrying two documents',
+        label: 'a drop carrying three documents, one of them twice',
         outcome: `${(queued.titles ?? []).length} queued, ${(afterOne.titles ?? []).length} after one removed`,
         held: queued.launcher ? 'launcher' : 'left the launcher',
+        problems
+      });
+    }
+
+    // A queued tiddler that would replace one inside the file being opened. The mount asks
+    // first, and both answers are checked: declining has to leave the launcher and the queue
+    // where they were, and accepting has to actually land the queued copy in the wiki.
+    {
+      await open();
+      await page.evaluate(() => {
+        const text = 'title: Getting Started\ntype: text/vnd.tiddlywiki\n\nthe queued body';
+        const transfer = new DataTransfer();
+        transfer.items.add(new File([text], 'queued.lith', { type: 'application/x-lith' }));
+        window.dispatchEvent(new DragEvent('drop', { dataTransfer: transfer, bubbles: true, cancelable: true }));
+      });
+      await sleep(page, 300);
+      const answer = (label) =>
+        page.evaluate((wanted) => {
+          [...document.querySelectorAll('.confirm-modal .modal-action')]
+            .find((node) => node.textContent.trim() === wanted)
+            ?.click();
+        }, label);
+      await pickFixture('valid');
+      await clickMount();
+      const asked = await page
+        .waitForSelector('.confirm-modal', { timeout: 8000 })
+        .then(() =>
+          safeEvaluate(page, () => ({
+            title: document.querySelector('.confirm-modal h2')?.textContent?.trim() ?? null,
+            body: document.querySelector('.confirm-modal p')?.textContent?.trim() ?? null
+          }))
+        )
+        .catch(() => null);
+      const problems = [];
+      if (!asked || asked.unreadable) problems.push('opening a Lith over a queued title asked nothing');
+      else if (asked.title !== 'Replace a tiddler in this Lith?') {
+        problems.push(`the question before the merge was ${JSON.stringify(asked.title)}`);
+      }
+      await answer('Cancel');
+      await sleep(page, 400);
+      const declined = await describePage();
+      const queueAfter = await safeEvaluate(page, () => ({
+        titles: [...document.querySelectorAll('.pending-imports .pending-title')].map((node) => node.textContent.trim())
+      }));
+      if (!declined.launcher) problems.push('declining the replacement took the launcher away');
+      else if (JSON.stringify(queueAfter.titles ?? []) !== JSON.stringify(['Getting Started'])) {
+        problems.push(`declining left the queue as ${JSON.stringify(queueAfter.titles)} rather than untouched`);
+      }
+      await pickFixture('valid');
+      await clickMount();
+      await page.waitForSelector('.confirm-modal', { timeout: 8000 }).catch(() => {});
+      await answer('Replace');
+      const booted = await boot();
+      const carried = await safeEvaluate(page, () => {
+        try {
+          return String(window.$tw?.wiki?.getTiddlerText?.('Getting Started') ?? '');
+        } catch {
+          return '';
+        }
+      });
+      if (!booted) problems.push('accepting the replacement never booted the engine');
+      else if (carried !== 'the queued body') {
+        problems.push(`the queued copy did not land in the wiki (${JSON.stringify(carried)})`);
+      }
+      edgeRow({
+        id: 'merge-collision',
+        label: 'opening a Lith that already holds a queued title',
+        outcome: asked ? 'asked, declined, then replaced' : 'asked nothing',
+        held: booted ? 'wiki' : 'launcher',
         problems
       });
     }

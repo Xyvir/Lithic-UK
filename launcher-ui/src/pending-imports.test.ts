@@ -7,6 +7,8 @@ import {
   tagRootDogear,
   mergePendingImports,
   removePendingImport,
+  queuePendingImports,
+  replacingTitles,
   isPayloadShareUrl,
   pinCachedTiddler
 } from './pending-imports.ts';
@@ -67,6 +69,61 @@ test('removePendingImport ignores a position outside the queue', () => {
   const queued = [{ title: 'Only' }];
   assert.equal(removePendingImport(queued, 4), queued);
   assert.equal(removePendingImport(queued, -1), queued);
+});
+
+test('queuePendingImports keeps the first copy of a title and refuses the later one', () => {
+  const result = queuePendingImports([{ title: 'Notes', text: 'queued' }], [{ title: 'Notes', text: 'dropped' }]);
+  assert.deepEqual(result.queued, [{ title: 'Notes', text: 'queued' }]);
+  assert.deepEqual(result.refused, ['Notes']);
+});
+
+// One file can hold a title twice, so the refusal cannot only look at what was queued before.
+test('queuePendingImports refuses a repeat inside the same batch', () => {
+  const result = queuePendingImports([], [{ title: 'X', text: 'first' }, { title: 'Y' }, { title: 'X', text: 'second' }]);
+  assert.deepEqual(result.queued, [{ title: 'X', text: 'first' }, { title: 'Y' }]);
+  assert.deepEqual(result.refused, ['X']);
+});
+
+test('queuePendingImports keeps order and leaves both inputs untouched', () => {
+  const existing = [{ title: 'A' }];
+  const incoming = [{ title: 'B' }, { title: 'C' }];
+  const result = queuePendingImports(existing, incoming);
+  assert.deepEqual(result.queued.map((tiddler) => tiddler.title), ['A', 'B', 'C']);
+  assert.deepEqual(existing, [{ title: 'A' }]);
+  assert.deepEqual(incoming, [{ title: 'B' }, { title: 'C' }]);
+});
+
+// The wiki keys tiddlers by the exact title string, so a differently-cased title is a
+// different tiddler and neither one replaces the other.
+test('queuePendingImports treats a differently-cased title as its own tiddler', () => {
+  const result = queuePendingImports([{ title: 'Notes' }], [{ title: 'notes' }]);
+  assert.deepEqual(result.queued.map((tiddler) => tiddler.title), ['Notes', 'notes']);
+  assert.deepEqual(result.refused, []);
+});
+
+test('queuePendingImports keeps untitled entries, which the mount drops', () => {
+  const result = queuePendingImports([{ title: 'A' }], [{ text: 'no title' }, { title: 'A' }]);
+  assert.equal(result.queued.length, 2);
+  assert.deepEqual(result.refused, ['A']);
+});
+
+test('replacingTitles names queued tiddlers that would change the document', () => {
+  const document = [{ title: 'Notes', text: 'mine' }, { title: 'Same', text: 'copy' }];
+  const queue = [{ title: 'Notes', text: 'theirs' }, { title: 'Same', text: 'copy' }, { title: 'New', text: 'x' }];
+  assert.deepEqual(replacingTitles(document, queue), ['Notes']);
+});
+
+// A missing field and an empty one are the same tiddler, so re-dropping an exported file back
+// into its own document asks nothing when nothing changed.
+test('replacingTitles ignores a copy identical to the one already held', () => {
+  const document = [{ title: 'A', text: '', tags: 'x' }];
+  const queue = [{ title: 'A', tags: 'x' }];
+  assert.deepEqual(replacingTitles(document, queue), []);
+});
+
+test('replacingTitles ignores untitled entries and a document with no titles', () => {
+  assert.deepEqual(replacingTitles([], [{ title: 'A' }]), []);
+  assert.deepEqual(replacingTitles([{ title: 'A' }], [{ text: 'untitled' }]), []);
 });
 
 test('isPayloadShareUrl detects share links with payload params', () => {

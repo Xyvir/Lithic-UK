@@ -68,6 +68,8 @@ import { backupFileName, collectInstanceBackup, mergeBookmarks, parseInstanceBac
     fetchRemotePayload,
     mergePendingImports,
     removePendingImport,
+    queuePendingImports,
+    replacingTitles,
     isPayloadShareUrl,
     pinCachedTiddler,
     type PendingTiddler
@@ -288,6 +290,19 @@ import { backupFileName, collectInstanceBackup, mergeBookmarks, parseInstanceBac
   $: syncStatusDeadlines(status, heldStatus);
   let busy = false;
   let pendingImports: PendingTiddler[] = [];
+  /** Titles the last queue addition refused, because the queue already held them. */
+  let skippedImports: string[] = [];
+  /** The refusals still worth showing: their queued row has not been removed since. */
+  $: shownSkipped = skippedImports.filter((title) => pendingImports.some((tiddler) => tiddler.title === title));
+  /**
+   * Titles queued by a gesture that means "take this copy" rather than "add this file".
+   *
+   * A search preview's pin is the case: it queues the note the person just clicked, tagged so
+   * it opens at the top, precisely so the merge writes it into the Lith it came from. Asking
+   * whether that may replace the stored copy would put a question in front of the one gesture
+   * that already answered it.
+   */
+  let intentionalImports: string[] = [];
   let introBusy = false;
   let dragCounter = 0;
   let showRecent = false;
@@ -3331,6 +3346,29 @@ import { backupFileName, collectInstanceBackup, mergeBookmarks, parseInstanceBac
     // One name for the recent row, the flat cache, the version history and the
     // dirty-state key. See resolveMountName for why they must not diverge.
     const safeName = resolveMountName(name, { scratch: isScratch, htmlMonolith: isHtmlMonolith });
+    // A queued tiddler can replace one this document already holds, and until the next save that
+    // copy exists nowhere else. Asked before `remember`, because a mount that is declined must
+    // leave no recents row behind. A blank document carries no tiddlers, and a monolith is a
+    // page rather than a store, so neither has anything to replace.
+    if (pendingImports.length > 0 && !isHtmlMonolith && !isScratch) {
+      const added = pendingImports.filter((tiddler) => !intentionalImports.includes(tiddler.title ?? ''));
+      const replacing = replacingTitles(parseDroppedData(contents, !isJsonBackup), added);
+      if (replacing.length > 0) {
+        const replace = await askConfirmation({
+          title: replacing.length === 1 ? copy.pending.replaceTitleOne : copy.pending.replaceTitleMany,
+          body: replacing.length === 1
+            ? copy.pending.replaceBodyOne(replacing[0], safeName)
+            : copy.pending.replaceBodyMany(replacing.length, safeName),
+          confirmLabel: copy.pending.replaceConfirm,
+          danger: true
+        });
+        if (!replace) {
+          busy = false;
+          status = '';
+          return;
+        }
+      }
+    }
     await remember({ name: safeName, path, text: contents, handle });
     // Drift compares the file against the tiddler chain, and only a .lith file
     // holds a tiddler store to compare (a scratch document is flat text and a
@@ -3399,6 +3437,8 @@ import { backupFileName, collectInstanceBackup, mergeBookmarks, parseInstanceBac
       __LITHIC_LAUNCHER_MODE__: mode
     }, { driftedFromHead, scratchMode, remote, browserOnly: indexDbOnly, shimToken, openBoardFor });
     pendingImports = [];
+    skippedImports = [];
+    intentionalImports = [];
   }
 
   async function blankLith() {
@@ -3802,6 +3842,20 @@ import { backupFileName, collectInstanceBackup, mergeBookmarks, parseInstanceBac
     }
   }
 
+  /**
+   * Add payloads to the queue, refusing a copy whose title is already queued.
+   *
+   * The wiki keeps one tiddler per title and the last writer wins, so queueing both copies
+   * would draw two rows for one tiddler and import only the second. The first copy stays and
+   * `skippedImports` says which copy did not arrive, which is what lets the panel offer the
+   * remedy (remove that row, then drop again) instead of leaving the difference silent.
+   */
+  function enqueuePending(payload: PendingTiddler[]): void {
+    const result = queuePendingImports(pendingImports, payload);
+    pendingImports = result.queued;
+    skippedImports = result.refused;
+  }
+
   async function handleDrop(event: DragEvent) {
     const droppedText = event.dataTransfer?.getData('URL') || event.dataTransfer?.getData('text/plain') || '';
     if (droppedText && isPayloadShareUrl(droppedText)) {
@@ -3813,7 +3867,7 @@ import { backupFileName, collectInstanceBackup, mergeBookmarks, parseInstanceBac
         if (remoteUrl) payload = await fetchRemotePayload(remoteUrl);
         else if (b64Json) payload = decodePayloadParam(b64Json);
         if (payload && payload.length > 0) {
-          pendingImports = mergePendingImports(pendingImports, payload);
+          enqueuePending(payload);
           return;
         }
       } catch {
@@ -3855,7 +3909,7 @@ import { backupFileName, collectInstanceBackup, mergeBookmarks, parseInstanceBac
       }
     }
     if (queued.length > 0) {
-      pendingImports = mergePendingImports(pendingImports, queued);
+      enqueuePending(queued);
     }
     if (unreadable) {
       mountError = copy.status.droppedInvalid;
@@ -5233,6 +5287,7 @@ import { backupFileName, collectInstanceBackup, mergeBookmarks, parseInstanceBac
     const payload = pinCachedTiddler(cacheText, match.title);
     if (!payload) return null;
     pendingImports = mergePendingImports(pendingImports, payload);
+    intentionalImports = [...intentionalImports, ...payload.map((tiddler) => tiddler.title ?? '')];
     return cacheText;
   }
 
@@ -6392,7 +6447,7 @@ import { backupFileName, collectInstanceBackup, mergeBookmarks, parseInstanceBac
     <div class="pending-imports" role="status" aria-label={copy.pending.aria}>
       <div class="pending-imports-header">
         <span>{copy.pending.heading}</span>
-        <button type="button" aria-label={copy.pending.clear} title={copy.pending.clear} on:click={() => pendingImports = []}>✕</button>
+        <button type="button" aria-label={copy.pending.clear} title={copy.pending.clear} on:click={() => { pendingImports = []; skippedImports = []; intentionalImports = []; }}>✕</button>
       </div>
       <ul>
         {#each pendingImports as tiddler, index}
@@ -6410,6 +6465,11 @@ import { backupFileName, collectInstanceBackup, mergeBookmarks, parseInstanceBac
           </li>
         {/each}
       </ul>
+      {#if shownSkipped.length > 0}
+        <p class="pending-note">
+          {shownSkipped.length === 1 ? copy.pending.skippedOne(shownSkipped[0]) : copy.pending.skippedMany(shownSkipped.length)}
+        </p>
+      {/if}
     </div>
   {/if}
   <!--

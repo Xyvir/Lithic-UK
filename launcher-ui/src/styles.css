@@ -1963,6 +1963,16 @@ a.modal-action { text-decoration: none; text-align: center; color: var(--lithic-
 .pending-imports .pending-remove:focus-visible {
   color: var(--lithic-ink);
 }
+/* A copy the queue refused, said where the row that blocks it is drawn. It leaves with that
+   row, because removing it is the whole remedy the sentence names. */
+.pending-imports .pending-note {
+  margin: 0;
+  padding: 8px 12px 10px;
+  border-top: 1px solid var(--lithic-line);
+  color: var(--lithic-amber);
+  font-size: 0.8rem;
+  line-height: 1.35;
+}
 
 /* --- DRAG AND DROP HIGHLIGHT (legacy parity) --- */
 body.drag-over::after {
