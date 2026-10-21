@@ -1,7 +1,16 @@
 name: Build and Release TiddlyWiki
-run-name: Build ${{ (github.event_name == 'push' || inputs.create_release == true) && '(Release)' || '(Dry Run)' }}
+run-name: Build ${{ (github.event_name == 'push' || github.event_name == 'schedule' || inputs.create_release == true) && '(Release)' || '(Dry Run)' }}
 
 on:
+  # The weekly tick exists for ONE reason: the libraries vendored into Lithic plugins
+  # (vendored.yml, e.g. pele and pdfjs-dist) are refreshed by `npm run vendor` inside this
+  # build. Nothing else here needs a clock, and this workflow already stages its output on a
+  # branch and opens a pull request, so a weekly refresh needs no second pipeline: the new
+  # bytes arrive in the same review the release already gets, beside the artifact they were
+  # built into. Monday morning, before anybody is reading diffs.
+  schedule:
+    - cron: '17 5 * * 1'
+
   workflow_dispatch:
     inputs:
       create_release:
@@ -76,8 +85,11 @@ permissions:
 # every prod/release gate below reads these two rather than branching on the
 # event at each of the twenty-odd steps that care.
 env:
-  BUILD_CONFIG: ${{ github.event_name == 'push' && 'prod' || inputs.build_config }}
-  CREATE_RELEASE: ${{ github.event_name == 'push' || inputs.create_release }}
+  # A scheduled run is a prod release build like a push is (see the `schedule` block above): it
+  # refreshes the vendored libraries and stages the result for review, which is the only thing
+  # the tick is for.
+  BUILD_CONFIG: ${{ (github.event_name == 'push' || github.event_name == 'schedule') && 'prod' || inputs.build_config }}
+  CREATE_RELEASE: ${{ github.event_name == 'push' || github.event_name == 'schedule' || inputs.create_release }}
   # The build job installs the root dependencies and drives no browser, so puppeteer's install
   # step is told not to fetch Chrome. The deck job below DOES drive one, and installs it in the
   # step that uses it, which is why this is a skip rather than a disable.
@@ -118,6 +130,27 @@ jobs:
 
       - name: Install Dependencies
         run: npm ci
+
+      # Before `mirror`, because mirror copies `wiki/local-plugins/` over the fetched tree: a
+      # vendored library refreshed after that copy would be baked into nothing. This is the
+      # counterpart of the step below, and the difference between them is where the bytes end
+      # up: an external plugin lands in a gitignored cache, a vendored library is written into
+      # the plugin source tracked in the repo, so the plugin stays complete without a network and
+      # the diff rides the release pull request this run opens.
+      #
+      # `--best-effort` is about the weather rather than about integrity: an unreachable
+      # registry keeps the bytes already in the repo and says so (a flaky fetch should not block
+      # a release), while wrong bytes are always a failure. A 404 on a pinned version, a missing
+      # file in the tarball, a body that fails its `expect` strings, or a tarball whose integrity
+      # does not match the registry all stop the build rather than ship. Prod only: a variant
+      # build ships the bytes committed on the branch, which is what makes a variant reproducible.
+      - name: Refresh Vendored Libraries (prod only)
+        if: env.BUILD_CONFIG == 'prod'
+        env:
+          VENDORED_SUMMARY: ${{ runner.temp }}/vendored-libraries.md
+        run: |
+          node scripts/vendor-libraries.mjs --best-effort --summary "$VENDORED_SUMMARY"
+          cat "$VENDORED_SUMMARY" >> "$GITHUB_STEP_SUMMARY"
 
       - name: Mirror External Plugins
         run: npm run mirror
@@ -296,7 +329,10 @@ jobs:
 
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add variants/prod.html variants/lithic-light.html src/lithic.html src/launcher.html manifest.json offline-service-worker.js
+          # The vendored libraries belong in this commit, not in a second one: the artifact being
+          # staged was BUILT from the bytes `npm run vendor` wrote earlier in this run, so the
+          # library and the wiki that carries it have to land together or neither is reviewable.
+          git add variants/prod.html variants/lithic-light.html src/lithic.html src/launcher.html manifest.json offline-service-worker.js vendored-lock.json wiki/local-plugins
           git diff --cached --quiet || git commit -m "Release build-$STAMP: src/lithic.html + variants/prod.html, and bump PWA to $NEW_VERSION"
           # A branch push cannot lose a race with a main that moved, which is the failure
           # scripts/ci-push-main.sh was written to survive on the push path. That script is

@@ -11,9 +11,10 @@
  *   5. the shim's build tag (the release workflow's shim job sets
  *      LITHIC_BUILD_TAG, which is the only thing that can turn the shim's update
  *      notice on: a build without it serves no tag and offers nothing)
- *   6. the release trigger (every path the release commits is excluded from the
- *      push trigger that starts it — otherwise a run's own commit starts
- *      another run, forever)
+ *   6. the release trigger (anything a push to MAIN could commit is excluded from
+ *      the trigger that starts the run — otherwise a run's own commit starts
+ *      another run, forever; a release stage pushes `release/$STAMP` instead, so
+ *      what it carries is review material rather than a second trigger)
  *   7. the light distribution guard (variants/lithic-light.html against
  *      src/lithic.html: same core, same plugin versions, still flash-sized)
  *   8. cargo check (Rust type/borrow check — catches the recent E07xx class
@@ -24,11 +25,14 @@
  *      is what the small Linux AppImage carries)
  *
  * Usage: npm run check:push   (or: node scripts/pre-push-check.mjs)
- *  11. the Android patch (its wiring in the release job, and its own self-test): the APK is
+ *  11. the vendored libraries (vendored.yml against vendored-lock.json, offline): a library baked
+ *      into a Lithic plugin is refreshed by the build, so a copy edited by hand, or a lock that
+ *      no longer describes the tree, has to fail here rather than ship in a release.
+ *  12. the Android patch (its wiring in the release job, and its own self-test): the APK is
  *      built from Tauri's template, which has a placeholder launcher icon and an activity
  *      that draws the page under the status bar, and the patch that answers both can only
  *      be tested by what it asserts here — no device or SDK is needed to run it.
- *  12. the phone's compile face: `lib.rs` chooses `gitcore` with a
+ *  13. the phone's compile face: `lib.rs` chooses `gitcore` with a
  *      `cfg(target_os = "android")`, so the stub that answers the sync on Android is a
  *      module no gate on this machine resolved a reference against until this step
  *      existed — and the Android release job was where that blind spot was found. It
@@ -195,19 +199,37 @@ function checkReleaseTrigger() {
   if (pushers.length === 0) {
     return `${file}: no step pushes anything — point this check at whatever replaced the release commit`;
   }
-  const staged = pushers.flatMap((step) =>
+  /**
+   * Which pushers can actually start another run.
+   *
+   * The loop this check exists for is a push to MAIN triggering the workflow whose commit the
+   * push carried. A prod release no longer pushes main at all: it stages `release/$STAMP` and
+   * pushes that branch, which the `branches: [main]` trigger cannot fire from. So the staged
+   * paths that matter are the ones a main-reaching pusher stages (today: `ci-push-main.sh`, on
+   * the non-prod variant path, and any `git push` naming main). Everything a release branch
+   * carries is review material by definition, and that includes the vendored libraries the
+   * build refreshes: demanding an exclusion for those would mean a hand edit under
+   * `wiki/local-plugins/` stopped rebuilding the wiki, which is the opposite of what the filter
+   * is for.
+   */
+  const reachesMain = (step) => {
+    const body = shell(step);
+    return /ci-push-main\.sh/.test(body) || /\bgit\s+push\b[^\n]*\bmain\b/.test(body);
+  };
+  const mainPushers = pushers.filter(reachesMain);
+  const staged = mainPushers.flatMap((step) =>
     shell(step)
       .split(/\r?\n/)
       .map((line) => line.trim())
       .filter((line) => line.startsWith('git add '))
       .flatMap((line) => line.slice('git add '.length).trim().split(/\s+/)),
   );
-  if (staged.length === 0) {
-    return `${file}: the steps that push stage nothing with \`git add\` — point this check at whatever replaced them`;
+  if (mainPushers.length > 0 && staged.length === 0) {
+    return `${file}: the steps that push main stage nothing with \`git add\` — point this check at whatever replaced them`;
   }
   const uncovered = staged.filter((entry) => !covered(entry));
   if (uncovered.length > 0) {
-    return `${file}: the release commits ${uncovered.join(', ')}, which on.push.paths does not exclude — the run's own commit would start another run, forever`;
+    return `${file}: a push to main commits ${uncovered.join(', ')}, which on.push.paths does not exclude — the run's own commit would start another run, forever`;
   }
 
   // The other half of the guard, and the newer half: a prod release must not reach main at
@@ -350,6 +372,33 @@ function checkMonkeyStaysLocal() {
   return `.github/workflows/${offenders.join(', ')} runs the local fuzz harness - it is user-initiated on purpose, and its findings belong in test-puppeteer-launcher.mjs`;
 }
 
+/**
+ * The vendored libraries, offline.
+ *
+ * `vendored.yml` names libraries that are baked INTO Lithic plugins (pele, pdfjs-dist), and the
+ * build refreshes them from upstream before anything is compiled. Nothing about that is visible
+ * in a diff of the built artifact, so the two things that can go wrong have to be caught here:
+ * a vendored `.tid` edited by hand (the bytes on disk stop matching `vendored-lock.json`), and a
+ * lock that no longer describes the manifest. Neither question needs a network, which is why this
+ * can run on every push rather than only in CI.
+ */
+function checkVendoredLibraries() {
+  if (!fs.existsSync('vendored.yml')) {
+    return 'vendored.yml is gone - point this check at whatever replaced the vendored-library manifest';
+  }
+  for (const args of [
+    ['--test', 'scripts/test-vendored-libraries.mjs'],
+    ['scripts/vendor-libraries.mjs', '--check'],
+  ]) {
+    const result = spawnSync(process.execPath, args, { encoding: 'utf8', shell: false });
+    if (result.status !== 0) {
+      const output = `${result.stdout ?? ''}${result.stderr ?? ''}`.trim().split('\n').slice(-6).join('\n  ');
+      return `${args.join(' ')} failed:\n  ${output}`;
+    }
+  }
+  return null;
+}
+
 const spawned = [
   {
     name: 'android patch self-test',
@@ -454,6 +503,16 @@ if (monkeyProblem === null) {
   failed = true;
   console.log('FAILED');
   console.log('  ' + monkeyProblem);
+}
+
+process.stdout.write('> vendored libraries             ');
+const vendoredProblem = checkVendoredLibraries();
+if (vendoredProblem === null) {
+  console.log('OK');
+} else {
+  failed = true;
+  console.log('FAILED');
+  console.log('  ' + vendoredProblem);
 }
 
 process.stdout.write('> android patch wiring           ');

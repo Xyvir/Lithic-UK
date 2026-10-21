@@ -1,0 +1,38 @@
+{
+  "jspython": {
+    "source": "jspython-interpreter@2.1.16 dist/jspython-interpreter.min.js",
+    "version": "2.1.16",
+    "url": "https://registry.npmjs.org/jspython-interpreter/-/jspython-interpreter-2.1.16.tgz",
+    "target": "wiki/local-plugins/tw-jspython/jspython-interpreter.js.tid",
+    "upstreamSha256": "fe7149093995ec22cb2bda377bf2e577fc9105c7ecc9551c8526e7f4b9ad5698",
+    "bodySha256": "9f408bfa7546ffa8a47c491abc4b32628947f1f5733422ba8edd912a4d7c695e",
+    "fetchedAt": "2026-10-21T14:22:48.963Z"
+  },
+  "pdfjs": {
+    "source": "pdfjs-dist (adopted from the repo)",
+    "version": "3.11.174",
+    "url": null,
+    "target": "wiki/local-plugins/lithic-import-handler/pdf.js.tid",
+    "upstreamSha256": null,
+    "bodySha256": "9ead8680c2ce3fb6c6ddfac9e1d35ef1a7be76261fb3eabfddf428e32afa3edd",
+    "fetchedAt": "2026-10-21T13:39:08.905Z"
+  },
+  "pdfjs-worker": {
+    "source": "pdfjs-dist (adopted from the repo)",
+    "version": "3.11.174",
+    "url": null,
+    "target": "wiki/local-plugins/lithic-import-handler/pdf.worker.js.tid",
+    "upstreamSha256": null,
+    "bodySha256": "59a466fe660424d288436657445fe3fed0cd492923acdae4518c3a0ab1858bbd",
+    "fetchedAt": "2026-10-21T13:39:08.923Z"
+  },
+  "pele": {
+    "source": "pele (adopted from the repo)",
+    "version": "unrecorded",
+    "url": null,
+    "target": "wiki/local-plugins/lithic-patch-mermaid/$__plugins_xyvir_lithic-patch-mermaid_pele.js.tid",
+    "upstreamSha256": null,
+    "bodySha256": "911f3a6bbe85176bcda7227a455a3d3876818cc54de1ce8108e272d9fbffff31",
+    "fetchedAt": "2026-10-21T13:39:08.893Z"
+  }
+}

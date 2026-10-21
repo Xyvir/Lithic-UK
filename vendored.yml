@@ -1,0 +1,102 @@
+# Lithic Vendored Libraries
+# -------------------------
+#
+# The counterpart of `external.yml`, for the other shape of third-party code.
+#
+# `external.yml` lists third-party PLUGINS: `scripts/mirror.js` fetches them at build time into
+# `wiki/external/`, a gitignored cache, and they never live in the repo. The entries here are
+# LIBRARIES baked INTO a Lithic-authored plugin: the bytes are twiki-ized into a `.tid` under
+# `wiki/local-plugins/`, committed, and shipped inside the built wiki, so the plugin is complete
+# in the repo and the artifact needs no network at all (see "Every Plugin Works Offline" in
+# agents.md).
+#
+# `scripts/vendor-libraries.mjs` is what fetches and rewrites them:
+#
+#   npm run vendor          refresh every entry from upstream, latest by default
+#   npm run vendor:check    offline: do the files on disk match vendored-lock.json?
+#
+# The refresh runs inside the prod wiki build, before `mirror.js`, so the newest release of each
+# library is baked into the artifact and the resulting diff rides the release pull request that
+# build already opens. `vendored-lock.json` records what was actually written (source, version,
+# hashes), which is both the audit trail and what `--check` compares against.
+#
+# A new entry is four lines plus whatever its file needs to become a tiddler:
+#
+#   - name: <unique>
+#     package: <npm name>        # or: url: <any https URL>
+#     file: <path in the tarball>   # npm entries only
+#     target: wiki/local-plugins/<plugin>/<tiddler file>.tid
+#
+# Optional, and each is a promise the sync enforces:
+#
+#   pin: <version>        freeze this entry; without it the entry follows upstream's latest
+#   minBytes: <n>         a fetched body smaller than this is refused
+#   expect: [<text>, ...] every string must appear in the fetched body
+#   transform:
+#     replace: [{ from: <text>, to: <text> }, ...]   each `from` must be present
+#     append:  [<line>, ...]                         added after the library's last line
+#
+# The front matter already in `target` is kept verbatim, because it says what the tiddler IS
+# (title, type, module-type), which is Lithic's decision rather than upstream's. Only the body is
+# replaced. Nothing here changes the RUNNING wiki's network behaviour: this is a build-time
+# fetch, and the bytes it writes are what ships.
+#
+# Deliberately NOT listed: `wiki/local-plugins/tw-react/` (react, react-dom, scheduler and the
+# jsx runtime). Those are pinned to React 19 because the whiteboard is a decoupled TiddlyWiki
+# port of an older, much smaller TLDraw, and an automatic bump there would move the runtime
+# under that port. They stay hand-managed.
+
+- name: pele
+  # The Mermaid engine. `dist/pele.global.js` is the browser global build, the one whose trailing
+  # `var pele` the appended export line turns into a TW library module. `dist/pele.js` is a
+  # different (module) build and is not interchangeable.
+  package: pele
+  file: dist/pele.global.js
+  target: wiki/local-plugins/lithic-patch-mermaid/$__plugins_xyvir_lithic-patch-mermaid_pele.js.tid
+  minBytes: 600000
+  expect:
+    - "var pele"
+  transform:
+    append:
+      - "// Lithic: expose the global build through the module system (TW evaluates this file as a CommonJS module)."
+      - "exports.pele = pele;"
+
+- name: pdfjs
+  # Pinned on purpose, and the pin is a ceiling rather than a bookmark. pdfjs-dist 4 moved to
+  # `.mjs` builds and dropped `build/pdf.min.js`; this plugin loads a UMD global (`pdfjsLib`)
+  # through a TW library module and hands the worker tiddler its own copy of the worker script, so
+  # moving past 3.x is a migration of the import handler, not a version bump. Remove the pin only
+  # as part of that migration (see $:/plugins/lithic/lithic-import-handler/pdf-drop-handler.js).
+  package: pdfjs-dist
+  file: build/pdf.min.js
+  pin: 3.11.174
+  target: wiki/local-plugins/lithic-import-handler/pdf.js.tid
+  minBytes: 300000
+  expect:
+    - "pdfjs-dist/build/pdf"
+
+- name: jspython
+  # The Python interpreter behind `tw-jspython`. The npm name is NOT `jspython`: that package
+  # (0.0.3, a different author) ships an index.js and has nothing to do with this engine. The
+  # project is github.com/jspython-dev/jspython, published as `jspython-interpreter`, and its
+  # GitHub tree does not carry `dist/` (it is gitignored there), so the npm tarball is the only
+  # place the browser build exists. The bundle is already UMD and takes the `exports`/`module`
+  # branch TW provides, so it becomes a library module with no transform: the comment block the
+  # hand-pasted copy carried above the bundle only repeated the front matter.
+  package: jspython-interpreter
+  file: dist/jspython-interpreter.min.js
+  target: wiki/local-plugins/tw-jspython/jspython-interpreter.js.tid
+  minBytes: 40000
+  expect:
+    - "Package loader not provided."
+
+- name: pdfjs-worker
+  # The same package and version as the entry above, and pinned for the same reason: the worker
+  # and the API build have to be the SAME version or the message protocol between them drifts.
+  package: pdfjs-dist
+  file: build/pdf.worker.min.js
+  pin: 3.11.174
+  target: wiki/local-plugins/lithic-import-handler/pdf.worker.js.tid
+  minBytes: 1000000
+  expect:
+    - "pdfjs-dist/build/pdf.worker"
