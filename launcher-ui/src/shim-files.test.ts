@@ -20,6 +20,7 @@ import {
   shimInstall,
   shimInstallStatus,
   shimList,
+  shimModifiedTimes,
   shimPick,
   shimRead,
   shimStartupPath,
@@ -114,6 +115,23 @@ test('the install and handoff helpers each frame the command the shim answers', 
   assert.deepEqual(answerBody(seen[3].init), { command: 'take-open', args: {} });
 });
 
+test('a stamp read asks the shim about the whole list at once', async () => {
+  // One call for every row, because a hover must not cost one round trip per row, and the
+  // answer is keyed by the path that was asked about rather than by position.
+  const { fetcher, seen } = fakeFetch(() => json({ ok: true, result: { modified: { '/home/a/one.lith': 42 } } }));
+  assert.deepEqual(await shimModifiedTimes(['/home/a/one.lith', '/home/a/gone.lith'], { fetcher, token: 'deadbeef' }), {
+    ok: true,
+    value: { '/home/a/one.lith': 42 }
+  });
+  assert.deepEqual(answerBody(seen[0].init), { command: 'stat', args: { paths: ['/home/a/one.lith', '/home/a/gone.lith'] } });
+  // An answer with no map is no answer, not a crash: the rows fall back on their own copies.
+  const { fetcher: bare } = fakeFetch(() => json({ ok: true, result: {} }));
+  assert.deepEqual(await shimModifiedTimes(['/home/a/one.lith'], { fetcher: bare, token: 'deadbeef' }), { ok: true, value: {} });
+  // A refusal is a value, like every other call on this wire.
+  const { fetcher: refused } = fakeFetch(() => json({ ok: false, error: 'bad-args' }));
+  assert.deepEqual(await shimModifiedTimes([], { fetcher: refused, token: 'deadbeef' }), { ok: false, error: 'bad-args' });
+});
+
 test('every failure is a value rather than a throw, so a caller can fall back', async () => {
   const { fetcher } = fakeFetch(() => new Response('no', { status: 403 }));
   assert.deepEqual(await shimPick('open', {}, { fetcher, token: 'deadbeef' }), { ok: false, error: 'refused' });
@@ -138,7 +156,8 @@ test('the commands this module sends are the commands the shim dispatches', () =
     'pick',
     'read',
     'write',
-    'list'
+    'list',
+    'stat'
   ]) {
     assert.match(shim, new RegExp(`"${command}" =>`), `the shim does not dispatch ${command}`);
   }

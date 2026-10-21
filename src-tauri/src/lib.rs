@@ -71,6 +71,33 @@ fn read_lith_path(app: tauri::AppHandle, path: String) -> Result<LithFile, Strin
     })
 }
 
+/// When each of these files was last written, in milliseconds since the epoch.
+///
+/// The recents list draws one of these in a row's hover, and the desktop app is the shape that
+/// has the file itself: its own modification time is the true answer, where every other shape
+/// falls back to the copy the launcher holds or to a server's listing. Read here rather than in
+/// the page because a webview has a path and no way to stat it.
+///
+/// A path that has gone missing, or one the platform names as a granted reference rather than a
+/// file (a phone's `content://`), is absent from the answer rather than zero. The row then keeps
+/// the cached copy's stamp, which is the same fallback every other shape uses, and one stale
+/// row cannot empty the tooltip of every other row.
+#[tauri::command]
+fn lith_modified_times(paths: Vec<String>) -> std::collections::HashMap<String, u64> {
+    let mut stamps = std::collections::HashMap::new();
+    for path in paths {
+        let stamp = fs::metadata(&path)
+            .and_then(|meta| meta.modified())
+            .ok()
+            .and_then(|modified| modified.duration_since(std::time::UNIX_EPOCH).ok())
+            .map(|since| since.as_millis() as u64);
+        if let Some(stamp) = stamp {
+            stamps.insert(path, stamp);
+        }
+    }
+    stamps
+}
+
 /// A file's bytes, base64-encoded.
 ///
 /// The launcher's half of opening a PDF: this process is the only one that can name the
@@ -3350,6 +3377,7 @@ pub fn run() {
             get_startup_file,
             get_cli_args,
             read_lith_path,
+            lith_modified_times,
             read_file_base64,
             pdf_lith_target,
             open_lith_file,
@@ -3601,6 +3629,24 @@ mod tests {
         run_git(dir, &["config", "core.autocrlf", "false"]);
         run_git(dir, &["config", "user.name", "Lithic Test"]);
         run_git(dir, &["config", "user.email", "test@lithic.local"]);
+    }
+
+    /// A row's hover asks when the file was last written, and only the process can answer:
+    /// the file's own stamp for a path it can see, and nothing at all for one it cannot.
+    #[test]
+    fn a_file_stamp_is_the_files_own_and_a_missing_path_is_no_answer() {
+        let dir = scratch("modified");
+        let present = dir.join("one.lith");
+        fs::write(&present, "title: one").unwrap();
+        let known = present.to_string_lossy().into_owned();
+        let gone = dir.join("never-there.lith").to_string_lossy().into_owned();
+
+        let stamps = lith_modified_times(vec![known.clone(), gone.clone()]);
+        let stamp = stamps.get(&known).copied().expect("an existing file answers");
+        // The epoch in milliseconds is past the first day of 2020, which is the whole point: a
+        // zero would draw 1970 in a tooltip rather than the moment the file was written.
+        assert!(stamp > 1_577_836_800_000, "the file stamp is not a real moment: {stamp}");
+        assert!(!stamps.contains_key(&gone), "a file that is not there draws no stamp");
     }
 
     /// A clean scratch directory under the system temp dir.

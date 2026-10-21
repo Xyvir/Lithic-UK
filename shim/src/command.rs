@@ -26,6 +26,8 @@
 //!   * `read` hands back a path's text, `write` puts text back at a path atomically, and
 //!     `list` answers a directory's entries for the recents check and for a chooser the
 //!     launcher can draw where no dialog exists.
+//!   * `stat` answers when each of a list of paths was last written, which is what a recents
+//!     row's hover draws: a served page can see a file's contents and never its stamp.
 //!   * `startup` names the `.lith` the shim was started with, so double-clicking one in a file
 //!     manager opens it, which is the shape every desktop document program already has.
 //!   * `take-open` answers the `.lith` a second launch handed to a shim that was already on the
@@ -139,6 +141,7 @@ pub fn handle(request: &Request, port: u16, token: &str, startup: Option<&Path>)
         "read" => read(&args),
         "write" => write(&args),
         "list" => list(&args),
+        "stat" => stat(&args),
         // The git sync reads. They live in `git.rs` because they answer a different question
         // from the four above (whether a folder is a repository Lithic manages, rather than
         // what is in a file), and because the writes that follow them will need a dependency
@@ -314,6 +317,34 @@ fn list(args: &Value) -> Response {
     });
     let parent = dir.parent().filter(|parent| !parent.as_os_str().is_empty()).map(path_text);
     ok(json!({ "path": path_text(&dir), "parent": parent, "entries": rows }))
+}
+
+/// `stat { paths }`
+///
+/// When each of these files was last written, in milliseconds since the epoch, keyed by the path
+/// the page handed over. The launcher draws one in each recents row's hover, and only this
+/// process can read a file's stamp: the page has contents and no path, and the wire is the only
+/// way across.
+///
+/// A path that is gone, unreadable, or a directory gives no answer and is left out rather than
+/// failing the whole call. One stale row must not empty every other row's tooltip, and the row
+/// that is left out keeps the cached copy's stamp, which is what the launcher shows anyway.
+fn stat(args: &Value) -> Response {
+    let Some(paths) = args.get("paths").and_then(|value| value.as_array()) else {
+        return bad_args();
+    };
+    let mut modified = serde_json::Map::new();
+    for path in paths.iter().filter_map(|value| value.as_str()) {
+        let stamp = fs::metadata(path)
+            .and_then(|meta| meta.modified())
+            .ok()
+            .and_then(|time| time.duration_since(std::time::UNIX_EPOCH).ok())
+            .map(|since| since.as_millis() as u64);
+        if let Some(stamp) = stamp {
+            modified.insert(path.to_string(), json!(stamp));
+        }
+    }
+    ok(json!({ "modified": modified }))
 }
 
 /// Write bytes to `path` by way of a temporary file in the same directory, then rename. A
@@ -785,6 +816,29 @@ mod tests {
         assert_eq!(listed["result"]["entries"][0]["dir"], json!(true));
         assert_eq!(listed["result"]["entries"][1]["dir"], json!(false));
         assert_eq!(listed["result"]["parent"], json!(path_text(scratch.root.parent().expect("parent"))));
+    }
+
+    #[test]
+    fn stat_answers_a_real_stamp_and_leaves_a_missing_path_out() {
+        let scratch = Scratch::new("stat");
+        let present = scratch.root.join("one.lith");
+        fs::write(&present, "title: one").expect("file");
+        let gone = scratch.root.join("nope.lith");
+        let answered = answer(&format!(
+            "{{\"command\":\"stat\",\"args\":{{\"paths\":[{},{}]}}}}",
+            json!(path_text(&present)),
+            json!(path_text(&gone))
+        ));
+        let modified = &answered["result"]["modified"];
+        let stamp = modified[path_text(&present)].as_u64().expect("an existing file answers");
+        // The epoch in milliseconds, and past 2020: a zero here would draw 1970 in a tooltip.
+        assert!(stamp > 1_577_836_800_000, "the stamp is not a real moment: {stamp}");
+        assert!(
+            modified.get(path_text(&gone)).is_none(),
+            "a file that is not there draws no stamp: {answered}"
+        );
+        // A body with no paths at all is the page asking nothing useful, not a file listing.
+        assert_eq!(answer("{\"command\":\"stat\",\"args\":{}}")["error"], json!("bad-args"));
     }
 
     #[test]

@@ -1316,13 +1316,25 @@ try {
     button: document.querySelector('.heading .sync-button')?.className ?? null,
     title: document.querySelector('.heading .sync-button')?.getAttribute('title') ?? null,
     rows: [...document.querySelectorAll('.recent-row.remote-row .recent-name')].map((row) => row.textContent.trim()),
-    size: document.querySelector('.recent-row.remote-row .recent-name .cached-size')?.textContent?.trim() ?? null
+    size: document.querySelector('.recent-row.remote-row .recent-name .cached-size')?.textContent?.trim() ?? null,
+    // The hover is the store's own stamp for the Lith, from the listing that drew the row:
+    // an instance is the shape where the file is not on this machine and the server is the
+    // only thing that knows when it was last written.
+    hover:
+      [...document.querySelectorAll('.recent-row.remote-row .recent-name')]
+        .find((row) => row.textContent.trim().startsWith('arrived.lith'))
+        ?.getAttribute('title') ?? null
   }));
   assert.equal(afterConnect.button, 'sync-button connected', 'Live self-host: the heading button turns green once the instance reports a backup');
   assert.match(
     afterConnect.title ?? '',
     /^GitHub Sync: github\.com\/keeper\/lithic-sync-[a-z0-9]{4}, last synced \d+[smh] ago$/,
     `Live self-host: and names the repository the instance is on: ${afterConnect.title}`
+  );
+  assert.match(
+    afterConnect.hover ?? '',
+    /^Last Modified: /,
+    `Live self-host: the hover names when the store last wrote the Lith: ${JSON.stringify(afterConnect.hover)}`
   );
   assert.ok(
     afterConnect.rows.some((row) => row.startsWith('arrived.lith')),
@@ -6060,6 +6072,14 @@ try {
             const pick = window.__lithicMountPicks.find((entry) => entry.path === args.path);
             return Promise.resolve(pick ? { name: pick.name, path: pick.path, text: pick.text } : null);
           }
+          // A row's hover asks when the file was last written, and the desktop app is the
+          // shape that can answer it. These fixture paths exist nowhere on this machine, so
+          // the mock answers one fixed moment for every one of them: a constant rather than
+          // `Date.now()` is what lets the assertion below name the year it expects.
+          if (command === 'lith_modified_times') {
+            const stamp = Date.UTC(2026, 9, 21, 14, 35);
+            return Promise.resolve(Object.fromEntries((args.paths ?? []).map((path) => [path, stamp])));
+          }
           if (command === 'read_recents_sidecar') return Promise.resolve([]);
           // Not the mode's default `null`: the launcher dereferences this map (it is
           // keyed by path), and these rows are the first in this suite to carry one.
@@ -6116,10 +6136,35 @@ try {
     'Added 3 Liths to Recents',
     '...and it says what it did, so a list that grew is not a mystery'
   );
+  // The hover is when the Lith was last written rather than where it lives. The desktop app
+  // has the file, so the file's own stamp is the answer, read through the one command that
+  // can see it: a webview has a path and no way to stat one.
+  await mountPage.waitForFunction(
+    () =>
+      [...document.querySelectorAll('.recent-row:not(.remote-row) .recent-name')].every((node) =>
+        (node.getAttribute('title') ?? '').startsWith('Last Modified: ')
+      ),
+    POLL
+  );
+  const tooltips = await rowTooltips();
+  assert.equal(
+    tooltips.length,
+    3,
+    `Every row still carries a hover: ${JSON.stringify(tooltips)}`
+  );
+  for (const title of tooltips) {
+    assert.match(
+      title ?? '',
+      /^Last Modified: .*2026/,
+      `A row hovers as the moment the process answered with: ${JSON.stringify(tooltips)}`
+    );
+  }
+  const stampCalls = mountCalls.filter(call => call.command === 'lith_modified_times');
+  assert.ok(stampCalls.length >= 1, 'The rows asked the machine for their file stamps');
   assert.deepEqual(
-    await rowTooltips(),
+    stampCalls.at(-1).args.paths,
     ['C:/fixture/first.lith', 'C:/fixture/alpha.lith', 'C:/fixture/beta.lith'],
-    `Every row hovers as the file it will open, in the same order: ${JSON.stringify(await rowTooltips())}`
+    `One call carries the whole list rather than one round trip per row: ${JSON.stringify(stampCalls)}`
   );
   assert.equal(
     mountCalls.filter(call => call.command === 'open_lith_files').length,

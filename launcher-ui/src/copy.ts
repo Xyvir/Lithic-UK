@@ -580,6 +580,11 @@ const en = {
       label: 'Remove'
     },
     cachedLocally: 'Cached locally',
+    /**
+     * The hover a row carries: when this Lith was last written, from the file's own stamp where
+     * the process can read it and from the copy this device holds where it cannot.
+     */
+    lastModified: (when: string) => `Last Modified: ${when}`,
     /** What a row's own mark claims about a Lith this browser holds and nothing else does. */
     browserOnly: (name: string) => `${name}. ${BROWSER_ONLY_TOOLTIP}`,
     browserOnlyClaim: BROWSER_ONLY_TOOLTIP,
@@ -1241,6 +1246,7 @@ const es: Copy = {
       label: 'Quitar'
     },
     cachedLocally: 'Guardado localmente',
+    lastModified: (when: string) => `Última modificación: ${when}`,
     browserOnly: (name: string) => `${name}. ${BROWSER_ONLY_TOOLTIP_ES}`,
     browserOnlyClaim: BROWSER_ONLY_TOOLTIP_ES,
     browserOnlyNote:
@@ -1873,6 +1879,7 @@ const fr: Copy = {
       label: 'Retirer'
     },
     cachedLocally: 'En cache local',
+    lastModified: (when: string) => `Dernière modification : ${when}`,
     browserOnly: (name: string) => `${name}. ${BROWSER_ONLY_TOOLTIP_FR}`,
     browserOnlyClaim: BROWSER_ONLY_TOOLTIP_FR,
     browserOnlyNote:
@@ -2502,6 +2509,7 @@ const de: Copy = {
       label: 'Entfernen'
     },
     cachedLocally: 'Lokal zwischengespeichert',
+    lastModified: (when: string) => `Zuletzt geändert: ${when}`,
     browserOnly: (name: string) => `${name}. ${BROWSER_ONLY_TOOLTIP_DE}`,
     browserOnlyClaim: BROWSER_ONLY_TOOLTIP_DE,
     browserOnlyNote:

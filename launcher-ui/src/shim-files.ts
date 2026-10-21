@@ -106,6 +106,25 @@ export function shimWrite(path: string, text: string, call: ShimCall = {}): Prom
   return shimCommand('write', { path, text }, call).then((answer) => result<{ name: string; path: string }>(answer));
 }
 
+/**
+ * When each of these paths was last written, in milliseconds, keyed by the path that was asked
+ * about.
+ *
+ * A recents row draws one in its hover, and this is the only way a served page can read a
+ * stamp: the shim is the process, and the page has the file's contents and never where the
+ * file is. A path the shim cannot read is absent from the map rather than zero, so one stale
+ * row does not claim a moment it does not have.
+ */
+export async function shimModifiedTimes(
+  paths: string[],
+  call: ShimCall = {}
+): Promise<ShimResult<Record<string, number>>> {
+  const answer = await shimCommand('stat', { paths }, call);
+  if (!answer.ok) return { ok: false, error: answer.error, ...(answer.detail ? { detail: answer.detail } : {}) };
+  const modified = (answer.result as { modified?: Record<string, number> } | null)?.modified;
+  return { ok: true, value: modified && typeof modified === 'object' ? modified : {} };
+}
+
 /** List a directory, or the home directory when no path is given. */
 export function shimList(path?: string, call: ShimCall = {}): Promise<ShimResult<ShimListing>> {
   return shimCommand('list', path ? { path } : {}, call).then((answer) => result<ShimListing>(answer));

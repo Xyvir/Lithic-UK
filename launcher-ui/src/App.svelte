@@ -11,7 +11,7 @@
   import { pwaInstall, promptPwaInstall, shouldRestoreInstallOfferOnReset } from './pwa-install';
   import { RELEASES_LATEST_PAGE, latestReleaseTag, readBuildTag, updateOffered } from './update-notice';
   import { readShimToken, shimCommand } from './shim-command';
-  import { shimCapabilities, shimInstall, shimInstallStatus, shimRead, shimStartupPath, shimTakeOpen } from './shim-files';
+  import { shimCapabilities, shimInstall, shimInstallStatus, shimModifiedTimes, shimRead, shimStartupPath, shimTakeOpen } from './shim-files';
   import { shimFolderLiths, shimGitCoverage, shimGitStatus } from './shim-git';
   import {
     awaitShimJob,
@@ -32,7 +32,7 @@
   } from './shim-sync';
   import { bootLegacyWiki, bootLegacyHtml, writeHandoff, type RemoteTarget } from './legacy-launcher-runtime';
   import { EMOJI_LIST, uploadInstanceIcon, clearInstanceIcon, emojiFaviconUrl, applyFavicon, bustIconCache, readInstanceEmoji, readServerEmoji, saveInstanceEmoji, clearInstanceEmoji, instanceMarkUrl } from './instance-icon';
-  import { getRecentFiles, setRecentRows, mergeRecentRow, mergeRecentLists, isAnonymousRow, clearAllRecentFiles, purgeOldestCachesIfNeeded, saveSearchCache, forgetWikiCache, cachedWikiNames, idb, getSearchCacheText, readFetchedLith, rememberFetchedLith, listWikiVersions, wikiHasHistory, downloadWikiVersion, getDirtyState, clearDirtyState, listDirtyRecoveries, isWikiDriftedFromHead, isInstallDismissed, setInstallDismissed, recentDiskPath, type DirtyStateRecord, type RecentEntry } from './storage';
+  import { getRecentFiles, setRecentRows, mergeRecentRow, mergeRecentLists, isAnonymousRow, clearAllRecentFiles, purgeOldestCachesIfNeeded, saveSearchCache, forgetWikiCache, cachedWikiNames, idb, getSearchCacheText, readFetchedLith, rememberFetchedLith, listWikiVersions, wikiHasHistory, downloadWikiVersion, getDirtyState, clearDirtyState, listDirtyRecoveries, isWikiDriftedFromHead, isInstallDismissed, setInstallDismissed, recentDiskPath, type DirtyStateRecord, type RecentEntry, type RecentRow } from './storage';
   import { isIosDevice, rememberRowKind, resolveStorageMode, storageModeOverride, browserOnlyMarkTitle, type StorageMode } from './browser-storage';
   import { readBookmarkEntries, saveBookmark, removeBookmark, setBookmarkIcon, writeBookmarkList, refreshBookmarkIcon, verifyInstanceUrl, normalizeInstanceUrl, instanceLabel, type BookmarkEntry, type InstanceVerification } from './bookmarks';
   import { LOGIN_CHECK_LABELS, askInstanceAboutLogin, loginVerdict, loginVerdictFromError, typedLoginCheck, type LoginCheckState, type LoginVerdict } from './login-check';
@@ -45,6 +45,7 @@
   import { documentStem, typedDocumentName } from './document-format';
   import { searchCachedWikis } from './cache-search';
   import { matchMarkup, showsForQuery, titleMatches, titleMarkup } from './name-match';
+  import { cachedStamp, modifiedTitle } from './last-modified';
   import { topHits, type InstanceCacheRead, type InstanceReads } from './instance-search';
   import { computeBackupCoverage, folderOf, hasBackedUpRepo, orphanedEntries, reindexFolders, syncedDirFor, type CoverageRow, type RebuildOrphan } from './backup-coverage';
 import { backupFileName, collectInstanceBackup, mergeBookmarks, parseInstanceBackup, planBackupImport, restoreInstanceBackup, serializeInstanceBackup, type InstanceBackup } from './instance-backup';
@@ -2494,7 +2495,15 @@ import { backupFileName, collectInstanceBackup, mergeBookmarks, parseInstanceBac
   function closeForInstall(): void {
     void tauriInvoke('quit_launcher').catch(() => { /* the window is going either way */ });
   }
-  type CacheSearchEntry = { name: string; text: string; sizeBytes: number };
+  /**
+   * One cached wiki, as the list draws it.
+   *
+   * `lastModified` is when this device wrote that copy. It is the answer a row's hover shows
+   * wherever no process could name the file's own stamp (see `last-modified.ts`), which is
+   * every browser mount: the handle's permission has not been granted, and asking for it on a
+   * hover is a prompt nobody wanted.
+   */
+  type CacheSearchEntry = { name: string; text: string; sizeBytes: number; lastModified?: number | null };
   type CacheSearchMatch = { preview: string; title?: string };
 
   function formatCacheSize(bytes: number): string {
@@ -2544,6 +2553,13 @@ import { backupFileName, collectInstanceBackup, mergeBookmarks, parseInstanceBac
     return gap ? copy.dialogs.history.later[gap.unit](gapCount(gap, LOCALE_TAG)) : '';
   }
   let cachedEntries: Record<string, CacheSearchEntry> = {};
+  /**
+   * When each file behind a row was last written, keyed by its path, as the process read it.
+   *
+   * Only the desktop app and the shim can answer this. Everywhere else the map stays empty and
+   * the rows fall back on the copy this device holds, which is the only stamp a page can see.
+   */
+  let fileStamps: Record<string, number> = {};
   let cacheSearchMatches: Record<string, CacheSearchMatch> = {};
   let cacheSearchRequest = 0;
   type HistoryEntry = { id: string; ts: number; sizeBytes: number; isBase?: boolean; external?: boolean; lastModified: string };
@@ -2964,9 +2980,16 @@ import { backupFileName, collectInstanceBackup, mergeBookmarks, parseInstanceBac
       // nothing in it, and findable only by a search that cannot open them.
       for (const name of cachedWikiNames(await idb.keys())) {
         try {
-          const cache = await idb.get<{ text?: string }>('search_cache_' + name);
+          const cache = await idb.get<{ text?: string; lastModified?: string; backupTimestamp?: number }>('search_cache_' + name);
           if (typeof cache?.text === 'string') {
-            entries[name] = { name, text: cache.text, sizeBytes: new Blob([cache.text]).size };
+            entries[name] = {
+              name,
+              text: cache.text,
+              sizeBytes: new Blob([cache.text]).size,
+              // When this device last wrote the copy, which is the only stamp a row's hover can
+              // name in a browser. Read beside the text because both are in the same record.
+              lastModified: cachedStamp(cache)
+            };
           }
         } catch { /* cached search is best effort */ }
       }
@@ -2984,6 +3007,50 @@ import { backupFileName, collectInstanceBackup, mergeBookmarks, parseInstanceBac
   }
 
   $: void updateCacheMatches(search);
+
+  /**
+   * Ask the process for each row's file stamp, where there is a process that can answer.
+   *
+   * One call for the whole list, because a hover is not worth a round trip per row, and one
+   * call per recents change, because the list is what the question is about. The desktop app
+   * and the shim are the two shapes with a file and a way to stat it; a browser page keeps the
+   * copy's own stamp instead. A failure here is not a failure of the list: the rows fall back
+   * on that copy, and nothing about opening one depends on this having answered.
+   */
+  async function refreshFileStamps(rows: readonly RecentRow[]) {
+    const paths = [
+      ...new Set(rows.map((row) => recentDiskPath(row)).filter((path): path is string => Boolean(path)))
+    ];
+    if (paths.length === 0) {
+      fileStamps = {};
+      return;
+    }
+    if (mode === 'tauri') {
+      try {
+        fileStamps = (await tauriInvoke<Record<string, number>>('lith_modified_times', { paths })) ?? {};
+      } catch { /* the copy's stamp is the fallback */ }
+      return;
+    }
+    if (!shimToken) return;
+    const answer = await shimModifiedTimes(paths, { token: shimToken });
+    if (answer.ok) fileStamps = answer.value;
+  }
+
+  // The list is what the question is about, so it is asked again whenever the list is: a
+  // mount adds a row, and a rebuild replaces every path in it.
+  $: void refreshFileStamps(recentFiles);
+
+  /**
+   * The hover a Lith on the server carries, from the stamp its listing reported.
+   *
+   * The row's own file is not on this machine, so the store's answer is the true one, and it
+   * is already in hand: the listing that drew the row carried it. A store that omitted the
+   * stamp keeps the sentence the hover always said rather than a date nobody reported.
+   */
+  function remoteRowTitle(file: WebdavFile): string {
+    return modifiedTitle(file.lastModified?.getTime(), LOCALE_TAG) ?? copy.row.openFromServer;
+  }
+
   // Version-history availability tracks the recents + cached lists so newly
   // appearing rows get their answer without re-checking existing ones.
   $: void refreshHistoryAvailability([
@@ -7305,8 +7372,9 @@ import { backupFileName, collectInstanceBackup, mergeBookmarks, parseInstanceBac
               dialog behind the mark is where a real file can be taken from it.
             -->
             {#each offlineRows as entry (entry.name)}
+              {@const offlineTitle = modifiedTitle(cachedEntries[entry.name]?.lastModified, LOCALE_TAG) ?? copy.offline.rowOpenTitle}
               <div class="recent-row offline-row">
-                <button class="recent-name" title={copy.offline.rowOpenTitle} on:click={() => void openCachedEntry(entry)}>{@html titleMarkup(entry.name, search)}<span class="cached-size">{formatCacheSize(entry.sizeBytes)}</span></button>
+                <button class="recent-name" title={offlineTitle} on:click={() => void openCachedEntry(entry)}>{@html titleMarkup(entry.name, search)}<span class="cached-size">{formatCacheSize(entry.sizeBytes)}</span></button>
                 <button class="recent-icon-button cache-history-button modified" type="button" title={copy.offline.rowMarkTitle} aria-label={copy.row.historyAria(entry.name)} on:click={() => openHistoryModal(entry.name)}>
                   <svg class="history-download-icon modified" viewBox="56 108 33 36" aria-hidden="true"><path class="history-icon-shape" d="m 73.595508,109.76746 c -7.198235,0 -13.103617,5.58342 -13.647229,12.64471 h -0.0072 V 138.2696 H 58.61606 l 2.32389,4.02559 2.324405,-4.02559 h -1.323433 v -15.85123 c 0.530186,-5.97937 5.534806,-10.65103 11.654586,-10.65103 6.474618,0 11.703161,5.22855 11.703161,11.70316 0,6.47462 -5.228543,11.70161 -11.703161,11.70161 -2.644513,0 -5.080809,-0.87232 -7.037814,-2.34508 v 2.39572 c 2.058162,1.23707 4.46633,1.94924 7.037814,1.94924 7.555498,0 13.703556,-6.14599 13.703556,-13.70149 0,-7.5555 -6.148058,-13.70304 -13.703556,-13.70304 z"></path><path class="history-icon-mark" d="M72.3 116h2.6v9h-2.6z"></path><circle class="history-icon-mark" cx="73.6" cy="128.4" r="1.6"></circle></svg>
                 </button>
@@ -7347,10 +7415,12 @@ import { backupFileName, collectInstanceBackup, mergeBookmarks, parseInstanceBac
                   The row's suffix is the file's size on the server, not its date: on this
                   list the dates of a store are its least interesting fact (the server
                   commits constantly, so they all read "today"), while the size is the one
-                  thing a name cannot tell you about a Lith you are about to open. Absent
-                  when the store does not report it, rather than shown as a zero.
+                  thing a name cannot tell you about a Lith you are about to open. The date
+                  is on the hover instead, where a reader who wants it asks for it. The
+                  suffix is absent when the store does not report a size, rather than shown
+                  as a zero.
                 -->
-                <button class="recent-name" title={copy.row.openFromServer} on:click={() => openRemoteFile(file.name)}>{@html titleMarkup(file.name, search)}{#if file.sizeBytes !== null}<span class="cached-size">{formatLithSize(file.sizeBytes)}</span>{/if}</button>
+                <button class="recent-name" title={remoteRowTitle(file)} on:click={() => openRemoteFile(file.name)}>{@html titleMarkup(file.name, search)}{#if file.sizeBytes !== null}<span class="cached-size">{formatLithSize(file.sizeBytes)}</span>{/if}</button>
                 <!--
                   The one fact about a Lith in a store that only this client can tell you:
                   what *it* has read of that Lith, and when. Same control, same place and the
@@ -7495,20 +7565,28 @@ import { backupFileName, collectInstanceBackup, mergeBookmarks, parseInstanceBac
         {#each filteredRecent as file}
           {@const name = getEntryName(file)}
           {@const diskPath = recentDiskPath(file as any)}
+          <!--
+            Read here rather than through a helper: Svelte re-evaluates these when the
+            variables they name change, and a function reads none of them from the template's
+            point of view. Through a helper the stamp only appeared on a row that happened to
+            be drawn again, which is exactly how half the list kept its old hover.
+          -->
+          {@const stamp = (diskPath ? fileStamps[diskPath] : undefined) ?? cachedEntries[name]?.lastModified}
+          {@const rowTitle = modifiedTitle(stamp, LOCALE_TAG) ?? diskPath ?? undefined}
           {@const browserOnlyRow = (file as any).browserOnly === true}
           {@const unsavedRow = Boolean(dirtyEntries[name])}
           {@const localOnlyRow = showBackupStatus && Boolean(diskPath) && localOnlyPaths.has(diskPath as string)}
           {@const markedRow = browserOnlyRow || localOnlyRow || unsavedRow}
           <div class="recent-row">
             <!--
-              The hover answers the one question a row cannot show: where this Lith lives
-              on disk. Only a row with a path can answer it (a browser's picker hands over a
-              handle, which is a permission rather than an address) and a Lith that has never
-              been saved has no path at all, so those rows name no place rather than the wrong
-              one. The path is what the app would open, unshortened: `~` or an ellipsis would
-              be a second thing to decode on the one line that exists to be exact.
+              The hover answers when this Lith was last written. The file's own stamp is the
+              answer wherever a process can read it, which is the desktop app and a shim; the
+              copy this device holds is the answer everywhere else, because a browser's handle
+              needs a permission the person has not been asked for and a hover is not the place
+              to ask. A row with neither keeps the place it lives, which is what the hover said
+              before, and a row with no place at all keeps no tooltip rather than a made-up one.
             -->
-            <button class="recent-name" title={diskPath ?? undefined} on:click={() => openRecent(file)}>{@html titleMarkup(name, search)}{#if cachedEntries[name]}<span class="cached-size">{formatCacheSize(cachedEntries[name].sizeBytes)}</span>{/if}</button>
+            <button class="recent-name" title={rowTitle} on:click={() => openRecent(file)}>{@html titleMarkup(name, search)}{#if cachedEntries[name]}<span class="cached-size">{formatCacheSize(cachedEntries[name].sizeBytes)}</span>{/if}</button>
             <!--
               One mark for every kind of unfinished row: no file at all, a file
               outside every backed-up folder, or edits never saved. It is the
@@ -7563,8 +7641,9 @@ import { backupFileName, collectInstanceBackup, mergeBookmarks, parseInstanceBac
           </div>
         {/each}
         {#each filteredCached as entry}
+          {@const cachedTitle = modifiedTitle(cachedEntries[entry.name]?.lastModified, LOCALE_TAG)}
           <div class="recent-row cached-only-row">
-            <div class="recent-name cached-result" role="note">{@html titleMarkup(entry.name, search)}<span class="cached-size">{formatCacheSize(entry.sizeBytes)}</span><span class="cached-label">{copy.row.cachedLocally}</span></div>
+            <div class="recent-name cached-result" role="note" title={cachedTitle}>{@html titleMarkup(entry.name, search)}<span class="cached-size">{formatCacheSize(entry.sizeBytes)}</span><span class="cached-label">{copy.row.cachedLocally}</span></div>
             {#if dirtyEntries[entry.name] || historyAvailable[entry.name]}<button class="recent-icon-button cache-history-button" class:modified={dirtyEntries[entry.name]} type="button" aria-label={copy.row.historyAria(entry.name)} title={dirtyEntries[entry.name] ? copy.row.unsavedFrom(new Date(dirtyEntries[entry.name]).toLocaleString(LOCALE_TAG)) : copy.row.showHistory} on:click={() => openHistoryModal(entry.name)}>
               {#if dirtyEntries[entry.name]}
                 <svg class="history-download-icon modified" viewBox="56 108 33 36" aria-hidden="true"><path class="history-icon-shape" d="m 73.595508,109.76746 c -7.198235,0 -13.103617,5.58342 -13.647229,12.64471 h -0.0072 V 138.2696 H 58.61606 l 2.32389,4.02559 2.324405,-4.02559 h -1.323433 v -15.85123 c 0.530186,-5.97937 5.534806,-10.65103 11.654586,-10.65103 6.474618,0 11.703161,5.22855 11.703161,11.70316 0,6.47462 -5.228543,11.70161 -11.703161,11.70161 -2.644513,0 -5.080809,-0.87232 -7.037814,-2.34508 v 2.39572 c 2.058162,1.23707 4.46633,1.94924 7.037814,1.94924 7.555498,0 13.703556,-6.14599 13.703556,-13.70149 0,-7.5555 -6.148058,-13.70304 -13.703556,-13.70304 z"></path><path class="history-icon-mark" d="M72.3 116h2.6v9h-2.6z"></path><circle class="history-icon-mark" cx="73.6" cy="128.4" r="1.6"></circle></svg>
