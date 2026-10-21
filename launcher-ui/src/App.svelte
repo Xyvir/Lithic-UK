@@ -5187,9 +5187,29 @@ import { backupFileName, collectInstanceBackup, mergeBookmarks, parseInstanceBac
    * Removing a row while keeping its cache left an entry only a search could
    * find, and the two branches disagreed about it: handle rows were cleaned up,
    * path rows (which is every row the desktop app writes) were not.
+   *
+   * `marked` and `onlyCopy` are the amber mark the row was wearing when its x was pressed,
+   * handed over rather than worked out again here. That mark is the launcher saying this
+   * row's cached copy is the only copy of something (no file, not in a backed-up folder, or
+   * edits never saved), and the x is about to delete exactly that copy, so the question and
+   * the warning have to be the same state. A plain row has nothing behind it to lose: its
+   * file is on disk and backed up, so its x stays one press.
    */
-  async function removeRecent(file: RecentEntry | { name?: string; handle?: any }) {
+  async function removeRecent(
+    file: RecentEntry | { name?: string; handle?: any },
+    marked = false,
+    onlyCopy = false
+  ) {
     const name = getEntryName(file);
+    if (marked) {
+      const remove = await askConfirmation({
+        title: copy.row.removeConfirm.title(name),
+        body: onlyCopy ? copy.row.removeConfirm.onlyCopyBody : copy.row.removeConfirm.cacheBody,
+        confirmLabel: copy.row.removeConfirm.label,
+        danger: true
+      });
+      if (!remove) return;
+    }
     // The list is one list, so the row leaves the list and both stores are then told what is
     // left. Taking the row out of one store instead is how the copies drifted apart: a handle
     // row was dropped from the store while the mirror kept it, so a relaunch brought it back
@@ -7533,7 +7553,7 @@ import { backupFileName, collectInstanceBackup, mergeBookmarks, parseInstanceBac
                 on:keydown={(event) => (event.key === 'Enter' || event.key === ' ') && pinFromPreview(name)}
               >{@html cacheSearchMatches[name].preview}</div>
             {/if}
-            <button class="recent-icon-button remove-recent" type="button" aria-label={copy.row.removeAria(name)} on:click={() => removeRecent(file)}><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m7 7 10 10M17 7 7 17"></path></svg></button>
+            <button class="recent-icon-button remove-recent" type="button" aria-label={copy.row.removeAria(name)} on:click={() => removeRecent(file, markedRow, browserOnlyRow)}><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m7 7 10 10M17 7 7 17"></path></svg></button>
           </div>
         {/each}
         {#each filteredCached as entry}

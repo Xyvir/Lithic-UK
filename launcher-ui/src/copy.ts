@@ -566,6 +566,18 @@ const en = {
     openAria: (name: string) => `Open ${name}`,
     pinTitle: 'Open and pin this tiddler',
     removeAria: (name: string) => `Remove ${name}`,
+    /**
+     * The × asks first on a row that carries the amber mark, because what it drops is the
+     * cached copy the mark is about: not backed up, never saved, or with no file at all.
+     * Two bodies, because a row with no file is the one case where the copy being removed
+     * is the Lith itself, and no sentence about the file staying would be true there.
+     */
+    removeConfirm: {
+      title: (name: string) => `Remove ${name}?`,
+      cacheBody: 'Removing it deletes its cached copies and unsaved edits. The file on disk stays.',
+      onlyCopyBody: 'This Lith has no file, so removing it deletes the only copy there is.',
+      label: 'Remove'
+    },
     cachedLocally: 'Cached locally',
     /** What a row's own mark claims about a Lith this browser holds and nothing else does. */
     browserOnly: (name: string) => `${name}. ${BROWSER_ONLY_TOOLTIP}`,
@@ -1220,6 +1232,12 @@ const es: Copy = {
     openAria: (name: string) => `Abrir ${name}`,
     pinTitle: 'Abrir y fijar este tiddler',
     removeAria: (name: string) => `Quitar ${name}`,
+    removeConfirm: {
+      title: (name: string) => `¿Quitar ${name}?`,
+      cacheBody: 'Quitarlo borra sus copias guardadas y las ediciones sin guardar. El archivo en disco se queda.',
+      onlyCopyBody: 'Este Lith no tiene archivo, así que quitarlo borra la única copia que hay.',
+      label: 'Quitar'
+    },
     cachedLocally: 'Guardado localmente',
     browserOnly: (name: string) => `${name}. ${BROWSER_ONLY_TOOLTIP_ES}`,
     browserOnlyClaim: BROWSER_ONLY_TOOLTIP_ES,
@@ -1845,6 +1863,12 @@ const fr: Copy = {
     openAria: (name: string) => `Ouvrir ${name}`,
     pinTitle: 'Ouvrir et épingler ce tiddler',
     removeAria: (name: string) => `Retirer ${name}`,
+    removeConfirm: {
+      title: (name: string) => `Retirer ${name} ?`,
+      cacheBody: 'Le retirer supprime ses copies en cache et les modifications non enregistrées. Le fichier sur le disque reste.',
+      onlyCopyBody: 'Ce Lith n’a pas de fichier, donc le retirer supprime l’unique copie existante.',
+      label: 'Retirer'
+    },
     cachedLocally: 'En cache local',
     browserOnly: (name: string) => `${name}. ${BROWSER_ONLY_TOOLTIP_FR}`,
     browserOnlyClaim: BROWSER_ONLY_TOOLTIP_FR,
@@ -2467,6 +2491,12 @@ const de: Copy = {
     openAria: (name: string) => `${name} öffnen`,
     pinTitle: 'Diesen Tiddler öffnen und anheften',
     removeAria: (name: string) => `${name} entfernen`,
+    removeConfirm: {
+      title: (name: string) => `${name} entfernen?`,
+      cacheBody: 'Entfernen löscht die Kopien im Cache und ungespeicherte Änderungen. Die Datei auf der Platte bleibt.',
+      onlyCopyBody: 'Dieser Lith hat keine Datei, daher löscht Entfernen die einzige Kopie.',
+      label: 'Entfernen'
+    },
     cachedLocally: 'Lokal zwischengespeichert',
     browserOnly: (name: string) => `${name}. ${BROWSER_ONLY_TOOLTIP_DE}`,
     browserOnlyClaim: BROWSER_ONLY_TOOLTIP_DE,

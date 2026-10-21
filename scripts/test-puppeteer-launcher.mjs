@@ -5282,6 +5282,147 @@ try {
   assert.equal(mergedMark.colour, 'rgb(224, 179, 65)', '...in the yellow the one mark is drawn in');
   assert.match(mergedMark.title, /Unsaved edits/, '...still naming the state it marks');
   assert.ok(mergedMark.plain >= 1, 'While a settled row keeps the plain clock icon');
+
+  // --- The × on a marked row asks first -----------------------------------------
+  // The mark and the × were telling different stories: the mark said this row's cached copy
+  // is the only copy of something (here, edits never saved), and the × deleted that copy
+  // along with the row without a word. A row with nothing behind it loses nothing, so the
+  // question belongs to the mark rather than to the control, and the plain row below is the
+  // half that proves the launcher has not simply started asking every time.
+
+  // Scoped to this device's own rows: bookmark rows share the row class and the ×, and they
+  // are a different list with a different question behind their removal.
+  const localRowNames = () =>
+    vaultPage.evaluate(() =>
+      [...document.querySelectorAll('.recent-row:not(.bookmark-row) .recent-name')]
+        .map(node => node.textContent?.trim() ?? '')
+    );
+  const clickRowRemove = async (name) =>
+    vaultPage.evaluate((text) => {
+      const row = [...document.querySelectorAll('.recent-row')].find(node => node.textContent?.includes(text));
+      row.querySelector('.remove-recent').click();
+    }, name);
+  const storedDirty = () =>
+    vaultPage.evaluate(async () => {
+      const opened = indexedDB.open('keyval-store', 1);
+      await new Promise((ok, fail) => {
+        opened.onerror = () => fail(opened.error);
+        opened.onsuccess = () => ok();
+      });
+      const db = opened.result;
+      const value = await new Promise((ok, fail) => {
+        const read = db.transaction('keyval', 'readonly').objectStore('keyval').get('dirty_state_chain.lith');
+        read.onsuccess = () => ok(read.result);
+        read.onerror = () => fail(read.error);
+      });
+      db.close();
+      return value !== undefined;
+    });
+  const seededNames = await localRowNames();
+  assert.equal(seededNames.length, 2, `The marked row and the settled one are both listed: ${JSON.stringify(seededNames)}`);
+  assert.ok(seededNames[0].startsWith('chain.lith'), 'The marked row is the first of them');
+  await clickRowRemove('chain.lith');
+  await vaultPage.waitForSelector('.confirm-modal');
+  const removalAsk = await vaultPage.evaluate(() => ({
+    title: document.querySelector('#confirm-title')?.textContent?.trim() ?? '',
+    body: document.querySelector('.confirm-modal p')?.textContent?.trim() ?? '',
+    buttons: [...document.querySelectorAll('.confirm-modal .modal-action')].map(node => ({
+      label: node.textContent?.trim() ?? '',
+      danger: node.classList.contains('danger')
+    })),
+    rows: document.querySelectorAll('.recent-row:not(.bookmark-row) .recent-name').length
+  }));
+  assert.equal(removalAsk.title, 'Remove chain.lith?', 'The × asks about the row it was pressed on');
+  assert.equal(
+    removalAsk.body,
+    'Removing it deletes its cached copies and unsaved edits. The file on disk stays.',
+    '...saying what goes and what stays, because that difference is the whole risk'
+  );
+  assert.deepEqual(
+    removalAsk.buttons,
+    [{ label: 'Remove', danger: true }, { label: 'Cancel', danger: false }],
+    'The answer that cannot be undone is the red one, and Cancel sits beside it'
+  );
+  assert.equal(removalAsk.rows, 2, 'Nothing is dropped while the question is open');
+  // Cancel is the choice to keep it, so keeping it has to be what happens: the row, and the
+  // unsaved edits the question named, are still there afterwards.
+  await vaultPage.click('.confirm-modal .modal-action.secondary');
+  await vaultPage.waitForFunction(() => document.querySelector('.confirm-modal') === null, POLL);
+  assert.equal((await localRowNames()).length, 2, 'Cancel keeps the row');
+  assert.equal(await storedDirty(), true, '...and its unsaved edits, which is what Cancel was protecting');
+  // Confirmed, and only then does it go, with the copy the question named.
+  await clickRowRemove('chain.lith');
+  await vaultPage.waitForSelector('.confirm-modal');
+  await vaultPage.click('.confirm-modal .modal-action.danger');
+  await vaultPage.waitForFunction(
+    () => ![...document.querySelectorAll('.recent-row:not(.bookmark-row) .recent-name')]
+      .some(node => node.textContent?.includes('chain.lith')),
+    POLL
+  );
+  assert.equal(await storedDirty(), false, 'The cached edits went with the row it was confirmed against');
+  // A row with no mark has nothing behind it to lose, so its × stays one press. Asking every
+  // time would train people to dismiss the one question that matters.
+  await vaultPage.evaluate(() => {
+    const row = [...document.querySelectorAll('.recent-row')].find(node => node.textContent?.includes('settled.lith'));
+    row.querySelector('.remove-recent').click();
+  });
+  const plainRemoval = await vaultPage.evaluate(() => ({
+    asked: document.querySelector('.confirm-modal') !== null,
+    rows: document.querySelectorAll('.recent-row:not(.bookmark-row) .recent-name').length
+  }));
+  assert.equal(plainRemoval.asked, false, 'A plain row’s × still removes it without a question');
+  assert.equal(plainRemoval.rows, 0, '...and the row went');
+  // The one row whose copy is the document: no file anywhere, so the question says that
+  // instead of promising a file that stays.
+  await vaultPage.evaluate(async () => {
+    const opened = indexedDB.open('keyval-store', 1);
+    await new Promise((ok, fail) => {
+      opened.onerror = () => fail(opened.error);
+      opened.onsuccess = () => ok();
+    });
+    const db = opened.result;
+    await new Promise((ok, fail) => {
+      const tx = db.transaction('keyval', 'readwrite');
+      tx.objectStore('keyval').put(
+        [{ handle: null, tauriPath: null, name: 'only-copy.lith', browserOnly: true }],
+        'recentFiles'
+      );
+      localStorage.setItem('lithic-recent-liths', JSON.stringify([{ name: 'only-copy.lith', browserOnly: true }]));
+      tx.oncomplete = ok;
+      tx.onerror = () => fail(tx.error);
+    });
+    db.close();
+  });
+  await reopenLauncher();
+  await vaultPage.waitForSelector('.recent-row .cache-history-button.modified');
+  await clickRowRemove('only-copy.lith');
+  await vaultPage.waitForSelector('.confirm-modal');
+  assert.equal(
+    await vaultPage.$eval('.confirm-modal p', node => node.textContent?.trim() ?? ''),
+    'This Lith has no file, so removing it deletes the only copy there is.',
+    'A row with no file is asked about as the only copy, not as a cache beside a file'
+  );
+  await vaultPage.click('.confirm-modal .modal-action.danger');
+  await vaultPage.waitForFunction(
+    () => document.querySelector('.recent-row:not(.bookmark-row)') === null,
+    POLL
+  );
+  await vaultPage.evaluate(async () => {
+    const opened = indexedDB.open('keyval-store', 1);
+    await new Promise((ok, fail) => {
+      opened.onerror = () => fail(opened.error);
+      opened.onsuccess = () => ok();
+    });
+    const db = opened.result;
+    await new Promise((ok, fail) => {
+      const tx = db.transaction('keyval', 'readwrite');
+      tx.objectStore('keyval').put([], 'recentFiles');
+      localStorage.setItem('lithic-recent-liths', JSON.stringify([]));
+      tx.oncomplete = ok;
+      tx.onerror = () => fail(tx.error);
+    });
+    db.close();
+  });
   await vaultPage.evaluate(async () => {
     const request = indexedDB.open('keyval-store', 1);
     await new Promise((ok, fail) => {
