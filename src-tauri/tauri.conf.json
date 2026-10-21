@@ -23,7 +23,8 @@
         "resizable": true,
         "title": "Lithic",
         "width": 800,
-        "useHttpsScheme": true
+        "useHttpsScheme": true,
+        "dragDropEnabled": false
       }
     ]
   },

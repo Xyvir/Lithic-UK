@@ -38,6 +38,10 @@
  *      existed — and the Android release job was where that blind spot was found. It
  *      rewrites the crate's own predicates in a throwaway copy and compiles it, which
  *      needs neither the SDK nor the NDK the APK's own steps need.
+ *  14. the desktop window's drag and drop (`src-tauri/tauri.conf.json`): Tauri's own
+ *      handler replaces the webview's, so with it on Windows starts a drag and no page
+ *      ever sees a drop. The wiki's stream rows are the thing that stops working, and
+ *      no browser harness can see it because the harness has no Tauri window.
  *
  * Exit 0 = safe to push; nonzero = fix before pushing.
  *
@@ -349,6 +353,41 @@ function checkAndroidPatchWiring() {
 }
 
 /**
+ * The desktop window has to leave HTML5 drag and drop to the page.
+ *
+ * `dragDropEnabled` is Tauri's native drag-drop system rather than "drag and drop" in
+ * general: it installs its own handler on the webview (on Windows it replaces WebView2's
+ * drop target), and while it is on the page's `dragstart` still fires but `dragover` and
+ * `drop` never do. That is exactly the reported fault in the Tauri app — a stream row
+ * could be picked up and then had nowhere to land — because `$draggable`/`$droppable`
+ * are TiddlyWiki's HTML5 drag widgets. The launcher's own `.lith` drop zone is HTML5 too.
+ *
+ * Nothing in the app listens for Tauri's `tauri://drag-drop` event, so the handler buys
+ * nothing and costs the wiki its reordering. It is also not Windows-only in practice:
+ * the same handler suppresses DOM drag events on macOS.
+ *
+ * Returns null when every window leaves drag and drop to the page, else the failure.
+ */
+function checkTauriDragDrop() {
+  const file = 'src-tauri/tauri.conf.json';
+  let config;
+  try {
+    config = JSON.parse(fs.readFileSync(file, 'utf8'));
+  } catch (error) {
+    return `${file}: ${String(error.message).split(/\r?\n/)[0]}`;
+  }
+  const windows = (config.app && config.app.windows) || [];
+  if (windows.length === 0) {
+    return `${file}: no windows are declared — point this check at whatever replaced them`;
+  }
+  const offenders = windows
+    .filter((window) => window.dragDropEnabled !== false)
+    .map((window) => window.label || '(unlabelled)');
+  if (offenders.length === 0) return null;
+  return `${file}: window ${offenders.join(', ')} leaves Tauri's own drag-drop handler on, which swallows the page's drop events — stream rows drag but never drop. Set "dragDropEnabled": false`;
+}
+
+/**
  * The monkey is local by decision (`scripts/monkey-launcher.mjs`), and this is the half of
  * that decision a workflow can break.
  *
@@ -523,6 +562,16 @@ if (androidProblem === null) {
   failed = true;
   console.log('FAILED');
   console.log('  ' + androidProblem);
+}
+
+process.stdout.write('> tauri drag and drop           ');
+const tauriDragProblem = checkTauriDragDrop();
+if (tauriDragProblem === null) {
+  console.log('OK');
+} else {
+  failed = true;
+  console.log('FAILED');
+  console.log('  ' + tauriDragProblem);
 }
 
 if (checkCargoAvailable()) {
