@@ -9,30 +9,30 @@
     "fetchedAt": "2026-10-21T14:22:48.963Z"
   },
   "pdfjs": {
-    "source": "pdfjs-dist (adopted from the repo)",
+    "source": "pdfjs-dist@3.11.174 build/pdf.min.js",
     "version": "3.11.174",
-    "url": null,
+    "url": "https://registry.npmjs.org/pdfjs-dist/-/pdfjs-dist-3.11.174.tgz",
     "target": "wiki/local-plugins/lithic-import-handler/pdf.js.tid",
-    "upstreamSha256": null,
-    "bodySha256": "9ead8680c2ce3fb6c6ddfac9e1d35ef1a7be76261fb3eabfddf428e32afa3edd",
-    "fetchedAt": "2026-10-21T13:39:08.905Z"
+    "upstreamSha256": "5b5799e6f8c680663207ac5b42ee14eed2a406fa7af48f50c154f0c0b1566946",
+    "bodySha256": "86791280654fb3403853a2e3a39212941fd1c4af0c7e3608ae8f85cead458be0",
+    "fetchedAt": "2026-10-21T19:20:13.314Z"
   },
   "pdfjs-worker": {
-    "source": "pdfjs-dist (adopted from the repo)",
+    "source": "pdfjs-dist@3.11.174 build/pdf.worker.min.js",
     "version": "3.11.174",
-    "url": null,
+    "url": "https://registry.npmjs.org/pdfjs-dist/-/pdfjs-dist-3.11.174.tgz",
     "target": "wiki/local-plugins/lithic-import-handler/pdf.worker.js.tid",
-    "upstreamSha256": null,
-    "bodySha256": "59a466fe660424d288436657445fe3fed0cd492923acdae4518c3a0ab1858bbd",
-    "fetchedAt": "2026-10-21T13:39:08.923Z"
+    "upstreamSha256": "feabdf309770ed24bba31a5467836cdc8cf639c705af27d52b585b041bb8527b",
+    "bodySha256": "6195a19b81679dfb8fbd6c387aa37cf212c83f02628d768d142925fddc3d88fb",
+    "fetchedAt": "2026-10-21T19:20:13.796Z"
   },
   "pele": {
-    "source": "pele (adopted from the repo)",
-    "version": "unrecorded",
-    "url": null,
+    "source": "pele@1.8.0 dist/pele.global.js",
+    "version": "1.8.0",
+    "url": "https://registry.npmjs.org/pele/-/pele-1.8.0.tgz",
     "target": "wiki/local-plugins/lithic-patch-mermaid/$__plugins_xyvir_lithic-patch-mermaid_pele.js.tid",
-    "upstreamSha256": null,
-    "bodySha256": "911f3a6bbe85176bcda7227a455a3d3876818cc54de1ce8108e272d9fbffff31",
-    "fetchedAt": "2026-10-21T13:39:08.893Z"
+    "upstreamSha256": "9bf34b3a9a19351dc69d0d238e365560331a8ae392c41656df7f5090653253d0",
+    "bodySha256": "f5cd9e290b8a0bba2097fd9a0e4214eb8f2d12b93a224b9f9342c276b2c37dd2",
+    "fetchedAt": "2026-10-21T19:20:12.970Z"
   }
 }
