@@ -326,6 +326,30 @@ function checkAndroidPatchWiring() {
   return null;
 }
 
+/**
+ * The monkey is local by decision (`scripts/monkey-launcher.mjs`), and this is the half of
+ * that decision a workflow can break.
+ *
+ * A fuzz run is noisy by nature: it takes a browser, it is driven by a seed, and a red build
+ * on an unlucky seed teaches people to press retry instead of fixing the crash it found. What
+ * it finds is meant to become a case in the Puppeteer suite, which does run in CI. So the
+ * wiring is refused here rather than trusted to stay undone.
+ *
+ * Returns null when no workflow runs it, else a failure message.
+ */
+function checkMonkeyStaysLocal() {
+  if (!fs.existsSync('scripts/monkey-launcher.mjs')) {
+    return 'scripts/monkey-launcher.mjs is gone - point this check at whatever replaced the local fuzz harness';
+  }
+  const offenders = [];
+  for (const file of fs.readdirSync('.github/workflows')) {
+    if (!/\.ya?ml$/.test(file)) continue;
+    if (/monkey-launcher/.test(fs.readFileSync(`.github/workflows/${file}`, 'utf8'))) offenders.push(file);
+  }
+  if (offenders.length === 0) return null;
+  return `.github/workflows/${offenders.join(', ')} runs the local fuzz harness - it is user-initiated on purpose, and its findings belong in test-puppeteer-launcher.mjs`;
+}
+
 const spawned = [
   {
     name: 'android patch self-test',
@@ -420,6 +444,16 @@ if (triggerProblem === null) {
   failed = true;
   console.log('FAILED');
   console.log('  ' + triggerProblem);
+}
+
+process.stdout.write('> monkey stays local            ');
+const monkeyProblem = checkMonkeyStaysLocal();
+if (monkeyProblem === null) {
+  console.log('OK');
+} else {
+  failed = true;
+  console.log('FAILED');
+  console.log('  ' + monkeyProblem);
 }
 
 process.stdout.write('> android patch wiring           ');

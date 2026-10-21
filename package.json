@@ -14,6 +14,8 @@
     "check:light": "node scripts/check-light-artifact.mjs",
     "test:puppeteer": "node scripts/test-puppeteer-launcher.mjs",
     "test:puppeteer:headed": "HEADED=1 node scripts/test-puppeteer-launcher.mjs",
+    "monkey:launcher": "node scripts/monkey-launcher.mjs",
+    "monkey:launcher:headed": "HEADED=1 node scripts/monkey-launcher.mjs",
     "gallery": "node scripts/ui-gallery.mjs",
     "check:pdf-plugin": "node scripts/check-pdf-plugin-unminified.mjs",
     "test:pdf-artifact": "node scripts/test-pdf-import-artifact.mjs",

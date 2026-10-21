@@ -235,4 +235,15 @@ The launcher reads in the language of the device it is opened on, in all three s
 * **`?lang=es` on the address** asks for one page in that language, whatever the device says. It is the review path: the gallery uses it to read a translation without building one, and it is the way out of a pinned deployment.
 * **A build can be pinned**, which is how a deployment speaks one language to everybody. Set `VITE_LAUNCHER_LOCALE=es` for `npm run build:launcher`, or keep it in `launcher-ui/.env` so CI and the artifact freshness gate both see it, and the published site, the desktop bundle and the server tarball are all built Spanish. A self-hosted instance can also pin its own without rebuilding, with `LITHIC_LOCALE=es`; [self-host.md](https://github.com/Xyvir/Lithic/blob/main/self-host.md) has the detail and the two things that pin does not reach.
 
+## Testing the Launcher by Hand
+
+Two harnesses in `scripts/` cover a change to the launcher's own page, and they answer different questions.
+
+* **`npm run test:puppeteer`** drives the committed artifact through the states it is meant to be in and asserts what each one does. It runs in CI, and a failure there is a real failure.
+* **`npm run monkey:launcher`** does not know what the launcher is supposed to do. It opens every entry box the page draws (a new Lith's name, the Recents search, a bookmark's address, the repository and token fields, the vault PIN, a saved login), fills each one with values nobody types, and reports what happened: a crash, a value that came back out as markup, a dialog that would not close, a keystroke sequence with no way back.
+
+`npm run monkey:launcher:headed` watches it happen. `--rounds=8` fuzzes each box harder, `--seed=1234` repeats a run exactly, `--mode=webapp` looks at the browser build instead of the desktop one, `--list` prints what would be fuzzed and stops, and `--strict` also fails on a guardrail it judges weak rather than on a crash. The values are the interesting half: line breaks and Windows device names for a filename, `javascript:` and unparseable ports for an address, emoji and fullwidth digits for a PIN, markup for all of them.
+
+It writes a report to `scratch/monkey/report-<stamp>.md` (ignored by git) listing every value, what the field held afterwards, and what the name and address arithmetic made of it. It is deliberately not part of CI: a fuzz run is noisy, it takes a browser, and a red build on a random seed teaches people to press retry instead of fixing the crash. What it finds belongs in `test-puppeteer-launcher.mjs`, which is the harness CI runs; nothing in `.github/` may invoke it, and `npm run check:push` fails if a workflow ever does.
+
 
