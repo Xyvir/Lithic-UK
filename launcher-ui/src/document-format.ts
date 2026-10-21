@@ -82,13 +82,37 @@ export function documentExtension(format: DocumentFormat = DOCUMENT_FORMAT): '.l
 }
 
 /**
+ * What no name may carry: the C0 controls, and DEL.
+ *
+ * These arrive by accident rather than by intent. A pasted line break, a tab, an ESC left in a
+ * string by something that read a terminal, a NUL where two values were joined with the wrong
+ * byte: none of them is a request about what the document should be called, and none of them
+ * can be honoured. No filesystem accepts one as part of a filename, a line-oriented list splits
+ * on a break, and a control character in a row or a save dialog is not something a person can
+ * read or correct. So they are removed and nothing is refused: the name that is left is the name
+ * the person meant, and a name of nothing but them is still a document.
+ *
+ * Separators (`/`, `\`) are deliberately not here. Whether a name carrying one is a mistake
+ * depends on what writes it (the OS picker sanitizes its own suggested name; a row merely shows
+ * it), and that is a decision rather than an accident.
+ */
+const CONTROL_CHARACTERS = /[\u0000-\u001f\u007f]/g;
+
+/**
  * A launcher-typed name, normalized to the document the build writes.
  *
- * The extension of whatever was typed is dropped first, so a name is never doubled up, and an
- * empty result becomes `untitled` rather than a bare extension.
+ * Accidentals are taken out first (see above), then the extension of whatever was typed is
+ * dropped, so a name is never doubled up, and the ends are trimmed because a stray space is the
+ * same accident. An empty result becomes `untitled` rather than a bare extension.
  */
 export function normalizeDocumentName(name: string, format: DocumentFormat = DOCUMENT_FORMAT): string {
-  const base = name.replace(/\.(?:html?|lith|json)$/i, '');
+  const base = name
+    .replace(CONTROL_CHARACTERS, '')
+    .trim()
+    .replace(/\.(?:html?|lith|json)$/i, '')
+    // Trimmed again because dropping the extension can expose a space: `notes .lith` is a
+    // name whose accidental space sat between the stem and the extension.
+    .trim();
   const stem = base || 'untitled';
   return `${stem}.${documentExtension(format).slice(1)}`;
 }

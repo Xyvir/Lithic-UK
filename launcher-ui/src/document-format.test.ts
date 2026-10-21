@@ -71,6 +71,21 @@ test('a typed name takes the build extension, and an empty stem is untitled', ()
   assert.equal(normalizeDocumentName('new', 'both'), 'new.lith');
 });
 
+test('a control character in a name is dropped, not refused', () => {
+  // The three a name meets by accident: a pasted line break, a tab, and the NUL a bad join
+  // leaves behind. None of them is a request about what the document is called, and none can
+  // be honoured: no filesystem takes them, and a line-oriented list splits on a break.
+  assert.equal(normalizeDocumentName('two\nlines'), 'twolines.lith');
+  assert.equal(normalizeDocumentName('two\r\nlines'), 'twolines.lith', 'the same break in the other ending');
+  assert.equal(normalizeDocumentName('a\tb'), 'ab.lith');
+  assert.equal(normalizeDocumentName('a\u0000b'), 'ab.lith');
+  assert.equal(normalizeDocumentName('del\u007f'), 'del.lith');
+  // A stray space is the same kind of accident, so the ends are trimmed too.
+  assert.equal(normalizeDocumentName('  notes  '), 'notes.lith');
+  assert.equal(normalizeDocumentName('  notes .lith '), 'notes.lith', 'trimmed after the extension goes');
+  assert.equal(normalizeDocumentName('\n\t '), 'untitled.lith', 'a name of nothing but accidentals is still a document');
+});
+
 test('a stem is the name without whichever document extension it carries', () => {
   assert.equal(documentStem('notes.lith'), 'notes');
   assert.equal(documentStem('notes.html'), 'notes');

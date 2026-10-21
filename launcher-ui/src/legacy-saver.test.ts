@@ -19,6 +19,9 @@ test('normalizes launcher names to one lith extension', () => {
   assert.equal(normalizeLithName('new.lith'), 'new.lith');
   assert.equal(normalizeLithName('new.json'), 'new.lith');
   assert.equal(normalizeLithName('.html'), 'untitled.lith');
+  // The launcher's own name path through the same helper: a break is dropped rather than
+  // carried into the file name and the recent row.
+  assert.equal(normalizeLithName('two\nlines'), 'twolines.lith');
 });
 
 test('builds accurate user tiddler filter excluding all 39 default plugins and core system spaces', () => {
