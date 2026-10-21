@@ -552,7 +552,20 @@ function readState(selector, pin) {
 
 /** The browser's own picker, answered from this run's fixtures instead of a disk. */
 function installPicker() {
+  /** How many times the page asked for a file, which is how a phase tells "ignored" from "asked". */
+  window.__monkeyPickCalls = 0;
   window.showOpenFilePicker = async () => {
+    window.__monkeyPickCalls += 1;
+    // What a picker answers is part of what a person can do with the launcher, and the two
+    // answers nobody types are the interesting ones: the user cancelling, and the picker
+    // itself refusing. The page has to survive both, and `busy` has to come back off.
+    const mode = window.__monkeyPickMode;
+    if (mode === 'cancel') {
+      const aborted = new Error('The user aborted a request.');
+      aborted.name = 'AbortError';
+      throw aborted;
+    }
+    if (mode === 'throw') throw new Error('the picker refused to open');
     const pick = window.__monkeyPick;
     if (!pick) return [];
     const blob = await (await fetch(pick.url)).blob();
@@ -900,11 +913,15 @@ async function spamControls(page) {
  * wiki or the launcher, never blank, never with a payload's script running in the launcher's own
  * chrome.
  */
-async function runOpenings(browser, origin) {
+async function runOpenings(browser, served) {
+  const origin = served.origin;
   const context = await browser.createBrowserContext();
   const mountErrors = [];
   let page;
   try {
+    // A real paste is the one input a keystroke cannot imitate, so the clipboard is allowed
+    // here. A browser that refuses the permission costs the phase its realism, never the run.
+    await context.overridePermissions(origin, ['clipboard-read', 'clipboard-write']).catch(() => {});
     page = await context.newPage();
     page.setDefaultTimeout(4000);
     page.on('pageerror', (error) => {
@@ -912,6 +929,11 @@ async function runOpenings(browser, origin) {
     });
     page.on('console', (message) => {
       if (message.type() !== 'error' || isResourceNoise(message.text())) return;
+      // This run's picker hands over a closure rather than a real handle, and the recent-list
+      // write is refused because a function cannot be structured-cloned. That is this harness,
+      // not the launcher, and letting it into every phase's error list makes them all fail for
+      // the same wrong reason.
+      if (/could not be cloned/i.test(message.text())) return;
       mountErrors.push(message.text());
     });
     await guardExternal(page, [origin]);
@@ -959,11 +981,11 @@ async function runOpenings(browser, origin) {
      * half-built `$tw` behind, so the check asks for the method a booted wiki answers rather
      * than for the object a broken one happens to have created.
      */
-    const boot = async () => {
+    const boot = async (timeout = MOUNT_TIMEOUT) => {
       try {
         await page.waitForFunction(
           () => Boolean(window.$tw && window.$tw.wiki && typeof window.$tw.wiki.getTiddlerText === 'function'),
-          { polling: 200, timeout: MOUNT_TIMEOUT }
+          { polling: 200, timeout }
         );
         return true;
       } catch {
@@ -999,7 +1021,7 @@ async function runOpenings(browser, origin) {
       const size = Math.round(Buffer.byteLength(textOf(fixture)) / 1024);
       const row = {
         surface: 'mount',
-        box: fixture.label,
+        box: labelOf(fixture),
         type: `${size} KB`,
         payload: booted ? 'booted' : 'no boot',
         typed: `${elapsed}ms`,
@@ -1041,7 +1063,7 @@ async function runOpenings(browser, origin) {
         notes.push(`mount ${fixture.id}: the engine booted and reported ${real.slice(0, 2).join(' | ')}`);
       }
       runs.push(row);
-      for (const problem of row.problems) finding('FAIL', `mount / ${fixture.label}`, `${size} KB`, problem);
+      for (const problem of row.problems) finding('FAIL', `mount / ${labelOf(fixture)}`, `${size} KB`, problem);
       if (VERBOSE) console.log(`  mount ${fixture.id} [${size} KB] ${row.payload} ${row.held} ${row.typed}`);
     }
 
@@ -1138,6 +1160,557 @@ async function runOpenings(browser, origin) {
           finding('FAIL', `link / ${item.id}`, '?json=', 'a payload in the address reached script in the launcher');
         }
       }
+    }
+
+    // --- the edges a person reaches by accident ------------------------------
+
+    /** One row per edge, in the same table as the files, because it judges the same page. */
+    const edgeRow = ({ id, label, outcome, held, problems = [] }) => {
+      runs.push({ surface: 'edge', box: label, type: id, payload: outcome, typed: '-', held, problems });
+      for (const problem of problems) finding('FAIL', `edge / ${label}`, id, problem);
+      if (VERBOSE) console.log(`  edge ${id}: ${outcome} ${held}${problems.length ? ` | ${problems.join('; ')}` : ''}`);
+    };
+    /** The Mount control is the launcher's own answer to "is it still working?". */
+    const mountIdle = () =>
+      page
+        .waitForFunction(
+          () => {
+            const button = document.querySelector('.mount-button');
+            return Boolean(button) && !button.disabled;
+          },
+          { polling: 100, timeout: 30000 }
+        )
+        .then(() => true)
+        .catch(() => false);
+    /** A page that says something in the status line, with what it said. */
+    const waitForSaid = async (timeout = 8000) => {
+      const started = Date.now();
+      while (Date.now() - started < timeout) {
+        const said = await safeEvaluate(
+          page,
+          () => document.querySelector('.status-line, .mount-error, .status-line.error')?.textContent?.trim() ?? ''
+        );
+        if (typeof said === 'string' && said.length > 0) return said;
+        await sleep(page, 200);
+      }
+      return '';
+    };
+    const pickFixture = (id) =>
+      page.evaluate(
+        (pick) => {
+          window.__monkeyPickMode = 'mount';
+          window.__monkeyPick = pick;
+        },
+        { url: `${origin}/fuzz/${id}`, name: `${id}.lith` }
+      );
+    /**
+     * Press Mount, but only once the launcher is idle.
+     *
+     * The button is disabled while the page is loading its own lists, and a press into a disabled
+     * control is silently dropped: a phase that clicks the moment the container appears reports a
+     * mount that never happened, and blames the launcher for it. Waiting is what makes the press
+     * mean the thing the phase is testing.
+     */
+    const clickMount = async () => {
+      await page
+        .waitForFunction(
+          () => {
+            const button = document.querySelector('.mount-button');
+            return Boolean(button) && !button.disabled;
+          },
+          { polling: 100, timeout: 15000 }
+        )
+        .catch(() => {});
+      await page.evaluate(() => document.querySelector('.mount-button')?.click());
+    };
+
+    // A picker answered by cancellation. Nothing is opened, and the one thing that matters is
+    // that the control comes back: a `busy` flag left on is the launcher refusing every later
+    // press with no way to tell why.
+    {
+      await open();
+      await page.evaluate(() => {
+        window.__monkeyPickMode = 'cancel';
+      });
+      const errorsBefore = mountErrors.length;
+      await clickMount();
+      const idle = await mountIdle();
+      await sleep(page, 200);
+      const state = await describePage();
+      const problems = [];
+      if (!idle) problems.push('cancelling the picker left the Mount control disabled');
+      if (!state.launcher) problems.push('the launcher was not the page afterwards');
+      const fresh = mountErrors.slice(errorsBefore);
+      if (fresh.length > 0) problems.push(`cancelling raised ${fresh[0]}`);
+      edgeRow({
+        id: 'picker-cancel',
+        label: 'the picker is cancelled',
+        outcome: idle ? 'back to idle' : 'stuck busy',
+        held: state.launcher ? 'launcher' : 'left the launcher',
+        problems
+      });
+    }
+
+    // A picker that refuses. The page falls back to the classic input, which a person then
+    // cancels by closing the chooser, and that answer has to land it back at idle too.
+    {
+      await open();
+      await page.evaluate(() => {
+        window.__monkeyPickMode = 'throw';
+        // The fallback input is created and clicked without ever being attached to the page, so
+        // the chooser it opens is only observable where the browser sees it. This answers the
+        // press the way a person closing the chooser does: no files, so `change` fires empty.
+        window.__monkeyFileInput = null;
+        const click = HTMLInputElement.prototype.click;
+        HTMLInputElement.prototype.click = function patched() {
+          if (this.type === 'file') {
+            window.__monkeyFileInput = this;
+            setTimeout(() => this.dispatchEvent(new Event('change', { bubbles: true })), 50);
+            return;
+          }
+          return click.call(this);
+        };
+      });
+      await clickMount();
+      await sleep(page, 500);
+      const appeared = await page.evaluate(() => Boolean(window.__monkeyFileInput));
+      const idle = await mountIdle();
+      const state = await describePage();
+      const problems = [];
+      if (!appeared) problems.push('a picker that threw offered no fallback chooser to cancel');
+      if (!idle) problems.push('the fallback chooser being cancelled left the Mount control disabled');
+      if (!state.launcher) problems.push('the launcher was not the page afterwards');
+      edgeRow({
+        id: 'picker-throw',
+        label: 'the picker refuses to open',
+        outcome: appeared ? 'fallback chooser' : 'no chooser',
+        held: state.launcher ? 'launcher' : 'left the launcher',
+        problems
+      });
+    }
+
+    // An engine that is not there at all: every candidate answers 404, so the launcher has to
+    // say so and stay usable rather than sit on an empty document.
+    {
+      served.missEngine(true);
+      try {
+        await open();
+        await pickFixture('valid');
+        await clickMount();
+        // Read the line only after the mount has stopped working: the first thing it says is
+        // "Opening", which is true and says nothing about whether the engine was found.
+        const idle = await mountIdle();
+        const said = await waitForSaid(2000);
+        const state = await describePage();
+        const problems = [];
+        const where = JSON.stringify({ url: state.url, title: state.title, body: state.body, status: state.status });
+        if (!said) problems.push(`a mount with no engine anywhere said nothing at all ${where}`);
+        if (!state.launcher) problems.push(`a mount with no engine left the launcher ${where}`);
+        if (!idle) problems.push(`the Mount control stayed disabled after the engine failed ${where}`);
+        edgeRow({
+          id: 'engine-missing',
+          label: 'the engine answers 404 everywhere',
+          outcome: said ? 'said so' : 'silent',
+          held: said.slice(0, 60) || state.status || '-',
+          problems
+        });
+      } finally {
+        served.missEngine(false);
+      }
+    }
+
+    // An engine that takes 25 seconds. The wait itself is the test: the page has to still be the
+    // launcher while it waits, and Escape has to work before the answer arrives.
+    {
+      await page.goto(`${origin}/slow/launcher.html?mode=webapp`, { waitUntil: 'domcontentloaded' });
+      await page.waitForSelector('main.container', { timeout: 15000 });
+      await pickFixture('valid');
+      const errorsBefore = mountErrors.length;
+      await clickMount();
+      await sleep(page, 1500);
+      const waiting = await describePage();
+      await page.keyboard.press('Escape').catch(() => {});
+      await page.keyboard.press('Escape').catch(() => {});
+      await sleep(page, 300);
+      const escaped = await describePage();
+      // The engine answers after 25 seconds, so the wait is that plus whatever the boot costs.
+      const booted = await boot(MOUNT_TIMEOUT + SLOW_ENGINE_MS);
+      const final = await describePage();
+      const problems = [];
+      if (!waiting.launcher) problems.push('the launcher was not the page while the engine was still loading');
+      if (waiting.unreadable) problems.push(`the page could not be read during the wait: ${waiting.unreadable}`);
+      if (escaped.unreadable) problems.push(`Escape during the wait left a page that could not be read: ${escaped.unreadable}`);
+      if (!final.wiki && !final.launcher) problems.push('the slow engine ended as neither the wiki nor the launcher');
+      const fresh = mountErrors.slice(errorsBefore);
+      if (fresh.length > 0) problems.push(`waiting raised ${fresh[0]}`);
+      edgeRow({
+        id: 'engine-slow',
+        label: 'the engine takes 25 seconds',
+        outcome: booted ? 'booted late' : 'never booted',
+        held: final.wiki ? 'wiki' : final.launcher ? 'launcher' : 'blank',
+        problems
+      });
+    }
+
+    // Two presses of the same control, in the same tick: the cheapest way to mount twice.
+    {
+      await open();
+      await pickFixture('valid');
+      const errorsBefore = mountErrors.length;
+      await page.evaluate(() => {
+        const button = document.querySelector('.mount-button');
+        button?.click();
+        button?.click();
+      });
+      const booted = await boot();
+      const state = await describePage();
+      const problems = [];
+      if (!booted) problems.push('a double press did not mount at all');
+      if (!state.wiki && !state.launcher) problems.push('a double press ended as neither the wiki nor the launcher');
+      const fresh = mountErrors.slice(errorsBefore);
+      if (fresh.length > 0) problems.push(`a double press raised ${fresh[0]}`);
+      edgeRow({
+        id: 'double-mount',
+        label: 'Mount is pressed twice in one tick',
+        outcome: booted ? 'one mount' : 'no mount',
+        held: state.wiki ? 'wiki' : state.launcher ? 'launcher' : 'blank',
+        problems
+      });
+    }
+
+    // A dropped instance backup. `handleDrop` reads a `.json` as this device's own store before
+    // it reads it as a tiddler array, and that branch had never been entered by a harness.
+    {
+      await open();
+      const backup = JSON.stringify({
+        format: 'lithic-instance-backup',
+        version: 1,
+        exportedAt: new Date(0).toISOString(),
+        source: { mode: 'local', origin: null },
+        recents: [{ name: 'imported.lith', text: 'title: Imported\n\nhello' }],
+        wikis: [{ name: 'imported.lith', history: [], cache: null }],
+        bookmarks: []
+      });
+      await page.evaluate(async (json) => {
+        const transfer = new DataTransfer();
+        transfer.items.add(new File([json], 'lithic-instance-backup.json', { type: 'application/json' }));
+        window.dispatchEvent(new DragEvent('drop', { dataTransfer: transfer, bubbles: true, cancelable: true }));
+      }, backup);
+      await sleep(page, 900);
+      const state = await safeEvaluate(page, () => ({
+        launcher: Boolean(document.querySelector('main.container')),
+        rows: [...document.querySelectorAll('.recent-row')].map((row) => row.textContent?.trim() ?? ''),
+        status: document.querySelector('.status-line')?.textContent?.trim() ?? ''
+      }));
+      const problems = [];
+      if (state.unreadable) problems.push(`the page could not be read after the backup: ${state.unreadable}`);
+      else {
+        if (!state.launcher) problems.push('dropping a backup left the launcher');
+        if (!state.rows.some((row) => row.includes('imported.lith'))) {
+          problems.push(`a dropped backup put no row in the list (${state.status || 'no status'})`);
+        }
+      }
+      edgeRow({
+        id: 'drop-backup',
+        label: 'a dropped instance backup',
+        outcome: state.rows?.some?.((row) => row.includes('imported.lith')) ? 'one row restored' : 'no row',
+        held: (state.status || '-').slice(0, 60),
+        problems
+      });
+    }
+
+    // A drop of something the launcher does not open. It is ignored, which is defensible, and
+    // silent, which is worth printing: the person sees a drop do nothing and has no way to ask.
+    {
+      await open();
+      const dropped = await safeEvaluate(page, async () => {
+        const forms = [
+          new File(['plain notes'], 'notes.txt', { type: 'text/plain' }),
+          new File(['{"not":"a tiddler array"}'], 'broken.json', { type: 'application/json' }),
+          new File([''], 'folder-without-extension', { type: '' })
+        ];
+        const seen = [];
+        for (const file of forms) {
+          const transfer = new DataTransfer();
+          transfer.items.add(file);
+          window.dispatchEvent(new DragEvent('drop', { dataTransfer: transfer, bubbles: true, cancelable: true }));
+          await new Promise((done) => setTimeout(done, 200));
+          seen.push({
+            name: file.name,
+            status: document.querySelector('.status-line, .mount-error')?.textContent?.trim() ?? '',
+            rows: document.querySelectorAll('.recent-row').length
+          });
+        }
+        return { alive: Boolean(document.querySelector('main.container')), seen };
+      });
+      const problems = [];
+      if (dropped.unreadable) problems.push(`the page could not be read after the drops: ${dropped.unreadable}`);
+      else if (!dropped.alive) problems.push('a dropped file the launcher does not open took the launcher away');
+      const quiet = (dropped.seen ?? []).filter((entry) => !entry.status).map((entry) => entry.name);
+      if (quiet.length > 0) {
+        notes.push(`edge: a dropped ${quiet.join(', ')} is ignored without saying so; whether that wants a notice is a copy decision, not a crash`);
+      }
+      edgeRow({
+        id: 'drop-other',
+        label: 'a dropped .txt, a broken .json and an extensionless file',
+        outcome: quiet.length === 0 ? 'said something' : `${quiet.length} ignored silently`,
+        held: dropped.alive ? 'launcher' : 'left the launcher',
+        problems
+      });
+    }
+
+    // One gesture carrying two documents. Both files are read, in the order the gesture held
+    // them, and a row's own ✕ takes only that row: the two things a person does after dragging
+    // several Liths at once.
+    {
+      await open();
+      await page.evaluate(
+        async (picks) => {
+          const transfer = new DataTransfer();
+          for (const pick of picks) {
+            const text = await (await fetch(pick.url)).text();
+            transfer.items.add(new File([text], pick.name, { type: 'text/plain' }));
+          }
+          window.dispatchEvent(new DragEvent('drop', { dataTransfer: transfer, bubbles: true, cancelable: true }));
+        },
+        [
+          { url: `${origin}/fuzz/valid`, name: 'first.lith' },
+          { url: `${origin}/fuzz/controls`, name: 'second.lith' }
+        ]
+      );
+      await sleep(page, 600);
+      const queued = await safeEvaluate(page, () => ({
+        titles: [...document.querySelectorAll('.pending-imports .pending-title')].map((node) => node.textContent.trim()),
+        label: document.querySelector('.pending-imports .pending-remove')?.getAttribute('aria-label') ?? null,
+        launcher: Boolean(document.querySelector('main.container'))
+      }));
+      const expected = ['Getting Started', 'Notes', 'Code', 'ctl'];
+      const problems = [];
+      if (queued.unreadable) problems.push(`the page could not be read after the drop: ${queued.unreadable}`);
+      else if (!queued.launcher) problems.push('a drop carrying two documents took the launcher away');
+      else if (JSON.stringify(queued.titles) !== JSON.stringify(expected)) {
+        problems.push(`a drop carrying two documents queued ${JSON.stringify(queued.titles)} rather than ${JSON.stringify(expected)}`);
+      } else if (queued.label !== 'Remove Getting Started') {
+        problems.push(`the first row's ✕ named ${JSON.stringify(queued.label)} rather than the row it removes`);
+      }
+      // The row's own control, not the header's: removing one must leave the others queued.
+      await page.evaluate(() => document.querySelector('.pending-imports .pending-remove')?.click());
+      await sleep(page, 250);
+      const afterOne = await safeEvaluate(page, () => ({
+        titles: [...document.querySelectorAll('.pending-imports .pending-title')].map((node) => node.textContent.trim())
+      }));
+      if (!afterOne.unreadable) {
+        const expectedAfter = ['Notes', 'Code', 'ctl'];
+        if (JSON.stringify(afterOne.titles) !== JSON.stringify(expectedAfter)) {
+          problems.push(`one row's ✕ left ${JSON.stringify(afterOne.titles)} rather than ${JSON.stringify(expectedAfter)}`);
+        }
+      }
+      edgeRow({
+        id: 'drop-many',
+        label: 'a drop carrying two documents',
+        outcome: `${(queued.titles ?? []).length} queued, ${(afterOne.titles ?? []).length} after one removed`,
+        held: queued.launcher ? 'launcher' : 'left the launcher',
+        problems
+      });
+    }
+
+    // A shared tiddler over a URL, which is the other half of `?json=` and a fetch the launcher
+    // makes itself. The payload mounts a blank wiki and queues what it carried.
+    {
+      await page.goto(`${base}&url=${encodeURIComponent(`${origin}/payload/remote`)}`, { waitUntil: 'domcontentloaded' });
+      const booted = await boot();
+      // The launcher's own panel is the launcher's chrome, and a `?url=` payload mounts a blank
+      // wiki before queueing it: where the tiddler has to arrive is the wiki itself.
+      const state = await safeEvaluate(page, () => ({
+        launcher: Boolean(document.querySelector('main.container')),
+        carried: (() => {
+          try {
+            return String(window.$tw?.wiki?.getTiddlerText?.('RemoteTiddler') ?? '');
+          } catch {
+            return '';
+          }
+        })()
+      }));
+      const problems = [];
+      if (!booted) problems.push('a ?url= payload did not boot the blank wiki');
+      if (state.unreadable) problems.push(`the page could not be read after the payload: ${state.unreadable}`);
+      else if (!state.carried) problems.push('a ?url= payload carried no tiddler into the wiki');
+      edgeRow({
+        id: 'url-payload',
+        label: 'tiddlers shared over a URL',
+        outcome: booted ? 'booted' : 'no boot',
+        held: state.carried ? `carried ${JSON.stringify(state.carried.slice(0, 30))}` : '-',
+        problems
+      });
+    }
+
+    // A paste, with the clipboard really set, and an IME composition, which is how the name field
+    // is used in half the world. Both are judged the way a field always is: the value arrives,
+    // nothing in it becomes markup, and the launcher is still there.
+    {
+      await open();
+      await page.click('.new-blank-button');
+      await page.waitForSelector('.new-lith-inline');
+      await page.click('.new-lith-field input');
+      // A clipboard write needs the document focused, and a background tab is not.
+      await page.bringToFront().catch(() => {});
+      const hostile = 'pasted </script><img src=x onerror="window.__monkeyPwned=1">';
+      await page.evaluate(async (text) => {
+        try {
+          await navigator.clipboard.writeText(text);
+        } catch {
+          // Left to the note below: the paste is only realistic if the clipboard took it.
+        }
+      }, hostile);
+      await page.keyboard.down('Control');
+      await page.keyboard.press('KeyV');
+      await page.keyboard.up('Control');
+      await sleep(page, 300);
+      const pasted = await page.evaluate(() => ({
+        value: document.querySelector('.new-lith-field input')?.value ?? '',
+        pwned: window.__monkey ? window.__monkey.pwned.slice() : [],
+        alive: Boolean(document.querySelector('main.container'))
+      }));
+      const pasteLanded = pasted.value.includes('onerror');
+      if (!pasteLanded) {
+        notes.push('edge: the clipboard could not be driven headlessly, so the paste phase ran as a keystroke-free no-op');
+      }
+      const composed = await page.evaluate(() => {
+        const input = document.querySelector('.new-lith-field input');
+        if (!input) return { value: null };
+        input.value = '';
+        input.dispatchEvent(new Event('input', { bubbles: true }));
+        input.focus();
+        input.value = 'み';
+        input.dispatchEvent(new CompositionEvent('compositionstart', { data: 'm', bubbles: true }));
+        input.value = 'みょうじ';
+        input.dispatchEvent(new CompositionEvent('compositionupdate', { data: 'みょうじ', bubbles: true }));
+        input.dispatchEvent(new InputEvent('input', { bubbles: true, data: 'みょうじ', isComposing: true }));
+        input.dispatchEvent(new CompositionEvent('compositionend', { data: 'みょうじ', bubbles: true }));
+        return { value: input.value, alive: Boolean(document.querySelector('main.container')) };
+      });
+      const problems = [];
+      if (!pasted.alive) problems.push('a paste took the launcher away');
+      if (pasted.pwned.length > 0) problems.push('a pasted payload reached script');
+      if (composed.value === null) problems.push('the composition ended with no field to compose into');
+      else if (composed.value !== 'みょうじ') problems.push(`the composed name arrived as ${JSON.stringify(composed.value)}`);
+      if (!composed.alive) problems.push('an IME composition took the launcher away');
+      edgeRow({
+        id: 'paste-ime',
+        label: 'a paste and an IME composition',
+        outcome: pasteLanded ? 'paste landed' : 'paste not drivable',
+        held: JSON.stringify((composed.value ?? '').slice(0, 12)),
+        problems
+      });
+    }
+
+    // A thousand rows and a hundred-kilobyte query, which is what a launcher accumulates after a
+    // year of use. The judgement is that it still draws and still answers, not that it is fast:
+    // nothing here has a budget, and a bound invented now would fail on a slower machine.
+    {
+      await page.evaluate(() => {
+        localStorage.setItem(
+          'lithic-recent-liths',
+          JSON.stringify(Array.from({ length: 1000 }, (_value, index) => ({ name: `row-${index}.lith`, text: 'title: x' })))
+        );
+        localStorage.setItem(
+          'lithic-bookmarks',
+          JSON.stringify(Array.from({ length: 50 }, (_value, index) => ({ url: `https://instance-${index}.example`, label: `i${index}` })))
+        );
+      });
+      const started = Date.now();
+      await open();
+      const drawn = Date.now() - started;
+      const search = await page.evaluate(async (query) => {
+        const box = document.querySelector('.recent-search');
+        if (!box) return { missing: true };
+        const at = Date.now();
+        box.value = query;
+        box.dispatchEvent(new Event('input', { bubbles: true }));
+        await new Promise((done) => setTimeout(done, 600));
+        return {
+          typed: box.value.length,
+          elapsed: Date.now() - at,
+          rows: document.querySelectorAll('.recent-row').length,
+          alive: Boolean(document.querySelector('main.container'))
+        };
+      }, 'x'.repeat(100_000));
+      const problems = [];
+      if (search.missing) problems.push('a thousand rows left no search box to type in');
+      else {
+        if (!search.alive) problems.push('a hundred-kilobyte query took the launcher away');
+        if (search.rows > 0) problems.push(`a query nothing matches still drew ${search.rows} row(s)`);
+      }
+      edgeRow({
+        id: 'accumulated',
+        label: '1000 rows, 50 bookmarks and a 100 KB query',
+        outcome: `drawn in ${drawn}ms`,
+        held: search.missing ? 'no search box' : `${search.rows} rows, answered in ${search.elapsed}ms`,
+        problems
+      });
+      notes.push('edge: the accumulated-state timing is reported, not asserted, because no budget for it has been decided');
+    }
+
+    // Storage that refuses the write. The cache is what makes an offline launcher work, and a
+    // mount must not become a failure just because the copy cannot be kept.
+    {
+      await open();
+      await page.evaluateOnNewDocument(() => {
+        // Only the write is refused: the store still opens, which is what a full disk does.
+        // Only the cache is refused. A full disk is this: the launcher's own store still works,
+        // the copy of the wiki cannot be kept, and the mount has to survive it.
+        const put = IDBObjectStore.prototype.put;
+        IDBObjectStore.prototype.put = function refuse(value, key) {
+          const at = typeof key === 'string' ? key : String(value && value.name ? value.name : '');
+          if (at.startsWith('search_cache')) {
+            throw new DOMException('the disk is full', 'QuotaExceededError');
+          }
+          return put.call(this, value, key);
+        };
+      });
+      // `open()` loads the next document, which is the one the patch applies to, and settles it
+      // before anything presses a control. A press into a page that has just drawn its first
+      // frame lands before the handler exists, which reads as a launcher ignoring the click.
+      await open();
+      const probe = await page.evaluate(() => {
+        window.__monkeySeenClicks = 0;
+        const button = document.querySelector('.mount-button');
+        button?.addEventListener('click', () => {
+          window.__monkeySeenClicks += 1;
+        }, { capture: true });
+        return { picker: typeof window.showOpenFilePicker, button: Boolean(button), disabled: Boolean(button?.disabled) };
+      });
+      await pickFixture('valid');
+      await clickMount();
+      const early = await page.evaluate(() => ({
+        clicks: window.__monkeySeenClicks ?? -1,
+        picks: window.__monkeyPickCalls ?? -1,
+        disabled: Boolean(document.querySelector('.mount-button')?.disabled)
+      }));
+      const booted = await boot();
+      const state = await describePage();
+      const problems = [];
+      const where = JSON.stringify({ probe, early,
+        url: state.url,
+        status: state.status,
+        errors: state.errors.slice(0, 2),
+        asked: await page.evaluate(() => ({
+          picks: window.__monkeyPickCalls ?? -1,
+          disabled: Boolean(document.querySelector('.mount-button')?.disabled)
+        })),
+        said: await page.evaluate(
+          () => (document.querySelector('main.container')?.innerText ?? '').replace(/\s+/g, ' ').slice(0, 240)
+        )
+      });
+      if (!booted) problems.push(`a mount whose cache write fails did not boot ${where}`);
+      if (!state.wiki && !state.launcher) problems.push(`a refused cache write ended as neither the wiki nor the launcher ${where}`);
+      edgeRow({
+        id: 'storage-full',
+        label: 'the cache refuses to write',
+        outcome: booted ? 'booted anyway' : 'did not boot',
+        held: state.wiki ? 'wiki' : state.launcher ? 'launcher' : 'blank',
+        problems
+      });
     }
   } finally {
     await context.close().catch(() => {});
@@ -1378,6 +1951,14 @@ const randomText = (length, rnd) => {
  * grew a NUL. Those are the shapes a parser meets when a write was interrupted or a file was
  * edited by hand, and they are where an index-of arithmetic goes wrong.
  */
+/**
+ * A seeded mutation of a valid Lith, made of one to three edits rather than one.
+ *
+ * One edit per seed was the first version, and it was too shallow to be worth a new round: a
+ * hundred seeds produced a hundred near-identical files. Stacking edits is what produces the
+ * shapes a real broken file has (a doubled header *and* a lost delimiter), and every operator
+ * here is a thing a hand-edit, a merge conflict or a half-finished write really leaves.
+ */
 function mutate(text, rnd) {
   const operators = [
     ['flipped one character', (source) => {
@@ -1398,10 +1979,32 @@ function mutate(text, rnd) {
     ['CRLF everywhere', (source) => source.replace(/\n/g, '\r\n')],
     ['newlines removed', (source) => source.replace(/\n/g, ' ')],
     ['titles stripped', (source) => source.replace(/^title:.*$/gm, '')],
-    ['a second title on every tiddler', (source) => source.replace(/^title: (.*)$/gm, 'title: $1\ntitle: dup')]
+    ['a second title on every tiddler', (source) => source.replace(/^title: (.*)$/gm, 'title: $1\ntitle: dup')],
+    ['a second tiddler whose title differs only by case', (source) =>
+      `${source}\n${DELIMITER}\ntitle: ${BASE_TIDDLERS[0].title.toUpperCase()}\n\nsecond`],
+    ['a delimiter inside a body', (source) => {
+      const at = source.indexOf('\n\n');
+      const cut = at >= 0 ? at + 2 + Math.floor((source.length - at) * 0.4) : Math.floor(source.length / 2);
+      return `${source.slice(0, cut)}\n${DELIMITER}\n${source.slice(cut)}`;
+    }],
+    ['a space before every header colon', (source) => source.replace(/^([a-z-]+):/gm, '$1 :')],
+    ['a byte-order mark in front', (source) => `\ufeff${source}`],
+    ['the delimiter inside a title', (source) => source.replace(/^title: (.*)$/m, `title: $1 ${DELIMITER} trailing`)],
+    ['no newline at the end', (source) => source.replace(/\n+$/, '')],
+    ['tabs where the blank lines were', (source) => source.replace(/\n\n/g, '\n\t\n')]
   ];
-  const [label, apply] = operators[Math.floor(rnd() * operators.length)];
-  return { label, text: apply(text) };
+  // One to three operators, drawn without replacement, so a seed can produce a file with two
+  // things wrong with it. The label names every edit, which is what makes a failure in the
+  // report reproducible rather than mysterious.
+  const wanted = 1 + Math.floor(rnd() * 3);
+  const remaining = [...operators];
+  const chosen = [];
+  while (chosen.length < wanted && remaining.length > 0) {
+    chosen.push(...remaining.splice(Math.floor(rnd() * remaining.length), 1));
+  }
+  let mutated = text;
+  for (const [, apply] of chosen) mutated = apply(mutated);
+  return { label: chosen.map(([name]) => name).join(', then '), text: mutated };
 }
 
 /**
@@ -1423,14 +2026,31 @@ const LITH_FIXTURES = [
   { id: 'script-body', label: 'script and an image handler in a body', note: 'a tiddler body is rendered; whether this runs is the engine\'s answer, not the launcher\'s', build: () => lithFile([{ title: 'evil', text: '<script>window.__monkeyPwned=1</script><img src=x onerror="window.__monkeyPwned=1">' }]) },
   { id: 'huge-body', label: 'one 8 MB tiddler', note: 'a wiki that outgrew every list it is shown in', build: () => lithFile([{ title: 'huge', text: 'x'.repeat(8_000_000) }]) },
   { id: 'many-tiddlers', label: '2000 small tiddlers', note: 'the delimiter scan at scale', build: () => lithFile(Array.from({ length: 2000 }, (_value, index) => ({ title: `n${index}`, text: 'y' }))) },
-  { id: 'mutated', label: 'a seeded mutation of a valid Lith', note: 'nearly a Lith, which is what an interrupted write leaves', build: (rnd) => mutate(lithFile(BASE_TIDDLERS), rnd).text, describe: (rnd) => mutate(lithFile(BASE_TIDDLERS), rnd).label }
+  { id: 'mutated', label: 'a seeded mutation of a valid Lith', note: 'nearly a Lith, which is what an interrupted write leaves', build: (rnd) => mutate(lithFile(BASE_TIDDLERS), rnd) }
 ];
 
-/** Fixture text, built once per run and kept by the little server below. */
-const fixtureText = new Map();
+/**
+ * Fixture text, built once per run and kept by the little server below.
+ *
+ * A build answers a string, or `{ text, label }` where the file was made by mutating one and the
+ * label names what was done to it. The label travels into the report, because "a seeded mutation"
+ * on its own is not enough to reproduce the file that broke something.
+ */
+const fixtureBuilt = new Map();
+function built(fixture) {
+  if (!fixtureBuilt.has(fixture.id)) {
+    const result = fixture.build(random);
+    fixtureBuilt.set(fixture.id, typeof result === 'string' ? { text: result, label: '' } : result);
+  }
+  return fixtureBuilt.get(fixture.id);
+}
 function textOf(fixture) {
-  if (!fixtureText.has(fixture.id)) fixtureText.set(fixture.id, fixture.build(random));
-  return fixtureText.get(fixture.id);
+  return built(fixture).text;
+}
+/** What a fixture is called in the report, saying what was done if it was made by mutating one. */
+function labelOf(fixture) {
+  const { label } = built(fixture);
+  return label ? `${fixture.label} (${label})` : fixture.label;
 }
 
 /** Which fixtures this run opens: the control always, then a seeded sample of the rest. */
@@ -1456,8 +2076,12 @@ function enginePath() {
  * Not a stand-in instance: it answers four paths and nothing else, so a mount can read the
  * engine over the same origin rules a deployment uses without pretending to be one.
  */
+/** How long the slow room takes to answer with an engine. */
+const SLOW_ENGINE_MS = 25000;
+
 async function startOrigin() {
   const engine = enginePath();
+  const state = { engineMissing: false };
   if (!engine) return null;
   const engineBytes = readFileSync(engine);
   const send = (response, type, body) => {
@@ -1477,8 +2101,36 @@ async function startOrigin() {
       response.writeHead(400).end(`bad request: ${JSON.stringify(request.url)} (${String(error.message)})`);
       return;
     }
-    if (path === '/launcher.html') return send(response, 'text/html; charset=utf-8', bytes);
-    if (path === '/lithic.html' || path === '/src/lithic.html') return send(response, 'text/html; charset=utf-8', engineBytes);
+    // Three rooms, because the engine's own failures are reached by changing where the page is:
+    // `/` is the ordinary one, `/slow` makes the first engine answer take 25 seconds, and
+    // `/noengine` has no engine under it at all. The launcher resolves its engine beside the
+    // page first and then at the origin root, so the root paths are part of the answer too.
+    const parts = path.split('/').filter(Boolean);
+    const room = parts.length > 1 ? parts[0] : '';
+    const file = parts[parts.length - 1] ?? '';
+    const known = room === '' || room === 'slow' || room === 'noengine';
+    if (known && file === 'launcher.html') return send(response, 'text/html; charset=utf-8', bytes);
+    if (file === 'lithic.html') {
+      // The launcher asks beside the page first and at the origin root after, so "no engine"
+      // has to cover all four candidates, `/src/` included.
+      if (room === 'noengine' || ((room === '' || room === 'src') && state.engineMissing)) {
+        return response.writeHead(404, { 'Content-Type': 'text/plain' }).end('no engine here');
+      }
+      if (room === 'slow') {
+        // Long enough that a person would give up, which is the point: the launcher has to
+        // stay a launcher while it waits, and the way out has to work before the answer comes.
+        return setTimeout(() => send(response, 'text/html; charset=utf-8', engineBytes), SLOW_ENGINE_MS);
+      }
+      return send(response, 'text/html; charset=utf-8', engineBytes);
+    }
+    if (path === '/payload/remote') {
+      // What a `?url=` link fetches: tiddlers as a JSON array, the shape the launcher parses.
+      return send(
+        response,
+        'application/json; charset=utf-8',
+        JSON.stringify([{ title: 'RemoteTiddler', text: 'shared over a url' }])
+      );
+    }
     if (path.startsWith('/fuzz/')) {
       const fixture = LITH_FIXTURES.find((entry) => entry.id === path.slice('/fuzz/'.length));
       if (fixture) return send(response, 'text/plain; charset=utf-8', textOf(fixture));
@@ -1487,7 +2139,14 @@ async function startOrigin() {
   });
   await new Promise((done) => server.listen(0, '127.0.0.1', done));
   const { port } = server.address();
-  return { origin: `http://127.0.0.1:${port}`, close: () => new Promise((done) => server.close(() => done())) };
+  return {
+    origin: `http://127.0.0.1:${port}`,
+    close: () => new Promise((done) => server.close(() => done())),
+    /** Make the root engine answer 404, for the no-engine phase. */
+    missEngine: (missing) => {
+      state.engineMissing = Boolean(missing);
+    }
+  };
 }
 
 // --- the run ----------------------------------------------------------------
@@ -1756,7 +2415,7 @@ async function run() {
       } else {
         notes.push(`opening phases served from ${served.origin} for this run only`);
         try {
-          await runOpenings(browser, served.origin);
+          await runOpenings(browser, served);
         } catch (error) {
           // A phase that cannot finish is a finding, not the end of the run: the report is the
           // whole point, and an uncaught error here used to take it down with the phase.
