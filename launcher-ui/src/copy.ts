@@ -510,6 +510,7 @@ const en = {
     nameAria: 'Lith file name',
     taken: 'Name already in use',
     takenError: 'Name already in use.',
+    renamed: (name: string) => `This saves as ${name} so it opens on every system.`,
     create: 'Create lith',
     closeAria: 'Close new lith entry'
   },
@@ -1179,6 +1180,7 @@ const es: Copy = {
     nameAria: 'Nombre del archivo Lith',
     taken: 'Nombre ya en uso',
     takenError: 'Nombre ya en uso.',
+    renamed: (name: string) => `Se guarda como ${name} para que abra en cualquier sistema.`,
     create: 'Crear lith',
     closeAria: 'Cerrar la entrada de nuevo lith'
   },
@@ -1810,6 +1812,7 @@ const fr: Copy = {
     nameAria: 'Nom du fichier Lith',
     taken: 'Nom déjà utilisé',
     takenError: 'Nom déjà utilisé.',
+    renamed: (name: string) => `Enregistré sous ${name} pour qu'il s'ouvre partout.`,
     create: 'Créer le lith',
     closeAria: 'Fermer la saisie du nouveau lith'
   },
@@ -2438,6 +2441,7 @@ const de: Copy = {
     nameAria: 'Dateiname des Lith',
     taken: 'Name bereits vergeben',
     takenError: 'Name bereits vergeben.',
+    renamed: (name: string) => `Wird als ${name} gespeichert, damit es überall aufgeht.`,
     create: 'Lith erstellen',
     closeAria: 'Eingabe des neuen Lith schließen'
   },

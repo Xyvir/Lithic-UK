@@ -956,7 +956,11 @@ footer > * { pointer-events: auto; }
 .new-lith-check.invalid { color: var(--lithic-amber-mark); }
 .new-lith-warn { width: 22px; height: 22px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
 .new-lith-close { border-radius: 6px; }
-.new-lith-error {
+/* One slot above the field, two things that can stand in it: a refusal (the name is taken) and
+ * the notice that the launcher had to change the name. They are never both drawn, and the
+ * refusal wins, because it is the one that stops the press. */
+.new-lith-error,
+.new-lith-rename {
   position: absolute;
   bottom: calc(100% + 5px);
   left: 0;
@@ -965,11 +969,21 @@ footer > * { pointer-events: auto; }
   border: 1px solid var(--lithic-line);
   border-radius: 5px;
   background: var(--lithic-surface-card);
-  color: var(--lithic-amber-mark);
   font-size: 0.78rem;
   line-height: 1.4;
   white-space: nowrap;
+}
+.new-lith-error {
+  color: var(--lithic-amber-mark);
   box-shadow: 0 2px 6px var(--lithic-shadow-wash-50);
+}
+.new-lith-rename {
+  color: var(--lithic-ink-faint);
+  /* This one carries a filename, so it wraps inside the field's width instead of sliding under
+   * the page edge on a phone, and a name with no spaces in it breaks rather than overflows. */
+  white-space: normal;
+  max-width: 100%;
+  overflow-wrap: anywhere;
 }
 /* Buttons stay on one line and move to their own row when the modal is too
    narrow for all of them, instead of squeezing the label into a stack. */

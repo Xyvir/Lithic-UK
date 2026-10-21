@@ -91,30 +91,102 @@ export function documentExtension(format: DocumentFormat = DOCUMENT_FORMAT): '.l
  * on a break, and a control character in a row or a save dialog is not something a person can
  * read or correct. So they are removed and nothing is refused: the name that is left is the name
  * the person meant, and a name of nothing but them is still a document.
- *
- * Separators (`/`, `\`) are deliberately not here. Whether a name carrying one is a mistake
- * depends on what writes it (the OS picker sanitizes its own suggested name; a row merely shows
- * it), and that is a decision rather than an accident.
  */
 const CONTROL_CHARACTERS = /[\u0000-\u001f\u007f]/g;
 
 /**
+ * What Windows refuses in a name, which is the baseline every other system is measured against.
+ *
+ * Windows is the most restrictive of the three this launcher ships to, so a name that satisfies
+ * it opens everywhere the launcher runs, and a name that satisfies only POSIX or only macOS is
+ * a file somebody cannot create on the machine beside them. The set is Microsoft's own: the
+ * nine characters `< > : " / \ | ? *`, which include both separators.
+ *
+ * They are replaced rather than removed, and a run of them by one `-`. Removing `MP3/FLAC notes`
+ * down to `MP3FLAC notes` invents a word nobody wrote, while a hyphen keeps the boundary the
+ * person did write visible, and a rename the launcher performed should be legible as one. That
+ * is also why a pasted path stops being a path: `../../etc/passwd` becomes `..-..-etc-passwd`,
+ * a name in the folder the person is saving into rather than a walk out of it.
+ */
+const ILLEGAL_IN_NAME = /[<>:"/\\|?*]+/g;
+
+/**
+ * The device names Windows keeps for itself, whatever extension follows.
+ *
+ * `CON.lith` is not a file: it is the console with a suffix, which is why Windows refuses to
+ * create it and why it cannot be the name of a document. The superscripts are the classic Win32
+ * spellings of COM1 and friends, which Microsoft lists beside the plain ones.
+ */
+const RESERVED_STEM = /^(?:con|prn|aux|nul|conin\$|conout\$|com[0-9\u00b9\u00b2\u00b3]|lpt[0-9\u00b9\u00b2\u00b3])$/i;
+
+/** What one path component may hold, before the extension is counted. */
+const MAX_COMPONENT = 255;
+
+/**
+ * Take the endings off, the way Windows does.
+ *
+ * A trailing space or dot is dropped when Windows creates the file, so a name that keeps one is
+ * a name a row shows and a disk never had. Leading dots are left alone: `.notes` is deliberate,
+ * and legal on every one of these systems.
+ */
+function tidyEnds(value: string): string {
+  // The trailing run is stripped as one, because a space after a dot (`notes. `) would otherwise
+  // leave the dot behind and hand back `notes..lith`.
+  return value.replace(/[.\s]+$/, '').replace(/^\s+/, '');
+}
+
+/** Cut to what a component may hold, without leaving half a character behind. */
+function capLength(value: string, limit: number): string {
+  if (value.length <= limit) return value;
+  const cut = value.slice(0, limit);
+  // A cut between the two halves of a surrogate pair is not a character, and would reach the
+  // filesystem as a replacement glyph rather than as the emoji somebody typed.
+  return /[\uD800-\uDBFF]$/.test(cut) ? cut.slice(0, -1) : cut;
+}
+
+/**
  * A launcher-typed name, normalized to the document the build writes.
  *
- * Accidentals are taken out first (see above), then the extension of whatever was typed is
- * dropped, so a name is never doubled up, and the ends are trimmed because a stray space is the
- * same accident. An empty result becomes `untitled` rather than a bare extension.
+ * Accidentals are taken out first (see above), then the characters Windows will not have, then
+ * the extension of whatever was typed, so a name is never doubled up. What is left is made legal
+ * in the three places Windows is stricter than the rest: the endings, the device names, and the
+ * length. An empty result becomes `untitled` rather than a bare extension.
  */
 export function normalizeDocumentName(name: string, format: DocumentFormat = DOCUMENT_FORMAT): string {
-  const base = name
-    .replace(CONTROL_CHARACTERS, '')
-    .trim()
-    .replace(/\.(?:html?|lith|json)$/i, '')
-    // Trimmed again because dropping the extension can expose a space: `notes .lith` is a
-    // name whose accidental space sat between the stem and the extension.
-    .trim();
-  const stem = base || 'untitled';
-  return `${stem}.${documentExtension(format).slice(1)}`;
+  const extension = documentExtension(format);
+  const stem = tidyEnds(
+    name
+      .replace(CONTROL_CHARACTERS, '')
+      .replace(ILLEGAL_IN_NAME, '-')
+      .trim()
+      .replace(/\.(?:html?|lith|json)$/i, '')
+    // Tidied again because dropping the extension can expose a space or a dot: `notes .lith` is
+    // a name whose accidental space sat between the stem and the extension.
+  );
+  // A device name is reserved in front of any extension, so escaping it moves the whole stem out
+  // of the way rather than renaming its tail.
+  const escaped = RESERVED_STEM.test(stem.split('.')[0]) ? `_${stem}` : stem;
+  const capped = tidyEnds(capLength(escaped, MAX_COMPONENT - extension.length));
+  return `${capped || 'untitled'}${extension}`;
+}
+
+/**
+ * The name as the person typed it, wearing the extension this build writes.
+ *
+ * The counterpart of `normalizeDocumentName`, and deliberately the dumb one: it adds the
+ * extension that is missing and trims the ends, and changes nothing else. Comparing the two
+ * answers "did the launcher have to rename this?" without asking the rule to explain itself,
+ * which is what lets a dialog show the answer before the document exists.
+ *
+ * It exists because every sanitiser merges: `a/b` and `a-b` both arrive as `a-b.lith`, and so do
+ * `CON` and `_CON`. Merging is unavoidable once a name has to fit one system's rules, but it must
+ * not be silent, or the person who typed the path learns about the rewrite only when a row shows
+ * a name they do not remember choosing.
+ */
+export function typedDocumentName(name: string, format: DocumentFormat = DOCUMENT_FORMAT): string {
+  const trimmed = name.trim();
+  if (!trimmed) return '';
+  return /\.(?:html?|lith|json)$/i.test(trimmed) ? trimmed : `${trimmed}${documentExtension(format)}`;
 }
 
 /**

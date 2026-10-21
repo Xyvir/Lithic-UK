@@ -42,7 +42,7 @@
   import PinEntry from './PinEntry.svelte';
   import { deleteRemoteFile, fetchRemoteFiles, fetchRemoteWiki, fetchRemoteWikiMeta, probePatchApi, createLockHeartbeat, readRemoteLock, uploadRemoteFile, webdavUrl, resolveSessionId, lithUploadName, type WebdavFile } from './webdav';
   import { normalizeLithName } from './legacy-saver';
-  import { documentStem } from './document-format';
+  import { documentStem, typedDocumentName } from './document-format';
   import { searchCachedWikis } from './cache-search';
   import { matchMarkup, showsForQuery, titleMatches, titleMarkup } from './name-match';
   import { topHits, type InstanceCacheRead, type InstanceReads } from './instance-search';
@@ -2942,6 +2942,12 @@ import { backupFileName, collectInstanceBackup, mergeBookmarks, parseInstanceBac
   // The name that will actually be created (extension normalized), used to
   // detect case-insensitive collisions with liths in the recent list.
   $: newLithNormalized = normalizeLithName(newLithName);
+  // The name as it was typed, so the field can say when the launcher had to change it. Every
+  // rule that makes a name legal somewhere also merges two names into one (`a/b` and `a-b`),
+  // and a rewrite nobody is shown is a document nobody asked for under a name they did not
+  // choose.
+  $: newLithAsTyped = typedDocumentName(newLithName);
+  $: newLithRenamed = Boolean(newLithAsTyped) && newLithAsTyped !== newLithNormalized;
   // Self-host: a name already on the server is taken even though this device
   // has never seen it, so the checkmark reports the collision before a PUT.
   $: newLithTaken = recentFiles.some((file) => getEntryName(file).toLowerCase() === newLithNormalized.toLowerCase())
@@ -7264,7 +7270,7 @@ import { backupFileName, collectInstanceBackup, mergeBookmarks, parseInstanceBac
         <div class="new-lith-inline" role="dialog" aria-label={copy.newLith.placeholder}>
           <div class="new-lith-row">
             <div class="new-lith-field">
-              {#if newLithError}<span class="new-lith-error" role="alert">{newLithError}</span>{/if}
+              {#if newLithError}<span class="new-lith-error" role="alert">{newLithError}</span>{:else if newLithRenamed}<span class="new-lith-rename" role="status">{copy.newLith.renamed(newLithNormalized)}</span>{/if}
               <input bind:this={newLithInputElement} bind:value={newLithName} aria-label={copy.newLith.nameAria} placeholder={copy.newLith.placeholder} spellcheck="false" on:keydown={(event) => { if (event.key === 'Enter') submitNewLith(); else if (event.key === 'Escape') closeNewLithModal(); }} on:input={() => (newLithError = '')} />
               <button type="button" class="new-lith-check" class:invalid={newLithTaken} aria-label={newLithTaken ? copy.newLith.taken : copy.newLith.create} title={newLithTaken ? copy.newLith.taken : copy.newLith.create} on:click={submitNewLith}>{#if newLithTaken}<svg class="new-lith-warn" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3 2 20h20Z"/><path d="M12 10v4.5"/><path d="M12 17.3v.2"/></svg>{:else}✓{/if}</button>
             </div>

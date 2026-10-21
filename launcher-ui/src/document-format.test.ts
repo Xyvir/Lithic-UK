@@ -10,6 +10,7 @@ import {
   inputAcceptTypes,
   isDocumentFormat,
   normalizeDocumentName,
+  typedDocumentName,
   pickerFiltersByMimeType,
   resolveDocumentFormat,
   serverDocumentName,
@@ -84,6 +85,84 @@ test('a control character in a name is dropped, not refused', () => {
   assert.equal(normalizeDocumentName('  notes  '), 'notes.lith');
   assert.equal(normalizeDocumentName('  notes .lith '), 'notes.lith', 'trimmed after the extension goes');
   assert.equal(normalizeDocumentName('\n\t '), 'untitled.lith', 'a name of nothing but accidentals is still a document');
+});
+
+test('a name is made legal for Windows, which is the strictest of the three', () => {
+  // The nine characters Windows refuses, separators included, since a name legal there is legal
+  // on macOS and Linux as well and the reverse is not true. A hyphen keeps the boundary the
+  // person wrote, where removing the character would invent a word nobody typed.
+  assert.equal(normalizeDocumentName('MP3/FLAC notes'), 'MP3-FLAC notes.lith');
+  assert.equal(normalizeDocumentName('a\\b'), 'a-b.lith');
+  assert.equal(normalizeDocumentName('Re: notes'), 'Re- notes.lith');
+  assert.equal(normalizeDocumentName('what?*'), 'what-.lith', 'a run of them is one hyphen');
+  assert.equal(normalizeDocumentName('"quoted"'), '-quoted-.lith');
+  // A pasted path stops being a path: the name lands in the folder being saved into rather
+  // than walking out of it.
+  assert.equal(normalizeDocumentName('../../etc/passwd'), '..-..-etc-passwd.lith');
+  assert.equal(normalizeDocumentName('C:\\Users\\me\\notes'), 'C-Users-me-notes.lith');
+});
+
+test('a name is tidied where Windows would create it differently', () => {
+  // Windows drops a trailing space and a trailing dot when it creates the file, so a name that
+  // keeps one is a name a row shows and a disk never had.
+  assert.equal(normalizeDocumentName('notes.'), 'notes.lith');
+  assert.equal(normalizeDocumentName('notes .lith'), 'notes.lith');
+  assert.equal(normalizeDocumentName('notes. '), 'notes.lith', 'a dot and the space after it go together');
+  assert.equal(normalizeDocumentName('...'), 'untitled.lith', 'nothing but dots is no name');
+  assert.equal(normalizeDocumentName('.notes'), '.notes.lith', 'a leading dot is deliberate');
+});
+
+test('a device name moves out of the way, whatever extension or dot follows it', () => {
+  // `CON.lith` is the console with a suffix rather than a file, so Windows will not create it.
+  assert.equal(normalizeDocumentName('CON'), '_CON.lith');
+  assert.equal(normalizeDocumentName('nul.lith'), '_nul.lith', 'the document extension does not save it');
+  assert.equal(normalizeDocumentName('CON.notes'), '_CON.notes.lith', 'a dot does not save it either');
+  assert.equal(normalizeDocumentName('com1'), '_com1.lith');
+  assert.equal(normalizeDocumentName('conin$'), '_conin$.lith');
+  // Names that merely start with one are ordinary documents.
+  assert.equal(normalizeDocumentName('console'), 'console.lith');
+  assert.equal(normalizeDocumentName('com10'), 'com10.lith');
+  assert.equal(normalizeDocumentName('my con'), 'my con.lith');
+});
+
+test('the typed name and the written name differ exactly when the launcher renamed it', () => {
+  // The comparison the New Blank Lith field draws its notice from. It has to be silent for the
+  // ordinary case, or the notice becomes noise nobody reads.
+  for (const plain of ['notes', 'notes.lith', '  notes  ', 'My Notes', 'ملف عربي']) {
+    assert.equal(typedDocumentName(plain), normalizeDocumentName(plain), `${JSON.stringify(plain)} is kept as typed`);
+  }
+  // And it has to speak for every rewrite: the characters Windows refuses, the endings, the
+  // device names, the extension of a document this build writes, and the length cap.
+  assert.equal(typedDocumentName('a/b'), 'a/b.lith');
+  assert.equal(normalizeDocumentName('a/b'), 'a-b.lith');
+  assert.equal(typedDocumentName('notes.'), 'notes..lith');
+  assert.equal(typedDocumentName('CON'), 'CON.lith');
+  assert.equal(typedDocumentName('notes.html'), 'notes.html');
+  assert.notEqual(normalizeDocumentName('notes.html'), typedDocumentName('notes.html'), 'a monolith name becomes a Lith name');
+  assert.notEqual(normalizeDocumentName('a'.repeat(400)), typedDocumentName('a'.repeat(400)), 'a name past the component limit is announced');
+  // An empty field has nothing to announce: the dialog opens with the notice absent rather than
+  // claiming the next document will be called `untitled.lith`.
+  assert.equal(typedDocumentName(''), '');
+  assert.equal(typedDocumentName('   '), '');
+});
+
+test('two names that merge are only ambiguous once one of them exists', () => {
+  // The reason the notice exists at all: a sanitiser always merges, and the person who typed the
+  // path is the one who has to know which name they are about to get.
+  assert.equal(normalizeDocumentName('a/b'), normalizeDocumentName('a-b'), 'the two typed names converge');
+  assert.notEqual(typedDocumentName('a/b'), typedDocumentName('a-b'), '...and are distinguishable before the rewrite');
+  assert.equal(normalizeDocumentName('CON'), normalizeDocumentName('_CON'), 'a device name and its escape converge too');
+});
+
+test('a name is cut to what one path component may hold', () => {
+  const long = 'a'.repeat(400);
+  assert.equal(normalizeDocumentName(long), `${'a'.repeat(250)}.lith`);
+  assert.equal(normalizeDocumentName(long, 'html'), `${'a'.repeat(250)}.html`);
+  // A cut between the two halves of an emoji drops the pair rather than shipping half a
+  // character, which would arrive as a replacement glyph.
+  const capped = normalizeDocumentName(`${'a'.repeat(249)}${'🔥'.repeat(4)}`);
+  assert.equal(capped, `${'a'.repeat(249)}.lith`);
+  assert.equal(capped.length, 254);
 });
 
 test('a stem is the name without whichever document extension it carries', () => {
