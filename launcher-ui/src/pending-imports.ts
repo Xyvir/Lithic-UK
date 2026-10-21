@@ -96,6 +96,18 @@ export function mergePendingImports(existing: PendingTiddler[], incoming: Pendin
 }
 
 /**
+ * Drop one queued tiddler by position, leaving the rest in the order they arrived.
+ *
+ * Position rather than title: a queue can hold two tiddlers with the same title (two dropped
+ * files are each their own payload), and removing "the one called X" would then take the
+ * wrong row or both.
+ */
+export function removePendingImport(existing: PendingTiddler[], index: number): PendingTiddler[] {
+  if (index < 0 || index >= existing.length) return existing;
+  return existing.filter((_, at) => at !== index);
+}
+
+/**
  * True when a dropped string looks like a Lithic share URL carrying a
  * payload (?json=, ?lith=, or ?url=).
  */

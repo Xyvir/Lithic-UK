@@ -67,6 +67,7 @@ import { backupFileName, collectInstanceBackup, mergeBookmarks, parseInstanceBac
     decodePayloadParam,
     fetchRemotePayload,
     mergePendingImports,
+    removePendingImport,
     isPayloadShareUrl,
     pinCachedTiddler,
     type PendingTiddler
@@ -3822,32 +3823,48 @@ import { backupFileName, collectInstanceBackup, mergeBookmarks, parseInstanceBac
 
     const files = event.dataTransfer?.files;
     if (!files || files.length === 0) return;
-    const file = files[0];
-    const lowerName = file.name.toLowerCase();
-    if (/\.(?:lith|json)$/.test(lowerName)) {
-      try {
-        const contents = await file.text();
-        // A dropped `.json` is read as an instance backup first, because that is the one file
-        // whose contents are this device's own store rather than a document to open. Anything
-        // that is not one falls through to the payload path below, which is what a `.json`
-        // holding a tiddler array has always been.
-        if (lowerName.endsWith('.json')) {
-          const backup = parseInstanceBackup(contents);
-          if (backup.ok) {
-            await importInstanceBackup(backup.backup);
-            return;
+    // Every file in the gesture is read, not just the first. Three dropped Liths are three
+    // payloads queued, because the panel lists what will be merged and a person who dragged
+    // three files expects to see three. Reading `files[0]` made the rest arrive nowhere.
+    const queued: PendingTiddler[] = [];
+    let wiki: File | null = null;
+    let unreadable = false;
+    for (const file of Array.from(files)) {
+      const lowerName = file.name.toLowerCase();
+      if (/\.(?:lith|json)$/.test(lowerName)) {
+        try {
+          const contents = await file.text();
+          // A dropped `.json` is read as an instance backup first, because that is the one file
+          // whose contents are this device's own store rather than a document to open. Anything
+          // that is not one falls through to the payload path below, which is what a `.json`
+          // holding a tiddler array has always been.
+          if (lowerName.endsWith('.json')) {
+            const backup = parseInstanceBackup(contents);
+            if (backup.ok) {
+              await importInstanceBackup(backup.backup);
+              continue;
+            }
           }
+          queued.push(...parseDroppedData(contents, lowerName.endsWith('.lith')));
+        } catch {
+          unreadable = true;
         }
-        const parsed = parseDroppedData(contents, lowerName.endsWith('.lith'));
-        if (parsed.length > 0) {
-          pendingImports = mergePendingImports(pendingImports, parsed);
-        }
-      } catch {
-        mountError = copy.status.droppedInvalid;
+      } else if (/\.(?:html?|htm)$/.test(lowerName) && !wiki) {
+        // One page opens at a time, so the first wiki in a drop is the one that opens.
+        wiki = file;
       }
-    } else if (/\.(?:html?|htm)$/.test(lowerName)) {
+    }
+    if (queued.length > 0) {
+      pendingImports = mergePendingImports(pendingImports, queued);
+    }
+    if (unreadable) {
+      mountError = copy.status.droppedInvalid;
+    }
+    if (wiki) {
+      // The mount drains the queue, so a wiki dropped with documents beside it opens with
+      // those tiddlers merged rather than leaving them queued behind a replaced page.
       try {
-        await mountWiki(await file.text(), file.name);
+        await mountWiki(await wiki.text(), wiki.name);
       } catch (error) {
         mountError = error instanceof Error ? error.message : String(error);
       }
@@ -6378,8 +6395,19 @@ import { backupFileName, collectInstanceBackup, mergeBookmarks, parseInstanceBac
         <button type="button" aria-label={copy.pending.clear} title={copy.pending.clear} on:click={() => pendingImports = []}>✕</button>
       </div>
       <ul>
-        {#each pendingImports as tiddler, index (tiddler.title ?? index)}
-          <li class={/^\d{14}-\d{3,4}$/.test(tiddler.title ?? '') || Boolean(tiddler['stream-type']) ? 'tiddler-list' : ''}>{tiddler.title || copy.pending.untitled}</li>
+        {#each pendingImports as tiddler, index}
+          <li class={/^\d{14}-\d{3,4}$/.test(tiddler.title ?? '') || Boolean(tiddler['stream-type']) ? 'tiddler-list' : ''}>
+            <span class="pending-row">
+              <span class="pending-title">{tiddler.title || copy.pending.untitled}</span>
+              <button
+                type="button"
+                class="pending-remove"
+                aria-label={copy.pending.remove(tiddler.title || copy.pending.untitled)}
+                title={copy.pending.remove(tiddler.title || copy.pending.untitled)}
+                on:click={() => pendingImports = removePendingImport(pendingImports, index)}
+              >✕</button>
+            </span>
+          </li>
         {/each}
       </ul>
     </div>

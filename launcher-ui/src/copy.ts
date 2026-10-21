@@ -130,6 +130,7 @@ const en = {
     aria: 'Pending imports',
     heading: 'Pending Imports',
     clear: 'Clear pending imports',
+    remove: (title: string) => `Remove ${title}`,
     untitled: 'Untitled Payload'
   },
 
@@ -856,6 +857,7 @@ const es: Copy = {
     aria: 'Importaciones pendientes',
     heading: 'Importaciones pendientes',
     clear: 'Borrar las importaciones pendientes',
+    remove: (title: string) => `Quitar ${title}`,
     untitled: 'Contenido sin título'
   },
 
@@ -1489,6 +1491,7 @@ const fr: Copy = {
     aria: 'Importations en attente',
     heading: 'Importations en attente',
     clear: 'Effacer les importations en attente',
+    remove: (title: string) => `Retirer ${title}`,
     untitled: 'Contenu sans titre'
   },
 
@@ -2119,6 +2122,7 @@ const de: Copy = {
     aria: 'Ausstehende Importe',
     heading: 'Ausstehende Importe',
     clear: 'Ausstehende Importe verwerfen',
+    remove: (title: string) => `${title} entfernen`,
     untitled: 'Inhalt ohne Titel'
   },
 

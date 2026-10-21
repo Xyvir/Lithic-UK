@@ -1934,6 +1934,35 @@ a.modal-action { text-decoration: none; text-align: center; color: var(--lithic-
   color: var(--lithic-ink-faint);
   font-size: 0.8rem;
 }
+/* One row is one queued tiddler, and its own ✕ drops only that one. The header's ✕ remains
+   the way to abandon the queue, which is the different decision it always was. */
+.pending-imports .pending-row {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+}
+.pending-imports .pending-title {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.pending-imports .pending-remove {
+  width: auto;
+  margin: 0;
+  padding: 0 2px;
+  border: 0;
+  background: none;
+  box-shadow: none;
+  color: var(--lithic-ink-ghost);
+  font: inherit;
+  font-size: 0.75rem;
+  line-height: 1.2;
+  cursor: pointer;
+}
+.pending-imports .pending-remove:hover,
+.pending-imports .pending-remove:focus-visible {
+  color: var(--lithic-ink);
+}
 
 /* --- DRAG AND DROP HIGHLIGHT (legacy parity) --- */
 body.drag-over::after {

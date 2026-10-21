@@ -1467,10 +1467,49 @@ try {
   await livePage.waitForSelector('.pending-imports li', { timeout: 5000 });
   const queuedPin = await livePage.evaluate(() => ({
     heading: document.querySelector('.pending-imports-header span')?.textContent?.trim() ?? null,
-    titles: [...document.querySelectorAll('.pending-imports li')].map((node) => node.textContent.trim())
+    titles: [...document.querySelectorAll('.pending-imports .pending-title')].map((node) => node.textContent.trim())
   }));
   assert.equal(queuedPin.heading, 'Pending Imports', `Live self-host: the panel's click queues what it matched before anything is opened: ${JSON.stringify(queuedPin)}`);
   assert.deepEqual(queuedPin.titles, ['arrived'], 'Live self-host: ...the note the preview was cut from, by the title the cache holds it under');
+
+  // Both halves of the drop queue at once: a gesture carrying two Liths queues both, and each
+  // row's own ✕ removes only itself. Before this, a drop read one file out of the gesture and
+  // the only way to undo a row was to abandon the whole queue.
+  await livePage.evaluate(() => {
+    const make = (name, title) =>
+      new File([`title: ${title}\n\ndropped ${title}`], name, { type: 'application/x-lith' });
+    const transfer = new DataTransfer();
+    transfer.items.add(make('one.lith', 'drop one'));
+    transfer.items.add(make('two.lith', 'drop two'));
+    window.dispatchEvent(new DragEvent('drop', { dataTransfer: transfer, bubbles: true, cancelable: true }));
+  });
+  await livePage.waitForFunction(() => document.querySelectorAll('.pending-imports li').length === 3, POLL);
+  const droppedRows = await livePage.evaluate(() => ({
+    titles: [...document.querySelectorAll('.pending-imports .pending-title')].map((node) => node.textContent.trim()),
+    label: document.querySelectorAll('.pending-imports li')[1]?.querySelector('.pending-remove')?.getAttribute('aria-label') ?? null
+  }));
+  assert.deepEqual(
+    droppedRows.titles,
+    ['arrived', 'drop one', 'drop two'],
+    `Live self-host: a drop carrying two Liths queues both, in the order the gesture held them: ${JSON.stringify(droppedRows)}`
+  );
+  assert.equal(
+    droppedRows.label,
+    'Remove drop one',
+    `Live self-host: each row's ✕ names the row it removes: ${JSON.stringify(droppedRows)}`
+  );
+  await livePage.evaluate(() => {
+    document.querySelectorAll('.pending-imports li')[1]?.querySelector('.pending-remove')?.click();
+  });
+  await livePage.waitForFunction(() => document.querySelectorAll('.pending-imports li').length === 2, POLL);
+  const remainingRows = await livePage.evaluate(() =>
+    [...document.querySelectorAll('.pending-imports .pending-title')].map((node) => node.textContent.trim())
+  );
+  assert.deepEqual(
+    remainingRows,
+    ['arrived', 'drop two'],
+    `Live self-host: ...by position, so the rows beside it stay queued: ${JSON.stringify(remainingRows)}`
+  );
   await livePage.waitForFunction(
     () => [...document.querySelectorAll('.status-line.error')].some((line) => line.textContent.includes('arrived.lith')),
     POLL

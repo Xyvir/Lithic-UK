@@ -6,6 +6,7 @@ import {
   decodePayloadParam,
   tagRootDogear,
   mergePendingImports,
+  removePendingImport,
   isPayloadShareUrl,
   pinCachedTiddler
 } from './pending-imports.ts';
@@ -47,6 +48,25 @@ test('mergePendingImports concatenates without mutating the source', () => {
   const merged = mergePendingImports(a, [{ title: 'B' }]);
   assert.deepEqual(merged, [{ title: 'A' }, { title: 'B' }]);
   assert.equal(a.length, 1);
+});
+
+test('removePendingImport drops one row and keeps the rest in order', () => {
+  const queued = [{ title: 'A' }, { title: 'B' }, { title: 'C' }];
+  assert.deepEqual(removePendingImport(queued, 1), [{ title: 'A' }, { title: 'C' }]);
+  assert.equal(queued.length, 3);
+});
+
+// A queue can hold the same title twice, one per dropped file, so position is what the row's
+// own control removes. Sorting by title would take both rows with one press.
+test('removePendingImport removes one of two tiddlers sharing a title', () => {
+  const queued = [{ title: 'Same', text: 'first' }, { title: 'Same', text: 'second' }];
+  assert.deepEqual(removePendingImport(queued, 0), [{ title: 'Same', text: 'second' }]);
+});
+
+test('removePendingImport ignores a position outside the queue', () => {
+  const queued = [{ title: 'Only' }];
+  assert.equal(removePendingImport(queued, 4), queued);
+  assert.equal(removePendingImport(queued, -1), queued);
 });
 
 test('isPayloadShareUrl detects share links with payload params', () => {
