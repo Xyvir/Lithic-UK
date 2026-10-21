@@ -104,6 +104,31 @@ function leaves(node: unknown, path = ''): Array<[string, unknown]> {
   );
 }
 
+test('no deck calls a note by the engine word for it', () => {
+  // The copy rule is that the launcher explains itself in the words a person already has. A
+  // deck leaf is a string or a function that builds one, and a function's source holds the
+  // literal parts of its sentence, so both are read the same way. The list is deliberately
+  // short and grows one decision at a time, the way the colour gate's allowlist does: a word
+  // arrives here when it has been replaced, not before.
+  //
+  // Each entry is a stem read from a word boundary, so a plural or a compound is caught with
+  // the word that was replaced rather than one edit behind it, and the translations are
+  // listed beside English because a deck is read in its own language. `cache` is deliberately
+  // absent: a few strings say where a copy actually is, and a person can act on it.
+  const jargon = ['tiddler', 'tiddlywiki', 'wiki', 'payload', 'serializ', 'sérialis', 'engine'];
+  for (const [id, deck] of Object.entries(decks)) {
+    for (const [path, value] of leaves(deck)) {
+      const reads = String(value);
+      for (const word of jargon) {
+        assert.ok(
+          !new RegExp(`\\b${word}`, 'i').test(reads),
+          `${id}.${path} says ${word} where a person reads it: ${reads}`
+        );
+      }
+    }
+  }
+});
+
 test('every leaf of every deck is a non-empty string, or a function that builds one', () => {
   for (const [id, deck] of Object.entries(decks)) {
     const found = leaves(deck);

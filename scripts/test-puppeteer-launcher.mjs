@@ -1452,7 +1452,7 @@ try {
     'Open arrived.lith and pin “arrived” to top',
     'Live self-host: ...and offers the gesture a local panel offers, the note the preview matched pinned to the top'
   );
-  assert.equal(storeBodyMatch.title, 'Open and pin this tiddler', 'Live self-host: said the same way in the tooltip');
+  assert.equal(storeBodyMatch.title, 'Open and pin this note', 'Live self-host: said the same way in the tooltip');
   assert.equal(storeBodyMatch.deviceRows, 0, 'Live self-host: and the answer is a panel on the server’s row rather than this device’s row appearing in a list that is not its own');
 
   // The other half of that gesture: the click pins the note and then opens the Lith. The
@@ -1504,7 +1504,7 @@ try {
   );
   assert.equal(
     droppedRows.note,
-    'drop one is already queued, so remove it first.',
+    'drop one is already pending, so remove it first.',
     `Live self-host: a repeated title is refused rather than queued twice, and the copy that did not arrive is named: ${JSON.stringify(droppedRows)}`
   );
   await livePage.evaluate(() => {
@@ -1793,7 +1793,7 @@ try {
   assert.equal(revertAsk.title, 'Revert to bbbbbbb?', 'Live self-host: pressing a row\u2019s revert icon asks first');
   assert.equal(
     revertAsk.body,
-    'The wiki returns to how it was 2026-10-11 12:00:00 UTC. Unsaved edits are committed first.',
+    'This instance returns to how it was 2026-10-11 12:00:00 UTC. Unsaved edits are committed first.',
     `Live self-host: and says which moment it goes back to and what happens to work in flight: ${revertAsk.body}`
   );
   assert.deepEqual(
@@ -6251,8 +6251,8 @@ try {
   assert.deepEqual(
     mergeAsk,
     {
-      title: 'Replace a tiddler in this Lith?',
-      body: 'The queued Solo note would replace the one in solo.lith.',
+      title: 'Replace a note in this Lith?',
+      body: 'The pending Solo note would replace the one in solo.lith.',
       actions: ['Replace', 'Cancel']
     },
     `Opening a Lith that already holds a queued title asks before it costs the stored copy: ${JSON.stringify(mergeAsk)}`

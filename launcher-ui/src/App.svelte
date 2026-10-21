@@ -3941,7 +3941,7 @@ import { backupFileName, collectInstanceBackup, mergeBookmarks, parseInstanceBac
       // wiki with the shared payload queued for injection.
       window.history.replaceState({}, document.title, window.location.pathname);
       pendingImports = payload;
-      status = `${payload.length} shared tiddler${payload.length === 1 ? '' : 's'} ready to import`;
+      status = copy.pending.sharedReady(payload.length);
       await blankLith();
     } else {
       mountError = copy.status.payloadFailed;

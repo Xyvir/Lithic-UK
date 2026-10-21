@@ -131,14 +131,20 @@ const en = {
     heading: 'Pending Imports',
     clear: 'Clear pending imports',
     remove: (title: string) => `Remove ${title}`,
-    untitled: 'Untitled Payload',
-    skippedOne: (title: string) => `${title} is already queued, so remove it first.`,
-    skippedMany: (count: number) => `${count} copies skipped: their titles are already queued.`,
-    replaceTitleOne: 'Replace a tiddler in this Lith?',
-    replaceTitleMany: 'Replace tiddlers in this Lith?',
-    replaceBodyOne: (title: string, name: string) => `The queued ${title} would replace the one in ${name}.`,
-    replaceBodyMany: (count: number, name: string) => `${count} queued tiddlers would replace ones in ${name}.`,
-    replaceConfirm: 'Replace'
+    untitled: 'Untitled note',
+    skippedOne: (title: string) => `${title} is already pending, so remove it first.`,
+    skippedMany: (count: number) => `${count} copies skipped: their titles are already pending.`,
+    replaceTitleOne: 'Replace a note in this Lith?',
+    replaceTitleMany: 'Replace notes in this Lith?',
+    replaceBodyOne: (title: string, name: string) => `The pending ${title} would replace the one in ${name}.`,
+    replaceBodyMany: (count: number, name: string) => `${count} pending notes would replace ones in ${name}.`,
+    replaceConfirm: 'Replace',
+    /**
+     * A shared payload that arrived over the address and is waiting in the panel. The count is
+     * the whole sentence, because the queue underneath already lists every title by name.
+     */
+    sharedReady: (count: number) =>
+      `${count} shared ${count === 1 ? 'note' : 'notes'} ready to import`
   },
 
   common: {
@@ -263,7 +269,7 @@ const en = {
         revertTitle: 'Revert to this commit',
         confirmTitle: (commit: string) => `Revert to ${commit}?`,
         confirmBody: (when: string) =>
-          `The wiki returns to how it was ${when}. Unsaved edits are committed first.`,
+          `This instance returns to how it was ${when}. Unsaved edits are committed first.`,
         confirm: 'Revert',
         working: 'Reverting…',
         reverted: (commit: string) => `Reverted to ${commit}.`,
@@ -490,7 +496,7 @@ const en = {
         hours: (count: string) => `${count} hour${count === '1' ? '' : 's'} later`,
         days: (count: string) => `${count} day${count === '1' ? '' : 's'} later`
       },
-      note: 'Reverting is manual. Download a version, then replace the wiki with it.'
+      note: 'Reverting is manual. Download a version, then replace this Lith with it.'
     },
 
     dirty: {
@@ -552,7 +558,7 @@ const en = {
     historyAria: (name: string) => `Show version history for ${name}`,
     olderVersions: 'Older versions',
     showHistory: 'Show version history',
-    noHistory: 'No cached history',
+    noHistory: 'No saved versions',
     unsavedAria: (name: string) => `${name} has unsaved edits; open to recover`,
     unsavedFrom: (when: string) => `Unsaved edits from ${when}`,
     localOnlyAria: (name: string) => `Open history and backup options for ${name}`,
@@ -573,7 +579,7 @@ const en = {
     instanceTruncated: 'Only the newest Liths here were searched',
     pinAria: (name: string, title: string) => `Open ${name} and pin “${title}” to top`,
     openAria: (name: string) => `Open ${name}`,
-    pinTitle: 'Open and pin this tiddler',
+    pinTitle: 'Open and pin this note',
     removeAria: (name: string) => `Remove ${name}`,
     /**
      * The × asks first on a row that carries the amber mark, because what it drops is the
@@ -761,16 +767,16 @@ const en = {
     reindexingLabel: 'Re-indexing',
     indexProgress: (label: string, position: number, total: number, name: string) =>
       `${label} ${position} of ${total} · ${name}`,
-    scratchSaveFailed: 'Scratch serialization failed; file left unchanged.',
-    monolithSaveFailed: 'Page serialization failed; the stored copy is unchanged.',
-    noHistory: 'No versioned history is available for this wiki yet.',
-    noHistoryVersion: 'That version could not be materialized from the history chain.',
+    scratchSaveFailed: 'Could not save this draft; the file is unchanged.',
+    monolithSaveFailed: 'Could not save this page; the stored copy is unchanged.',
+    noHistory: 'This Lith has no saved versions yet.',
+    noHistoryVersion: 'That version could not be rebuilt from the saved ones.',
     introFailed: 'Could not load the introduction.',
-    droppedInvalid: 'Dropped file is not valid data format.',
-    payloadFailed: 'Unable to load the shared payload',
-    blankLithFailed: 'Unable to load the local wiki',
-    engineUnavailable: (status: string) => `Unable to load the wiki engine (${status})`,
-    engineMissing: 'Could not load the Lithic engine locally, from the offline cache, or online.'
+    droppedInvalid: 'Could not read that dropped file.',
+    payloadFailed: 'Could not load the shared notes',
+    blankLithFailed: 'Could not start this new Lith',
+    engineUnavailable: (status: string) => `Could not load Lithic (${status})`,
+    engineMissing: 'Could not load Lithic on this device or online.'
   },
 
   /** Names the OS file picker shows for each kind of document this app opens or saves. */
@@ -865,14 +871,16 @@ const es: Copy = {
     heading: 'Importaciones pendientes',
     clear: 'Borrar las importaciones pendientes',
     remove: (title: string) => `Quitar ${title}`,
-    untitled: 'Contenido sin título',
-    skippedOne: (title: string) => `${title} ya está en la cola, quítalo primero.`,
-    skippedMany: (count: number) => `${count} copias omitidas: sus títulos ya están en la cola.`,
-    replaceTitleOne: '¿Reemplazar un tiddler de este Lith?',
-    replaceTitleMany: '¿Reemplazar tiddlers de este Lith?',
-    replaceBodyOne: (title: string, name: string) => `El ${title} en cola reemplazaría el de ${name}.`,
-    replaceBodyMany: (count: number, name: string) => `${count} tiddlers en cola reemplazarían los de ${name}.`,
-    replaceConfirm: 'Reemplazar'
+    untitled: 'Nota sin título',
+    skippedOne: (title: string) => `${title} ya está pendiente, quítalo primero.`,
+    skippedMany: (count: number) => `${count} copias omitidas: sus títulos ya están pendientes.`,
+    replaceTitleOne: '¿Reemplazar una nota de este Lith?',
+    replaceTitleMany: '¿Reemplazar notas de este Lith?',
+    replaceBodyOne: (title: string, name: string) => `La nota ${title} pendiente reemplazaría la de ${name}.`,
+    replaceBodyMany: (count: number, name: string) => `${count} notas pendientes reemplazarían las de ${name}.`,
+    replaceConfirm: 'Reemplazar',
+    sharedReady: (count: number) =>
+      `${count} ${count === 1 ? 'nota compartida lista' : 'notas compartidas listas'} para importar`
   },
 
   common: {
@@ -983,7 +991,7 @@ const es: Copy = {
         revertTitle: 'Volver a este commit',
         confirmTitle: (commit: string) => `¿Volver a ${commit}?`,
         confirmBody: (when: string) =>
-          `El wiki vuelve al estado de ${when}. Los cambios pendientes se guardan antes.`,
+          `Esta instancia vuelve al estado de ${when}. Los cambios pendientes se guardan antes.`,
         confirm: 'Volver',
         working: 'Volviendo…',
         reverted: (commit: string) => `Se volvió a ${commit}.`,
@@ -1173,7 +1181,7 @@ const es: Copy = {
         hours: (count: string) => `${count} hora${count === '1' ? '' : 's'} después`,
         days: (count: string) => `${count} día${count === '1' ? '' : 's'} después`
       },
-      note: 'Revertir es manual. Descarga una versión y sustituye el wiki con ella.'
+      note: 'Revertir es manual. Descarga una versión y sustituye este Lith con ella.'
     },
 
     dirty: {
@@ -1234,7 +1242,7 @@ const es: Copy = {
     historyAria: (name: string) => `Ver el historial de ${name}`,
     olderVersions: 'Versiones anteriores',
     showHistory: 'Ver el historial',
-    noHistory: 'Sin historial guardado',
+    noHistory: 'Sin versiones guardadas',
     unsavedAria: (name: string) => `${name} tiene ediciones sin guardar; abre para recuperarlas`,
     unsavedFrom: (when: string) => `Ediciones sin guardar del ${when}`,
     localOnlyAria: (name: string) => `Abrir el historial y las opciones de respaldo de ${name}`,
@@ -1253,7 +1261,7 @@ const es: Copy = {
     instanceTruncated: 'Solo se buscó en los Liths más recientes',
     pinAria: (name: string, title: string) => `Abrir ${name} y fijar “${title}” arriba`,
     openAria: (name: string) => `Abrir ${name}`,
-    pinTitle: 'Abrir y fijar este tiddler',
+    pinTitle: 'Abrir y fijar esta nota',
     removeAria: (name: string) => `Quitar ${name}`,
     removeConfirm: {
       title: (name: string) => `¿Quitar ${name}?`,
@@ -1408,16 +1416,16 @@ const es: Copy = {
     reindexingLabel: 'Reindexando',
     indexProgress: (label: string, position: number, total: number, name: string) =>
       `${label} ${position} de ${total} · ${name}`,
-    scratchSaveFailed: 'Falló la serialización del borrador; el archivo no se tocó.',
-    monolithSaveFailed: 'Falló la serialización de la página; la copia guardada no se tocó.',
-    noHistory: 'Todavía no hay historial de versiones para este wiki.',
-    noHistoryVersion: 'Esa versión no se pudo reconstruir desde la cadena del historial.',
+    scratchSaveFailed: 'No se pudo guardar el borrador; el archivo no se tocó.',
+    monolithSaveFailed: 'No se pudo guardar la página; la copia guardada no se tocó.',
+    noHistory: 'Este Lith todavía no tiene versiones guardadas.',
+    noHistoryVersion: 'Esa versión no se pudo reconstruir desde las guardadas.',
     introFailed: 'No se pudo cargar la introducción.',
-    droppedInvalid: 'El archivo soltado no tiene un formato de datos válido.',
-    payloadFailed: 'No se pudo cargar el contenido compartido',
-    blankLithFailed: 'No se pudo cargar el wiki local',
-    engineUnavailable: (status: string) => `No se pudo cargar el motor del wiki (${status})`,
-    engineMissing: 'No se pudo cargar el motor de Lithic localmente, desde la caché sin conexión ni en línea.'
+    droppedInvalid: 'No se pudo leer el archivo soltado.',
+    payloadFailed: 'No se pudieron cargar las notas compartidas',
+    blankLithFailed: 'No se pudo iniciar este nuevo Lith',
+    engineUnavailable: (status: string) => `No se pudo cargar Lithic (${status})`,
+    engineMissing: 'No se pudo cargar Lithic en este dispositivo ni en línea.'
   },
 
   fileTypes: {
@@ -1506,14 +1514,16 @@ const fr: Copy = {
     heading: 'Importations en attente',
     clear: 'Effacer les importations en attente',
     remove: (title: string) => `Retirer ${title}`,
-    untitled: 'Contenu sans titre',
+    untitled: 'Note sans titre',
     skippedOne: (title: string) => `${title} est déjà dans la file, retire-le d'abord.`,
     skippedMany: (count: number) => `${count} copies ignorées : leurs titres sont déjà dans la file.`,
-    replaceTitleOne: 'Remplacer un tiddler de ce Lith ?',
-    replaceTitleMany: 'Remplacer des tiddlers de ce Lith ?',
-    replaceBodyOne: (title: string, name: string) => `Le ${title} en attente remplacerait celui de ${name}.`,
-    replaceBodyMany: (count: number, name: string) => `${count} tiddlers en attente remplaceraient ceux de ${name}.`,
-    replaceConfirm: 'Remplacer'
+    replaceTitleOne: 'Remplacer une note de ce Lith ?',
+    replaceTitleMany: 'Remplacer des notes de ce Lith ?',
+    replaceBodyOne: (title: string, name: string) => `La note ${title} en attente remplacerait celle de ${name}.`,
+    replaceBodyMany: (count: number, name: string) => `${count} notes en attente remplaceraient celles de ${name}.`,
+    replaceConfirm: 'Remplacer',
+    sharedReady: (count: number) =>
+      `${count} ${count === 1 ? 'note partagée prête' : 'notes partagées prêtes'} à importer`
   },
 
   common: {
@@ -1624,7 +1634,7 @@ const fr: Copy = {
         revertTitle: 'Revenir à ce commit',
         confirmTitle: (commit: string) => `Revenir à ${commit} ?`,
         confirmBody: (when: string) =>
-          `Le wiki revient à son état de ${when}. Les modifications en attente sont enregistrées avant.`,
+          `Cette instance revient à son état de ${when}. Les modifications en attente sont enregistrées avant.`,
         confirm: 'Revenir',
         working: 'Retour en cours…',
         reverted: (commit: string) => `Retour à ${commit} effectué.`,
@@ -1814,7 +1824,7 @@ const fr: Copy = {
         hours: (count: string) => `${count} heure${count === '1' ? '' : 's'} plus tard`,
         days: (count: string) => `${count} jour${count === '1' ? '' : 's'} plus tard`
       },
-      note: 'Le retour en arrière est manuel. Téléchargez une version, puis remplacez le wiki par celle-ci.'
+      note: 'Le retour en arrière est manuel. Téléchargez une version, puis remplacez ce Lith par celle-ci.'
     },
 
     dirty: {
@@ -1875,7 +1885,7 @@ const fr: Copy = {
     historyAria: (name: string) => `Afficher l’historique de ${name}`,
     olderVersions: 'Versions précédentes',
     showHistory: 'Afficher l’historique',
-    noHistory: 'Aucun historique en cache',
+    noHistory: 'Aucune version enregistrée',
     unsavedAria: (name: string) => `${name} a des modifications non enregistrées ; ouvrez pour les récupérer`,
     unsavedFrom: (when: string) => `Modifications non enregistrées du ${when}`,
     localOnlyAria: (name: string) => `Ouvrir l’historique et les options de sauvegarde de ${name}`,
@@ -1894,7 +1904,7 @@ const fr: Copy = {
     instanceTruncated: 'Seuls les Liths les plus récents ont été cherchés',
     pinAria: (name: string, title: string) => `Ouvrir ${name} et épingler « ${title} » en haut`,
     openAria: (name: string) => `Ouvrir ${name}`,
-    pinTitle: 'Ouvrir et épingler ce tiddler',
+    pinTitle: 'Ouvrir et épingler cette note',
     removeAria: (name: string) => `Retirer ${name}`,
     removeConfirm: {
       title: (name: string) => `Retirer ${name} ?`,
@@ -2049,16 +2059,16 @@ const fr: Copy = {
     reindexingLabel: 'Réindexation',
     indexProgress: (label: string, position: number, total: number, name: string) =>
       `${label} ${position} sur ${total} · ${name}`,
-    scratchSaveFailed: 'Échec de la sérialisation du brouillon ; le fichier n’a pas été touché.',
-    monolithSaveFailed: 'Échec de la sérialisation de la page ; la copie enregistrée n’a pas été touchée.',
-    noHistory: 'Aucun historique de versions n’est encore disponible pour ce wiki.',
-    noHistoryVersion: 'Cette version n’a pas pu être reconstruite depuis l’historique.',
+    scratchSaveFailed: 'Impossible d’enregistrer le brouillon ; le fichier n’a pas été touché.',
+    monolithSaveFailed: 'Impossible d’enregistrer la page ; la copie enregistrée n’a pas été touchée.',
+    noHistory: 'Ce Lith n’a pas encore de versions enregistrées.',
+    noHistoryVersion: 'Cette version n’a pas pu être reconstruite depuis les autres.',
     introFailed: 'Impossible de charger l’introduction.',
-    droppedInvalid: 'Le fichier déposé n’a pas un format de données valide.',
-    payloadFailed: 'Impossible de charger le contenu partagé',
-    blankLithFailed: 'Impossible de charger le wiki local',
-    engineUnavailable: (status: string) => `Impossible de charger le moteur du wiki (${status})`,
-    engineMissing: 'Impossible de charger le moteur Lithic en local, depuis le cache hors ligne ou en ligne.'
+    droppedInvalid: 'Impossible de lire le fichier déposé.',
+    payloadFailed: 'Impossible de charger les notes partagées',
+    blankLithFailed: 'Impossible de démarrer ce nouveau Lith',
+    engineUnavailable: (status: string) => `Impossible de charger Lithic (${status})`,
+    engineMissing: 'Impossible de charger Lithic sur cet appareil ou en ligne.'
   },
 
   fileTypes: {
@@ -2144,14 +2154,16 @@ const de: Copy = {
     heading: 'Ausstehende Importe',
     clear: 'Ausstehende Importe verwerfen',
     remove: (title: string) => `${title} entfernen`,
-    untitled: 'Inhalt ohne Titel',
-    skippedOne: (title: string) => `${title} steht schon in der Warteschlange, entferne es zuerst.`,
-    skippedMany: (count: number) => `${count} Kopien übersprungen: ihre Titel stehen schon in der Warteschlange.`,
-    replaceTitleOne: 'Einen Tiddler in diesem Lith ersetzen?',
-    replaceTitleMany: 'Tiddler in diesem Lith ersetzen?',
-    replaceBodyOne: (title: string, name: string) => `Der eingereihte ${title} würde den in ${name} ersetzen.`,
-    replaceBodyMany: (count: number, name: string) => `${count} eingereihte Tiddler würden die in ${name} ersetzen.`,
-    replaceConfirm: 'Ersetzen'
+    untitled: 'Notiz ohne Titel',
+    skippedOne: (title: string) => `${title} steht schon bei den ausstehenden Importen, entferne es zuerst.`,
+    skippedMany: (count: number) => `${count} Kopien übersprungen: ihre Titel stehen schon bei den ausstehenden Importen.`,
+    replaceTitleOne: 'Eine Notiz in diesem Lith ersetzen?',
+    replaceTitleMany: 'Notizen in diesem Lith ersetzen?',
+    replaceBodyOne: (title: string, name: string) => `Die ausstehende Notiz ${title} würde die in ${name} ersetzen.`,
+    replaceBodyMany: (count: number, name: string) => `${count} ausstehende Notizen würden die in ${name} ersetzen.`,
+    replaceConfirm: 'Ersetzen',
+    sharedReady: (count: number) =>
+      `${count} geteilte ${count === 1 ? 'Notiz' : 'Notizen'} zum Importieren bereit`
   },
 
   common: {
@@ -2262,7 +2274,7 @@ const de: Copy = {
         revertTitle: 'Auf diesen Commit zurücksetzen',
         confirmTitle: (commit: string) => `Auf ${commit} zurücksetzen?`,
         confirmBody: (when: string) =>
-          `Das Wiki kehrt zum Stand von ${when} zurück. Offene Änderungen werden zuvor gespeichert.`,
+          `Diese Instanz kehrt zum Stand von ${when} zurück. Offene Änderungen werden zuvor gespeichert.`,
         confirm: 'Zurücksetzen',
         working: 'Wird zurückgesetzt…',
         reverted: (commit: string) => `Auf ${commit} zurückgesetzt.`,
@@ -2452,7 +2464,7 @@ const de: Copy = {
         hours: (count: string) => `${count} Stunde${count === '1' ? '' : 'n'} später`,
         days: (count: string) => `${count} Tag${count === '1' ? '' : 'e'} später`
       },
-      note: 'Zurücksetzen ist manuell. Lade eine Version herunter und ersetze das Wiki damit.'
+      note: 'Zurücksetzen ist manuell. Lade eine Version herunter und ersetze diesen Lith damit.'
     },
 
     dirty: {
@@ -2513,7 +2525,7 @@ const de: Copy = {
     historyAria: (name: string) => `Versionsverlauf von ${name} anzeigen`,
     olderVersions: 'Ältere Versionen',
     showHistory: 'Versionsverlauf anzeigen',
-    noHistory: 'Kein Verlauf im Cache',
+    noHistory: 'Keine gespeicherten Versionen',
     unsavedAria: (name: string) => `${name} hat ungespeicherte Änderungen; zum Wiederherstellen öffnen`,
     unsavedFrom: (when: string) => `Ungespeicherte Änderungen vom ${when}`,
     localOnlyAria: (name: string) => `Verlauf und Sicherungsoptionen für ${name} öffnen`,
@@ -2532,7 +2544,7 @@ const de: Copy = {
     instanceTruncated: 'Nur die neuesten Liths wurden durchsucht',
     pinAria: (name: string, title: string) => `${name} öffnen und „${title}“ oben anheften`,
     openAria: (name: string) => `${name} öffnen`,
-    pinTitle: 'Diesen Tiddler öffnen und anheften',
+    pinTitle: 'Diese Notiz öffnen und anheften',
     removeAria: (name: string) => `${name} entfernen`,
     removeConfirm: {
       title: (name: string) => `${name} entfernen?`,
@@ -2687,16 +2699,16 @@ const de: Copy = {
     reindexingLabel: 'Indexiere neu',
     indexProgress: (label: string, position: number, total: number, name: string) =>
       `${label} ${position} von ${total} · ${name}`,
-    scratchSaveFailed: 'Serialisieren des Entwurfs fehlgeschlagen; die Datei blieb unverändert.',
-    monolithSaveFailed: 'Serialisieren der Seite fehlgeschlagen; die gespeicherte Kopie blieb unverändert.',
-    noHistory: 'Für dieses Wiki gibt es noch keinen Versionsverlauf.',
-    noHistoryVersion: 'Diese Version konnte nicht aus dem Verlauf erzeugt werden.',
+    scratchSaveFailed: 'Der Entwurf konnte nicht gespeichert werden; die Datei blieb unverändert.',
+    monolithSaveFailed: 'Die Seite konnte nicht gespeichert werden; die gespeicherte Kopie blieb unverändert.',
+    noHistory: 'Dieser Lith hat noch keine gespeicherten Versionen.',
+    noHistoryVersion: 'Diese Version konnte nicht aus den gespeicherten erzeugt werden.',
     introFailed: 'Die Einführung konnte nicht geladen werden.',
-    droppedInvalid: 'Die abgelegte Datei hat kein gültiges Datenformat.',
-    payloadFailed: 'Der geteilte Inhalt konnte nicht geladen werden',
-    blankLithFailed: 'Das lokale Wiki konnte nicht geladen werden',
-    engineUnavailable: (status: string) => `Die Wiki-Engine konnte nicht geladen werden (${status})`,
-    engineMissing: 'Die Lithic-Engine konnte weder lokal noch aus dem Offline-Cache noch online geladen werden.'
+    droppedInvalid: 'Die abgelegte Datei konnte nicht gelesen werden.',
+    payloadFailed: 'Die geteilten Notizen konnten nicht geladen werden',
+    blankLithFailed: 'Dieser neue Lith konnte nicht gestartet werden',
+    engineUnavailable: (status: string) => `Lithic konnte nicht geladen werden (${status})`,
+    engineMissing: 'Lithic konnte weder auf diesem Gerät noch online geladen werden.'
   },
 
   fileTypes: {

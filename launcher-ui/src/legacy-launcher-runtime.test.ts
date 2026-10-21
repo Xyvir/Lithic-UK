@@ -782,9 +782,9 @@ test('a browser-only monolith mount compiles the browser-storage saver in', () =
 test('injected failure copy is a literal the mounted document can read', () => {
   const scratch = buildEngineHtml(ENGINE_STUB, { name: 'notes.txt', text: '' }, [], {}, { scratchMode: 'text' });
   assert.doesNotMatch(scratch, /copy\.status\./, 'no launcher module reference survives into the mounted document');
-  assert.match(scratch, /new Error\("Scratch serialization failed; file left unchanged\."\)/);
+  assert.match(scratch, /new Error\("Could not save this draft; the file is unchanged\."\)/);
   const monolith = buildEngineHtml(ENGINE_STUB, { name: 'page.html', text: '' }, [], {}, { isHtmlMode: true, browserOnly: true });
-  assert.match(monolith, /new Error\("Page serialization failed; the stored copy is unchanged\."\)/);
+  assert.match(monolith, /new Error\("Could not save this page; the stored copy is unchanged\."\)/);
 });
 
 test('an ordinary mount does not get the browser-storage save path', () => {

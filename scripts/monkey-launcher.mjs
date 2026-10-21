@@ -1496,7 +1496,7 @@ async function runOpenings(browser, served) {
         problems.push(`a drop carrying three documents queued ${JSON.stringify(queued.titles)} rather than ${JSON.stringify(expected)}`);
       } else if (queued.label !== 'Remove Getting Started') {
         problems.push(`the first row's ✕ named ${JSON.stringify(queued.label)} rather than the row it removes`);
-      } else if (queued.note !== '3 copies skipped: their titles are already queued.') {
+      } else if (queued.note !== '3 copies skipped: their titles are already pending.') {
         problems.push(`a repeated file's copies were ${JSON.stringify(queued.note)} rather than named as three skipped`);
       }
       // The row's own control, not the header's: removing one must leave the others queued.
@@ -1551,7 +1551,7 @@ async function runOpenings(browser, served) {
         .catch(() => null);
       const problems = [];
       if (!asked || asked.unreadable) problems.push('opening a Lith over a queued title asked nothing');
-      else if (asked.title !== 'Replace a tiddler in this Lith?') {
+      else if (asked.title !== 'Replace a note in this Lith?') {
         problems.push(`the question before the merge was ${JSON.stringify(asked.title)}`);
       }
       await answer('Cancel');
