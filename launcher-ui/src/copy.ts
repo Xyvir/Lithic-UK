@@ -441,6 +441,24 @@ const en = {
     history: {
       closeAria: 'Close history trail dialog',
       title: (name: string) => `${name} History Trail`,
+      /**
+       * The badge on the trail's top row, which is this Lith's unsaved capture rather than a
+       * save: the edits as they stand in the wiki right now, with nothing written to disk yet.
+       * Four characters like `full`, `step` and `sync`, because a badge in this list names a
+       * kind of row rather than saying a sentence; the row's own trailing text carries the
+       * meaning, and its amber dashed frame says the row is not a version at all.
+       */
+      inlinePill: 'live',
+      inlineNote: 'Not saved yet',
+      saveCopy: 'Save a copy',
+      savedCopy: (edits: number) => `Saved a copy of ${edits} edit${edits === 1 ? '' : 's'}.`,
+      /** The browser's download, which cannot confirm the bytes landed. Says so. */
+      startedCopy: (edits: number) => `Download started for ${edits} edit${edits === 1 ? '' : 's'}.`,
+      /** The rung where the file cannot be reached but the browser still holds a saved copy. */
+      rebuildNote: 'No file here, so recovering rebuilds it from the last saved copy.',
+      /** The last rung: nothing to rebuild onto, so the edits can only be written out. */
+      captureOnlyNote: 'No file or saved copy remains. Save a copy to keep these edits.',
+      noCapture: 'These edits are no longer in this browser.',
       backupGroupAria: 'Back up this Lith',
       localOnly: (folder: string) => `Not backed up. Copy it into ${folder} to have it synced.`,
       copy: 'Copy',
@@ -1095,6 +1113,14 @@ const es: Copy = {
     history: {
       closeAria: 'Cerrar el sendero del historial',
       title: (name: string) => `Sendero del historial de ${name}`,
+      inlinePill: 'en vivo',
+      inlineNote: 'Aún sin guardar',
+      saveCopy: 'Guardar una copia',
+      savedCopy: (edits: number) => `Copia guardada de ${edits} ${edits === 1 ? 'edición' : 'ediciones'}.`,
+      startedCopy: (edits: number) => `Descarga iniciada de ${edits} ${edits === 1 ? 'edición' : 'ediciones'}.`,
+      rebuildNote: 'Aquí no hay archivo, así que recuperar lo reconstruye desde la última copia guardada.',
+      captureOnlyNote: 'No queda archivo ni copia guardada. Guarda una copia para conservar estas ediciones.',
+      noCapture: 'Estas ediciones ya no están en este navegador.',
       backupGroupAria: 'Respaldar este Lith',
       localOnly: (folder: string) => `Sin respaldo. Cópialo a ${folder} para que se sincronice.`,
       copy: 'Copiar',
@@ -1712,6 +1738,14 @@ const fr: Copy = {
     history: {
       closeAria: 'Fermer le sentier de l’historique',
       title: (name: string) => `Sentier de l’historique de ${name}`,
+      inlinePill: 'en cours',
+      inlineNote: 'Pas encore enregistré',
+      saveCopy: 'Enregistrer une copie',
+      savedCopy: (edits: number) => `Copie enregistrée de ${edits} ${edits === 1 ? 'modification' : 'modifications'}.`,
+      startedCopy: (edits: number) => `Téléchargement lancé de ${edits} ${edits === 1 ? 'modification' : 'modifications'}.`,
+      rebuildNote: 'Aucun fichier ici, donc récupérer reconstruit le Lith depuis la dernière copie enregistrée.',
+      captureOnlyNote: 'Il ne reste ni fichier ni copie enregistrée. Enregistrez une copie pour garder ces modifications.',
+      noCapture: 'Ces modifications ne sont plus dans ce navigateur.',
       backupGroupAria: 'Sauvegarder ce Lith',
       localOnly: (folder: string) => `Pas sauvegardé. Copiez-le dans ${folder} pour le synchroniser.`,
       copy: 'Copier',
@@ -2326,6 +2360,14 @@ const de: Copy = {
     history: {
       closeAria: 'Spur des Verlaufs schließen',
       title: (name: string) => `Spur des Verlaufs von ${name}`,
+      inlinePill: 'live',
+      inlineNote: 'Noch nicht gespeichert',
+      saveCopy: 'Kopie speichern',
+      savedCopy: (edits: number) => `Kopie mit ${edits} ${edits === 1 ? 'Änderung' : 'Änderungen'} gespeichert.`,
+      startedCopy: (edits: number) => `Download von ${edits} ${edits === 1 ? 'Änderung' : 'Änderungen'} gestartet.`,
+      rebuildNote: 'Hier gibt es keine Datei, also baut Wiederherstellen sie aus der zuletzt gespeicherten Kopie neu auf.',
+      captureOnlyNote: 'Es bleibt weder Datei noch gespeicherte Kopie. Speichere eine Kopie, um diese Änderungen zu behalten.',
+      noCapture: 'Diese Änderungen sind nicht mehr in diesem Browser.',
       backupGroupAria: 'Diesen Lith sichern',
       localOnly: (folder: string) => `Nicht gesichert. Kopiere ihn nach ${folder}, damit er synchronisiert wird.`,
       copy: 'Kopieren',

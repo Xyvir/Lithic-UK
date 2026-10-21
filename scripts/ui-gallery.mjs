@@ -450,6 +450,12 @@ const installRust = (page, config) =>
             url: 'https://github.com/Xyvir/Lithic-UK/releases/latest',
             latest: cfg.latestRelease ?? ''
           };
+        case 'save_lith_file':
+          // The app's own write. Rust opens the dialog, writes the bytes and returns the path,
+          // and a returned path is exactly what the launcher reads as a confirmed save. No file
+          // is written here and none needs to be: the pane is about the sentence that answer
+          // earns, and inventing a path is the whole of what this side of the bridge sees.
+          return { name: args?.suggestedName ?? 'copy.lith', path: `C:/liths/${args?.suggestedName ?? 'copy.lith'}` };
         case 'open_external':
           // The offer's action in this mode: the invoke is recorded above, and a
           // headless shot has no window to open.
@@ -2296,6 +2302,126 @@ const SHEETS = [
           }
         },
         expect: '.cache-history-button.modified'
+      },
+      {
+        // The same dirty row, opened. The edits are the trail's top row rather than a note
+        // beside the title, because the list is where a reader looks for this Lith's states
+        // and the wiki as it stands is one: edits no save has written yet, badged `live`. The
+        // amber dashed row is deliberately not the shape of a version, and the distance below
+        // it says how long those edits have been waiting since the save under them.
+        name: '635-inline-edits-row',
+        view: 'wide',
+        modal: 'history-title',
+        seed: {
+          recents: [handleRow('notes.lith')],
+          caches: { 'search_cache_notes.lith': cache([{ title: 'A', text: 'note text' }]) },
+          meta: {
+            'search_cache_meta_notes.lith': versionChain(),
+            // Recorded after the newest save, which is the only order that happens: a capture
+            // is edits made since something was written, so the pane puts two hours between
+            // the row and the save under it and the connector has a distance to draw.
+            'dirty_state_notes.lith': { ts: SAVED_AT + 2 * 60 * 60 * 1000, tiddlers: [{ title: 'A', text: 'unsaved' }] }
+          }
+        },
+        drive: async (page) => {
+          await page.click('.cache-history-button.modified');
+          await page.waitForSelector('.history-entry.inline');
+          await settle(page, 300);
+        },
+        clip: '.history-modal',
+        expect: '.history-entry.inline'
+      },
+      {
+        // The case the row exists for, and the one where the old dialog was a dead end: no
+        // save has ever been recorded for this Lith, so the trail holds the unsaved capture
+        // and nothing else. It also has to be the case where "No versions saved yet" does
+        // not turn up as an error over the one row that answers it.
+        name: '636-inline-only',
+        view: 'wide',
+        modal: 'history-title',
+        seed: {
+          recents: [handleRow('draft.lith')],
+          caches: { 'search_cache_draft.lith': cache([{ title: 'A', text: 'note text' }]) },
+          meta: { 'dirty_state_draft.lith': { ts: SAVED_AT, tiddlers: [{ title: 'A', text: 'unsaved' }] } }
+        },
+        drive: async (page) => {
+          await page.click('.cache-history-button.modified');
+          await page.waitForSelector('.history-entry.inline');
+          await settle(page, 300);
+        },
+        clip: '.history-modal',
+        expect: '.history-entry.inline'
+      },
+      {
+        // The capture row opened. This is the answer the mark's own warning never had: the
+        // dialog it leads to describes saves, so the edits get a row that can be unfolded
+        // into what they are called, how many there are, and the two ways to take them
+        // somewhere real. Recover here mounts the Lith the row belongs to, with the capture
+        // already merged, rather than opening the three-way prompt about a decision the
+        // dialog has just explained.
+        name: '637-capture-actions',
+        view: 'wide',
+        modal: 'history-title',
+        seed: {
+          recents: [handleRow('notes.lith')],
+          caches: { 'search_cache_notes.lith': cache([{ title: 'A', text: 'note text' }]) },
+          meta: {
+            'search_cache_meta_notes.lith': versionChain(),
+            'dirty_state_notes.lith': {
+              ts: SAVED_AT + 2 * 60 * 60 * 1000,
+              tiddlers: [
+                { title: 'Reading list', text: 'unsaved' },
+                { title: 'Morning pages', text: 'unsaved' },
+                { title: 'Scratch', text: 'unsaved' }
+              ]
+            }
+          }
+        },
+        drive: async (page) => {
+          await page.click('.cache-history-button.modified');
+          await page.waitForSelector('.history-entry.inline');
+          await page.click('.history-capture-head');
+          await page.waitForSelector('.history-capture-actions');
+          await settle(page, 300);
+        },
+        clip: '.history-modal',
+        expect: '.history-capture-actions'
+      },
+      {
+        // The mount-free answer, driven rather than described: Save a copy writes the edits out
+        // as a `.lith` and the row then says what the platform confirmed. What this deck can
+        // stage is the unconfirmed hand-off, because the app's own save dialog is not here to
+        // name a path, and that is the sentence the browser download earns anyway.
+        name: '638-capture-saved',
+        view: 'wide',
+        modal: 'history-title',
+        mode: 'tauri',
+        seed: {
+          recents: [handleRow('notes.lith')],
+          caches: { 'search_cache_notes.lith': cache([{ title: 'A', text: 'note text' }]) },
+          meta: {
+            'search_cache_meta_notes.lith': versionChain(),
+            'dirty_state_notes.lith': {
+              ts: SAVED_AT + 2 * 60 * 60 * 1000,
+              tiddlers: [
+                { title: 'Reading list', text: 'unsaved' },
+                { title: 'Morning pages', text: 'unsaved' },
+                { title: 'Scratch', text: 'unsaved' }
+              ]
+            }
+          }
+        },
+        drive: async (page) => {
+          await page.click('.cache-history-button.modified');
+          await page.waitForSelector('.history-entry.inline');
+          await page.click('.history-capture-head');
+          await page.waitForSelector('.history-capture-actions');
+          await clickAction(page, '.history-capture-actions .modal-action', 'Save a copy');
+          await page.waitForSelector('.history-capture-notice');
+          await settle(page, 300);
+        },
+        clip: '.history-modal',
+        expect: '.history-capture-notice'
       },
       {
         // The mark on a browser-only row opens this same dialog, and this is where a

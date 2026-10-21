@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { KeyvalWikiHistory, HISTORY_VERSIONS_PER_WIKI, recoveredFileName, recoverStamp, isHistoryKey, type WikiHistoryStore } from './wiki-history.ts';
+import { KeyvalWikiHistory, HISTORY_VERSIONS_PER_WIKI, recoveredFileName, recoverStamp, isHistoryKey, unsavedFileName, type WikiHistoryStore } from './wiki-history.ts';
 import type { CacheStore } from './storage.ts';
 
 class MemoryIdb implements CacheStore {
@@ -103,6 +103,15 @@ test('recovered file name embeds the original stem and timestamp stamp', () => {
   assert.equal(recoverStamp(ts), '20260903T154500Z');
   assert.equal(recoveredFileName('My Wiki.lith', ts), 'My Wiki_recover_20260903T154500Z.lith');
   assert.equal(recoveredFileName('notes.html', ts), 'notes_recover_20260903T154500Z.lith');
+});
+
+test('unsaved capture name sits beside the recovered one and still says what it is', () => {
+  const ts = Date.UTC(2026, 8, 3, 15, 45, 0);
+  assert.equal(unsavedFileName('My Wiki.lith', ts), 'My Wiki_unsaved_20260903T154500Z.lith');
+  assert.equal(unsavedFileName('notes.html', ts), 'notes_unsaved_20260903T154500Z.lith');
+  // A capture and a version are different things in the same list, so the two names must not
+  // be able to collide even when both were stamped from the same moment.
+  assert.notEqual(unsavedFileName('notes.lith', ts), recoveredFileName('notes.lith', ts));
 });
 
 test('retention keeps only the newest maxVersions entries without losing HEAD', async () => {

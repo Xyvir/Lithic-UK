@@ -128,6 +128,19 @@ export function recoveredFileName(name: string, ts: number): string {
   return `${stem}_recover_${recoverStamp(ts)}.lith`;
 }
 
+/**
+ * Suggested download name for an unsaved capture: `<original>_unsaved_<stamp>.lith`.
+ *
+ * The capture is a patch rather than a document -- the launcher's watcher records only the
+ * tiddlers that changed since a save -- so this names something to merge back rather than
+ * something to open on its own. Built beside `recoveredFileName` and out of the same stamp, so
+ * the two exports of one Lith sort together and read apart.
+ */
+export function unsavedFileName(name: string, ts: number): string {
+  const stem = name.replace(/\.(?:html?|lith|json)$/i, '') || 'untitled';
+  return `${stem}_unsaved_${recoverStamp(ts)}.lith`;
+}
+
 /** Short deterministic version id: timestamp + content/parent hash. */
 function versionId(ts: number, text: string, parentId = ''): string {
   let hash = 5381;

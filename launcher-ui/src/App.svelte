@@ -32,7 +32,7 @@
   } from './shim-sync';
   import { bootLegacyWiki, bootLegacyHtml, writeHandoff, type RemoteTarget } from './legacy-launcher-runtime';
   import { EMOJI_LIST, uploadInstanceIcon, clearInstanceIcon, emojiFaviconUrl, applyFavicon, bustIconCache, readInstanceEmoji, readServerEmoji, saveInstanceEmoji, clearInstanceEmoji, instanceMarkUrl } from './instance-icon';
-  import { getRecentFiles, setRecentRows, mergeRecentRow, mergeRecentLists, isAnonymousRow, clearAllRecentFiles, purgeOldestCachesIfNeeded, saveSearchCache, forgetWikiCache, cachedWikiNames, idb, getSearchCacheText, readFetchedLith, rememberFetchedLith, listWikiVersions, wikiHasHistory, downloadWikiVersion, getDirtyState, clearDirtyState, listDirtyRecoveries, isWikiDriftedFromHead, isInstallDismissed, setInstallDismissed, recentDiskPath, type RecentEntry } from './storage';
+  import { getRecentFiles, setRecentRows, mergeRecentRow, mergeRecentLists, isAnonymousRow, clearAllRecentFiles, purgeOldestCachesIfNeeded, saveSearchCache, forgetWikiCache, cachedWikiNames, idb, getSearchCacheText, readFetchedLith, rememberFetchedLith, listWikiVersions, wikiHasHistory, downloadWikiVersion, getDirtyState, clearDirtyState, listDirtyRecoveries, isWikiDriftedFromHead, isInstallDismissed, setInstallDismissed, recentDiskPath, type DirtyStateRecord, type RecentEntry } from './storage';
   import { isIosDevice, rememberRowKind, resolveStorageMode, storageModeOverride, browserOnlyMarkTitle, type StorageMode } from './browser-storage';
   import { readBookmarkEntries, saveBookmark, removeBookmark, setBookmarkIcon, writeBookmarkList, refreshBookmarkIcon, verifyInstanceUrl, normalizeInstanceUrl, instanceLabel, type BookmarkEntry, type InstanceVerification } from './bookmarks';
   import { LOGIN_CHECK_LABELS, askInstanceAboutLogin, loginVerdict, loginVerdictFromError, typedLoginCheck, type LoginCheckState, type LoginVerdict } from './login-check';
@@ -52,6 +52,7 @@ import { backupFileName, collectInstanceBackup, mergeBookmarks, parseInstanceBac
   import { copyText } from './clipboard';
   import { syncIndicator, shouldHeartbeat, healthFailure, verifiedAge, SYNC_PULSE_MS, type SyncIndicator, type HealthState } from './git-sync-health';
   import { gapCount, versionGap } from './history-gap';
+  import { unsavedFileName, utcStamp } from './wiki-history';
   import { TRAIL_LIMIT, parseTrailCommits, trailGapLabel, trailRows as trailRowList, type TrailCommit, type TrailPill, type TrailRow } from './instance-trail';
   import { createServerRepo, disconnectServerSync, fetchServerSyncHistory, fetchServerSyncStatus, listServerRepos, pollServerDeviceToken, requestServerDeviceCode, revertServerSync, serverSyncIndicator, setupServerSync, type ServerSyncStatus } from './server-git-sync';
   import { serializeJsonToLith, parseLithToJSON } from './lithic-format';
@@ -2557,6 +2558,22 @@ import { backupFileName, collectInstanceBackup, mergeBookmarks, parseInstanceBac
   let historyBrowserOnly = false;
   let historyBusy = false;
   let historyError = '';
+  /**
+   * The capture itself, when this Lith has one.
+   *
+   * `dirtyEntries` carries only the moment a capture was stamped, which is enough for a badge
+   * and not for a body: the row now says how many edits it holds and what they are called, and
+   * offers to take them somewhere real, so the record is loaded with the versions rather than
+   * re-read on every press.
+   */
+  let historyDirty: DirtyStateRecord | null = null;
+  let historyCaptureOpen = false;
+  let historyCaptureSaving = false;
+  /**
+   * What the row says after a save lands. The header's status line is behind this modal, so a
+   * sentence about what the dialog just wrote has to be drawn in the dialog.
+   */
+  let historyCaptureNotice = '';
   // Per-wiki version-history availability keys the history affordance:
   // wikis with no recorded versions (never saved, scratch-before-save)
   // hide the button instead of opening an empty modal.
@@ -3138,10 +3155,12 @@ import { backupFileName, collectInstanceBackup, mergeBookmarks, parseInstanceBac
    * realtime dirty watcher, ask the user what to do before booting. Returns
    * the decision ('later' means the caller should abort the mount).
    */
-  async function prepareDirtyRecovery(safeName: string): Promise<'merge' | 'discard' | 'later'> {
+  async function prepareDirtyRecovery(safeName: string, answer?: 'merge'): Promise<'merge' | 'discard' | 'later'> {
     const dirty = await getDirtyState(safeName);
     if (!dirty) return 'merge'; // Nothing to recover; proceed.
-    const decision = await promptDirtyRecovery(safeName, dirty);
+    // A caller that has already asked (the history trail's Recover) answers rather than
+    // opening the prompt a second time about a capture the row it came from has described.
+    const decision = answer ?? await promptDirtyRecovery(safeName, dirty);
     if (decision === 'merge') {
       // Queued after the file's own tiddlers, so recovered edits win title
       // conflicts but stay below engine plumbing.
@@ -3218,7 +3237,14 @@ import { backupFileName, collectInstanceBackup, mergeBookmarks, parseInstanceBac
     // The container a PDF's own open asked the engine to draw, when this mount is the Lith
     // beside that PDF. Every other mount leaves it undefined, and the boot answers the
     // question either way (see publishBoardRequest), so a request cannot outlive its mount.
-    openBoardFor?: string
+    openBoardFor?: string,
+    /**
+     * An answer this mount already carries to the unsaved-edit gate, from a caller that has
+     * asked its own question about the same capture (the history trail's own Recover). Only
+     * merge can arrive this way: discarding and deciding later are answers a person gives, so
+     * they never come from a button whose whole claim is that it recovers the edits.
+     */
+    dirtyAnswer?: 'merge'
   ) {
     mountError = '';
     // A complete wiki page rather than a Lithic document: served as-is, with
@@ -3246,7 +3272,7 @@ import { backupFileName, collectInstanceBackup, mergeBookmarks, parseInstanceBac
     // snapshot on mounts that changed nothing.
     const driftedFromHead = !isHtmlMonolith && !isScratch && !indexDbOnly && await isWikiDriftedFromHead(safeName, contents);
     if (tracksUnsavedEdits(name)) {
-      if ((await prepareDirtyRecovery(safeName)) === 'later') {
+      if ((await prepareDirtyRecovery(safeName, dirtyAnswer)) === 'later') {
         busy = false;
         status = copy.status.editsKept;
         return;
@@ -3465,7 +3491,17 @@ import { backupFileName, collectInstanceBackup, mergeBookmarks, parseInstanceBac
     }
   }
 
-  async function openRecent(recent: RecentEntry | { name?: string; path?: string; text?: string; handle?: any }) {
+  async function openRecent(
+    recent: RecentEntry | { name?: string; path?: string; text?: string; handle?: any },
+    /**
+     * The history trail's own Recover starts this mount with the unsaved-edit gate already
+     * answered, and asks for silence on failure because it has a second rung to try: a Lith
+     * whose file cannot be read can still be rebuilt from its last saved copy, and a sentence
+     * about the file would be answered a moment later by the copy that worked. Every other
+     * caller passes nothing and keeps today's messages.
+     */
+    opts: { dirtyAnswer?: 'merge'; quietFail?: boolean } = {}
+  ): Promise<boolean> {
     busy = true;
     status = copy.status.openingRecent;
     try {
@@ -3480,27 +3516,26 @@ import { backupFileName, collectInstanceBackup, mergeBookmarks, parseInstanceBac
         const name = getEntryName(recent);
         const cached = isHtmlMonolithName(name) ? '' : await getSearchCacheText(name);
         const text = cached || (recent as any).text || '';
-        await mountWiki(text, name);
+        await mountWiki(text, name, undefined, undefined, [], null, undefined, opts.dirtyAnswer);
         status = copy.status.mounted(name);
-        return;
+        return true;
       }
       // A row with a disk path is read through whichever process can: the app's Rust bridge
       // under Tauri, the shim's wire when a shim served this page. A shim handle carries a
       // path and no `getFile`, so it belongs here rather than in the browser-handle block.
       if ((mode === 'tauri' || shimToken !== null) && tauriPath) {
-        await mountDiskPath(tauriPath);
-        return;
+        return await mountDiskPath(tauriPath, undefined, opts);
       }
       if (mode === 'tauri' && !rawHandle?.getFile) {
         // A handle-less or pseudo-handle row with no path can't be opened:
         // browser handles don't exist in this WebView.
-        reportHeld(copy.status.noPath);
-        return;
+        if (!opts.quietFail) reportHeld(copy.status.noPath);
+        return false;
       }
       // The same dead end on a shim: a handle with no resolvable path has nothing to read.
       if (shimToken !== null && rawHandle && !rawHandle.getFile) {
-        reportHeld(copy.status.noPath);
-        return;
+        if (!opts.quietFail) reportHeld(copy.status.noPath);
+        return false;
       }
       const handle = rawHandle;
       if (handle) {
@@ -3512,31 +3547,33 @@ import { backupFileName, collectInstanceBackup, mergeBookmarks, parseInstanceBac
         }
         const file = await handle.getFile();
         const text = await file.text();
-        await mountWiki(text, file.name, recentDiskPath(recent) ?? undefined, handle);
+        await mountWiki(text, file.name, recentDiskPath(recent) ?? undefined, handle, [], null, undefined, opts.dirtyAnswer);
         status = copy.status.mounted(file.name);
-        return;
+        return true;
       }
       if ((recent as any).text !== undefined) {
         lithText = (recent as any).text;
         fileName = (recent as any).name || 'untitled.lith';
         filePath = recentDiskPath(recent) ?? undefined;
         status = copy.status.mounted(fileName);
-        await mountWiki(lithText, fileName, filePath);
+        await mountWiki(lithText, fileName, filePath, undefined, [], null, undefined, opts.dirtyAnswer);
+        return true;
       } else if (recentDiskPath(recent) && mode === 'tauri') {
         // Tauri recents opened through the save dialog carry only a disk
         // path (no cached text). Read fresh from disk so in-place edits
         // made outside the app are picked up.
-        await mountDiskPath(recentDiskPath(recent) as string);
-        return;
+        return await mountDiskPath(recentDiskPath(recent) as string, undefined, opts);
       } else {
         // Nothing left to open it from: the row has no path this build can read and
         // no body to mount. The case a store too small to mirror a large Lith leaves
         // behind (`persistRecentRows`). Said out loud rather than left as a click that
         // does nothing, which is what it looked like from the outside.
-        reportHeld(copy.status.noPath);
+        if (!opts.quietFail) reportHeld(copy.status.noPath);
+        return false;
       }
     } catch (error) {
-      reportHeld(copy.status.openFailed(error instanceof Error ? error.message : String(error)));
+      if (!opts.quietFail) reportHeld(copy.status.openFailed(error instanceof Error ? error.message : String(error)));
+      return false;
     } finally {
       busy = false;
       showRecent = false;
@@ -3614,7 +3651,12 @@ import { backupFileName, collectInstanceBackup, mergeBookmarks, parseInstanceBac
    * bridge; a shim reads through its own wire, which is the same shape of answer: a name, the
    * path and the text. Callable while a mount is already in flight.
    */
-  async function mountDiskPath(path: string, openBoardFor?: string) {
+  async function mountDiskPath(
+    path: string,
+    openBoardFor?: string,
+    /** The history trail's Recover, on its first rung: the same answer and the same silence. */
+    opts: { dirtyAnswer?: 'merge'; quietFail?: boolean } = {}
+  ): Promise<boolean> {
     try {
       if (isPdfPath(path)) {
         // Before the text read below, which a PDF has no business going through: its pages
@@ -3629,11 +3671,11 @@ import { backupFileName, collectInstanceBackup, mergeBookmarks, parseInstanceBac
           // the import wrote travels along and the engine opens the board. Opening that same
           // Lith on its own, from the recents list or a Mount, carries no container and leaves
           // it exactly as it says.
-          return await mountDiskPath(target.path, pdfContainerTitle(path));
+          return await mountDiskPath(target.path, pdfContainerTitle(path), opts);
         }
         await importPdfIntoNewLith(path, target.path);
         status = copy.status.mounted(fileName);
-        return;
+        return true;
       }
       const result =
         mode === 'tauri'
@@ -3646,10 +3688,12 @@ import { backupFileName, collectInstanceBackup, mergeBookmarks, parseInstanceBac
       lithText = result.text;
       fileName = result.name;
       filePath = result.path;
-      await mountWiki(result.text, result.name, result.path, undefined, [], null, openBoardFor);
+      await mountWiki(result.text, result.name, result.path, undefined, [], null, openBoardFor, opts.dirtyAnswer);
       status = copy.status.mounted(result.name);
+      return true;
     } catch (error) {
-      reportHeld(copy.status.openFailed(error instanceof Error ? error.message : String(error)));
+      if (!opts.quietFail) reportHeld(copy.status.openFailed(error instanceof Error ? error.message : String(error)));
+      return false;
     }
   }
 
@@ -4287,6 +4331,65 @@ import { backupFileName, collectInstanceBackup, mergeBookmarks, parseInstanceBac
   /** The folder that offer would copy into, named rather than promised. */
   $: historySyncedFolder = historyLocalOnlyPath ? syncedDirFor(recentRows(), backupRoots) ?? '' : '';
   /**
+   * The unsaved-edit capture this dialog's Lith has, when it has one.
+   *
+   * The row's mark is amber for three different reasons, and this dialog already answered two
+   * of them in its header: the fallback's claim, and the offer to copy a Lith that sits outside
+   * every backed-up folder. Edits never saved to disk were the third, and they were the one
+   * reason the mark had no answer at all: the trail below lists saves, so a Lith whose only
+   * news was an unsaved edit opened onto a dialog that never mentioned it. Read from
+   * `dirtyEntries` at render time rather than copied when the dialog opened, so a dialog left
+   * open across a recovery stops claiming edits it no longer has.
+   */
+  $: historyUnsavedTs = showHistoryModal ? historyDirty?.ts ?? dirtyEntries[historyName] ?? 0 : 0;
+  /**
+   * The trail's rows: this Lith's unsaved capture first, then its saves, newest first.
+   *
+   * The capture is a row rather than a notice beside the title because the list is where a
+   * reader looks for this Lith's states, and the wiki as it stands is one of them: edits no
+   * save has written yet, badged `live` beside the `full` and `step` rows they are not.
+   * Putting it in the list also gives it
+   * the trail's own grammar, so the chevron and the distance below it say how long the edits
+   * have been waiting since the save under them, and the row's own column says it is not
+   * exported rather than leaving a download beside it that would have nothing to fetch. The
+   * row is synthesised here instead of being stored, because it is not a version: no id, no
+   * bytes, and it disappears with the capture rather than ageing out of a capped list.
+   */
+  type HistoryRow = HistoryEntry & { inline?: boolean };
+  $: historyRows = (historyUnsavedTs
+    ? [{ id: 'inline', ts: historyUnsavedTs, sizeBytes: 0, lastModified: utcStamp(historyUnsavedTs), inline: true } as HistoryRow]
+    : ([] as HistoryRow[])
+  ).concat(historyEntries);
+  /** The row this dialog is about, when the list still has it. */
+  $: historyRow = showHistoryModal ? recentFiles.find((item) => getEntryName(item) === historyName) ?? null : null;
+  /**
+   * Whether Recover has a document to open at all: a handle, a disk path this build can read,
+   * a body carried in the row, or the browser-only fallback, which mounts from the cache.
+   */
+  $: historyCanOpen = Boolean(
+    historyRow &&
+      ((historyRow as any).handle ||
+        (historyRow as any).browserOnly === true ||
+        (historyRow as any).text !== undefined ||
+        recentDiskPath(historyRow) ||
+        // Where no mount can have a file behind it, the cached copy is the document, which is
+        // the same route `openRecent` takes. Required to exist, because mounting from nothing
+        // would open a blank wiki and call it a recovery.
+        (indexDbOnly && Boolean(cachedEntries[historyName])))
+  );
+  /** Whether there is a saved copy to rebuild the Lith from when the file cannot be read. */
+  $: historyHasCopy = Boolean(historyEntries.length > 0 || cachedEntries[historyName]);
+  /**
+   * Which rung of the recovery ladder this Lith is on, and therefore what the row can promise.
+   *
+   * `file` is the ordinary case and needs no sentence. `copy` is a Lith whose file this app
+   * cannot reach, where the last saved copy in this browser is the document to rebuild from.
+   * `capture` is both of those gone, where the edits are all that is left and saving them out
+   * is the only thing that cannot make it worse. A stale path reads as `file` here because the
+   * truth is only discovered by mounting; Recover falls through to `copy` when the read fails.
+   */
+  $: historyCaptureRung = historyCanOpen ? 'file' : historyHasCopy ? 'copy' : ('capture' as const);
+  /**
    * Open the per-wiki version history modal. The history icon no longer
    * downloads a single cache blob. It lists every timestamped version
    * (deltas materialized on demand) and lets the user download any of them
@@ -4295,13 +4398,25 @@ import { backupFileName, collectInstanceBackup, mergeBookmarks, parseInstanceBac
   async function openHistoryModal(name: string, browserOnly = false) {
     historyName = name;
     historyEntries = [];
+    historyDirty = null;
+    historyCaptureOpen = false;
+    historyCaptureSaving = false;
+    historyCaptureNotice = '';
     historyBrowserOnly = browserOnly;
     historyError = '';
     showHistoryModal = true;
     historyBusy = true;
     try {
-      historyEntries = await listWikiVersions(name);
-      if (historyEntries.length === 0) historyError = copy.status.noHistory;
+      // The capture is read with the versions rather than on the press that opens the row: the
+      // row has to name how many edits it holds the moment it is drawn, and a body that filled
+      // in a moment later would reflow the dialog under the pointer.
+      const [versions, capture] = await Promise.all([listWikiVersions(name), getDirtyState(name)]);
+      historyEntries = versions;
+      historyDirty = capture;
+      // Saying "no saved versions" over a trail that is about to draw this Lith's unsaved
+      // capture would read as a dead end, and it is one thing this dialog now has: when the
+      // capture is the only row there is, the row is the answer the old sentence denied.
+      if (versions.length === 0 && !capture && !dirtyEntries[name]) historyError = copy.status.noHistory;
     } catch (error) {
       historyError = error instanceof Error ? error.message : String(error);
     } finally {
@@ -4313,6 +4428,10 @@ import { backupFileName, collectInstanceBackup, mergeBookmarks, parseInstanceBac
     showHistoryModal = false;
     historyBrowserOnly = false;
     historyError = '';
+    historyDirty = null;
+    historyCaptureOpen = false;
+    historyCaptureSaving = false;
+    historyCaptureNotice = '';
   }
 
   /**
@@ -4344,6 +4463,94 @@ import { backupFileName, collectInstanceBackup, mergeBookmarks, parseInstanceBac
     } catch (error) {
       historyError = error instanceof Error ? error.message : String(error);
     }
+  }
+
+  /** Open or close the capture row's own body, and drop whatever the last save said. */
+  function toggleHistoryCapture() {
+    historyCaptureOpen = !historyCaptureOpen;
+    historyCaptureNotice = '';
+  }
+
+  /**
+   * Write the capture out as a `.lith` file the user can keep.
+   *
+   * The mount-free answer, and the one this dialog can always give: the edits leave the
+   * browser's volatile store and land in a file, without the Lith they belong to having to be
+   * open first. The capture is a patch rather than a document, so the name says `_unsaved_`
+   * beside the `_recover_` the version rows write, and what lands is meant to be dragged back
+   * into the wiki it came from. Written through the app's own save wherever it has one, for the
+   * reason `downloadHistoryVersion` gives: the browser anchor writes nothing on Android.
+   */
+  async function saveHistoryCapture() {
+    if (historyCaptureSaving) return;
+    const record = historyDirty ?? await getDirtyState(historyName);
+    if (!record || record.tiddlers.length === 0) {
+      historyError = copy.dialogs.history.noCapture;
+      return;
+    }
+    historyCaptureSaving = true;
+    historyCaptureNotice = '';
+    historyError = '';
+    try {
+      const fileName = unsavedFileName(historyName, record.ts);
+      const json = JSON.stringify(record.tiddlers);
+      if (documents) {
+        const outcome = await saveTextVerifiably(fileName, serializeJsonToLith(json), documents);
+        // The user backed out of the save dialog: no file, no notice, and no error.
+        if (outcome === 'cancelled') return;
+        // `started` is the platform's unconfirmed download. It says what happened rather
+        // than borrowing the sentence a confirmed write earns, for the reason
+        // `saveTextVerifiably` documents: the browser never reports whether it finished.
+        historyCaptureNotice = outcome === 'saved'
+          ? copy.dialogs.history.savedCopy(record.tiddlers.length)
+          : copy.dialogs.history.startedCopy(record.tiddlers.length);
+      } else {
+        saveBlobAs(fileName, json);
+        historyCaptureNotice = copy.dialogs.history.startedCopy(record.tiddlers.length);
+      }
+    } catch (error) {
+      historyError = error instanceof Error ? error.message : String(error);
+    } finally {
+      historyCaptureSaving = false;
+    }
+  }
+
+  /**
+   * Take the capture into a wiki, down the ladder until the edits are somewhere real.
+   *
+   * The edits are a patch on a document, so each rung is a document to put them on. First the
+   * file itself, which is also the only rung that writes back where it came from. Then, when
+   * that file cannot be read, the last saved copy in this browser: the wiki comes back whole
+   * with the edits on top, read-only, and a save puts it wherever the user names. Neither is a
+   * dead end any more; the last rung, where no copy exists either, says so and leaves the edits
+   * to Save a copy, which is the one thing that cannot make it worse.
+   */
+  async function recoverHistoryCapture() {
+    if (historyCaptureSaving) return;
+    const name = historyName;
+    const record = historyDirty ?? await getDirtyState(name);
+    if (!record || record.tiddlers.length === 0) {
+      historyError = copy.dialogs.history.noCapture;
+      return;
+    }
+    historyCaptureOpen = false;
+    historyCaptureNotice = '';
+    historyError = '';
+    // Rung one. Silent on failure, because the next rung speaks for it.
+    if (historyRow && historyCanOpen) {
+      const mounted = await openRecent(historyRow, { dirtyAnswer: 'merge', quietFail: true });
+      if (mounted) return;
+    }
+    // Rung two: the same merge onto the newest saved copy this device holds.
+    const cacheText = await getSearchCacheText(name);
+    if (cacheText) {
+      closeHistoryModal();
+      await mountCachedReadOnly(name, cacheText, 'merge');
+      return;
+    }
+    // Rung three: nothing to mount onto. The row already says so; this is the guard for a
+    // cache that vanished between the dialog opening and the press.
+    historyError = copy.dialogs.history.captureOnlyNote;
   }
 
   /**
@@ -4878,7 +5085,7 @@ import { backupFileName, collectInstanceBackup, mergeBookmarks, parseInstanceBac
    * Mount a wiki from its cached tiddler snapshot in read-only mode:
    * hydrate SiteTitle from the file name and inject DisableAutoSaver.
    */
-  async function mountCachedReadOnly(name: string, cacheText: string) {
+  async function mountCachedReadOnly(name: string, cacheText: string, answer?: 'merge') {
     let parsed: Array<Record<string, string>> = [];
     try {
       const json = JSON.parse(cacheText);
@@ -4888,7 +5095,10 @@ import { backupFileName, collectInstanceBackup, mergeBookmarks, parseInstanceBac
     // of the cache snapshot when accepted.
     const dirty = await getDirtyState(name);
     if (dirty) {
-      const decision = await promptDirtyRecovery(name, dirty);
+      // A caller that has already asked (the history trail's Recover, rebuilding a Lith whose
+      // file it could not read) answers here instead of opening a second prompt about a
+      // capture the row it came from has just described.
+      const decision = answer ?? await promptDirtyRecovery(name, dirty);
       if (decision === 'merge') {
         parsed = [...parsed, ...dirty.tiddlers.map((tiddler) => ({ ...tiddler }))];
         await clearDirtyState(name);
@@ -6898,12 +7108,12 @@ import { backupFileName, collectInstanceBackup, mergeBookmarks, parseInstanceBac
         {/if}
         {#if historyBusy}
           <p class="history-empty">{copy.dialogs.history.loading}</p>
-        {:else if historyEntries.length === 0}
+        {:else if historyRows.length === 0}
           <p class="history-empty">{historyError || copy.dialogs.history.none}</p>
         {:else}
           <ul class="history-list">
-            {#each historyEntries as entry, index (entry.id)}
-              {@const newer = historyEntries[index - 1]}
+            {#each historyRows as entry, index (entry.id)}
+              {@const newer = historyRows[index - 1]}
               {@const gap = newer ? historyGapLabel(newer.ts, entry.ts) : ''}
               {#if newer}
                 <!--
@@ -6924,18 +7134,66 @@ import { backupFileName, collectInstanceBackup, mergeBookmarks, parseInstanceBac
                   {#if gap}<span class="history-gap">{gap}</span>{/if}
                 </li>
               {/if}
-              <li class="history-entry">
-                {#if entry.isBase && entry.external}<span class="history-badge sync" title={copy.dialogs.history.badgeSyncTitle}>{copy.dialogs.history.badgeSync}</span>{:else if entry.isBase}<span class="history-badge" title={copy.dialogs.history.badgeFullTitle}>{copy.dialogs.history.badgeFull}</span>{:else}<span class="history-badge delta" title={copy.dialogs.history.badgeStepTitle}>{copy.dialogs.history.badgeStep}</span>{/if}
-                <span class="history-time">{entry.lastModified}</span>
-                <span class="history-size">{formatCacheSize(entry.sizeBytes)}</span>
-                <button class="recent-icon-button history-download-button" type="button" aria-label={copy.dialogs.history.downloadAria(entry.lastModified)} title={copy.row.downloadTitle} on:click={() => downloadHistoryVersion(entry.id)}>
-                  <svg class="history-download-icon" viewBox="56 108 33 36" aria-hidden="true"><path class="history-icon-shape" d="m 73.595508,109.76746 c -7.198235,0 -13.103617,5.58342 -13.647229,12.64471 h -0.0072 V 138.2696 H 58.61606 l 2.32389,4.02559 2.324405,-4.02559 h -1.323433 v -15.85123 c 0.530186,-5.97937 5.534806,-10.65103 11.654586,-10.65103 6.474618,0 11.703161,5.22855 11.703161,11.70316 0,6.47462 -5.228543,11.70161 -11.703161,11.70161 -2.644513,0 -5.080809,-0.87232 -7.037814,-2.34508 v 2.39572 c 2.058162,1.23707 4.46633,1.94924 7.037814,1.94924 7.555498,0 13.703556,-6.14599 13.703556,-13.70149 0,-7.5555 -6.148058,-13.70304 -13.703556,-13.70304 z m -2.108915,7.49825 v 8.05016 h 7.125663 v -1.59836 h -5.527311 v -6.4518 z"></path></svg>
-                </button>
+              <li class="history-entry" class:inline={entry.inline} class:capture-open={entry.inline && historyCaptureOpen}>
+                {#if entry.inline}
+                  <!--
+                    The capture row is a disclosure rather than a version, and pressing it opens
+                    the one thing this dialog can do about edits no save has written: take them
+                    somewhere real. The confession this row exists for is that the mark on the
+                    list promised edits and the dialog then described only saves, so the row has
+                    to hold the answer rather than leaving it to a mount and a second prompt. Its
+                    head is a button, so the whole row is the target and the keyboard gets the
+                    same one; the chevron is the only decoration, and it turns when open.
+                  -->
+                  <button type="button" class="history-capture-head" aria-expanded={historyCaptureOpen} aria-controls="history-capture-body" on:click={toggleHistoryCapture}>
+                    <span class="history-badge unsaved" title={copy.row.unsavedFrom(new Date(entry.ts).toLocaleString(LOCALE_TAG))}>{copy.dialogs.history.inlinePill}</span>
+                    <span class="history-time">{entry.lastModified}</span>
+                    <span class="history-inline-note">{copy.dialogs.history.inlineNote}</span>
+                    <svg class="history-capture-chevron" viewBox="0 0 14 8" aria-hidden="true"><path d="M1.5 1.5 7 6.5l5.5-5"></path></svg>
+                  </button>
+                  {#if historyCaptureOpen}
+                    <div class="history-capture-body" id="history-capture-body">
+                      {#if historyDirty && historyDirty.tiddlers.length > 0}
+                        <!-- The same list the recovery prompt draws, so the edits on offer are the
+                           edits either window would recover: a title apiece, capped, and a count
+                           for the rest rather than a scrollbar nobody reads. No sentence above
+                           it: the row's own stamp is the moment, `Not saved yet` is the state,
+                           and a line repeating either would be the third account of one fact. -->
+                        <ul class="dirty-tiddler-list">
+                          {#each historyDirty.tiddlers.slice(0, 8) as tiddler (tiddler.title)}
+                            <li>{tiddler.title}</li>
+                          {/each}
+                          {#if historyDirty.tiddlers.length > 8}<li class="dirty-more">{copy.dialogs.dirty.more(historyDirty.tiddlers.length - 8)}</li>{/if}
+                        </ul>
+                      {/if}
+                      <!-- What Recover can promise on this rung, and nothing where the ordinary
+                           answer needs no explaining. -->
+                      {#if historyCaptureRung === 'copy'}<p class="history-capture-why">{copy.dialogs.history.rebuildNote}</p>{:else if historyCaptureRung === 'capture'}<p class="history-capture-why">{copy.dialogs.history.captureOnlyNote}</p>{/if}
+                      {#if historyCaptureNotice}<p class="history-capture-notice" role="status">{historyCaptureNotice}</p>{/if}
+                      <div class="history-capture-actions">
+                        <button class="modal-action" disabled={historyCaptureRung === 'capture' || historyCaptureSaving} on:click={recoverHistoryCapture}>{copy.dialogs.dirty.recover}</button>
+                        <button class="modal-action secondary" disabled={historyCaptureSaving} on:click={saveHistoryCapture}>{copy.dialogs.history.saveCopy}</button>
+                      </div>
+                    </div>
+                  {/if}
+                {:else}
+                  {#if entry.isBase && entry.external}<span class="history-badge sync" title={copy.dialogs.history.badgeSyncTitle}>{copy.dialogs.history.badgeSync}</span>{:else if entry.isBase}<span class="history-badge" title={copy.dialogs.history.badgeFullTitle}>{copy.dialogs.history.badgeFull}</span>{:else}<span class="history-badge delta" title={copy.dialogs.history.badgeStepTitle}>{copy.dialogs.history.badgeStep}</span>{/if}
+                  <span class="history-time">{entry.lastModified}</span>
+                  <span class="history-size">{formatCacheSize(entry.sizeBytes)}</span>
+                  <button class="recent-icon-button history-download-button" type="button" aria-label={copy.dialogs.history.downloadAria(entry.lastModified)} title={copy.row.downloadTitle} on:click={() => downloadHistoryVersion(entry.id)}>
+                    <svg class="history-download-icon" viewBox="56 108 33 36" aria-hidden="true"><path class="history-icon-shape" d="m 73.595508,109.76746 c -7.198235,0 -13.103617,5.58342 -13.647229,12.64471 h -0.0072 V 138.2696 H 58.61606 l 2.32389,4.02559 2.324405,-4.02559 h -1.323433 v -15.85123 c 0.530186,-5.97937 5.534806,-10.65103 11.654586,-10.65103 6.474618,0 11.703161,5.22855 11.703161,11.70316 0,6.47462 -5.228543,11.70161 -11.703161,11.70161 -2.644513,0 -5.080809,-0.87232 -7.037814,-2.34508 v 2.39572 c 2.058162,1.23707 4.46633,1.94924 7.037814,1.94924 7.555498,0 13.703556,-6.14599 13.703556,-13.70149 0,-7.5555 -6.148058,-13.70304 -13.703556,-13.70304 z m -2.108915,7.49825 v 8.05016 h 7.125663 v -1.59836 h -5.527311 v -6.4518 z"></path></svg>
+                  </button>
+                {/if}
               </li>
             {/each}
           </ul>
           {#if historyError}<p class="status-line error" role="alert">{historyError}</p>{/if}
-          <p class="history-note">{copy.dialogs.history.note}</p>
+          <!--
+            Only when something here can be downloaded. The line tells a reader what to do
+            with a version they take; beside a trail whose only row is the unsaved capture
+            there is nothing to take, and the instruction would point at an absence.
+          -->
+          {#if historyEntries.length > 0}<p class="history-note">{copy.dialogs.history.note}</p>{/if}
         {/if}
       </div>
     </div>

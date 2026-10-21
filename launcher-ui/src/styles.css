@@ -1936,6 +1936,50 @@ body.drag-over::after {
 /* --- History trail modal --- */
 .history-modal { width: min(100%, 540px); }
 .history-modal h2 { margin-bottom: 12px; padding-right: 30px; overflow-wrap: anywhere; }
+/*
+ * The trail's own badges: the kind of state a row is, in the warning tone when the row is not a
+ * saved version. `inline` is the unsaved capture, which sits at the top of the list because it
+ * is the newest state there is, and wears the amber so the mark that opened the dialog and the
+ * row it was warning about are the same colour.
+ */
+.history-badge.unsaved { border-color: var(--lithic-amber-rim); background: var(--lithic-amber-wash-16); color: var(--lithic-amber-soft); }
+/*
+ * The unsaved row, drawn rather than written: a dashed rim and the faintest amber wash, so it
+ * reads as a row qualifying for the list above it rather than as the first version in it. The
+ * trailing word replaces both the size and the download, since the capture has neither.
+ */
+.history-entry.inline { border-style: dashed; border-color: var(--lithic-amber-rim); background: var(--lithic-amber-wash-12); }
+.history-inline-note { flex: none; color: var(--lithic-amber-soft); font-size: 0.76em; white-space: nowrap; }
+/*
+ * The capture row is a disclosure, so the row's frame stays (a capture qualifies for the list
+ * rather than being a version in it) and the padding moves onto the head, which is a button:
+ * the whole first line is the target, and the body opens inside the same dashed frame instead
+ * of drawing a second panel that would read as another row. The chevron is pushed to the far
+ * side so it reads as the row's own control rather than as punctuation after the note.
+ */
+.history-entry.inline { display: block; padding: 0; }
+.history-entry.inline.capture-open { border-color: var(--lithic-amber-soft); }
+.history-capture-head {
+  display: flex; align-items: center; gap: 10px; width: 100%;
+  padding: 8px 10px; border: 0; border-radius: 7px; background: none;
+  color: inherit; font: inherit; text-align: left; cursor: pointer;
+}
+.history-capture-head:focus-visible { outline: 2px solid var(--lithic-amber-soft); outline-offset: -2px; }
+.history-capture-chevron {
+  flex: none; width: 12px; height: 7px; margin-left: auto;
+  fill: none; stroke: var(--lithic-amber-soft); stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round;
+  transition: transform 120ms ease;
+}
+.history-entry.capture-open .history-capture-chevron { transform: rotate(180deg); }
+.history-capture-body { padding: 0 10px 10px; }
+.history-capture-body > p { margin: 0 0 8px; color: var(--lithic-ink-soft); font-size: 0.82em; line-height: 1.45; }
+.history-capture-body .dirty-tiddler-list { margin: 0 0 8px; max-height: 22vh; }
+/* The rung's own sentence, in the amber of the row it belongs to: what recovering will have to
+   work from, said where the two buttons that depend on it are. */
+.history-capture-body > .history-capture-why { color: var(--lithic-amber-soft); }
+.history-capture-body > .history-capture-notice { color: var(--lithic-ok); }
+.history-capture-actions { display: flex; gap: 8px; margin-top: 10px; }
+.history-capture-actions .modal-action { padding: 5px 12px; font-size: 0.84em; }
 .history-empty { color: var(--lithic-ink-muted); }
 .history-list { list-style: none; margin: 0; padding: 0; max-height: 46vh; overflow: auto; }
 .history-entry {
