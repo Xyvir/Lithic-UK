@@ -51,6 +51,21 @@ test('a title-less tiddler is dropped instead of bricking the boot', () => {
   assert.equal(readStore(html).length, titles.filter((title) => typeof title === 'string' && title.trim() !== '').length);
 });
 
+// A tiddler body is text, and `</script>` is ordinary text in a note about HTML. Written into
+// the store raw it ended the script element early: the browser read a truncated JSON array,
+// parsed the rest of the document as markup, and the mount booted a wiki with no page around
+// it. The store is escaped so the body arrives exactly as it was written.
+test('a tiddler body cannot end the store script that carries it', () => {
+  const body = '</script><script>window.pwned=1</script><!-- <script>';
+  const html = buildEngineHtml(ENGINE_STUB, { name: 'x.lith', text: '' }, [{ title: 'evil', text: body }]);
+  const store = html.match(/<script class="tiddlywiki-tiddler-store" type="application\/json">([\s\S]*?)<\/script>/);
+  assert.ok(store, 'the store is still one script element');
+  assert.equal(store[1].includes('</script>'), false, 'no closing tag survives inside the store');
+  assert.equal(store[1].includes('<!--'), false, 'no comment opener survives inside the store');
+  const parsed = JSON.parse(store[1]) as Array<Record<string, string>>;
+  assert.equal(parsed.find((tiddler) => tiddler.title === 'evil')?.text, body, 'the body parses back unchanged');
+});
+
 test('buildEngineHtml injects handoff tiddlers then pending imports', () => {
   const html = buildEngineHtml(ENGINE_STUB, { name: 'x.lith', text: 'title: FileTiddler\n\nfile body' }, [{ title: 'PendingTiddler', text: 'queued' }]);
   const titles = readStore(html).map((tiddler) => tiddler.title);

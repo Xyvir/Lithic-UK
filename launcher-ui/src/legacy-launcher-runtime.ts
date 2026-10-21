@@ -153,11 +153,27 @@ export function readEnginePluginRoots(html: string): string[] {
   return [...roots].sort();
 }
 
+/**
+ * The tiddlers as JSON text that cannot end the script element carrying it.
+ *
+ * A tiddler body may contain anything, and `</script>` is ordinary text in a note about
+ * HTML or in the docs of a plugin. Written raw, it closes the store early: the browser sees
+ * a truncated JSON array, parses the rest of the document as markup, and the mount boots a
+ * wiki with no page around it. `<` is therefore escaped as a JSON unicode escape, which
+ * parses back to the same string and leaves no sequence the HTML parser can mistake for the
+ * end of the element (or for the `<!--` that starts its double-escaped state).
+ */
+function storeJson(tiddlers: Array<Record<string, string>>): string {
+  // `String.raw` so the replacement is the text of a JSON unicode escape, not the `<` that a
+  // plain string literal would turn that escape into.
+  return JSON.stringify(tiddlers).replace(/</g, () => String.raw`\u003c`);
+}
+
 function injectTiddlers(html: string, tiddlers: Array<Record<string, string>>): string {
-  const script = `<script class="tiddlywiki-tiddler-store" type="application/json">${JSON.stringify(tiddlers)}</script>`;
+  const script = `<script class="tiddlywiki-tiddler-store" type="application/json">${storeJson(tiddlers)}</script>`;
   const store = /(<script class="tiddlywiki-tiddler-store" type="application\/json">\[)([\s\S]*?)(\]\s*<\/script>)/i;
   if (store.test(html)) {
-    return html.replace(store, (_, start, existing, end) => `${start}${existing.trim() ? `${existing},` : ''}${JSON.stringify(tiddlers).slice(1, -1)}${end}`);
+    return html.replace(store, (_, start, existing, end) => `${start}${existing.trim() ? `${existing},` : ''}${storeJson(tiddlers).slice(1, -1)}${end}`);
   }
   // A TiddlyWiki store must be available before the boot scripts execute.
   // Insert immediately before the first boot script, falling back to body.

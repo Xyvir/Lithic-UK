@@ -551,6 +551,38 @@ try {
     `...most of which is the field itself (${typingRow.fieldWidth} of ${typingRow.cardWidth})`
   );
   await closeTypingRow();
+
+  // The name written is not always the name typed. Every rule that makes a filename legal also
+  // merges two names into one (`a/b` and `a-b` both arrive at `a-b.lith`), so the field says
+  // which file it will create before the document exists. An ordinary name says nothing, or the
+  // notice becomes noise nobody reads.
+  await page.evaluate(() => {
+    [...document.querySelectorAll('button')].find((button) => button.textContent?.includes('New Blank Lith'))?.click();
+  });
+  await page.waitForSelector('.new-lith-inline');
+  await page.click('.new-lith-field input');
+  await page.keyboard.type('a/b');
+  await page.waitForFunction(() => document.querySelector('.new-lith-rename') !== null, POLL);
+  const rewritten = await page.evaluate(() => document.querySelector('.new-lith-rename')?.textContent?.trim() ?? null);
+  assert.equal(
+    rewritten,
+    'This saves as a-b.lith so it opens on every system.',
+    `The field names the file it will create: ${rewritten}`
+  );
+  await page.evaluate(() => {
+    const input = document.querySelector('.new-lith-field input');
+    input.value = '';
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+  });
+  await page.keyboard.type('notes');
+  await new Promise((resolve) => setTimeout(resolve, 200));
+  assert.equal(
+    await page.evaluate(() => document.querySelector('.new-lith-rename') !== null),
+    false,
+    '...and an ordinary name is not announced at all'
+  );
+  await closeTypingRow();
+
   const restoredRow = await page.evaluate(() => {
     const card = document.querySelector('.action-pair');
     const shown = (node) => (node ? getComputedStyle(node).display !== 'none' : false);

@@ -43,7 +43,8 @@
 import { createHash } from 'node:crypto';
 import { spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
-import { join, resolve } from 'node:path';
+import { createServer } from 'node:http';
+import { dirname, join, resolve } from 'node:path';
 import process from 'node:process';
 import puppeteer from 'puppeteer';
 
@@ -73,10 +74,29 @@ const ONLY = flagValue('only', null);
 const VERBOSE = flags.includes('--verbose');
 const KEYBOARD_ONLY = flags.includes('--keyboard');
 const KEYBOARD = !flags.includes('--no-keyboard');
+/** How many opening fixtures to try: a count, `all`, or `off`. */
+const MOUNTS = String(flagValue('mounts', 4));
+const DROPS = !flags.includes('--no-drop');
+const PAYLOAD_URLS = !flags.includes('--no-payload-urls');
+const SPAM = !flags.includes('--no-spam');
+const MOUNT_TIMEOUT = Number(flagValue('mount-timeout', 20000));
 const REPORT_DIR = resolve('scratch/monkey');
 const PROFILE_DIR = resolve(`scratch/monkey-profile-${SEED}`);
 const STAMP = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
-const URL = (artifact) => `file://${artifact}?mode=${MODE}`;
+/**
+ * The artifact as a `file://` address. Deliberately not named `URL`: shadowing the global
+ * constructor is how the little server below silently answered 400 for every request.
+ */
+const artifactUrl = (artifact) => `file://${artifact}?mode=${MODE}`;
+
+if (!Number.isFinite(Number(flagValue('rounds', 3))) || ROUNDS < 1) {
+  console.error('FAIL - --rounds needs a number of at least 1.');
+  process.exit(2);
+}
+if (!['off', 'all'].includes(MOUNTS) && !(Number(MOUNTS) >= 1)) {
+  console.error(`FAIL - --mounts=${MOUNTS} names no fixture count. Use a number, \`all\` or \`off\`.`);
+  process.exit(2);
+}
 
 if (!['tauri', 'webapp'].includes(MODE)) {
   console.error(`FAIL - --mode=${MODE} is not a mode. Use tauri (desktop surfaces) or webapp (the browser fallback).`);
@@ -203,8 +223,14 @@ const poolFor = (kind) => PAYLOADS.filter((payload) => payload.kinds.includes(ki
 
 // --- the surfaces and what is reachable in them -----------------------------
 
+/**
+ * Wait, in the page rather than here.
+ *
+ * A timer is not an assertion: a document that navigates while it runs has done nothing
+ * wrong, and a rejected wait would end the phase instead of the pause.
+ */
 const sleep = (page, ms) =>
-  page.evaluate((wait) => new Promise((done) => setTimeout(done, wait)), ms);
+  page.evaluate((wait) => new Promise((done) => setTimeout(done, wait)), ms).catch(() => {});
 
 /**
  * The launcher draws its entry boxes in dialogs, and a dialog is its own state.
@@ -359,19 +385,57 @@ function installStandIn(config) {
         return null;
     }
   };
-  window.__TAURI__ = {
-    core: {
-      invoke: (command, args) => {
-        try {
-          return Promise.resolve(answer(command, args));
-        } catch (error) {
-          return Promise.reject(error);
+  /**
+   * The Rust side, unless this page is meant to be the browser launcher.
+   *
+   * `bridge: false` is how the opening phases say so: a mount over the loopback origin is the
+   * browser's own path through the picker, and a stand-in answering every command with `null`
+   * makes the launcher take the desktop route and quietly do nothing instead.
+   */
+  if (config.bridge !== false) {
+    window.__TAURI__ = {
+      core: {
+        invoke: (command, args) => {
+          try {
+            return Promise.resolve(answer(command, args));
+          } catch (error) {
+            return Promise.reject(error);
+          }
         }
-      }
-    },
-    event: { listen: () => Promise.resolve(() => {}) }
-  };
+      },
+      event: { listen: () => Promise.resolve(() => {}) }
+    };
+  }
   window.__monkey = { alive: true, errors: [], pwned: [], mutated: [] };
+  /**
+   * One authored path per element, so a control or a box can be aimed at after a re-render.
+   *
+   * Defined on the window rather than beside the callers because the page-side functions in
+   * this file are serialised into the document individually: one of them cannot see another's
+   * scope, and this is the one piece both of them need.
+   */
+  window.__monkeyPath = (element) => {
+    const parts = [];
+    let node = element;
+    while (node && node.nodeType === 1 && node !== document.documentElement) {
+      if (node.id && /^[A-Za-z][\w-]*$/.test(node.id)) {
+        parts.unshift(`#${node.id}`);
+        break;
+      }
+      let part = node.tagName.toLowerCase();
+      if (typeof node.className === 'string' && node.className.trim()) {
+        part += '.' + node.className.trim().split(/\s+/).slice(0, 2).join('.');
+      }
+      const parent = node.parentElement;
+      if (parent) {
+        const siblings = [...parent.children].filter((child) => child.tagName === node.tagName);
+        if (siblings.length > 1) part += `:nth-of-type(${siblings.indexOf(node) + 1})`;
+      }
+      parts.unshift(part);
+      node = node.parentElement;
+    }
+    return parts.join(' > ');
+  };
   const record = (message) => window.__monkey.errors.push(String(message));
   window.addEventListener('error', (event) => record(`window error: ${event.message || event.type}`));
   window.addEventListener('unhandledrejection', (event) =>
@@ -414,28 +478,7 @@ function describeBoxes(scopeSelector, needsSelector) {
     const style = getComputedStyle(element);
     return rect.width > 0 && rect.height > 0 && style.visibility !== 'hidden' && style.display !== 'none';
   };
-  const pathOf = (element) => {
-    const parts = [];
-    let node = element;
-    while (node && node.nodeType === 1 && node !== document.documentElement) {
-      if (node.id && /^[A-Za-z][\w-]*$/.test(node.id)) {
-        parts.unshift(`#${node.id}`);
-        break;
-      }
-      let part = node.tagName.toLowerCase();
-      if (typeof node.className === 'string' && node.className.trim()) {
-        part += '.' + node.className.trim().split(/\s+/).slice(0, 2).join('.');
-      }
-      const parent = node.parentElement;
-      if (parent) {
-        const siblings = [...parent.children].filter((child) => child.tagName === node.tagName);
-        if (siblings.length > 1) part += `:nth-of-type(${siblings.indexOf(node) + 1})`;
-      }
-      parts.unshift(part);
-      node = node.parentElement;
-    }
-    return parts.join(' > ');
-  };
+  const pathOf = (element) => window.__monkeyPath(element);
   const boxes = [];
   const seenPins = new Set();
   for (const element of scope.querySelectorAll('input, textarea, [contenteditable="true"]')) {
@@ -505,6 +548,37 @@ function readState(selector, pin) {
     pwned: monkey.pwned.slice(),
     mutated: monkey.mutated.slice()
   };
+}
+
+/** The browser's own picker, answered from this run's fixtures instead of a disk. */
+function installPicker() {
+  window.showOpenFilePicker = async () => {
+    const pick = window.__monkeyPick;
+    if (!pick) return [];
+    const blob = await (await fetch(pick.url)).blob();
+    const file = new File([blob], pick.name, { type: 'text/plain' });
+    // The launcher asks twice, once for the name and once for the bytes. A real handle answers
+    // both from the same file, so this one does too.
+    return [{ name: file.name, getFile: async () => file }];
+  };
+}
+
+/** Every control the page draws, with a path that survives a re-render. */
+function listControls() {
+  const visible = (element) => {
+    const rect = element.getBoundingClientRect();
+    const style = getComputedStyle(element);
+    return rect.width > 0 && rect.height > 0 && style.visibility !== 'hidden' && style.display !== 'none';
+  };
+  return [...document.querySelectorAll('button, a[href], [role="button"]')]
+    .filter((element) => !element.disabled && visible(element))
+    .map((element) => ({
+      selector: window.__monkeyPath(element),
+      label:
+        (element.textContent || '').trim().replace(/\s+/g, ' ').slice(0, 40) ||
+        element.getAttribute('aria-label') ||
+        String(element.className || element.tagName)
+    }));
 }
 
 // --- results ----------------------------------------------------------------
@@ -676,22 +750,411 @@ async function probe(page, surface, box, payload) {
   } catch (error) {
     outcome.problems.push(`the probe threw: ${String(error.message).split('\n')[0]}`);
     await dismiss(page, surface).catch(() => {});
-    await page.goto(URL(ARTIFACT), { waitUntil: 'domcontentloaded' }).catch(() => {});
+    await page.goto(artifactUrl(ARTIFACT), { waitUntil: 'domcontentloaded' }).catch(() => {});
   }
   return outcome;
+}
+
+/**
+ * Refuse every request that is not local, keeping a list of what was refused.
+ *
+ * The artifact's promise is that it runs with no network, so the run is offline by
+ * construction. Only the phases that need the engine behind the artifact allow an origin of
+ * this process's own, and nothing else.
+ */
+async function guardExternal(page, allowed = []) {
+  await page.setRequestInterception(true);
+  page.on('request', (request) => {
+    const url = request.url();
+    if (/^(file|data|blob|about):/i.test(url)) return void request.continue();
+    if (allowed.some((prefix) => url.startsWith(prefix))) return void request.continue();
+    blocked.push(url);
+    void request.abort();
+  });
+}
+
+/** An evaluate that a navigation cannot blow up, because a page under test may move. */
+async function safeEvaluate(page, fn, ...args) {
+  try {
+    return await page.evaluate(fn, ...args);
+  } catch (error) {
+    return { unreadable: String(error.message).split('\n')[0] };
+  }
+}
+
+/**
+ * Press every control the page draws, then hammer Enter and Escape.
+ *
+ * A field test clicks what it means to click. This clicks everything, once, in whatever order
+ * the page drew it, and then presses the two keys a person reaches for fastest until the page
+ * gives up or does not. What it is looking for is the wedge: a control whose effect cannot be
+ * undone by Escape, or by closing the dialog it opened.
+ */
+async function spamControls(page) {
+  // Read through the navigation-proof helper: the phase before this one presses Enter at
+  // whatever a Tab landed on, and a mount that is still in flight can take the document away
+  // between two lines. Skipping the phase is honest; crashing the report is not.
+  const controls = await safeEvaluate(page, listControls);
+  if (controls.unreadable) {
+    notes.push(`controls: the page moved before the spam phase (${controls.unreadable}), so it was skipped`);
+    return;
+  }
+  if (controls.length === 0) {
+    notes.push('controls: the launcher drew no pressable control, which is odd enough to say out loud');
+    return;
+  }
+  notes.push(`controls: pressed ${controls.length}: ${controls.map((control) => control.label).join(' | ')}`);
+  /** A key press during a navigation throws; that is the page moving, not a fault. */
+  const press = async (key) => {
+    try {
+      await page.keyboard.press(key);
+    } catch {
+      // Nothing to judge: the document under the keys has already been replaced.
+    }
+  };
+  // A press that navigates is a press doing its job (`Back to the main launcher` is a
+  // route), so the context going away is read as a navigation rather than a failure.
+  const NAVIGATED = /Execution context was destroyed|Cannot find context|detached Frame/i;
+  for (const control of controls.slice(0, 14)) {
+    const before = page.url();
+    const result = await safeEvaluate(page, (selector) => {
+      const element = document.querySelector(selector);
+      if (!element) return 'gone';
+      element.click();
+      return 'pressed';
+    }, control.selector);
+    if (result === 'gone') continue;
+    await sleep(page, 250);
+    const state = await safeEvaluate(page, () => ({
+      alive: Boolean(window.__monkey && window.__monkey.alive) && Boolean(document.querySelector('main.container')),
+      errors: window.__monkey ? window.__monkey.errors.slice() : [],
+      overlays: document.querySelectorAll('.modal-overlay').length
+    }));
+    if (state.unreadable) {
+      if (NAVIGATED.test(state.unreadable)) {
+        notes.push(`controls: ${control.label} navigated the page, which is what it is for`);
+      } else {
+        finding('FAIL', 'controls', control.label, `the page could not be read after one press: ${state.unreadable}`);
+      }
+      await refresher(page);
+      continue;
+    }
+    if (!state.alive && page.url() !== before) {
+      // Two controls here are routes rather than dialogs: the way back out of a mounted
+      // wiki, and a bookmark that hands the window to its own instance. A press that took
+      // the address somewhere else is the control working, offline or not.
+      notes.push(`controls: ${control.label} navigated away, which is what it is for`);
+    } else if (!state.alive) {
+      // The address did not move and the launcher is still not the page: that is the wedge
+      // this phase exists to find, and no navigation explains it.
+      finding('FAIL', 'controls', control.label, 'the launcher stopped being the page after one press');
+    }
+    if (state.errors.length > 0) finding('FAIL', 'controls', control.label, `one press raised ${state.errors.join(' | ')}`);
+    // Escape is the way out of anything this page opens, and the x is the other half.
+    await press('Escape');
+    await sleep(page, 150);
+    let left = await safeEvaluate(page, () => document.querySelectorAll('.modal-overlay').length);
+    if (typeof left === 'number' && left > 0) {
+      await safeEvaluate(page, () => {
+        const close = document.querySelector('.modal-overlay .modal-close, .new-lith-close');
+        if (close) close.click();
+        return true;
+      });
+      await sleep(page, 150);
+      left = await safeEvaluate(page, () => document.querySelectorAll('.modal-overlay').length);
+    }
+    if (typeof left === 'number' && left > 0) {
+      finding('FAIL', 'controls', control.label, `what it opened could not be closed: ${left} overlay(s) left after Escape and the x`);
+    }
+    await refresher(page);
+  }
+
+  // The hammer: the two keys people actually press hard, alternating, with no pause to think.
+  for (let index = 0; index < 12; index += 1) {
+    await press(index % 3 === 2 ? 'Escape' : 'Enter');
+    await sleep(page, 60);
+  }
+  const hammered = await safeEvaluate(page, () => ({
+    alive: Boolean(window.__monkey && window.__monkey.alive) && Boolean(document.querySelector('main.container')),
+    errors: window.__monkey ? window.__monkey.errors.slice() : [],
+    overlays: document.querySelectorAll('.modal-overlay').length
+  }));
+  if (!hammered.alive && !hammered.unreadable) {
+    finding('FAIL', 'controls', 'Enter and Escape', 'twelve presses of the two keys people press fastest left the launcher');
+  }
+  if (hammered.errors && hammered.errors.length > 0) {
+    finding('FAIL', 'controls', 'Enter and Escape', `the hammer raised ${hammered.errors.join(' | ')}`);
+  }
+  if (typeof hammered.overlays === 'number' && hammered.overlays > 0) {
+    notes.push(`controls: the Enter/Escape hammer left ${hammered.overlays} dialog overlay(s) open, which a person would then have to close by hand`);
+  }
+  await refresher(page);
+}
+
+/**
+ * Open the fixtures three ways: through the picker, by dropping one on the page, and from a
+ * link that carries tiddlers in its query string.
+ *
+ * The engine is served from this process, so a mount really boots instead of failing on a
+ * refused fetch, and the judgement is the same in every case: the page must end as either the
+ * wiki or the launcher, never blank, never with a payload's script running in the launcher's own
+ * chrome.
+ */
+async function runOpenings(browser, origin) {
+  const context = await browser.createBrowserContext();
+  const mountErrors = [];
+  let page;
+  try {
+    page = await context.newPage();
+    page.setDefaultTimeout(4000);
+    page.on('pageerror', (error) => {
+      if (!isResourceNoise(error.message)) mountErrors.push(error.message);
+    });
+    page.on('console', (message) => {
+      if (message.type() !== 'error' || isResourceNoise(message.text())) return;
+      mountErrors.push(message.text());
+    });
+    await guardExternal(page, [origin]);
+    await page.evaluateOnNewDocument(installStandIn, {
+      vault: { exists: false, count: 0, path: 'C:/fixture/lithic-vault.json' },
+      folder: 'C:/fixture',
+      // Browser mount, not the desktop app: see `installStandIn`.
+      bridge: false
+    });
+    await page.evaluateOnNewDocument(installPicker);
+
+    const base = `${origin}/launcher.html?mode=webapp`;
+    /**
+     * Put the launcher back on screen, and say what happened if it will not come.
+     *
+     * A mount legitimately replaces the document, so every opening starts from a reload. When
+     * the reload does not draw the launcher, the useful thing is the state it *did* draw: a
+     * blank page, a wiki that stayed, or an artifact that did not boot are three different
+     * faults, and a bare selector timeout names none of them.
+     */
+    const open = async () => {
+      await page.goto(base, { waitUntil: 'domcontentloaded' });
+      try {
+        await page.waitForSelector('main.container', { timeout: 15000 });
+      } catch (error) {
+        const state = await safeEvaluate(page, () => ({
+          title: document.title,
+          url: location.href,
+          wiki: Boolean(window.$tw && window.$tw.wiki),
+          rendered: Boolean(document.querySelector('.tc-page-container, .tc-story-river, .tc-tiddler-frame')),
+          body: (document.body?.innerHTML ?? '').slice(0, 120),
+          monkey: Boolean(window.__monkey),
+          errors: window.__monkey ? window.__monkey.errors.slice(0, 2) : []
+        }));
+        throw new Error(
+          `the launcher did not come back: ${state.unreadable ?? JSON.stringify(state)}`
+        );
+      }
+      await sleep(page, 250);
+    };
+    /**
+     * Wait for the engine, and say whether it arrived *whole*.
+     *
+     * `$tw.wiki` on its own is not the answer: a document that breaks mid-store leaves a
+     * half-built `$tw` behind, so the check asks for the method a booted wiki answers rather
+     * than for the object a broken one happens to have created.
+     */
+    const boot = async () => {
+      try {
+        await page.waitForFunction(
+          () => Boolean(window.$tw && window.$tw.wiki && typeof window.$tw.wiki.getTiddlerText === 'function'),
+          { polling: 200, timeout: MOUNT_TIMEOUT }
+        );
+        return true;
+      } catch {
+        return false;
+      }
+    };
+    const describePage = async () =>
+      safeEvaluate(page, () => ({
+        url: location.href.slice(0, 120),
+        title: document.title,
+        body: (document.body?.innerHTML ?? '').slice(0, 120),
+        wiki: Boolean(window.$tw && window.$tw.wiki && typeof window.$tw.wiki.getTiddlerText === 'function'),
+        rendered: Boolean(document.querySelector('.tc-page-container, .tc-story-river, .tc-tiddler-frame')),
+        launcher: Boolean(document.querySelector('main.container')),
+        pwned: window.__monkey ? window.__monkey.pwned.slice() : [],
+        errors: window.__monkey ? window.__monkey.errors.slice() : [],
+        status: document.querySelector('.status-line.error, .mount-error, .status-line')?.textContent?.trim() || ''
+      }));
+
+    // --- through the picker -------------------------------------------------
+
+    for (const fixture of chosenFixtures()) {
+      await open();
+      await page.evaluate((pick) => {
+        window.__monkeyPick = pick;
+      }, { url: `${origin}/fuzz/${fixture.id}`, name: `${fixture.id}.lith` });
+      const errorsBefore = mountErrors.length;
+      const started = Date.now();
+      await page.evaluate(() => document.querySelector('.mount-button')?.click());
+      const booted = await boot();
+      const elapsed = Date.now() - started;
+      const state = await describePage();
+      const size = Math.round(Buffer.byteLength(textOf(fixture)) / 1024);
+      const row = {
+        surface: 'mount',
+        box: fixture.label,
+        type: `${size} KB`,
+        payload: booted ? 'booted' : 'no boot',
+        typed: `${elapsed}ms`,
+        held: state.rendered ? 'rendered' : state.launcher ? 'launcher' : 'blank',
+        problems: []
+      };
+      const fresh = mountErrors.slice(errorsBefore);
+      if (state.unreadable) {
+        row.problems.push(`the page could not be read: ${state.unreadable}`);
+      } else if (!state.wiki && !state.launcher) {
+        row.problems.push('the page ended as neither the wiki nor the launcher');
+      }
+      if (state.wiki && !state.rendered && !state.launcher) {
+        // The engine is there and answered as a wiki, yet the document drew neither a page
+        // nor the launcher: the mount wrote a document it could not finish reading.
+        row.problems.push('the engine booted but the page drew nothing');
+      }
+      if (fixture.id === 'valid' && !booted) {
+        // The launcher says why it gave up on its own status line, so quote it rather than
+        // making the reader guess between a missing engine and a slow one.
+        row.problems.push(
+          `a well-formed Lith did not boot${state.status ? ` (${state.status})` : ''}, so the rest of this pass proves nothing`
+        );
+      }
+      if (state.pwned && state.pwned.length > 0) {
+        notes.push(`mount ${fixture.id}: the payload's markup ran inside the wiki, which is the engine rendering a document rather than a launcher fault`);
+      }
+      // The recent list is written through the picked handle, and this run's handle is a
+      // closure around a `File`: structured cloning refuses a function, so the write fails
+      // every time. That is the stand-in talking, not the launcher, and saying it once is
+      // enough for a reader not to go looking for a bug that lives here.
+      const real = fresh.filter((text) => !/could not be cloned/i.test(text));
+      if (fresh.length > real.length && !notes.some((note) => note.includes('stand-in handle'))) {
+        notes.push('mount: the recent-list write is refused because the stand-in handle is a function, which the harness causes rather than the launcher');
+      }
+      if (!booted && real.length > 0) {
+        notes.push(`mount ${fixture.id}: the engine did not boot (${real[0]})`);
+      } else if (booted && real.length > 0) {
+        notes.push(`mount ${fixture.id}: the engine booted and reported ${real.slice(0, 2).join(' | ')}`);
+      }
+      runs.push(row);
+      for (const problem of row.problems) finding('FAIL', `mount / ${fixture.label}`, `${size} KB`, problem);
+      if (VERBOSE) console.log(`  mount ${fixture.id} [${size} KB] ${row.payload} ${row.held} ${row.typed}`);
+    }
+
+    // --- by dropping one on the page ----------------------------------------
+
+    if (DROPS) {
+      const ids = ['valid', 'controls', 'script-body'];
+      for (const id of ids) {
+        const fixture = LITH_FIXTURES.find((entry) => entry.id === id);
+        await open();
+        await page.evaluate(async (pick) => {
+          const text = await (await fetch(pick.url)).text();
+          const transfer = new DataTransfer();
+          transfer.items.add(new File([text], pick.name, { type: 'text/plain' }));
+          window.dispatchEvent(new DragEvent('drop', { dataTransfer: transfer, bubbles: true, cancelable: true }));
+        }, { url: `${origin}/fuzz/${id}`, name: `${id}.lith` });
+        await sleep(page, 400);
+        const dropped = await describePage();
+        if (dropped.unreadable) {
+          finding('FAIL', `drop / ${fixture.label}`, `${id}.lith`, `the launcher could not be read after the drop: ${dropped.unreadable}`);
+          continue;
+        }
+        runs.push({
+          surface: 'drop',
+          box: fixture.label,
+          type: 'queued',
+          payload: dropped.launcher ? 'launcher survived' : 'left the launcher',
+          typed: '-',
+          held: dropped.status || '-',
+          problems: dropped.launcher ? [] : ['the drop left the launcher']
+        });
+        if (!dropped.launcher) finding('FAIL', `drop / ${fixture.label}`, `${id}.lith`, 'the drop left the launcher');
+        if (dropped.pwned && dropped.pwned.length > 0) {
+          finding('FAIL', `drop / ${fixture.label}`, `${id}.lith`, 'a dropped payload reached script in the launcher');
+        }
+        // A dropped Lith is queued rather than opened: it merges into the next mount, which is
+        // the path a hostile tiddler actually reaches the engine through.
+        await page.evaluate(() => document.querySelector('.new-blank-button')?.click());
+        await page.waitForSelector('.new-lith-inline', { timeout: 4000 }).catch(() => {});
+        await page.keyboard.press('Enter');
+        const booted = await boot();
+        const merged = await describePage();
+        runs.push({
+          surface: 'drop + open',
+          box: fixture.label,
+          type: 'merged',
+          payload: booted ? 'booted' : 'no boot',
+          typed: '-',
+          held: merged.rendered ? 'rendered' : merged.launcher ? 'launcher' : 'blank',
+          problems: []
+        });
+        if (!booted) notes.push(`drop + open ${id}: the queued tiddlers did not reach a booted engine`);
+        if (merged.pwned && merged.pwned.length > 0) {
+          notes.push(`drop + open ${id}: a queued payload's markup ran inside the wiki, which is the engine rendering a document`);
+        }
+      }
+    }
+
+    // --- from a link that carries tiddlers -----------------------------------
+
+    if (PAYLOAD_URLS) {
+      const cases = [
+        { id: 'bad-base64', value: 'not base64!!' },
+        { id: 'not-json', value: Buffer.from('this is not json').toString('base64') },
+        { id: 'hostile-tiddlers', value: Buffer.from(JSON.stringify([{ title: '<img src=x onerror="window.__monkeyPwned=1">', text: 'x' }])).toString('base64') },
+        { id: 'large-json', value: Buffer.from(`[${'x'.repeat(200_000)}]`).toString('base64') }
+      ];
+      for (const item of cases) {
+        // The payload query is read on mount, so the page has to be loaded rather than only
+        // opened; the launcher's own boot is what parses it.
+        await page.goto(`${base}&json=${encodeURIComponent(item.value)}`, { waitUntil: 'domcontentloaded' }).catch(() => {});
+        await sleep(page, 600);
+        const state = await describePage();
+        runs.push({
+          surface: 'link',
+          box: `?json=${item.id}`,
+          type: `${item.value.length} chars`,
+          payload: state.launcher ? 'launcher survived' : 'left the launcher',
+          typed: '-',
+          held: state.status || '-',
+          problems: []
+        });
+        if (!state.launcher && !state.wiki) {
+          // A blank page is three different faults, so quote what it actually is: a refused
+          // navigation shows the previous URL, a failed boot shows the error page's body.
+          finding(
+            'FAIL',
+            `link / ${item.id}`,
+            '?json=',
+            `a link carrying tiddlers left a blank page (${JSON.stringify({ url: state.url, title: state.title, body: state.body })})`
+          );
+        }
+        if (state.pwned && state.pwned.length > 0) {
+          finding('FAIL', `link / ${item.id}`, '?json=', 'a payload in the address reached script in the launcher');
+        }
+      }
+    }
+  } finally {
+    await context.close().catch(() => {});
+  }
 }
 
 // --- guardrails the repo already intends ------------------------------------
 
 /**
- * Four claims the launcher already makes about its fields, restated as something that can
+ * Five claims the launcher already makes about its fields, restated as something that can
  * fail.
  *
  * Each one is observable through the page, and each one is a guardrail a person would
- * expect: a name that collides says so, an address that is not an address is refused, a
- * PIN takes only what a PIN can hold, an empty name still produces a document. They are
- * here rather than in the Puppeteer suite because they are only worth keeping if they
- * still hold after a fuzz pass has stirred the same dialogs up.
+ * expect: a name that collides says so, a name that has to be changed says so, an address that
+ * is not an address is refused, a PIN takes only what a PIN can hold, an empty name still
+ * produces a document. They are here rather than in the Puppeteer suite because they are only
+ * worth keeping if they still hold after a fuzz pass has stirred the same dialogs up.
  */
 const CHECKS = [
   {
@@ -714,6 +1177,32 @@ const CHECKS = [
     },
     verdict: (result) => result.taken && result.free,
     detail: (result) => `taken=${result.taken}, free=${result.free}`
+  },
+  {
+    id: 'name-rewrite',
+    title: 'a name the launcher has to change says so',
+    claim: 'typing a path shows the name it will be saved under, and an ordinary name shows nothing',
+    run: async (page) => {
+      await page.click('.new-blank-button');
+      await page.waitForSelector('.new-lith-inline');
+      await page.click('.new-lith-field input');
+      // A separator is the case the rules merge: `a/b` and `a-b` both arrive at `a-b.lith`.
+      await page.keyboard.type('a/b');
+      await sleep(page, 350);
+      const notice = await page.evaluate(() => document.querySelector('.new-lith-rename')?.textContent?.trim() ?? null);
+      await page.evaluate(() => {
+        const input = document.querySelector('.new-lith-field input');
+        input.value = '';
+        input.dispatchEvent(new Event('input', { bubbles: true }));
+      });
+      await page.keyboard.type('notes');
+      await sleep(page, 350);
+      const quiet = await page.evaluate(() => document.querySelector('.new-lith-rename') === null);
+      await page.click('.new-lith-close');
+      return { notice, quiet };
+    },
+    verdict: (result) => Boolean(result.notice) && result.notice.includes('a-b.lith') && !result.notice.includes('a/b') && result.quiet,
+    detail: (result) => `notice=${JSON.stringify(result.notice)}, quietForPlainName=${result.quiet}`
   },
   {
     id: 'bookmark-scheme',
@@ -799,9 +1288,10 @@ const CHECKS = [
  *
  * These two functions are the whole of the guardrail for the two fields that produce
  * something later (a filename, a stored address), and both are plain functions, so what a
- * hostile value *becomes* can be printed instead of inferred. A result carrying a path
- * separator or a control character is reported: not a crash, but a value that will read
- * as nonsense in a row, a save dialog or a line-oriented file.
+ * hostile value *becomes* can be printed instead of inferred. A result carrying a control
+ * character or a path separator is reported. The separator row is now an inverted assertion:
+ * the name is sanitized to Windows' rules, so a separator surviving means that rule was
+ * weakened rather than that the value was unlucky.
  */
 async function pureProbes() {
   const rows = [];
@@ -843,22 +1333,185 @@ async function pureProbes() {
   return rows;
 }
 
+// --- what gets opened ------------------------------------------------------
+
+/**
+ * Opening is the half a field test cannot reach from a text box: a Lith is bytes, and bytes
+ * arrive from a picker, a drop, or a link.
+ *
+ * The page is served over a loopback origin for these phases, because a mount needs the
+ * engine beside the artifact and a `file://` document may not fetch one. Everything is still
+ * local: the server is this process, on port 0, and every other request is refused.
+ */
+const DELIMITER = '\u2042\u2042\u2042';
+
+/** A `.lith` file: headers, a blank line, the body, and the triple asterism between tiddlers. */
+function lithFile(tiddlers) {
+  return tiddlers
+    .map((tiddler) => {
+      const headers = Object.entries(tiddler)
+        .filter(([key]) => key !== 'text')
+        .map(([key, value]) => `${key}: ${value}`)
+        .join('\n');
+      return `${headers}\n\n${tiddler.text ?? ''}`;
+    })
+    .join(`\n${DELIMITER}\n`);
+}
+
+const BASE_TIDDLERS = [
+  { title: 'Getting Started', text: 'A line of text.\n\n* one\n* two' },
+  { title: 'Notes', tags: 'note', text: 'Some notes.' },
+  { title: 'Code', type: 'text/x-python', text: 'print("hi")' }
+];
+
+const randomText = (length, rnd) => {
+  const parts = [];
+  for (let index = 0; index < length; index += 1) parts.push(String.fromCharCode(1 + Math.floor(rnd() * 255)));
+  return parts.join('');
+};
+
+/**
+ * One seeded mutation of a valid Lith, labelled with what it did.
+ *
+ * The point is not a random byte soup (that is the `binary` fixture) but a file that is *nearly*
+ * a Lith: a truncation in the middle of a header, a delimiter run with no tiddlers, a body that
+ * grew a NUL. Those are the shapes a parser meets when a write was interrupted or a file was
+ * edited by hand, and they are where an index-of arithmetic goes wrong.
+ */
+function mutate(text, rnd) {
+  const operators = [
+    ['flipped one character', (source) => {
+      const at = Math.floor(rnd() * source.length);
+      return source.slice(0, at) + String.fromCharCode(Math.floor(rnd() * 0xffff)) + source.slice(at + 1);
+    }],
+    ['junk spliced into the middle', (source) => {
+      const at = Math.floor(rnd() * source.length);
+      return source.slice(0, at) + '\u0000\u001b[31m<<now>>{]\u3300' + source.slice(at);
+    }],
+    ['truncated at half', (source) => source.slice(0, Math.floor(source.length * 0.5))],
+    ['truncated mid-header', (source) => {
+      const at = source.indexOf('title:') + 9;
+      return source.slice(0, at);
+    }],
+    ['every delimiter doubled', (source) => source.split(DELIMITER).join(`${DELIMITER}${DELIMITER}`)],
+    ['every delimiter removed', (source) => source.split(DELIMITER).join('')],
+    ['CRLF everywhere', (source) => source.replace(/\n/g, '\r\n')],
+    ['newlines removed', (source) => source.replace(/\n/g, ' ')],
+    ['titles stripped', (source) => source.replace(/^title:.*$/gm, '')],
+    ['a second title on every tiddler', (source) => source.replace(/^title: (.*)$/gm, 'title: $1\ntitle: dup')]
+  ];
+  const [label, apply] = operators[Math.floor(rnd() * operators.length)];
+  return { label, text: apply(text) };
+}
+
+/**
+ * The corpus of files the launcher can be asked to open.
+ *
+ * Each one is a thing a person can really have: an interrupted write, a file edited by hand, a
+ * document from somebody else, a wiki that grew until it stopped fitting anywhere sensible.
+ */
+const LITH_FIXTURES = [
+  { id: 'valid', label: 'a well-formed Lith', note: 'the control: if this one does not open, nothing below means anything', build: () => lithFile(BASE_TIDDLERS) },
+  { id: 'empty', label: 'a 0-byte file', note: 'the file a failed write leaves behind', build: () => '' },
+  { id: 'delimiters', label: 'nothing but delimiters', note: '40 separators and no tiddler between them', build: () => DELIMITER.repeat(40) },
+  { id: 'no-title', label: 'a tiddler with no title', note: 'the one header the format requires', build: () => 'text: no title here\n\nbody' },
+  { id: 'duplicate-titles', label: 'two tiddlers with one title', note: 'the last writer wins, or something throws', build: () => lithFile([{ title: 'x', text: '1' }, { title: 'x', text: '2' }]) },
+  { id: 'markup-title', label: 'a title that is markup', note: 'a title is drawn in rows; if it is ever interpolated as HTML, this runs', build: () => lithFile([{ title: '<img src=x onerror="window.__monkeyPwned=1">', text: 'x' }]) },
+  { id: 'bracket-title', label: 'a title with filter brackets', note: '`]]` and `[[` in the one string filters are built from', build: () => lithFile([{ title: 'a]] b [[c', text: 'x' }]) },
+  { id: 'controls', label: 'NUL, ESC and DEL in a body', note: 'what a binary got pasted into a text field leaves', build: () => lithFile([{ title: 'ctl', text: 'a\u0000b\u001b[31mc\u007f' }]) },
+  { id: 'binary', label: 'random bytes read as text', note: 'a broken UTF-8 sequence in every field', build: (rnd) => randomText(4000, rnd) },
+  { id: 'script-body', label: 'script and an image handler in a body', note: 'a tiddler body is rendered; whether this runs is the engine\'s answer, not the launcher\'s', build: () => lithFile([{ title: 'evil', text: '<script>window.__monkeyPwned=1</script><img src=x onerror="window.__monkeyPwned=1">' }]) },
+  { id: 'huge-body', label: 'one 8 MB tiddler', note: 'a wiki that outgrew every list it is shown in', build: () => lithFile([{ title: 'huge', text: 'x'.repeat(8_000_000) }]) },
+  { id: 'many-tiddlers', label: '2000 small tiddlers', note: 'the delimiter scan at scale', build: () => lithFile(Array.from({ length: 2000 }, (_value, index) => ({ title: `n${index}`, text: 'y' }))) },
+  { id: 'mutated', label: 'a seeded mutation of a valid Lith', note: 'nearly a Lith, which is what an interrupted write leaves', build: (rnd) => mutate(lithFile(BASE_TIDDLERS), rnd).text, describe: (rnd) => mutate(lithFile(BASE_TIDDLERS), rnd).label }
+];
+
+/** Fixture text, built once per run and kept by the little server below. */
+const fixtureText = new Map();
+function textOf(fixture) {
+  if (!fixtureText.has(fixture.id)) fixtureText.set(fixture.id, fixture.build(random));
+  return fixtureText.get(fixture.id);
+}
+
+/** Which fixtures this run opens: the control always, then a seeded sample of the rest. */
+function chosenFixtures() {
+  if (MOUNTS === 'off') return [];
+  const control = LITH_FIXTURES.find((fixture) => fixture.id === 'valid');
+  if (MOUNTS === 'all') return [control, ...LITH_FIXTURES.filter((fixture) => fixture !== control)];
+  const rest = shuffled(LITH_FIXTURES.filter((fixture) => fixture !== control));
+  return [control, ...rest.slice(0, Math.max(0, Number(MOUNTS) - 1))];
+}
+
+/** The engine beside the artifact, which is what a mount fetches. */
+function enginePath() {
+  const beside = join(dirname(ARTIFACT), 'lithic.html');
+  if (existsSync(beside)) return beside;
+  if (existsSync(resolve('src/lithic.html'))) return resolve('src/lithic.html');
+  return null;
+}
+
+/**
+ * A loopback origin serving the artifact, the engine and the fixtures.
+ *
+ * Not a stand-in instance: it answers four paths and nothing else, so a mount can read the
+ * engine over the same origin rules a deployment uses without pretending to be one.
+ */
+async function startOrigin() {
+  const engine = enginePath();
+  if (!engine) return null;
+  const engineBytes = readFileSync(engine);
+  const send = (response, type, body) => {
+    response.writeHead(200, { 'Content-Type': type, 'Content-Length': Buffer.byteLength(body), 'Cache-Control': 'no-store' });
+    response.end(body);
+  };
+  // A `?json=` payload is tiddlers carried in a URL, and the interesting sizes are past the
+  // 16 KB request line Node allows by default. The limit here is the harness's, so it is
+  // raised rather than being mistaken for the launcher refusing an address.
+  const server = createServer({ maxHeaderSize: 512 * 1024 }, (request, response) => {
+    let path = '/';
+    try {
+      path = new URL(request.url ?? '/', 'http://127.0.0.1').pathname;
+    } catch (error) {
+      // Say what could not be parsed: this server exists to be trusted, so a request it
+      // cannot route is a fact about the harness rather than about the launcher.
+      response.writeHead(400).end(`bad request: ${JSON.stringify(request.url)} (${String(error.message)})`);
+      return;
+    }
+    if (path === '/launcher.html') return send(response, 'text/html; charset=utf-8', bytes);
+    if (path === '/lithic.html' || path === '/src/lithic.html') return send(response, 'text/html; charset=utf-8', engineBytes);
+    if (path.startsWith('/fuzz/')) {
+      const fixture = LITH_FIXTURES.find((entry) => entry.id === path.slice('/fuzz/'.length));
+      if (fixture) return send(response, 'text/plain; charset=utf-8', textOf(fixture));
+    }
+    response.writeHead(404).end('not found');
+  });
+  await new Promise((done) => server.listen(0, '127.0.0.1', done));
+  const { port } = server.address();
+  return { origin: `http://127.0.0.1:${port}`, close: () => new Promise((done) => server.close(() => done())) };
+}
+
 // --- the run ----------------------------------------------------------------
 
 async function refresher(page) {
   // A navigation already in flight can take the context out from under `goto`, which is
-  // not a launcher fault and not something to fail a run on: the retry is the answer.
+  // not a launcher fault and not something to fail a run on: the retry is the answer. And a
+  // reload that never lands is a note rather than a throw, because every caller's next move
+  // is an evaluate that already copes with a page it cannot read: one unreachable page must
+  // not take the whole report down with it.
+  let last = null;
   for (let attempt = 0; attempt < 3; attempt += 1) {
     try {
-      await page.goto(URL(ARTIFACT), { waitUntil: 'domcontentloaded' });
+      await page.goto(artifactUrl(ARTIFACT), { waitUntil: 'domcontentloaded' });
       await page.waitForSelector('main.container', { timeout: 15000 });
       await sleep(page, 250);
-      return;
+      return true;
     } catch (error) {
-      if (attempt === 2) throw error;
+      last = error;
       await sleep(page, 400);
     }
   }
+  notes.push(`refresher: the launcher would not come back after three reloads (${String(last?.message).split('\n')[0]}), so the next step saw another page`);
+  return false;
 }
 
 async function run() {
@@ -876,13 +1529,7 @@ async function run() {
     // the artifact first and then for the published one, and fetching that from
     // lithic.uk on a `file://` page would replace the document with a real wiki and end
     // the run. Refusing every request that is not local is what keeps this a page test.
-    await page.setRequestInterception(true);
-    page.on('request', (request) => {
-      const url = request.url();
-      if (/^(file|data|blob|about):/i.test(url)) return void request.continue();
-      blocked.push(url);
-      void request.abort();
-    });
+    await guardExternal(page);
     page.on('pageerror', (error) => {
       if (!isResourceNoise(error.message)) pageErrors.push(error.message);
     });
@@ -899,7 +1546,7 @@ async function run() {
       folder: 'C:/fixture'
     });
 
-    await page.goto(URL(ARTIFACT), { waitUntil: 'domcontentloaded' });
+    await page.goto(artifactUrl(ARTIFACT), { waitUntil: 'domcontentloaded' });
     await page.waitForSelector('main.container', { timeout: 15000 });
 
     // Two rows and a bookmark, so the Recents box, its rows and the dialog that manages an
@@ -957,6 +1604,10 @@ async function run() {
           console.log(`     ${box.type.padEnd(9)} ${box.label}${box.pin ? ` (${box.count} boxes)` : ''}`);
           console.log(`     ${box.selector}`);
         }
+      }
+      for (const fixture of LITH_FIXTURES) {
+        console.log(`  mount ${fixture.id} - ${fixture.label}`);
+        console.log(`     ${fixture.note}`);
       }
       for (const note of notes) console.log(`  ! ${note}`);
       return { listed: true, plan };
@@ -1084,6 +1735,38 @@ async function run() {
       }
     }
 
+    // --- pressing everything ------------------------------------------------
+
+    if (SPAM && !KEYBOARD_ONLY) {
+      try {
+        await spamControls(page);
+      } catch (error) {
+        // Same rule as the opening phases: a phase that cannot finish is a finding, and the
+        // report still has to print.
+        finding('FAIL', 'controls', '-', String(error.message).split('\n')[0]);
+      }
+    }
+
+    // --- opening what the picker, a drop and a link can hand over -------------
+
+    if (MOUNTS !== 'off' || DROPS || PAYLOAD_URLS) {
+      const served = await startOrigin();
+      if (!served) {
+        notes.push('the opening phases were skipped: no lithic.html beside the artifact, so a mount has no engine to boot');
+      } else {
+        notes.push(`opening phases served from ${served.origin} for this run only`);
+        try {
+          await runOpenings(browser, served.origin);
+        } catch (error) {
+          // A phase that cannot finish is a finding, not the end of the run: the report is the
+          // whole point, and an uncaught error here used to take it down with the phase.
+          finding('FAIL', 'openings', '-', String(error.message).split('\n')[0]);
+        } finally {
+          await served.close();
+        }
+      }
+    }
+
     return { listed: false, plan };
   } finally {
     await browser.close();
@@ -1105,7 +1788,7 @@ const PURE = await pureProbes();
 const separators = PURE.filter((entry) => entry.separator);
 if (separators.length > 0) {
   notes.push(
-    `normalizeLithName keeps a path separator in ${separators.length} corpus value${separators.length === 1 ? '' : 's'} (see the table). Whether that is a bug depends on what writes the name, so it is reported rather than failed on.`
+    `normalizeLithName keeps a path separator in ${separators.length} corpus value${separators.length === 1 ? '' : 's'} (see the table). Names are sanitized to Windows' rules now, so a separator here means that rule was weakened.`
   );
 }
 for (const row of PURE.filter((entry) => entry.hazard)) {
