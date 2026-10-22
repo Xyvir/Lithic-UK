@@ -6402,6 +6402,10 @@ import { backupFileName, collectInstanceBackup, mergeBookmarks, parseInstanceBac
   }
 
   function openFlash(): void {
+    // The manager is the offer's new home, not a backdrop for it: the flasher is the next
+    // dialog, and leaving the first one open underneath would stack two overlays whose
+    // dismissal rules disagree about which one Escape ends.
+    showEmojiPicker = false;
     flashShow = true;
     flashLine = '';
     flashProblem = '';
@@ -6955,22 +6959,20 @@ import { backupFileName, collectInstanceBackup, mergeBookmarks, parseInstanceBac
       The one-time flash offer. A blank board is the subject, so the dialog asks for nothing:
       it reads the published images, writes them, and lets go of the port. The stages share
       one line because only one can be happening, and the button stays disabled for the run
-      rather than offering a second start over the top of the first.
+      rather than offering a second start over the top of the first. It opens only from the
+      manager row, which is drawn only where Web Serial exists, so there is no unsupported
+      shape to draw here.
     -->
     <div class="modal-overlay" role="presentation" on:click={(event) => event.currentTarget === event.target && closeFlash()}>
       <div class="launcher-modal flash-modal" role="dialog" aria-modal="true" aria-labelledby="flash-title">
         <button class="modal-close" aria-label={copy.esp32.closeAria} disabled={flashBusy} on:click={closeFlash}>×</button>
         <h2 id="flash-title">{copy.esp32.title}</h2>
         <p>{copy.esp32.intro}</p>
-        {#if !flashSupported}
-          <p class="status-line error" role="alert">{copy.esp32.unsupported}</p>
-        {:else}
-          {#if flashLine}<p class="status-line" role="status">{flashLine}{#if flashBusy && flashPercent > 0} {flashPercent}%{/if}</p>{/if}
-          {#if flashProblem}<p class="status-line error" role="alert">{flashProblem}</p>{/if}
-          <div class="modal-actions">
-            <button class="modal-action" disabled={flashBusy} on:click={runFlash}>{copy.esp32.flash}</button>
-          </div>
-        {/if}
+        {#if flashLine}<p class="status-line" role="status">{flashLine}{#if flashBusy && flashPercent > 0} {flashPercent}%{/if}</p>{/if}
+        {#if flashProblem}<p class="status-line error" role="alert">{flashProblem}</p>{/if}
+        <div class="modal-actions">
+          <button class="modal-action" disabled={flashBusy} on:click={runFlash}>{copy.esp32.flash}</button>
+        </div>
       </div>
     </div>
   {/if}
@@ -7309,6 +7311,19 @@ import { backupFileName, collectInstanceBackup, mergeBookmarks, parseInstanceBac
         -->
         <div class="modal-actions management-actions">
           <button class="modal-action secondary full-backup-button" disabled={backupBusy} on:click={() => downloadInstanceBackup('manage')} title={copy.dialogs.icon.backupTitle}>{@render fullBackupIcon()}{backupBusy ? '…' : copy.dialogs.icon.backup}</button>
+          <!--
+            The appliance offer, drawn only where Web Serial exists.
+
+            It was a footer link, beside the project link, on every page. Two things were
+            wrong with that: it is not a thing every page is for, and the footer is drawn in
+            the desktop app and on a phone, where there is no serial device to reach at all,
+            so the one control a person could press there only ever failed. A platform with
+            nothing to offer says nothing rather than drawing a button that does not work,
+            which is the rule the install offer already follows.
+          -->
+          {#if flashSupported}
+            <button class="modal-action secondary flash-button" type="button" on:click={openFlash} title={copy.esp32.openTitle}>{copy.esp32.open}</button>
+          {/if}
           <!--
             The way out to the project as a small link at the end of the row rather than a
             third full-width button: the dialog has two jobs (the icon and the backup) and
@@ -8011,5 +8026,5 @@ import { backupFileName, collectInstanceBackup, mergeBookmarks, parseInstanceBac
     drawn, is the offer's own business; the two sites are mutually exclusive, which is why
     the markup for it is written once, above.
   -->
-  <footer><button class="flash-link" type="button" on:click={openFlash} title={copy.esp32.openTitle}>{copy.esp32.open}</button>{#if mode === 'webapp' && !browserOnly}<a class="github-link" href={PROJECT_URL} target="_blank" rel="noreferrer">{copy.app.footerLink}</a>{/if}{#if installOffer && !recentPanelShown}{@render installOfferControl()}{/if}</footer>
+  <footer>{#if mode === 'webapp' && !browserOnly}<a class="github-link" href={PROJECT_URL} target="_blank" rel="noreferrer">{copy.app.footerLink}</a>{/if}{#if installOffer && !recentPanelShown}{@render installOfferControl()}{/if}</footer>
 </main>

@@ -1,10 +1,16 @@
 name: ESP32 firmware
 
 # Builds the five images the launcher's flash offer writes to a blank board, and
-# publishes them under one fixed tag: `esp32-firmware`. The offer reads that tag and
-# nothing else (launcher-ui/src/esp32-flash.ts), so the release is updated in place
-# rather than cut per version: its assets are a distribution channel, not a record of
-# one version.
+# publishes them twice: to a fixed `esp32-firmware` release, which is the copy a person
+# downloads and flashes by hand, and to a fixed `esp32-firmware` branch, which is the
+# copy the offer reads (launcher-ui/src/esp32-flash.ts).
+#
+# The branch exists because the release cannot serve the offer: GitHub redirects a
+# release download to a storage host and neither hop sends an
+# `Access-Control-Allow-Origin` header, so a page's fetch is rejected as a network
+# failure. `raw.githubusercontent.com` sends it. Both targets are replaced in place
+# rather than cut per version, because they are a distribution channel rather than a
+# record of one version.
 #
 # The pages are staged from this repository, never downloaded, and the firmware
 # serves them from its own littlefs partition. That makes `src/launcher.html` and
@@ -79,6 +85,26 @@ jobs:
       - name: Collect the five images
         run: node scripts/collect-esp32-firmware.mjs
 
+      # The copy the offer reads. Force-pushed as a single commit, so the branch holds one
+      # build rather than a history of them, and a force push is what makes a re-run of an
+      # older commit reachable again instead of adding a second set of filenames.
+      - name: Publish the images to the firmware branch
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          work="$(mktemp -d)"
+          cp esp32-firmware/*.bin "$work"/
+          cd "$work"
+          git init -q -b esp32-firmware
+          git add .
+          git -c user.name='github-actions[bot]' \
+              -c user.email='41898282+github-actions[bot]@users.noreply.github.com' \
+              commit -q -m "ESP32 firmware for ${GITHUB_SHA}"
+          git push --force \
+            "https://x-access-token:${GITHUB_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" \
+            esp32-firmware
+
       - name: Publish the flash images
         uses: softprops/action-gh-release@v2
         with:
@@ -97,4 +123,7 @@ jobs:
 
             Built from the newest commit that changed the firmware or the pages it
             serves, with the launcher and the light wiki staged from that same commit.
+
+            The same five files are on the `esp32-firmware` branch, which is where the
+            launcher's flash offer reads them from.
           files: esp32-firmware/*.bin

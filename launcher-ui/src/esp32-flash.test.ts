@@ -7,6 +7,7 @@ import {
   esp32FlashPlan,
   esp32ImageUrl,
   fetchEsp32Images,
+  flashLithicAppliance,
   serialFlashSupported,
   writeEsp32,
   type Esp32Image
@@ -45,11 +46,12 @@ test('the five images are written at the offsets the partition table fixes', () 
   assert.equal(littlefs.address + littlefs.limit, 0x400000);
 });
 
-test('every image is fetched from one fixed release', () => {
-  assert.equal(
-    esp32ImageUrl('firmware.bin'),
-    'https://github.com/Xyvir/Lithic-UK/releases/download/esp32-firmware/firmware.bin'
-  );
+test('every image is fetched from one fixed address a page is allowed to read', () => {
+  const url = esp32ImageUrl('firmware.bin');
+  assert.equal(url, 'https://raw.githubusercontent.com/Xyvir/Lithic-UK/esp32-firmware/firmware.bin');
+  // Not a release download: GitHub sends no CORS header on those, so a page cannot read
+  // one however healthy the release is. Pinned because it is the whole reason for the branch.
+  assert.ok(!url.includes('/releases/download/'), 'release assets are unreadable from a page');
 });
 
 test('an image that is not an ESP image is refused before it reaches a chip', () => {
@@ -154,4 +156,15 @@ test('progress is measured across the whole plan, not per file', async () => {
 
 test('Web Serial is absent where there is no browser', () => {
   assert.equal(serialFlashSupported(), false);
+});
+
+test('a browser with no serial port is told so before anything is downloaded', async () => {
+  let fetched = 0;
+  const fetcher = (async () => {
+    fetched += 1;
+    return { ok: true, status: 200, arrayBuffer: async () => new ArrayBuffer(0) } as Response;
+  }) as typeof fetch;
+
+  await assert.rejects(flashLithicAppliance({ fetchImpl: fetcher }), /Web Serial is not available/);
+  assert.equal(fetched, 0);
 });

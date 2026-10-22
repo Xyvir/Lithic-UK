@@ -7,7 +7,7 @@
  * PlatformIO leaves four of them in the build directory; `boot_app0.bin` ships
  * inside the Arduino framework package instead, which is why the fifth cannot be
  * taken from the build tree. Everything lands in one directory with the exact names
- * `launcher-ui/src/esp32-flash.ts` fetches, so the release upload and the offer
+ * `launcher-ui/src/esp32-flash.ts` fetches, so the published branch and the offer
  * cannot disagree about a filename.
  *
  * The limits are the gaps between the regions `esp32/partitions.csv` fixes. They are

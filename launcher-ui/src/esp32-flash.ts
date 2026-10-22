@@ -15,12 +15,19 @@ import { ESPLoader, Transport } from 'esptool-js';
 import type { FlashOptions } from 'esptool-js';
 
 /**
- * Where the five images live. The tag is a fixed name rather than `latest` so a flash
- * cannot pick up a half-published release, and so the artifact's behaviour does not
- * change when somebody else publishes one.
+ * Where the five images live: one fixed branch, force-pushed by the firmware workflow,
+ * read through `raw.githubusercontent.com`.
+ *
+ * Not the release assets that same workflow publishes, although they are the better
+ * address to look at: a page cannot read them. GitHub answers a release download with
+ * a redirect to a storage host, and neither hop sends an `Access-Control-Allow-Origin`
+ * header, so every browser rejects the read as a network failure before a byte arrives.
+ * `raw.githubusercontent.com` does send it. The branch is a distribution channel rather
+ * than a record of versions, so it is replaced in place on every build, and the images
+ * are still checked against their own magic and their region's size below.
  */
-export const ESP32_RELEASE_BASE =
-  'https://github.com/Xyvir/Lithic-UK/releases/download/esp32-firmware';
+export const ESP32_IMAGE_BASE =
+  'https://raw.githubusercontent.com/Xyvir/Lithic-UK/esp32-firmware';
 
 /** One flash region: the file written there, its address, and the room it has. */
 export interface Esp32Region {
@@ -66,7 +73,7 @@ export interface Esp32FlashProgress {
 }
 
 export function esp32ImageUrl(file: string): string {
-  return `${ESP32_RELEASE_BASE}/${file}`;
+  return `${ESP32_IMAGE_BASE}/${file}`;
 }
 
 export function esp32Region(file: string): Esp32Region {
@@ -174,7 +181,10 @@ export async function writeEsp32(options: WriteEsp32Options): Promise<void> {
   });
 }
 
-/** Web Serial is Chromium only, and the dialog says so instead of offering a dead button. */
+/**
+ * Web Serial is Chromium only. This is what the manager's row is gated on, so the launcher
+ * navigates a desktop app or a phone to a control its browser can never satisfy.
+ */
 export function serialFlashSupported(): boolean {
   return typeof navigator !== 'undefined' && 'serial' in navigator && Boolean(navigator.serial);
 }
@@ -199,10 +209,13 @@ export interface FlashLithicOptions {
  */
 export async function flashLithicAppliance(options: FlashLithicOptions = {}): Promise<void> {
   const { fetchImpl = fetch, onStage, onProgress } = options;
+  // Asked before the download rather than after it: a browser with no serial port would
+  // otherwise pull about four megabytes and only then say it cannot reach a board. That is
+  // also what a run outside a Chromium browser used to report as a download failure.
+  if (!serialFlashSupported()) throw new Error('Web Serial is not available in this browser');
   const images = await fetchEsp32Images(fetchImpl, (file, index, count) =>
     onStage?.('downloading', `${index}/${count} ${file}`)
   );
-  if (!serialFlashSupported()) throw new Error('Web Serial is not available in this browser');
   onStage?.('connecting', '');
   const port = await navigator.serial.requestPort();
   const transport = new Transport(port, true);

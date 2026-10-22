@@ -70,7 +70,7 @@ const EXTERNAL = [
   {
     prefix: 'https://github.com/',
     kind: 'click target',
-    why: 'The anchors a person clicks: the repository in the brand row, and the device-code page the sync dialog tells them to open. It is also where the one-time ESP32 flash offer downloads its firmware images, which is the single runtime load agents.md allows, and it happens only when a person asks for a flash.'
+    why: 'The anchors a person clicks: the repository in the brand row, and the device-code page the sync dialog tells them to open.'
   },
   {
     prefix: 'https://lithic.uk/',
@@ -80,7 +80,7 @@ const EXTERNAL = [
   {
     prefix: 'https://raw.githubusercontent.com/',
     kind: 'fetch',
-    why: 'Two reads, both the ephemeral swarm widget: the bastion list in docs/swarm.json before a coderunner session, and intro.lith when the launcher is opened straight from file://, where no server exists to serve the intro. Offline both fail and the launcher carries on.'
+    why: 'Three reads. The one-time ESP32 flash offer takes its five firmware images from the esp32-firmware branch, which is the single runtime load agents.md allows and happens only when a person asks for a flash: the release the same workflow publishes cannot serve it, because GitHub sends no CORS header on a release download. The other two are the ephemeral swarm widget: the bastion list in docs/swarm.json before a coderunner session, and intro.lith when the launcher is opened straight from file://, where no server exists to serve the intro. Offline all three fail and the launcher carries on.'
   },
   {
     prefix: 'https://xyvir.github.io/',
