@@ -100,8 +100,9 @@ rmSync(outputDir, { recursive: true, force: true });
 mkdirSync(outputDir, { recursive: true });
 cpSync(path.join(editionDir, 'output'), outputDir, { recursive: true });
 
-// The carrier: a vanilla wiki (core only) whose one config tiddler points at the library above,
-// so a user drags it into their wiki and gets the same Plugin Library entry Kookma's page offers.
+// The carrier: a vanilla wiki (core plus the vanilla theme, so it looks like TiddlyWiki rather than
+// bare core) whose one config tiddler points at the library above, so a user drags it into their
+// wiki and gets the same Plugin Library entry Kookma's page offers.
 rmSync(carrierDir, { recursive: true, force: true });
 mkdirSync(path.join(carrierDir, 'tiddlers'), { recursive: true });
 writeFileSync(
@@ -122,7 +123,7 @@ writeFileSync(
     {
       description: 'Lithic plugin store carrier',
       plugins: [],
-      themes: [],
+      themes: ['tiddlywiki/vanilla'],
       build: {
         carrier: ['--render', '$:/core/save/all', 'plugin-store-carrier-wiki.html', 'text/plain'],
       },
