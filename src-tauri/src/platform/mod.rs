@@ -699,17 +699,18 @@ pub fn open_in_browser(app: &tauri::AppHandle, url: &str) -> Result<(), String> 
 /// (the page would be a file inside this app's sandbox), and its webview is not a browser
 /// either.
 pub fn flash_browser() -> Option<PathBuf> {
-    #[cfg(windows)]
-    {
-        windows::flash_browser()
-    }
-    #[cfg(not(windows))]
-    {
-        match current() {
-            Os::Macos => macos::flash_browser(),
-            Os::Linux => linux::flash_browser(),
-            Os::Android | Os::Other => None,
-        }
+    // One match with a `cfg` arm, rather than a `cfg` block per platform. A block per platform is
+    // only compiled on the host of the build, so a variant left out of the non-Windows block is
+    // invisible to this project's Windows gate and first fails on CI; written this way, each
+    // build type-checks the whole decision and names every platform it is not.
+    match current() {
+        #[cfg(windows)]
+        Os::Windows => windows::flash_browser(),
+        #[cfg(not(windows))]
+        Os::Windows => None,
+        Os::Macos => macos::flash_browser(),
+        Os::Linux => linux::flash_browser(),
+        Os::Android | Os::Other => None,
     }
 }
 
