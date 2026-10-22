@@ -187,6 +187,19 @@ public:
     }
 };
 
+// Serves a staged .gz page with Content-Encoding: gzip. The browser inflates it, the device never does.
+void sendGzippedPage(AsyncWebServerRequest *request, const char* path, const char* type) {
+    String gzPath = String(path) + ".gz";
+    if (!LittleFS.exists(gzPath)) {
+        request->send(404, "text/plain", "Not Found");
+        return;
+    }
+    AsyncWebServerResponse *response = request->beginResponse(LittleFS, gzPath, type);
+    response->addHeader("Content-Encoding", "gzip");
+    response->addHeader("Cache-Control", "public, max-age=31536000");
+    request->send(response);
+}
+
 void setup() {
     Serial.begin(115200);
 
@@ -223,14 +236,10 @@ void setup() {
         request->redirect("/src/launcher.html?v=" + String(UI_VERSION));
     });
     server.on("/src/launcher.html", HTTP_GET, [](AsyncWebServerRequest *request){
-        AsyncWebServerResponse *response = request->beginResponse(LittleFS, "/src/launcher.html", "text/html");
-        response->addHeader("Cache-Control", "public, max-age=31536000"); // 1 year
-        request->send(response);
+        sendGzippedPage(request, "/src/launcher.html", "text/html");
     });
     server.on("/src/lithic.html", HTTP_GET, [](AsyncWebServerRequest *request){
-        AsyncWebServerResponse *response = request->beginResponse(LittleFS, "/src/lithic.html", "text/html");
-        response->addHeader("Cache-Control", "public, max-age=31536000");
-        request->send(response);
+        sendGzippedPage(request, "/src/lithic.html", "text/html");
     });
     server.on("/src/vollkorn.css", HTTP_GET, [](AsyncWebServerRequest *request){
         AsyncWebServerResponse *response = request->beginResponse(LittleFS, "/src/vollkorn.css", "text/css");

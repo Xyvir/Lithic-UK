@@ -66,3 +66,7 @@ wiki/tiddlywiki.log
 /scratch/chrome-test-profile/
 /scratch/test-saver-headless.html
 wiki/library-edition/
+
+# The five images the ESP32 workflow collects for the `esp32-firmware` release.
+# Build output, uploaded by CI, never committed.
+/esp32-firmware/

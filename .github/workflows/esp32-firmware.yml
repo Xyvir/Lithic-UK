@@ -1,0 +1,100 @@
+name: ESP32 firmware
+
+# Builds the five images the launcher's flash offer writes to a blank board, and
+# publishes them under one fixed tag: `esp32-firmware`. The offer reads that tag and
+# nothing else (launcher-ui/src/esp32-flash.ts), so the release is updated in place
+# rather than cut per version: its assets are a distribution channel, not a record of
+# one version.
+#
+# The pages are staged from this repository, never downloaded, and the firmware
+# serves them from its own littlefs partition. That makes `src/launcher.html` and
+# `variants/lithic-light.html` build inputs: a release that rebuilds the launcher
+# rebuilds the appliance image too, so a board flashed today carries today's UI.
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - 'esp32/**'
+      - 'scripts/stage-esp32.mjs'
+      - 'scripts/collect-esp32-firmware.mjs'
+      - 'src/launcher.html'
+      - 'variants/lithic-light.html'
+      - '.github/workflows/esp32-firmware.yml'
+
+permissions:
+  contents: write
+
+# Two runs replacing the same release assets at once would leave the tag holding one
+# run's firmware and another run's filesystem. A newer push wins, and the stale run
+# is cancelled rather than allowed to race.
+concurrency:
+  group: esp32-firmware
+  cancel-in-progress: true
+
+jobs:
+  firmware:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      # The staging step is a node script that PlatformIO calls during the build, so
+      # node has to exist before `pio run` does.
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      # The platform is pinned in esp32/platformio.ini, which is what makes this key
+      # safe: the toolchain a cache restores is the one the file names, not whatever
+      # the last run happened to download.
+      - name: Cache PlatformIO
+        uses: actions/cache@v4
+        with:
+          path: ~/.platformio
+          key: platformio-${{ runner.os }}-${{ hashFiles('esp32/platformio.ini') }}
+
+      - name: Install PlatformIO
+        run: pip install --disable-pip-version-check platformio
+
+      # This also stages the pages: esp32/scripts/download_assets.py runs
+      # scripts/stage-esp32.mjs from its pre-script.
+      - name: Build the application
+        run: pio run --project-dir esp32
+
+      # A build that still fetched pages from a URL would leave no .gz behind, and the
+      # firmware serving /src/*.gz would answer 404 on every page. Said here rather
+      # than discovered on a board.
+      - name: Check the staged pages
+        run: |
+          test -s esp32/data/src/launcher.html.gz
+          test -s esp32/data/src/lithic.html.gz
+          test -s esp32/data/offline-service-worker.js
+
+      - name: Build the filesystem image
+        run: pio run --project-dir esp32 --target buildfs
+
+      - name: Collect the five images
+        run: node scripts/collect-esp32-firmware.mjs
+
+      - name: Publish the flash images
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: esp32-firmware
+          name: ESP32 firmware
+          # This is a recurring download, not a version: it must not take the
+          # "Latest release" slot from the wiki build a person is looking for.
+          make_latest: false
+          fail_on_unmatched_files: true
+          overwrite_files: true
+          body: |
+            The five images the launcher's flash offer writes to a blank ESP32:
+            `bootloader.bin` at 0x1000, `partitions.bin` at 0x8000,
+            `boot_app0.bin` at 0xE000, `firmware.bin` at 0x10000 and
+            `littlefs.bin` at 0x150000, the offsets `esp32/partitions.csv` fixes.
+
+            Built from the newest commit that changed the firmware or the pages it
+            serves, with the launcher and the light wiki staged from that same commit.
+          files: esp32-firmware/*.bin
