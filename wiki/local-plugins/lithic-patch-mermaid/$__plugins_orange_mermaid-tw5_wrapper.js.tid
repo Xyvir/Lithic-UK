@@ -40,11 +40,24 @@ modified: Lithic 2026-10-19 (engine swap: diagrams render through the vendored p
             .replace(/"/g, '&quot;');
     }
 
-    function decodeHtmlEntities(text) {
+    var NAMED_ENTITIES = { amp: '&', lt: '<', gt: '>', quot: '"', apos: "'", nbsp: '\u00a0' };
+
+    // doc is the widget's document: the browser's, or TiddlyWiki's fake DOM
+    // when the library build renders in Node, where there is no global document.
+    function decodeHtmlEntities(text, doc) {
         if (!text) return text;
-        var el = document.createElement('textarea');
-        el.innerHTML = text;
-        return el.value !== undefined ? el.value : (el.innerHTML || text);
+        if (doc && doc.createElement) {
+            var el = doc.createElement('textarea');
+            el.innerHTML = text;
+            if (typeof el.value === 'string') return el.value;
+        }
+        return text.replace(/&(#x[0-9a-f]+|#[0-9]+|[a-z]+);/gi, function(match, body) {
+            if (body.charAt(0) === '#') {
+                var code = body.charAt(1) === 'x' || body.charAt(1) === 'X' ? parseInt(body.slice(2), 16) : parseInt(body.slice(1), 10);
+                return isNaN(code) ? match : String.fromCodePoint(code);
+            }
+            return NAMED_ENTITIES.hasOwnProperty(body.toLowerCase()) ? NAMED_ENTITIES[body.toLowerCase()] : match;
+        });
     }
 
     // ---- ROBUST SOURCE EXTRACTION --------------------------------------
@@ -208,7 +221,7 @@ modified: Lithic 2026-10-19 (engine swap: diagrams render through the vendored p
         var source = String(rawBody).trim();
         // Entities first, then the dash repair TiddlyWiki's parser applies to
         // widget attribute values, then the poison-character pass.
-        source = decodeHtmlEntities(source).trim();
+        source = decodeHtmlEntities(source, this.document).trim();
         source = source.replace(/\u2013/g, '--').replace(/\u2014/g, '---');
         source = sanitizeDiagramSource(source).trim();
 

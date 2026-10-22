@@ -43,7 +43,6 @@ export const DEFAULT_PLUGINS: string[] = [
   'mklauber/aliases',
   'nico/notebook-mobile',
   'oeyoews/notebook-theme-sidebar-resizer',
-  'orange/mermaid-tw5',
   'snowgoon88/edit-comptext',
   'sq/streams',
   'tiddlywiki/dynaview',

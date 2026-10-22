@@ -15,30 +15,28 @@
  *      the trigger that starts the run — otherwise a run's own commit starts
  *      another run, forever; a release stage pushes `release/$STAMP` instead, so
  *      what it carries is review material rather than a second trigger)
- *   7. the light distribution guard (variants/lithic-light.html against
- *      src/lithic.html: same core, same plugin versions, still flash-sized)
- *   8. cargo check (Rust type/borrow check — catches the recent E07xx class
+ *   7. cargo check (Rust type/borrow check — catches the recent E07xx class
  *      of release-workflow failures)
- *   9. cargo clippy (Rust lint pass, warnings are failures)
- *  10. the shim's own cargo check, clippy and unit tests (shim/Cargo.toml: a
+ *   8. cargo clippy (Rust lint pass, warnings are failures)
+ *   9. the shim's own cargo check, clippy and unit tests (shim/Cargo.toml: a
  *      crate of its own beside src-tauri, so nothing above compiles it, and it
  *      is what the small Linux AppImage carries)
  *
  * Usage: npm run check:push   (or: node scripts/pre-push-check.mjs)
- *  11. the vendored libraries (vendored.yml against vendored-lock.json, offline): a library baked
+ *  10. the vendored libraries (vendored.yml against vendored-lock.json, offline): a library baked
  *      into a Lithic plugin is refreshed by the build, so a copy edited by hand, or a lock that
  *      no longer describes the tree, has to fail here rather than ship in a release.
- *  12. the Android patch (its wiring in the release job, and its own self-test): the APK is
+ *  11. the Android patch (its wiring in the release job, and its own self-test): the APK is
  *      built from Tauri's template, which has a placeholder launcher icon and an activity
  *      that draws the page under the status bar, and the patch that answers both can only
  *      be tested by what it asserts here — no device or SDK is needed to run it.
- *  13. the phone's compile face: `lib.rs` chooses `gitcore` with a
+ *  12. the phone's compile face: `lib.rs` chooses `gitcore` with a
  *      `cfg(target_os = "android")`, so the stub that answers the sync on Android is a
  *      module no gate on this machine resolved a reference against until this step
  *      existed — and the Android release job was where that blind spot was found. It
  *      rewrites the crate's own predicates in a throwaway copy and compiles it, which
  *      needs neither the SDK nor the NDK the APK's own steps need.
- *  14. the desktop window's drag and drop (`src-tauri/tauri.conf.json`): Tauri's own
+ *  13. the desktop window's drag and drop (`src-tauri/tauri.conf.json`): Tauri's own
  *      handler replaces the webview's, so with it on Windows starts a drag and no page
  *      ever sees a drop. The wiki's stream rows are the thing that stops working, and
  *      no browser harness can see it because the harness has no Tauri window.
@@ -455,11 +453,6 @@ const spawned = [
     cmd: 'npx',
     args: ['svelte-check', '--tsconfig', './tsconfig.json'],
     cwd: 'launcher-ui',
-  },
-  {
-    name: 'light artifact guard',
-    cmd: 'node',
-    args: ['scripts/check-light-artifact.mjs'],
   },
   // Cargo, but through a script because the arrangement it checks is an edit of the
   // sources rather than a flag. Warm, it copies the crate, rewrites 23 predicates and

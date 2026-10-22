@@ -24,7 +24,7 @@ test('normalizes launcher names to one lith extension', () => {
   assert.equal(normalizeLithName('two\nlines'), 'twolines.lith');
 });
 
-test('builds accurate user tiddler filter excluding all 39 default plugins and core system spaces', () => {
+test('builds accurate user tiddler filter excluding all 41 default plugins and core system spaces', () => {
   const filter = getLithicUserFilter();
   assert.match(filter, /\[all\[tiddlers\]!is\[system\]\]/);
   assert.match(filter, /!prefix\[\$:\/core\]/);
@@ -33,7 +33,7 @@ test('builds accurate user tiddler filter excluding all 39 default plugins and c
   assert.match(filter, /!prefix\[\$:\/state\]/);
   assert.match(filter, /-\[\[\$:\/plugins\/sq\/streams\]\]/);
   assert.match(filter, /-\[\[\$:\/plugins\/xyvir\/lithic-core\]\]/);
-  assert.equal(DEFAULT_PLUGINS.length, 42);
+  assert.equal(DEFAULT_PLUGINS.length, 41);
 });
 
 // The injected tiddlers are re-created on every mount, so a copy in the file is

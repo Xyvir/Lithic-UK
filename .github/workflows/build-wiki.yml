@@ -167,6 +167,12 @@ jobs:
       - name: Generate Build Config
         run: node scripts/generate-config.js $BUILD_CONFIG
 
+      # The light export filter is generated from lithic-light-tw.info into a tracked tiddler,
+      # so a prod wiki can export its own light copy. Prod only: it rides the release commit.
+      - name: Generate Light Export Filter
+        if: env.BUILD_CONFIG == 'prod'
+        run: node scripts/generate-light-filter.mjs
+
       # The plugin library (library/) is built from the same staged plugins as the wiki, so
       # it reflects the commit being released. It needs no network: the library holds only
       # local-plugins. Prod only, like the vendored refresh: the output rides the release branch

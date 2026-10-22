@@ -153,7 +153,7 @@ jobs:
       tag_name: ${{ steps.stamp.outputs.tag }}
     steps:
       # The same setup the build and the platform jobs use, from one definition: this job
-      # regenerates the light build's gzip and wiki.zip from the merged tree, so it wants the
+      # regenerates wiki.zip from the merged tree, so it wants the
       # Node the tree was built and tested with, and that version lives in
       # .github/actions/setup/action.yml.
       - name: Checkout and set up Node
@@ -177,18 +177,15 @@ jobs:
           echo "tag=build-$STAMP" >> "$GITHUB_OUTPUT"
           echo "Publishing build-$STAMP"
 
-      # Four of the six assets are files the merge just landed, and they are published as
-      # they are: src/lithic.html, src/launcher.html and variants/lithic-light.html came
-      # through the review, so the download is exactly the bytes that were looked at. The
-      # other two are derived rather than committed and are rebuilt here from that same
-      # tree, which is the only reason this job installs anything.
+      # src/lithic.html and src/launcher.html came through the review, so the download is
+      # exactly the bytes that were looked at. wiki.zip is derived rather than committed and
+      # is rebuilt here from that same tree, which is the only reason this job installs anything.
       - name: Check the released files are there
         run: |
           fail() { echo "::error::$1"; exit 1; }
           [ -f src/lithic.html ] || fail "src/lithic.html is missing from the merge; this is not a release commit"
           [ -f src/launcher.html ] || fail "src/launcher.html is missing from the merge"
-          [ -f variants/lithic-light.html ] || fail "variants/lithic-light.html is missing from the merge"
-          ls -la src/lithic.html src/launcher.html variants/lithic-light.html
+          ls -la src/lithic.html src/launcher.html
 
       - name: Install Dependencies
         run: npm ci
@@ -198,15 +195,6 @@ jobs:
 
       - name: Flatten Plugins
         run: node scripts/flatten-plugins.js
-
-      - name: Gzip the light artifact
-        run: |
-          gzip -9 -c variants/lithic-light.html > variants/lithic-light.html.gz
-          ls -la variants/lithic-light.html.gz
-          # The flash budget the light build exists to meet, restated here because this is
-          # now the last place it can be checked before somebody downloads it.
-          GZ=$(stat -c%s variants/lithic-light.html.gz)
-          [ "$GZ" -lt 1048576 ] || { echo "::error::the light artifact gzips to $GZ bytes, over the 1 MB budget"; exit 1; }
 
       - name: Archive Wiki Folder
         run: zip -r wiki.zip wiki
@@ -226,8 +214,6 @@ jobs:
           files: |
             src/lithic.html
             src/launcher.html
-            variants/lithic-light.html
-            variants/lithic-light.html.gz
             wiki.zip
             wiki/flatten-manifest.log
 

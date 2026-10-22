@@ -32,7 +32,7 @@ link.prototype.render = function() {
 		tiddler = wiki.getTiddler(this.to),
 		defaults = "$:/plugins/tobibeer/preview/defaults/",
 		preview = "$:/temp/tobibeer/preview-",
-		keyDescriptor = $tw.utils.parseKeyDescriptorTB(wiki.getTextReference(defaults + "keys", "").toUpperCase()),
+		keyDescriptor = $tw.keyboardManager.parseKeyDescriptors(wiki.getTextReference(defaults + "keys", "").toUpperCase()),
 		delay = wiki.getTextReference(defaults + "delay", "").toUpperCase(),
 		hovering = 0, // per-link hover lock (the upstream original shared this flag module-wide)
 		// If a preview is already open for this tiddler at this level, don't re-trigger
@@ -129,7 +129,7 @@ link.prototype.render = function() {
 						if(!event.keyCode) {
 							event.keyCode = 0;
 						}
-						if($tw.utils.checkKeyDescriptorTB(event, keyDescriptor)) {
+						if($tw.keyboardManager.checkKeyDescriptors(event, keyDescriptor)) {
 							if(!hovering) {
 								hovering = 1;
 								triggerPreview();
