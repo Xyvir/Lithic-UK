@@ -1,0 +1,390 @@
+<!doctype html>
+<html>
+<head>
+<meta http-equiv="Content-Type" content="text/html;charset=utf-8" />
+<meta name="application-name" content="TiddlyWiki Plugin Library" />
+<meta name="application-version" content="v0.0.0" />
+<meta name="copyright" content="Copyright 2015 Jeremy Ruston" />
+<link id="faviconLink" rel="shortcut icon" href="favicon.ico">
+<title>Plugin Library</title>
+<script>
+var assetList = [
+    {
+        "title": "$:/plugins/ahanniga/context-menu-plugin",
+        "description": "Configurable context menus for tiddlers (Natified by Lithic)",
+        "author": "A Hannigan & Xyvir",
+        "version": "1.0.0",
+        "core-version": ">=5.0.0",
+        "source": "https://github.com/ahanniga/tiddlywiki-context-menu-plugin",
+        "plugin-type": "plugin",
+        "list": "README License",
+        "dependents": "",
+        "type": "application/json",
+        "requires-reload": "yes"
+    },
+    {
+        "title": "$:/plugins/bj/unieditor",
+        "name": "Unieditor (for Lithic)",
+        "author": "Jeffrey Wilkinson (BJ)",
+        "description": "edit js and css and html — Lithic fork with CompText auto-completion and styled markdown highlighting",
+        "plugin-type": "plugin",
+        "version": "0.0.8",
+        "core-version": ">=5.3.5",
+        "list": "readme license",
+        "source": "https://github.com/buggyj/unieditor",
+        "dependents": "",
+        "type": "application/json",
+        "readme": "title: $:/plugins/bj/unieditor/readme\n\ntbd\n",
+        "requires-reload": "yes"
+    },
+    {
+        "title": "$:/plugins/linonetwo/tw-react",
+        "description": "Allow using ReactJS Components in TW widget.",
+        "author": "LinOnetwo",
+        "core-version": ">=5.3.0",
+        "plugin-type": "plugin",
+        "stability": "STABILITY_2_STABLE",
+        "version": "1.0.0",
+        "list": "readme tree",
+        "dependents": "",
+        "plugin-priority": "2",
+        "type": "application/json",
+        "readme": "!! What is this\n\nThis is a dependency of slate-write WYSIWYG editor and flowtiwi-sidebar and many other dynamic widgets. This plugin enable powerful data operation and UI operation of those plugins, thus become a prerequisite of those plugins.\n\n!! Example\n\n{{$:/plugins/linonetwo/tw-react/docs/example}}\n\n!! Usage\n\n<<tree prefix:\"$:/plugins/linonetwo/tw-react/docs/\">>\n",
+        "requires-reload": "yes"
+    },
+    {
+        "title": "$:/plugins/xyvir/anchors-for-streams",
+        "author": "xyvir",
+        "description": "Allows for 'anchoring' top-level streams nodes; so you can clone the whole stream and use the anchors to spawn stream independent sibling nodes. ",
+        "name": "Anchors for streams",
+        "plugin-type": "plugin",
+        "version": "0.0.2",
+        "plugin-priority": "2",
+        "dependents": "",
+        "type": "application/json",
+        "requires-reload": "no"
+    },
+    {
+        "title": "$:/plugins/xyvir/ephemeral-runner",
+        "description": "Ephemeral code runner. Serves the run-code button beside each code block, choosing at runtime between a self-hosted instance's Ephemeral API and the public paper-light swarm. Off by default; enable it in Lithic Settings.",
+        "name": "Ephemeral Runner",
+        "author": "Lithic",
+        "version": "0.0.1",
+        "core-version": ">=5.0.0",
+        "source": "local",
+        "plugin-type": "plugin",
+        "plugin-priority": "2",
+        "dependents": "",
+        "type": "application/json",
+        "requires-reload": "yes"
+    },
+    {
+        "created": "20260109181217294",
+        "title": "$:/plugins/xyvir/lithic-core",
+        "description": "The foundational logic and UI framework for the Lithic edition. Provides essential UI overrides and global session management filters.",
+        "name": "Lithic Core",
+        "plugin-type": "plugin",
+        "version": "0.0.13",
+        "modified": "20260109181242713",
+        "author": "Xyvir",
+        "plugin-priority": "2",
+        "dependents": "",
+        "type": "application/json",
+        "requires-reload": "yes"
+    },
+    {
+        "title": "$:/plugins/xyvir/lithic-default-configs",
+        "author": "Xyvir",
+        "description": "Lithically-opinionated global system configurations and preference management for standard TiddlyWiki behaviors and UI element visibility.",
+        "name": "Lithic Default Configs",
+        "plugin-type": "plugin",
+        "version": "0.0.2",
+        "dependents": "$:/themes/nico/notebook",
+        "plugin-priority": "2",
+        "type": "application/json",
+        "requires-reload": "no"
+    },
+    {
+        "title": "$:/plugins/xyvir/lithic-import-handler",
+        "name": "Import Handler",
+        "description": "Intercepts file drops (PDFs, images, notebooks) and converts them into native Lithic tiddlers.",
+        "author": "Antigravity",
+        "core-version": ">=5.3.0",
+        "plugin-type": "plugin",
+        "version": "0.0.5",
+        "dependents": "$:/plugins/linonetwo/tw-whiteboard",
+        "type": "application/json",
+        "requires-reload": "yes"
+    },
+    {
+        "title": "$:/plugins/xyvir/lithic-patch-appear",
+        "description": "Restricted Quickview/Appear integration for Lithic UI components and Streams.",
+        "name": "Lithic Patch Appear",
+        "plugin-type": "plugin",
+        "version": "0.0.1",
+        "plugin-priority": "10",
+        "dependents": "",
+        "type": "application/json",
+        "requires-reload": "yes"
+    },
+    {
+        "title": "$:/plugins/xyvir/lithic-patch-browserstorage",
+        "description": "Environment-specific persistence settings to maintain Lithic's clean-slate architecture across different browser sessions.",
+        "name": "Browser Storage_LithicPatch",
+        "plugin-type": "plugin",
+        "parent-plugin": "$:/plugins/tiddlywiki/browser-storage",
+        "version": "0.0.1",
+        "plugin-priority": "2",
+        "dependents": "",
+        "type": "application/json",
+        "requires-reload": "no"
+    },
+    {
+        "title": "$:/plugins/xyvir/lithic-patch-calendar",
+        "author": "Xyvir",
+        "description": "Lithic ToDo Highlighting added to Extendable Calendar",
+        "name": "Calendar_LithicPatch",
+        "plugin-type": "plugin",
+        "version": "0.0.3",
+        "plugin-priority": "2",
+        "dependents": "",
+        "type": "application/json",
+        "requires-reload": "yes"
+    },
+    {
+        "created": "20260110200222944",
+        "title": "$:/plugins/xyvir/lithic-patch-comptext",
+        "author": "Xyvir",
+        "description": "Extensions and templates for the CompText completion engine, extended to include Slash Menu feature.",
+        "plugin-type": "plugin",
+        "version": "0.0.2",
+        "modified": "20260110230737710",
+        "parent-plugin": "$:/plugins/snowgoon88/edit-comptext",
+        "plugin-priority": "2",
+        "dependents": "",
+        "type": "application/json",
+        "requires-reload": "yes"
+    },
+    {
+        "title": "$:/plugins/xyvir/lithic-patch-markdown",
+        "author": "Xyvir",
+        "description": "Configuration patches and UI additions to optimize the native Markdown parsing and editing experience.",
+        "name": "Markdown_LithicPatch",
+        "plugin-type": "plugin",
+        "parent-plugin": "$:/plugins/tiddlywiki/markdown",
+        "version": "0.0.2",
+        "plugin-priority": "2",
+        "dependents": "",
+        "type": "application/json",
+        "requires-reload": "no"
+    },
+    {
+        "title": "$:/plugins/xyvir/lithic-patch-mermaid",
+        "description": "Lithic Mermaid engine: the <$mermaid> widget, rendered by the vendored pele engine, its stylesheets, and the Pyramid sidebar view, which renders the active stream node as a mermaid tree. Everything here needs this plugin, so it belongs behind it rather than in lithic-core. A build without it loses the view instead of shipping a sidebar tab whose <$mermaid> widget does not exist.",
+        "author": "Lithic",
+        "core-version": ">=5.0.0",
+        "version": "0.1.0",
+        "plugin-type": "plugin",
+        "list": "readme",
+        "priority": "2",
+        "dependents": "",
+        "type": "application/json",
+        "requires-reload": "yes"
+    },
+    {
+        "created": "20260110200357387",
+        "title": "$:/plugins/xyvir/lithic-patch-streams",
+        "author": "Xyvir",
+        "description": "Structural refinements and configuration overrides (markdown as default node) for the Streams outliner ecosystem.",
+        "name": "Streams_LithicPatch",
+        "plugin-type": "plugin",
+        "version": "0.0.13",
+        "modified": "20260110200412717",
+        "parent-plugin": "$:/plugins/sq/streams",
+        "plugin-priority": "2",
+        "dependents": "",
+        "type": "application/json",
+        "requires-reload": "yes"
+    },
+    {
+        "created": "20260110200549392",
+        "title": "$:/plugins/xyvir/lithic-patch-whiteboard",
+        "author": "Xyvir",
+        "description": "Integration logic and UI enhancements for whiteboard and freehand drawing tools within the Story River.",
+        "plugin-type": "plugin",
+        "version": "0.0.1",
+        "modified": "20260110230834139",
+        "parent-plugin": "$:/plugins/linonetwo/tw-whiteboard",
+        "plugin-priority": "2",
+        "dependents": "",
+        "type": "application/json",
+        "requires-reload": "yes"
+    },
+    {
+        "title": "$:/plugins/xyvir/lithic-python-codeblocks",
+        "description": "Lithic Python Codeblocks",
+        "author": "Lithic",
+        "version": "0.0.1",
+        "core-version": ">=5.0.0",
+        "source": "local",
+        "plugin-type": "plugin",
+        "plugin-priority": "2",
+        "dependents": "",
+        "type": "application/json",
+        "requires-reload": "no"
+    },
+    {
+        "title": "$:/plugins/xyvir/lithic-richlinks",
+        "description": "Displays external links as rich objects: YouTube, GitHub, Wikipedia, SoundCloud, jsFiddle, Disqus, tweets, PDFs, text files, images, audio, video, generic iframes. Nativized into a proper plugin from the RichLinks revisited demosite.",
+        "name": "Lithic Richlinks",
+        "plugin-type": "plugin",
+        "version": "0.0.1",
+        "author": "Xyvir",
+        "plugin-priority": "5",
+        "list": "readme",
+        "dependents": "",
+        "type": "application/json",
+        "readme": "!Lithic Richlinks\n\nDisplays external links as rich objects. Type:\n\n```\n<<richlink \"https://www.youtube.com/watch?v=VIDEO_ID\">>\n```\n\nand the link is replaced by an embedded player, viewer or styled link depending on what it points to. One command, many shapes — the URL itself picks the template:\n\n* Domain templates (e.g. `d@youtube`, `d@github`, `d@wikipedia`, `d@soundcloud`, `d@jsfiddle`, `d@disq.us`, `d@twitter`, `docs@tiddlywiki`)\n* File templates (e.g. `f@txt`, `fimg@jpg@jpeg@png@gif@webp@svg`, `faudio@mp3@ogg@wav@flac`, `fvideo@mp4@avi@webm@ogv`)\n* Generic [[$:/plugins/richlink/iframe]] template as a fallback\n\n!Extra parameters\n\nSome templates accept extra parameters after the URL, e.g. an image caption or an iframe height:\n\n```\n<<richlink \"https://example.com/photo.jpg\" \"my caption\">>\n<<richlink iframe \"https://example.com/page\" \"description\" \"site\" \"600px\">>\n```\n\nWithin a template the URL is available as `<<link>>` and the extra parameters as `<<1>>`, `<<2>>`, `<<3>>` and `<<4>>`.\n\n!In the editor\n\nType `/richlinks` in the editor to insert `<<richlink \"\">>` with the caret placed inside the quotes — just paste a URL.\n\n!Test links\n\nVerified embed-friendly URLs for each template:\n\n```\n<<richlink \"https://www.youtube.com/watch?v=dQw4w9WgXcQ\">>                          <!-- d@youtube     -->\n<<richlink \"https://github.com/Jermolene/TiddlyWiki5\">>                            <!-- d@github      -->\n<<richlink \"https://en.wikipedia.org/wiki/TiddlyWiki\">>                            <!-- d@wikipedia   -->\n<<richlink \"https://example.com/\">>                                               <!-- iframe fallback -->\n<<richlink iframe \"https://www.openstreetmap.org/export/embed.html?bbox=-0.004,51.476,0.006,51.482&amp;layer=mapnik\" \"OpenStreetMap\" \"openstreetmap.org\" \"450px\">>  <!-- forced iframe -->\n```\n\nIframe-embeddable targets (no `X-Frame-Options` / CSP `frame-ancestors` block): `example.com`, the OpenStreetMap / YouTube / Vimeo / Bing Maps embed endpoints, and Wikipedia pages.\n\n!Notes\n\n* The tweet template renders tweets via the official Twitter plugin when installed, and falls back to a plain link otherwise.\n* Text files are fetched and rendered inline with palette colours when the host allows CORS (e.g. `raw.githubusercontent.com`); otherwise they fall back to an unstyled iframe.\n* SoundCloud only embeds track/set URLs (e.g. `https://soundcloud.com/zedd/clarity-1`), not the homepage.\n* Based on the [[RichLinks revisited demosite|https://richlinkrevistedii.tiddlyhost.com/]] by Mat von TWaddle and JanJo.\n",
+        "requires-reload": "yes"
+    },
+    {
+        "title": "$:/plugins/xyvir/lithic-save",
+        "description": "Publishing override for $:/core/save/all: excludes build-time tooling (the uglify plugin and related tiddlers) from saved/published wiki files, mirroring the uglify wizard's purge option.",
+        "name": "Lithic Save",
+        "plugin-type": "plugin",
+        "version": "0.0.1",
+        "core-version": ">=5.3.0",
+        "plugin-priority": "1",
+        "dependents": "",
+        "type": "application/json",
+        "requires-reload": "no"
+    },
+    {
+        "title": "$:/plugins/xyvir/lithic-tweaks",
+        "description": "A curated collection of standalone utilities and community-sourced enhancements for specialized wiki functionality.",
+        "name": "Lithic Tweaks",
+        "plugin-type": "plugin",
+        "version": "0.0.6",
+        "plugin-priority": "2",
+        "dependents": "",
+        "type": "application/json",
+        "requires-reload": "yes"
+    },
+    {
+        "title": "$:/plugins/xyvir/lithic-wikitext-highlight",
+        "description": "Lithic Wikitext Highlight",
+        "author": "Xyvir",
+        "version": "0.0.1",
+        "core-version": ">=5.0.0",
+        "source": "local",
+        "plugin-type": "plugin",
+        "plugin-priority": "2",
+        "dependents": "",
+        "type": "application/json",
+        "requires-reload": "yes"
+    },
+    {
+        "title": "$:/plugins/xyvir/tw-jspython",
+        "description": "JSpython interpreter for TiddlyWiki",
+        "version": "1.0.0",
+        "core-version": ">=5.0.0",
+        "source": "",
+        "plugin-type": "plugin",
+        "list": "readme playground",
+        "dependents": "",
+        "type": "application/json",
+        "readme": "The jspython engine allows you to run python in tiddlywiki.\n\nProvides an `<$action-jspython>` widget for executing Python code in the browser using JSpython.\n\nFeatures a playground in the sidebar for quickly testing scripts.\n",
+        "requires-reload": "yes"
+    }
+];
+
+/*\
+title: $:/plugins/tiddlywiki/pluginlibrary/libraryserver.js
+type: application/javascript
+module-type: library
+
+A simple HTTP-over-window.postMessage implementation of a standard TiddlyWeb-compatible server. It uses real HTTP to load the individual tiddler JSON files.
+
+\*/
+
+"use strict";
+
+// Listen for window messages
+window.addEventListener("message",function listener(event){
+	console.log("plugin library: Received message from",event.origin);
+	console.log("plugin library: Message content",event.data);
+	switch(event.data.verb) {
+		case "GET":
+			if(event.data.url === "recipes/library/tiddlers.json") {
+				// Route for recipes/library/tiddlers.json
+				event.source.postMessage({
+					verb: "GET-RESPONSE",
+					status: "200",
+					cookies: event.data.cookies,
+					url: event.data.url,
+					type: "application/json",
+					body: JSON.stringify(assetList,null,4)
+				},"*");
+			} else if(event.data.url.indexOf("recipes/library/tiddlers/") === 0) {
+				var url = "recipes/library/tiddlers/" + encodeURIComponent(removePrefix(event.data.url,"recipes/library/tiddlers/"));
+				// Route for recipes/library/tiddlers/<uri-encoded-tiddler-title>.json
+				httpGet(url,function(err,responseText) {
+					if(err) {
+						event.source.postMessage({
+							verb: "GET-RESPONSE",
+							status: "404",
+							cookies: event.data.cookies,
+							url: event.data.url,
+							type: "text/plain",
+							body: "Not found"
+						},"*");
+					} else {
+						event.source.postMessage({
+							verb: "GET-RESPONSE",
+							status: "200",
+							cookies: event.data.cookies,
+							url: event.data.url,
+							type: "application/json",
+							body: responseText
+						},"*");
+					}
+				});
+			} else {
+				event.source.postMessage({
+					verb: "GET-RESPONSE",
+					status: "404",
+					cookies: event.data.cookies,
+					url: event.data.url,
+					type: "text/plain",
+					body: "Not found"
+				},"*");
+			}
+			break;
+	}
+},false);
+
+// Helper to remove string prefixes
+function removePrefix(string,prefix) {
+	if(string.indexOf(prefix) === 0) {
+		return string.substr(prefix.length);
+	} else {
+		return string;
+	}
+}
+
+// Helper for HTTP GET
+function httpGet(url,callback) {
+	var http = new XMLHttpRequest();
+	http.open("GET",url,true);
+	http.onreadystatechange = function() {
+		if(http.readyState == 4 && http.status == 200) {
+			callback(null,http.responseText);
+		}
+	};
+	http.send();
+}
+
+</script>
+</head>
+<body><h1>HelloThere</h1><p>This is the TiddlyWiki plugin library. It is not intended to be opened directly in the browser.</p><p>See <a href="https://tiddlywiki.com/" target="_blank">https://tiddlywiki.com/</a> for details of how to install plugins.</p></body>
+</html>
