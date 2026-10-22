@@ -50,6 +50,18 @@ export interface PlatformCapabilities {
    * launcher already gone. See `opensInstanceInBrowser` for what the launcher does instead.
    */
   instance_auth?: boolean;
+  /**
+   * A Chromium browser is installed, so the flash offer can leave this app for one.
+   *
+   * The fallback route: where the window's webview implements Web Serial (a Chromium tab, and a
+   * current WebView2) the offer flashes in its own dialog, and where it does not (WKWebView,
+   * WebKitGTK, an older WebView2) it hands the same page to that browser (`flash_in_browser`, and
+   * `Flash.svelte` at `?flash=1`). Where this is false and the window cannot flash either, the
+   * offer is not drawn, because a button whose only outcome is a failure is worse than no button.
+   * A missing answer reads as false here, and not as a refusal, because there is no older
+   * behaviour for it to keep.
+   */
+  flash_browser?: boolean;
 }
 
 /**

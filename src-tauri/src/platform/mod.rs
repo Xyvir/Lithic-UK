@@ -175,6 +175,16 @@ pub struct Capabilities {
     pub instance_storage_read: bool,
     /// A copy this app downloaded of one origin can be dropped.
     pub instance_storage_clear: bool,
+    /// A Chromium browser is installed, so the flash offer can leave this app for one.
+    ///
+    /// The fallback route. Where the window's webview implements Web Serial (a Chromium tab does,
+    /// and so does a current WebView2, which draws its own chooser) the offer flashes in place;
+    /// where it does not (WKWebView, WebKitGTK, an older WebView2) the offer hands the same page
+    /// to a Chromium browser at `?flash=1` (`flash_in_browser`), which is a real browser and
+    /// brings a chooser the write can rely on. False means there is no handoff to offer; with no
+    /// serial in the window either, nothing is offered at all, because a button whose only
+    /// outcome is a failure is worse than no button (the rule the install offer already follows).
+    pub flash_browser: bool,
 }
 
 /// The name `capabilities()` reports, which is the platform and not the enum.
@@ -210,6 +220,9 @@ pub fn capabilities() -> Capabilities {
         webview_auth: cfg!(windows),
         instance_storage_read: cfg!(windows),
         instance_storage_clear: cfg!(windows),
+        // Asked rather than assumed, and asked once per report: the answer is a handful of
+        // `is_file` checks, and the launcher reads the flag once at boot.
+        flash_browser: flash_browser().is_some(),
     }
 }
 
@@ -671,6 +684,62 @@ pub fn open_in_browser(app: &tauri::AppHandle, url: &str) -> Result<(), String> 
     }
 }
 
+/// The Chromium browser on this machine that can reach a serial port, when one is installed.
+///
+/// Chrome, Chromium and Edge are the three that implement Web Serial; where each platform keeps
+/// its copies is that platform's own module's business, and the order within a module's list is
+/// a preference rather than a requirement (a machine with two is a machine with two).
+///
+/// This is the flash offer's fallback route out of the desktop app. Where the window's webview
+/// implements Web Serial the offer flashes in place; WKWebView and WebKitGTK implement none of
+/// it, and an older WebView2 may not either, so the offer hands that browser the launcher page
+/// with `?flash=1` on it.
+///
+/// `None` is the honest answer everywhere else, including Android: a phone has no such handoff
+/// (the page would be a file inside this app's sandbox), and its webview is not a browser
+/// either.
+pub fn flash_browser() -> Option<PathBuf> {
+    #[cfg(windows)]
+    {
+        windows::flash_browser()
+    }
+    #[cfg(not(windows))]
+    {
+        match current() {
+            Os::Macos => macos::flash_browser(),
+            Os::Linux => linux::flash_browser(),
+            Os::Android | Os::Other => None,
+        }
+    }
+}
+
+/// The first candidate that is actually a file on this machine.
+///
+/// Every platform's discovery is the same shape: a list of places the browser is installed, in
+/// the order a person would look, and the first one that exists. Shared here so the three
+/// modules differ in their lists rather than in the rule.
+pub(super) fn first_existing(candidates: &[PathBuf]) -> Option<PathBuf> {
+    candidates.iter().find(|candidate| candidate.is_file()).cloned()
+}
+
+/// Open an address in one named browser rather than in the platform's default.
+///
+/// Not routed by platform, because it is the same call on all three desktops: the path is the
+/// browser's own executable (`chrome.exe`, `Contents/MacOS/Google Chrome`, `/usr/bin/chromium`),
+/// so starting it with the address as its only argument is what the shell does too. The streams
+/// are detached: the browser's output is not ours to show and a dialog is not a terminal.
+pub fn open_in_named_browser(browser: &Path, url: &str) -> Result<(), String> {
+    let spawned = std::process::Command::new(browser)
+        .arg(url)
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .spawn();
+    match spawned {
+        Ok(_) => Ok(()),
+        Err(error) => Err(format!("{} could not be opened: {error}", browser.display())),
+    }
+}
+
 /// Show a file in the platform's own file manager, selected where that is possible.
 ///
 /// Best effort by design: the install itself already succeeded, and a machine with no
@@ -913,6 +982,31 @@ mod tests {
             Os::Linux,
             &Placement { image: None, flatpak: false, snap: false, roots: vec![PathBuf::from("/usr")] }
         ));
+    }
+
+    /// The rule every platform's flash-browser search shares: the first candidate that is
+    /// actually a file, and nothing invented when none is. The platform modules are then lists
+    /// of places rather than three implementations of a search.
+    #[test]
+    fn the_first_candidate_that_exists_wins() {
+        let root = std::env::temp_dir().join(format!("lithic-browser-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(&root).unwrap();
+        let present = root.join("chrome");
+        std::fs::write(&present, b"stub").unwrap();
+        let later = root.join("chromium");
+        std::fs::write(&later, b"stub").unwrap();
+        let missing = root.join("edge");
+
+        assert_eq!(
+            first_existing(&[missing.clone(), present.clone(), later]),
+            Some(present),
+            "the first one that exists is the one that is used"
+        );
+        assert_eq!(first_existing(&[missing]), None, "nothing is not the same as something");
+        assert_eq!(first_existing(&[]), None);
+
+        let _ = std::fs::remove_dir_all(&root);
     }
 
     /// The folder the program travels in: the executable's own folder on every platform but

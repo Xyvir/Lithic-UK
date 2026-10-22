@@ -42,7 +42,7 @@
   import PinEntry from './PinEntry.svelte';
   import { deleteRemoteFile, fetchRemoteFiles, fetchRemoteWiki, fetchRemoteWikiMeta, probePatchApi, createLockHeartbeat, readRemoteLock, uploadRemoteFile, webdavUrl, resolveSessionId, lithUploadName, type WebdavFile } from './webdav';
   import { normalizeLithName } from './legacy-saver';
-  import { flashLithicAppliance, serialFlashSupported } from './esp32-flash';
+  import { esp32Percent, esp32StageLine, flashLithicAppliance, serialFlashSupported } from './esp32-flash';
   import { documentStem, typedDocumentName } from './document-format';
   import { searchCachedWikis } from './cache-search';
   import { matchMarkup, showsForQuery, titleMatches, titleMarkup } from './name-match';
@@ -316,14 +316,32 @@ import { backupFileName, collectInstanceBackup, mergeBookmarks, parseInstanceBac
 
   /**
    * The one-time flash offer. A blank board is its whole subject, so nothing on this page
-   * feeds it: the images come from the published release and the run reports one line.
+   * feeds it: the images come from the firmware branch and the run reports one line.
    */
   let flashShow = false;
   let flashBusy = false;
   let flashLine = '';
   let flashProblem = '';
   let flashPercent = 0;
+  /** The handoff in flight, so the row cannot be pressed twice while a browser starts. */
+  let flashBrowserBusy = false;
+  /**
+   * This window can flash a board by itself: its webview implements Web Serial.
+   *
+   * A Chromium tab does, and so does a current WebView2. That is measured rather than assumed:
+   * the runtime answers `navigator.serial` and draws its own chooser, titled "tauri.localhost
+   * wants to connect to a serial port". WKWebView and WebKitGTK implement none of it, and an
+   * older WebView2 may not either, which is what `flashInBrowser` is for.
+   */
   const flashSupported = serialFlashSupported();
+  /**
+   * The route where the window has no serial port: a Chromium browser on this machine, when one
+   * is installed (see `flash_browser` in `src-tauri/src/platform/mod.rs`). Pressing the row
+   * hands the same page to it at `?flash=1` (`Flash.svelte`), which is a real browser and so
+   * brings a chooser the write can rely on.
+   */
+  const flashInBrowser = mode === 'tauri' && platformCapabilities?.flash_browser === true;
+  const flashOfferable = flashSupported || flashInBrowser;
 
   // --- Self-host (WebDAV listing + the git-backed patch API) ---
   // remoteFiles is the server's .lith listing; activeRemote is the wiki this
@@ -4234,6 +4252,7 @@ import { backupFileName, collectInstanceBackup, mergeBookmarks, parseInstanceBac
     emojiChoice = brandEmoji;
     emojiStatus = '';
     backupStatus = '';
+    flashProblem = '';
     showEmojiPicker = true;
   }
 
@@ -6380,17 +6399,10 @@ import { backupFileName, collectInstanceBackup, mergeBookmarks, parseInstanceBac
     try {
       await flashLithicAppliance({
         onStage: (stage) => {
-          flashLine =
-            stage === 'downloading'
-              ? copy.esp32.downloading
-              : stage === 'connecting'
-                ? copy.esp32.connecting
-                : stage === 'writing'
-                  ? copy.esp32.writing
-                  : copy.esp32.done;
+          flashLine = esp32StageLine(stage);
         },
         onProgress: (progress) => {
-          flashPercent = progress.total > 0 ? Math.min(100, Math.round((progress.written / progress.total) * 100)) : 0;
+          flashPercent = esp32Percent(progress);
         }
       });
     } catch (error) {
@@ -6401,14 +6413,33 @@ import { backupFileName, collectInstanceBackup, mergeBookmarks, parseInstanceBac
     }
   }
 
-  function openFlash(): void {
+  /**
+   * The offer's two routes to a serial port.
+   *
+   * Where this window has Web Serial the dialog below is the whole run. Where it has none, the
+   * same page goes to a Chromium browser at `?flash=1` (see `Flash.svelte`), which brings its own
+   * chooser. The manager stays open for that handoff, so a browser that will not start can say so
+   * where the person pressed instead of in a dialog that never appeared.
+   */
+  async function openFlash(): Promise<void> {
+    flashProblem = '';
+    if (!flashSupported) {
+      flashBrowserBusy = true;
+      try {
+        await tauriInvoke('flash_in_browser', { lang: LOCALE_TAG });
+      } catch (error) {
+        flashProblem = copy.esp32.openFailed(error instanceof Error ? error.message : String(error));
+      } finally {
+        flashBrowserBusy = false;
+      }
+      return;
+    }
     // The manager is the offer's new home, not a backdrop for it: the flasher is the next
     // dialog, and leaving the first one open underneath would stack two overlays whose
     // dismissal rules disagree about which one Escape ends.
     showEmojiPicker = false;
     flashShow = true;
     flashLine = '';
-    flashProblem = '';
     flashPercent = 0;
   }
 
@@ -7312,7 +7343,8 @@ import { backupFileName, collectInstanceBackup, mergeBookmarks, parseInstanceBac
         <div class="modal-actions management-actions">
           <button class="modal-action secondary full-backup-button" disabled={backupBusy} on:click={() => downloadInstanceBackup('manage')} title={copy.dialogs.icon.backupTitle}>{@render fullBackupIcon()}{backupBusy ? '…' : copy.dialogs.icon.backup}</button>
           <!--
-            The appliance offer, drawn only where Web Serial exists.
+            The appliance offer, drawn only where pressing it can reach a board: a Chromium
+            tab has Web Serial, and the desktop app has a browser it can hand the page to.
 
             It was a footer link, beside the project link, on every page. Two things were
             wrong with that: it is not a thing every page is for, and the footer is drawn in
@@ -7321,8 +7353,8 @@ import { backupFileName, collectInstanceBackup, mergeBookmarks, parseInstanceBac
             nothing to offer says nothing rather than drawing a button that does not work,
             which is the rule the install offer already follows.
           -->
-          {#if flashSupported}
-            <button class="modal-action secondary flash-button" type="button" on:click={openFlash} title={copy.esp32.openTitle}>{copy.esp32.open}</button>
+          {#if flashOfferable}
+            <button class="modal-action secondary flash-button" type="button" disabled={flashBrowserBusy} on:click={openFlash} title={flashSupported ? copy.esp32.openTitle : copy.esp32.openBrowserTitle}>{copy.esp32.open}</button>
           {/if}
           <!--
             The way out to the project as a small link at the end of the row rather than a
@@ -7333,6 +7365,7 @@ import { backupFileName, collectInstanceBackup, mergeBookmarks, parseInstanceBac
           <a class="modal-footnote-link" href={PROJECT_URL} target="_blank" rel="noreferrer" title={copy.dialogs.icon.docsTitle} on:click={(event) => openExternalLink(event, PROJECT_URL)}>{copy.dialogs.icon.docs}</a>
         </div>
         {#if backupStatus}<p class="status-line" role="status">{backupStatus}</p>{/if}
+        {#if flashProblem}<p class="status-line error" role="alert">{flashProblem}</p>{/if}
       </div>
     </div>
   {/if}

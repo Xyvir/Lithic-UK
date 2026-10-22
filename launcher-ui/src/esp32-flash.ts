@@ -13,6 +13,7 @@
  */
 import { ESPLoader, Transport } from 'esptool-js';
 import type { FlashOptions } from 'esptool-js';
+import { copy } from './copy.ts';
 
 /**
  * Where the five images live: one fixed branch, force-pushed by the firmware workflow,
@@ -74,6 +75,31 @@ export interface Esp32FlashProgress {
 
 export function esp32ImageUrl(file: string): string {
   return `${ESP32_IMAGE_BASE}/${file}`;
+}
+
+/**
+ * The line a run shows while it is at this stage.
+ *
+ * Here rather than in a component because two pages draw the same run: the manager's dialog,
+ * in a browser that has a serial port, and the flash-only page the desktop app opens in one
+ * that does (`?flash=1`). One mapping is one place for the stages to stay in step.
+ */
+export function esp32StageLine(stage: Esp32Stage): string {
+  switch (stage) {
+    case 'downloading':
+      return copy.esp32.downloading;
+    case 'connecting':
+      return copy.esp32.connecting;
+    case 'writing':
+      return copy.esp32.writing;
+    default:
+      return copy.esp32.done;
+  }
+}
+
+/** How far through the write a report is, as a whole percentage of every image's bytes. */
+export function esp32Percent(progress: Esp32FlashProgress): number {
+  return progress.total > 0 ? Math.min(100, Math.round((progress.written / progress.total) * 100)) : 0;
 }
 
 export function esp32Region(file: string): Esp32Region {
@@ -182,8 +208,8 @@ export async function writeEsp32(options: WriteEsp32Options): Promise<void> {
 }
 
 /**
- * Web Serial is Chromium only. This is what the manager's row is gated on, so the launcher
- * navigates a desktop app or a phone to a control its browser can never satisfy.
+ * Web Serial is Chromium only. The offer reads this to choose between its own dialog and handing
+ * the page to a Chromium browser, which is what a window without the API has left.
  */
 export function serialFlashSupported(): boolean {
   return typeof navigator !== 'undefined' && 'serial' in navigator && Boolean(navigator.serial);

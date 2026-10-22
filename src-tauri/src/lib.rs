@@ -2906,6 +2906,50 @@ fn open_external(app: tauri::AppHandle, url: String) -> Result<(), String> {
     platform::open_in_browser(&app, &url)
 }
 
+/// Write the launcher page out and open it in a Chromium browser, at `?flash=1`.
+///
+/// The fallback for a window that cannot flash: WKWebView and WebKitGTK implement no Web Serial,
+/// and an older WebView2 may not either, so the offer hands the work to a Chromium browser,
+/// which is a real browser and brings a chooser the write can rely on. What is handed over is
+/// this same artifact: one flat HTML file carrying its own script and stylesheet, read from the
+/// assets the window itself was loaded from, so the browser flashes the version that is running
+/// rather than whatever happens to be installed on the machine.
+///
+/// The file is written into the temporary folder and left there, overwritten on the next press.
+/// It is a page and not a second entry point: `?flash=1` mounts the flasher alone, and the
+/// document has no bridge back into this app, so the browser cannot ask it for anything.
+#[tauri::command]
+fn flash_in_browser(app: tauri::AppHandle, lang: Option<String>) -> Result<(), String> {
+    let browser = platform::flash_browser()
+        .ok_or_else(|| "no Chromium browser is installed".to_string())?;
+    let asset = app
+        .asset_resolver()
+        .get("launcher.html".to_string())
+        .ok_or_else(|| "the launcher page is not in this build".to_string())?;
+    let page = std::env::temp_dir().join("lithic-flash.html");
+    fs::write(&page, &asset.bytes)
+        .map_err(|error| format!("the flash page could not be written: {error}"))?;
+    let url = flash_page_url(&page, lang.as_deref())?;
+    platform::open_in_named_browser(&browser, url.as_str())
+}
+
+/// The address the browser is handed: the temporary page, plus the flash-only query.
+///
+/// The language travels with it (see `flash_in_browser`), and only language is passed on: a
+/// query the app does not own would be a way for this command to ask the page for more than
+/// the flasher.
+fn flash_page_url(page: &Path, lang: Option<&str>) -> Result<tauri::Url, String> {
+    let mut url = tauri::Url::from_file_path(page)
+        .map_err(|_| "the flash page has no address".to_string())?;
+    let mut query = url.query_pairs_mut();
+    query.append_pair("flash", "1");
+    if let Some(lang) = lang.map(str::trim).filter(|tag| !tag.is_empty()) {
+        query.append_pair("lang", lang);
+    }
+    drop(query);
+    Ok(url)
+}
+
 // --- Credential vault --------------------------------------------------------
 // The launcher's side of a self-hosted instance asking for HTTP Basic auth. The
 // storage and the cryptography live in `credentials`; what is here is the session
@@ -3391,6 +3435,7 @@ pub fn run() {
             install_monolith,
             install_status,
             platform_capabilities,
+            flash_in_browser,
             install_offer_status,
             set_install_dismissed,
             install_update_check,
@@ -3449,6 +3494,24 @@ pub fn run() {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The flash page's address is a file URL with the flash-only query on it, and the app's
+    /// language when it has one. A blank language is not one: the browser's own is better than
+    /// a query the page would read as a request.
+    #[test]
+    fn the_flash_page_address_carries_the_flash_query_and_the_language() {
+        let page = std::env::temp_dir().join("lithic-flash.html");
+
+        let spanish = flash_page_url(&page, Some("es")).expect("a temporary file has an address");
+        assert!(spanish.as_str().starts_with("file://"), "{spanish}");
+        assert_eq!(spanish.query(), Some("flash=1&lang=es"));
+
+        let bare = flash_page_url(&page, None).expect("a temporary file has an address");
+        assert_eq!(bare.query(), Some("flash=1"));
+
+        let blank = flash_page_url(&page, Some("   ")).expect("a temporary file has an address");
+        assert_eq!(blank.query(), Some("flash=1"), "an empty language is not a language");
+    }
 
     /// The update offer's whole decision, minus the network: this build's own tag
     /// is nothing to offer, a different tag with an exe is an offer, and a newest

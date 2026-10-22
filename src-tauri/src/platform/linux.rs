@@ -63,6 +63,51 @@ fn mime_types() -> &'static str {
     "application/x-lith;text/markdown;text/plain;text/vnd.tiddlywiki;application/json;application/x-ipynb+json;text/html;application/pdf;"
 }
 
+/// The names a Chromium browser is installed under, most preferred first.
+///
+/// The two Chrome names are the same browser under the names its own package uses (`-stable` is
+/// what the `.deb` and `.rpm` provide on several distributions), and the two Chromium names are
+/// the same pair for it, `chromium-browser` being Debian's. Edge is last because a Linux desktop
+/// is the one place it is genuinely unlikely.
+const FLASH_BROWSER_NAMES: [&str; 5] = [
+    "google-chrome",
+    "google-chrome-stable",
+    "chromium",
+    "chromium-browser",
+    "microsoft-edge",
+];
+
+/// The first of those the desktop's `PATH` resolves.
+///
+/// The names are what a package installs, and a package installs into a `PATH` folder, so the
+/// search is the shell's own rather than a list of guessed locations. A browser installed as a
+/// flatpak or a snap is reachable only if its wrapper is on `PATH`, which for a snap it is and
+/// for a flatpak it is not: a flatpak nothing has exported is a copy this app cannot find and
+/// says nothing about.
+pub fn flash_browser() -> Option<PathBuf> {
+    super::first_existing(&browser_candidates(&path_dirs()))
+}
+
+/// Every `PATH` folder, in the order the shell would search them.
+fn path_dirs() -> Vec<PathBuf> {
+    std::env::var_os("PATH")
+        .map(|path| {
+            std::env::split_paths(&path)
+                .filter(|dir| !dir.as_os_str().is_empty())
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+/// Names outer, folders inner: a Chrome anywhere beats a Chromium in a folder searched sooner,
+/// which is the preference the list states rather than a fact about the filesystem.
+fn browser_candidates(dirs: &[PathBuf]) -> Vec<PathBuf> {
+    FLASH_BROWSER_NAMES
+        .iter()
+        .flat_map(|name| dirs.iter().map(move |dir| dir.join(name)))
+        .collect()
+}
+
 /// Open an address in whatever the desktop has registered as its browser.
 pub fn open_in_browser(url: &str) -> Result<(), String> {
     let opened = Command::new("xdg-open")
@@ -331,6 +376,28 @@ mod tests {
         // The four characters the format reserves are escaped inside the quotes, and a
         // path is allowed to contain every one of them.
         assert_eq!(exec_path(Path::new("/home/u/a $b/`c`/\"d\" e")), "\"/home/u/a \\$b/\\`c\\`/\\\"d\\\" e\"");
+    }
+
+    /// Chrome before Chromium, and every folder searched before the next name: the order the
+    /// list states is the order the search runs in.
+    #[test]
+    fn the_flash_browser_search_prefers_chrome_and_walks_every_folder() {
+        let dirs = vec![PathBuf::from("/usr/local/bin"), PathBuf::from("/usr/bin")];
+        let candidates = browser_candidates(&dirs);
+        assert_eq!(candidates[0], PathBuf::from("/usr/local/bin/google-chrome"));
+        assert_eq!(candidates[1], PathBuf::from("/usr/bin/google-chrome"));
+        assert_eq!(candidates[2], PathBuf::from("/usr/local/bin/google-chrome-stable"));
+        assert_eq!(
+            candidates.len(),
+            FLASH_BROWSER_NAMES.len() * dirs.len(),
+            "every name is looked for in every folder"
+        );
+        assert_eq!(
+            candidates.last(),
+            Some(&PathBuf::from("/usr/bin/microsoft-edge")),
+            "Edge is the last resort, not the first"
+        );
+        assert!(candidates.contains(&PathBuf::from("/usr/bin/chromium")));
     }
 
     /// The icon search prefers a real size folder, and falls back to whatever the bundle

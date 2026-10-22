@@ -34,6 +34,46 @@
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
+/// The browsers that can flash a board, as the bundles macOS installs them into.
+///
+/// One name is enough for each because all three bundles name their executable after themselves.
+/// A copy somebody renamed would not be found, which is the right answer: what this app is
+/// looking for is a browser it knows implements Web Serial, not a file that starts with a
+/// familiar word.
+const FLASH_BROWSERS: [&str; 3] = ["Google Chrome", "Chromium", "Microsoft Edge"];
+
+/// The first of those installed in `/Applications`, then in the user's own `Applications`.
+///
+/// `/Applications` first because that is where an installed browser lives; the folder in a
+/// home is for a bundle somebody keeps there on purpose, and it comes second for that reason.
+pub fn flash_browser() -> Option<PathBuf> {
+    super::first_existing(&browser_candidates(dirs::home_dir().as_deref()))
+}
+
+fn browser_candidates(home: Option<&Path>) -> Vec<PathBuf> {
+    let mut candidates = FLASH_BROWSERS
+        .iter()
+        .map(|name| bundle_binary(Path::new("/Applications"), name))
+        .collect::<Vec<_>>();
+    if let Some(home) = home {
+        candidates.extend(
+            FLASH_BROWSERS
+                .iter()
+                .map(|name| bundle_binary(&home.join("Applications"), name)),
+        );
+    }
+    candidates
+}
+
+/// The executable inside a bundle, which is the thing that actually starts.
+fn bundle_binary(folder: &Path, name: &str) -> PathBuf {
+    folder
+        .join(format!("{name}.app"))
+        .join("Contents")
+        .join("MacOS")
+        .join(name)
+}
+
 /// Open an address in the default browser.
 pub fn open_in_browser(url: &str) -> Result<(), String> {
     spawn(open_arguments(url))
@@ -97,6 +137,22 @@ mod tests {
             reveal_arguments(Path::new("/Users/u/Documents/Lithic/Lithic.app")),
             vec!["-R".to_string(), "/Users/u/Documents/Lithic/Lithic.app".to_string()]
         );
+    }
+
+    /// A Mac browser is a bundle, and the file that starts is the executable inside it rather
+    /// than the folder Finder shows.
+    #[test]
+    fn the_flash_browser_is_the_executable_inside_the_bundle() {
+        let candidates = browser_candidates(Some(Path::new("/Users/u")));
+        assert_eq!(
+            candidates[0],
+            PathBuf::from("/Applications/Google Chrome.app/Contents/MacOS/Google Chrome")
+        );
+        assert!(candidates.contains(&PathBuf::from(
+            "/Users/u/Applications/Chromium.app/Contents/MacOS/Chromium"
+        )));
+        // A machine that cannot name a home folder still knows about /Applications.
+        assert_eq!(browser_candidates(None).len(), FLASH_BROWSERS.len());
     }
 
     /// A Mac install creates nothing, and says so rather than reporting a path to a

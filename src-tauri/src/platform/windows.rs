@@ -34,6 +34,39 @@ pub fn open_in_browser(url: &str) -> Result<(), String> {
     Ok(())
 }
 
+/// The Chromium browser this app can hand the flash page to, when one is installed.
+///
+/// Chrome first, then Edge. Both implement Web Serial, which is the only thing the offer needs;
+/// Edge is listed at all because Windows itself installs it, so it is what answers on a machine
+/// where nobody has installed a browser by hand, which is most of them.
+///
+/// The three folders are the ones a Windows browser lands in: the machine's programs, the 32-bit
+/// program folder Chrome still uses on some installs, and this user's own programs, which is
+/// where a per-user Chrome install goes when the installer was not elevated.
+pub fn flash_browser() -> Option<PathBuf> {
+    let roots = ["ProgramFiles", "ProgramFiles(x86)", "LOCALAPPDATA"]
+        .iter()
+        .filter_map(|name| std::env::var_os(name).map(PathBuf::from))
+        .collect::<Vec<_>>();
+    super::first_existing(&browser_candidates(&roots))
+}
+
+/// Chrome in every root before Edge in any of them, so a machine with both opens Chrome.
+fn browser_candidates(roots: &[PathBuf]) -> Vec<PathBuf> {
+    let routes = [
+        ("Google", "Chrome", "chrome.exe"),
+        ("Microsoft", "Edge", "msedge.exe"),
+    ];
+    routes
+        .iter()
+        .flat_map(|(vendor, product, executable)| {
+            roots.iter().map(move |root| {
+                root.join(vendor).join(product).join("Application").join(executable)
+            })
+        })
+        .collect()
+}
+
 /// Reveal a file in Explorer, with the file itself selected.
 ///
 /// `explorer /select,<path>` is the one platform here that can do the selecting half,
@@ -213,4 +246,34 @@ pub fn register_file_associations(program: &Path) -> Result<(), String> {
 /// A copied `.exe` needs no permission bits, so there is nothing to do here.
 pub fn make_launchable(_path: &Path) -> Result<(), String> {
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Every program folder is searched for Chrome before any is searched for Edge, so a machine
+    /// with both opens the browser a person installed over the one Windows shipped.
+    #[test]
+    fn chrome_is_tried_before_edge_in_every_program_folder() {
+        let roots = vec![
+            PathBuf::from(r"C:\Program Files"),
+            PathBuf::from(r"C:\Users\u\AppData\Local"),
+        ];
+        let candidates = browser_candidates(&roots);
+        assert_eq!(candidates.len(), 4, "two browsers in two program folders");
+        assert_eq!(
+            candidates[0],
+            PathBuf::from(r"C:\Program Files\Google\Chrome\Application\chrome.exe")
+        );
+        assert_eq!(
+            candidates[1],
+            PathBuf::from(r"C:\Users\u\AppData\Local\Google\Chrome\Application\chrome.exe")
+        );
+        assert_eq!(
+            candidates[2],
+            PathBuf::from(r"C:\Program Files\Microsoft\Edge\Application\msedge.exe")
+        );
+        assert!(candidates[3].ends_with(r"msedge.exe"), "the executable is what gets started");
+    }
 }

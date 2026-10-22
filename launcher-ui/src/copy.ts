@@ -154,6 +154,11 @@ const en = {
   esp32: {
     open: 'Flash a device',
     openTitle: 'Write Lithic onto a blank ESP32',
+    /**
+     * The same row where the app's window has no serial port: pressing it hands the flash page to
+     * a Chromium browser, so the title says that rather than repeating the promise.
+     */
+    openBrowserTitle: 'Opens your browser, which can reach the board over USB.',
     title: 'Flash an ESP32',
     intro: 'Writes Lithic onto a blank ESP32 over USB.',
     flash: 'Flash device',
@@ -162,6 +167,9 @@ const en = {
     writing: 'Writing. Leave the device plugged in.',
     done: 'Flashed. Join its network and open the launcher.',
     failed: (reason: string) => `Flash failed: ${reason}`,
+    /** The flash-only page (`?flash=1`), reached by hand in a browser that cannot flash. */
+    unsupported: 'This browser cannot flash a board. Use Chrome or Edge.',
+    openFailed: (reason: string) => `Could not open a browser: ${reason}`,
     closeAria: 'Close the flasher'
   },
 
@@ -926,6 +934,7 @@ const es: Copy = {
   esp32: {
     open: 'Grabar un dispositivo',
     openTitle: 'Grabar Lithic en un ESP32 vacío',
+    openBrowserTitle: 'Abre tu navegador, que puede llegar a la placa por USB.',
     title: 'Grabar un ESP32',
     intro: 'Escribe Lithic en un ESP32 vacío por USB.',
     flash: 'Grabar dispositivo',
@@ -934,6 +943,8 @@ const es: Copy = {
     writing: 'Grabando. Deja el dispositivo conectado.',
     done: 'Grabado. Únete a su red y abre el launcher.',
     failed: (reason: string) => `La grabación falló: ${reason}`,
+    unsupported: 'Este navegador no puede grabar una placa. Usa Chrome o Edge.',
+    openFailed: (reason: string) => `No se pudo abrir un navegador: ${reason}`,
     closeAria: 'Cerrar el grabador'
   },
 
@@ -1591,6 +1602,7 @@ const fr: Copy = {
   esp32: {
     open: 'Flasher un appareil',
     openTitle: 'Écrire Lithic sur un ESP32 vierge',
+    openBrowserTitle: 'Ouvre votre navigateur, qui peut joindre la carte par USB.',
     title: 'Flasher un ESP32',
     intro: 'Écrit Lithic sur un ESP32 vierge par USB.',
     flash: 'Flasher',
@@ -1599,6 +1611,8 @@ const fr: Copy = {
     writing: 'Écriture. Laissez l’appareil branché.',
     done: 'Flashé. Rejoignez son réseau et ouvrez le launcher.',
     failed: (reason: string) => `Échec du flash : ${reason}`,
+    unsupported: 'Ce navigateur ne peut pas flasher une carte. Utilisez Chrome ou Edge.',
+    openFailed: (reason: string) => `Impossible d’ouvrir un navigateur : ${reason}`,
     closeAria: 'Fermer le flasheur'
   },
 
@@ -2253,6 +2267,7 @@ const de: Copy = {
   esp32: {
     open: 'Gerät flashen',
     openTitle: 'Lithic auf einen leeren ESP32 schreiben',
+    openBrowserTitle: 'Öffnet deinen Browser, der die Platine über USB erreicht.',
     title: 'ESP32 flashen',
     intro: 'Schreibt Lithic über USB auf einen leeren ESP32.',
     flash: 'Gerät flashen',
@@ -2261,6 +2276,8 @@ const de: Copy = {
     writing: 'Wird geschrieben. Gerät angeschlossen lassen.',
     done: 'Geflasht. Mit seinem Netz verbinden und den Launcher öffnen.',
     failed: (reason: string) => `Flashen fehlgeschlagen: ${reason}`,
+    unsupported: 'Dieser Browser kann keine Platine flashen. Nutze Chrome oder Edge.',
+    openFailed: (reason: string) => `Browser konnte nicht geöffnet werden: ${reason}`,
     closeAria: 'Flasher schließen'
   },
 

@@ -1,11 +1,19 @@
 import { mount } from 'svelte';
 import App from './App.svelte';
+import Flash from './Flash.svelte';
 import { LOCALE_TAG } from './copy';
 import { declaresBrowserOnly, hostedInApp, resolveMode } from './mode';
 import { readPlatformCapabilities } from './platform-capabilities';
 import './styles.css';
 
 const mode = resolveMode(window.location);
+/*
+ * The flash-only page (`?flash=1`), which the desktop app opens in a Chromium browser when its
+ * own window has no Web Serial (see `flash_in_browser` and `Flash.svelte`). Read here rather
+ * than inside a component so the launcher is simply not mounted: composing the page, its recents
+ * and its storage is work a board does not need.
+ */
+const flashOnly = new URLSearchParams(window.location.search).has('flash');
 // A page the shim served declares itself browser-only (see `mode.ts`). Read from
 // the document rather than from the mode, since the shim's loopback address alone
 // cannot say what answered it.
@@ -38,9 +46,14 @@ window.__LITHIC_HOSTED_IN_APP__ = hostedInApp(window.location);
  * waits on it.
  */
 async function start() {
+  const target = document.getElementById('app')!;
+  if (flashOnly) {
+    mount(Flash, { target });
+    return;
+  }
   const platformCapabilities = await readPlatformCapabilities(mode);
   mount(App, {
-    target: document.getElementById('app')!,
+    target,
     props: { mode, platformCapabilities }
   });
 }
