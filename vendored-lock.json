@@ -27,12 +27,12 @@
     "fetchedAt": "2026-10-21T22:08:16.412Z"
   },
   "pele": {
-    "source": "pele@1.8.0 dist/pele.global.js",
-    "version": "1.8.0",
-    "url": "https://registry.npmjs.org/pele/-/pele-1.8.0.tgz",
+    "source": "pele@1.9.0 dist/pele.global.js",
+    "version": "1.9.0",
+    "url": "https://registry.npmjs.org/pele/-/pele-1.9.0.tgz",
     "target": "wiki/local-plugins/lithic-patch-mermaid/$__plugins_xyvir_lithic-patch-mermaid_pele.js.tid",
-    "upstreamSha256": "9bf34b3a9a19351dc69d0d238e365560331a8ae392c41656df7f5090653253d0",
-    "bodySha256": "f5cd9e290b8a0bba2097fd9a0e4214eb8f2d12b93a224b9f9342c276b2c37dd2",
-    "fetchedAt": "2026-10-21T22:08:15.505Z"
+    "upstreamSha256": "323c16de7844d4b609743f70449ebce041a531e4f48f23b1e9e7ec9d3b917287",
+    "bodySha256": "52a988ab06d142afc7e66880752b04938d8d92ff88e492d6e010dab956d1e954",
+    "fetchedAt": "2026-10-22T23:03:59.405Z"
   }
 }
