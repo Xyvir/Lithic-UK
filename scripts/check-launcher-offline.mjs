@@ -70,7 +70,7 @@ const EXTERNAL = [
   {
     prefix: 'https://github.com/',
     kind: 'click target',
-    why: 'The anchors a person clicks: the repository in the brand row, and the device-code page the sync dialog tells them to open.'
+    why: 'The anchors a person clicks: the repository in the brand row, and the device-code page the sync dialog tells them to open. It is also where the one-time ESP32 flash offer downloads its firmware images, which is the single runtime load agents.md allows, and it happens only when a person asks for a flash.'
   },
   {
     prefix: 'https://lithic.uk/',

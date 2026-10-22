@@ -147,6 +147,25 @@ const en = {
       `${count} shared ${count === 1 ? 'note' : 'notes'} ready to import`
   },
 
+  /**
+   * The one-time flash offer, which turns a blank board into an appliance. Its stages are
+   * the words the dialog shows while it has nothing else to say.
+   */
+  esp32: {
+    open: 'Flash a device',
+    openTitle: 'Write Lithic onto a blank ESP32',
+    title: 'Flash an ESP32',
+    intro: 'Writes Lithic onto a blank ESP32 over USB.',
+    unsupported: 'This browser cannot reach a serial device. Use Chrome or Edge on a computer.',
+    flash: 'Flash device',
+    downloading: 'Downloading the firmware.',
+    connecting: 'Connecting to the device.',
+    writing: 'Writing. Leave the device plugged in.',
+    done: 'Flashed. Join its network and open the launcher.',
+    failed: (reason: string) => `Flash failed: ${reason}`,
+    closeAria: 'Close the flasher'
+  },
+
   common: {
     cancel: 'Cancel',
     back: 'Back',
@@ -905,6 +924,21 @@ const es: Copy = {
       `${count} ${count === 1 ? 'nota compartida lista' : 'notas compartidas listas'} para importar`
   },
 
+  esp32: {
+    open: 'Grabar un dispositivo',
+    openTitle: 'Grabar Lithic en un ESP32 vacío',
+    title: 'Grabar un ESP32',
+    intro: 'Escribe Lithic en un ESP32 vacío por USB.',
+    unsupported: 'Este navegador no llega a un dispositivo serie. Usa Chrome o Edge en un ordenador.',
+    flash: 'Grabar dispositivo',
+    downloading: 'Descargando el firmware.',
+    connecting: 'Conectando con el dispositivo.',
+    writing: 'Grabando. Deja el dispositivo conectado.',
+    done: 'Grabado. Únete a su red y abre el launcher.',
+    failed: (reason: string) => `La grabación falló: ${reason}`,
+    closeAria: 'Cerrar el grabador'
+  },
+
   common: {
     cancel: 'Cancelar',
     back: 'Atrás',
@@ -1556,6 +1590,21 @@ const fr: Copy = {
       `${count} ${count === 1 ? 'note partagée prête' : 'notes partagées prêtes'} à importer`
   },
 
+  esp32: {
+    open: 'Flasher un appareil',
+    openTitle: 'Écrire Lithic sur un ESP32 vierge',
+    title: 'Flasher un ESP32',
+    intro: 'Écrit Lithic sur un ESP32 vierge par USB.',
+    unsupported: 'Ce navigateur ne joint pas un appareil série. Utilisez Chrome ou Edge sur un ordinateur.',
+    flash: 'Flasher',
+    downloading: 'Téléchargement du micrologiciel.',
+    connecting: 'Connexion à l’appareil.',
+    writing: 'Écriture. Laissez l’appareil branché.',
+    done: 'Flashé. Rejoignez son réseau et ouvrez le launcher.',
+    failed: (reason: string) => `Échec du flash : ${reason}`,
+    closeAria: 'Fermer le flasheur'
+  },
+
   common: {
     cancel: 'Annuler',
     back: 'Retour',
@@ -2202,6 +2251,21 @@ const de: Copy = {
     replaceConfirm: 'Ersetzen',
     sharedReady: (count: number) =>
       `${count} geteilte ${count === 1 ? 'Notiz' : 'Notizen'} zum Importieren bereit`
+  },
+
+  esp32: {
+    open: 'Gerät flashen',
+    openTitle: 'Lithic auf einen leeren ESP32 schreiben',
+    title: 'ESP32 flashen',
+    intro: 'Schreibt Lithic über USB auf einen leeren ESP32.',
+    unsupported: 'Dieser Browser erreicht kein serielles Gerät. Nutze Chrome oder Edge am Computer.',
+    flash: 'Gerät flashen',
+    downloading: 'Firmware wird geladen.',
+    connecting: 'Verbindung zum Gerät.',
+    writing: 'Wird geschrieben. Gerät angeschlossen lassen.',
+    done: 'Geflasht. Mit seinem Netz verbinden und den Launcher öffnen.',
+    failed: (reason: string) => `Flashen fehlgeschlagen: ${reason}`,
+    closeAria: 'Flasher schließen'
   },
 
   common: {

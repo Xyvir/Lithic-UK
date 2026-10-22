@@ -42,6 +42,7 @@
   import PinEntry from './PinEntry.svelte';
   import { deleteRemoteFile, fetchRemoteFiles, fetchRemoteWiki, fetchRemoteWikiMeta, probePatchApi, createLockHeartbeat, readRemoteLock, uploadRemoteFile, webdavUrl, resolveSessionId, lithUploadName, type WebdavFile } from './webdav';
   import { normalizeLithName } from './legacy-saver';
+  import { flashLithicAppliance, serialFlashSupported } from './esp32-flash';
   import { documentStem, typedDocumentName } from './document-format';
   import { searchCachedWikis } from './cache-search';
   import { matchMarkup, showsForQuery, titleMatches, titleMarkup } from './name-match';
@@ -312,6 +313,17 @@ import { backupFileName, collectInstanceBackup, mergeBookmarks, parseInstanceBac
   let mountError = '';
   let bookmarks: BookmarkEntry[] = [];
   let showBookmarkModal = false;
+
+  /**
+   * The one-time flash offer. A blank board is its whole subject, so nothing on this page
+   * feeds it: the images come from the published release and the run reports one line.
+   */
+  let flashShow = false;
+  let flashBusy = false;
+  let flashLine = '';
+  let flashProblem = '';
+  let flashPercent = 0;
+  const flashSupported = serialFlashSupported();
 
   // --- Self-host (WebDAV listing + the git-backed patch API) ---
   // remoteFiles is the server's .lith listing; activeRemote is the wiki this
@@ -6355,6 +6367,51 @@ import { backupFileName, collectInstanceBackup, mergeBookmarks, parseInstanceBac
       offerBusy = false;
     }
   }
+
+  /**
+   * The offer's one action. The stages collapse into a single line because only one of
+   * them can be happening, and a failure keeps the loader's own reason after its clause.
+   */
+  async function runFlash(): Promise<void> {
+    flashBusy = true;
+    flashProblem = '';
+    flashPercent = 0;
+    flashLine = copy.esp32.downloading;
+    try {
+      await flashLithicAppliance({
+        onStage: (stage) => {
+          flashLine =
+            stage === 'downloading'
+              ? copy.esp32.downloading
+              : stage === 'connecting'
+                ? copy.esp32.connecting
+                : stage === 'writing'
+                  ? copy.esp32.writing
+                  : copy.esp32.done;
+        },
+        onProgress: (progress) => {
+          flashPercent = progress.total > 0 ? Math.min(100, Math.round((progress.written / progress.total) * 100)) : 0;
+        }
+      });
+    } catch (error) {
+      flashProblem = copy.esp32.failed(error instanceof Error ? error.message : String(error));
+      flashLine = '';
+    } finally {
+      flashBusy = false;
+    }
+  }
+
+  function openFlash(): void {
+    flashShow = true;
+    flashLine = '';
+    flashProblem = '';
+    flashPercent = 0;
+  }
+
+  function closeFlash(): void {
+    if (flashBusy) return;
+    flashShow = false;
+  }
 </script>
 
 <svelte:head><title>{copy.app.title}</title></svelte:head>
@@ -6888,6 +6945,30 @@ import { backupFileName, collectInstanceBackup, mergeBookmarks, parseInstanceBac
               <button class="modal-action" disabled={gitSyncBusy || gitAuthActive} on:click={reconnectGitSync}>{gitAuthActive ? copy.dialogs.gitSync.waitingForGitHub : copy.dialogs.gitSync.reconnect}</button>
             {/if}
             <button class="modal-action warn" disabled={gitSyncBusy} on:click={disconnectGitSync}>{copy.dialogs.gitSync.disconnect}</button>
+          </div>
+        {/if}
+      </div>
+    </div>
+  {/if}
+  {#if flashShow}
+    <!--
+      The one-time flash offer. A blank board is the subject, so the dialog asks for nothing:
+      it reads the published images, writes them, and lets go of the port. The stages share
+      one line because only one can be happening, and the button stays disabled for the run
+      rather than offering a second start over the top of the first.
+    -->
+    <div class="modal-overlay" role="presentation" on:click={(event) => event.currentTarget === event.target && closeFlash()}>
+      <div class="launcher-modal flash-modal" role="dialog" aria-modal="true" aria-labelledby="flash-title">
+        <button class="modal-close" aria-label={copy.esp32.closeAria} disabled={flashBusy} on:click={closeFlash}>×</button>
+        <h2 id="flash-title">{copy.esp32.title}</h2>
+        <p>{copy.esp32.intro}</p>
+        {#if !flashSupported}
+          <p class="status-line error" role="alert">{copy.esp32.unsupported}</p>
+        {:else}
+          {#if flashLine}<p class="status-line" role="status">{flashLine}{#if flashBusy && flashPercent > 0} {flashPercent}%{/if}</p>{/if}
+          {#if flashProblem}<p class="status-line error" role="alert">{flashProblem}</p>{/if}
+          <div class="modal-actions">
+            <button class="modal-action" disabled={flashBusy} on:click={runFlash}>{copy.esp32.flash}</button>
           </div>
         {/if}
       </div>
@@ -7930,5 +8011,5 @@ import { backupFileName, collectInstanceBackup, mergeBookmarks, parseInstanceBac
     drawn, is the offer's own business; the two sites are mutually exclusive, which is why
     the markup for it is written once, above.
   -->
-  <footer>{#if mode === 'webapp' && !browserOnly}<a class="github-link" href={PROJECT_URL} target="_blank" rel="noreferrer">{copy.app.footerLink}</a>{/if}{#if installOffer && !recentPanelShown}{@render installOfferControl()}{/if}</footer>
+  <footer><button class="flash-link" type="button" on:click={openFlash} title={copy.esp32.openTitle}>{copy.esp32.open}</button>{#if mode === 'webapp' && !browserOnly}<a class="github-link" href={PROJECT_URL} target="_blank" rel="noreferrer">{copy.app.footerLink}</a>{/if}{#if installOffer && !recentPanelShown}{@render installOfferControl()}{/if}</footer>
 </main>
