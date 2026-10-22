@@ -29,7 +29,16 @@ TextNodeWidget.prototype.render = function (parent, nextSibling) {
     this.parentDomNode = parent;
     this.computeAttributes();
     this.execute();
-    this.renderChildren(parent, nextSibling);
+    if (this.widgetClasses["plain-text"]) {
+        this.renderChildren(parent, nextSibling);
+        return;
+    }
+    // No plain-text widget is registered (freelinks is not loaded, as in the library edition).
+    // Render the text directly, as core does. Creating plain-text children here would fall back
+    // to this same widget and recurse without end.
+    var textNode = this.document.createTextNode(this.getAttribute("text", this.parseTreeNode.text || "").replace(/\r/mg, ""));
+    parent.insertBefore(textNode, nextSibling);
+    this.domNodes.push(textNode);
 };
 
 /*
@@ -50,7 +59,8 @@ TextNodeWidget.prototype.execute = function () {
     var isExcludedType = tiddlerType === "application/tldr" || (typeof tiddlerType === "string" && tiddlerType.indexOf("image/") === 0);
 
     // Only process links if not disabled and we're not within a button or link widget
-    if (!isExcludedType && this.getVariable("tv-wikilinks", { defaultValue: "yes" }).trim() !== "no" && this.getVariable("tv-freelinks", { defaultValue: "no" }).trim() === "yes" && !this.isWithinButtonOrLink()) {
+    var plainTextAvailable = !!this.widgetClasses["plain-text"];
+    if (plainTextAvailable && !isExcludedType && this.getVariable("tv-wikilinks", { defaultValue: "yes" }).trim() !== "no" && this.getVariable("tv-freelinks", { defaultValue: "no" }).trim() === "yes" && !this.isWithinButtonOrLink()) {
         // Get the information about the current tiddler titles, and construct a regexp
         this.tiddlerTitleInfo = this.wiki.getGlobalCache("tiddler-title-info-aliases-" + (ignoreCase ? "insensitive" : "sensitive"), function () {
             var targetFilterText = self.wiki.getTiddlerText(TITLE_TARGET_FILTER),
@@ -177,7 +187,9 @@ TextNodeWidget.prototype.execute = function () {
         }
     }
     // Make the child widgets
-    this.makeChildWidgets(childParseTree);
+    if (plainTextAvailable) {
+        this.makeChildWidgets(childParseTree);
+    }
 };
 
 TextNodeWidget.prototype.isWithinButtonOrLink = function () {

@@ -60,6 +60,7 @@ on:
       - '**'
       - '!src/lithic.html'
       - '!src/launcher.html'
+      - '!docs/**'
       - '!variants/**'
       - '!manifest.json'
       - '!offline-service-worker.js'
@@ -164,6 +165,14 @@ jobs:
 
       - name: Generate Build Config
         run: node scripts/generate-config.js $BUILD_CONFIG
+
+      # The plugin library (docs/library) is built from the same staged plugins as the wiki, so
+      # it reflects the commit being released. It needs no network: the library holds only
+      # local-plugins. Prod only, like the vendored refresh: the output rides the release branch
+      # below and the review pull request, and a variant build has no release to carry it.
+      - name: Build Plugin Library (prod only)
+        if: env.BUILD_CONFIG == 'prod'
+        run: npm run build:library
 
       - name: Build Launcher (Svelte)
         if: env.BUILD_CONFIG == 'prod'
@@ -332,7 +341,7 @@ jobs:
           # The vendored libraries belong in this commit, not in a second one: the artifact being
           # staged was BUILT from the bytes `npm run vendor` wrote earlier in this run, so the
           # library and the wiki that carries it have to land together or neither is reviewable.
-          git add variants/prod.html variants/lithic-light.html src/lithic.html src/launcher.html manifest.json offline-service-worker.js vendored-lock.json wiki/local-plugins
+          git add variants/prod.html variants/lithic-light.html src/lithic.html src/launcher.html manifest.json offline-service-worker.js vendored-lock.json wiki/local-plugins docs/library
           git diff --cached --quiet || git commit -m "Release build-$STAMP: src/lithic.html + variants/prod.html, and bump PWA to $NEW_VERSION"
           # A branch push cannot lose a race with a main that moved, which is the failure
           # scripts/ci-push-main.sh was written to survive on the push path. That script is

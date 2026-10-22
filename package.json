@@ -11,6 +11,7 @@
     "vendor:check": "node scripts/vendor-libraries.mjs --check",
     "test": "node --test scripts/test-pdf-import.mjs && node --test scripts/test-vendored-libraries.mjs && npm --prefix launcher-ui ci && npm --prefix launcher-ui test",
     "build:launcher": "npm --prefix launcher-ui ci && node scripts/build-launcher.mjs",
+    "build:library": "node scripts/build-library.mjs",
     "test:launcher": "node scripts/launcher-smoke.mjs",
     "build:light": "node scripts/build-light.mjs",
     "check:light": "node scripts/check-light-artifact.mjs",
