@@ -1,0 +1,21 @@
+# PlatformIO build artifacts
+.pio
+.vscdb
+.vscode/
+
+# Local data / Dynamically downloaded assets
+data/src/
+data/offline-service-worker.js
+data/config.txt
+
+# Exclude sync data if you want the ESP32 to start with a clean slate
+# Or keep them if you want default files to be included in the repo
+# data/sync/
+
+# Binary files
+*.bin
+*.elf
+
+# OS files
+.DS_Store
+Thumbs.db
