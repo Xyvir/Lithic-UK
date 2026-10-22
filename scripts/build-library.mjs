@@ -26,6 +26,8 @@ const pluginsStage = path.join(repoRoot, 'wiki', 'plugins');
 const themesStage = path.join(repoRoot, 'wiki', 'themes');
 const editionDir = path.join(repoRoot, 'wiki', 'library-edition');
 const outputDir = path.join(repoRoot, 'library');
+const carrierDir = path.join(repoRoot, 'wiki', 'library-carrier');
+const libraryUrl = 'https://lithic.uk/library/index.html';
 
 if (!existsSync(path.join(repoRoot, 'node_modules', 'tiddlywiki', 'tiddlywiki.js'))) {
   console.error('node_modules/tiddlywiki is missing. Run `npm ci` first.');
@@ -97,6 +99,48 @@ if (result.status !== 0) {
 rmSync(outputDir, { recursive: true, force: true });
 mkdirSync(outputDir, { recursive: true });
 cpSync(path.join(editionDir, 'output'), outputDir, { recursive: true });
+
+// The carrier: a vanilla wiki (core only) whose one config tiddler points at the library above,
+// so a user drags it into their wiki and gets the same Plugin Library entry Kookma's page offers.
+rmSync(carrierDir, { recursive: true, force: true });
+mkdirSync(path.join(carrierDir, 'tiddlers'), { recursive: true });
+writeFileSync(
+  path.join(carrierDir, 'tiddlers', 'LithicPluginLibrary.tid'),
+  [
+    'title: $:/config/LithicPluginLibrary',
+    'tags: $:/tags/PluginLibrary',
+    `url: ${libraryUrl}`,
+    'caption: Lithic Plugin Library',
+    '',
+    'The Lithic plugin library, published at lithic.uk.',
+    '',
+  ].join('\n'),
+);
+writeFileSync(
+  path.join(carrierDir, 'tiddlywiki.info'),
+  JSON.stringify(
+    {
+      description: 'Lithic plugin store carrier',
+      plugins: [],
+      themes: [],
+      build: {
+        carrier: ['--render', '$:/core/save/all', 'plugin-store-carrier-wiki.html', 'text/plain'],
+      },
+    },
+    null,
+    2,
+  ) + '\n',
+);
+const carrier = spawnSync(
+  process.execPath,
+  [path.join(repoRoot, 'node_modules', 'tiddlywiki', 'tiddlywiki.js'), carrierDir, '--build', 'carrier'],
+  { cwd: repoRoot, stdio: ['ignore', 'pipe', 'pipe'], encoding: 'utf8' },
+);
+if (carrier.status !== 0) {
+  console.error(`${carrier.stdout ?? ''}${carrier.stderr ?? ''}`.trim().split('\n').slice(-25).join('\n'));
+  process.exit(1);
+}
+cpSync(path.join(carrierDir, 'output', 'plugin-store-carrier-wiki.html'), path.join(outputDir, 'plugin-store-carrier-wiki.html'));
 
 const libDir = path.join(outputDir, 'recipes', 'library', 'tiddlers');
 const count = existsSync(libDir) ? readdirSync(libDir).filter((f) => f.endsWith('.json')).length : 0;

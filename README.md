@@ -261,7 +261,7 @@ Every backup keeps a history of its own, and the sync dialog shows the newest te
 
 ## Plugin Library
 
-The Lithic plugins are also published as a TiddlyWiki plugin library, at [lithic.uk/library](https://lithic.uk/library/). Any plugin on the page can be installed into a wiki by its title, the same way as any other TiddlyWiki plugin library.
+The Lithic plugins are also published as a TiddlyWiki plugin library. Drag [plugin-store-carrier-wiki.html](https://lithic.uk/library/plugin-store-carrier-wiki.html) into your wiki, then open Control Panel, Plugins, and Get more plugins to browse and install any of them. The library itself is at [lithic.uk/library](https://lithic.uk/library/).
 
 * **It is built from the same sources as the wiki.** `npm run build:library` writes `library/` from `wiki/local-plugins/`, and the release run rebuilds it on every prod build, so it arrives in the same review pull request as the wiki.
 * **Only Lithic's own plugins are listed.** Third-party plugins are fetched at build time from their own hosts, so they are not bundled into the library.
