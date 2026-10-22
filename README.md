@@ -190,6 +190,37 @@ If you are interested in running codeblocks from Lithic or any other text-based 
 
 Self hosting instructions can be found in [self-host.md](https://github.com/Xyvir/Lithic/blob/main/self-host.md)
 
+## Bring Your Own Sync
+
+Lithic has never shipped a sync engine of its own, and that is a decision rather than a gap. The launcher writes ordinary `.lith` files into an ordinary folder, so any tool that already syncs folders already syncs your wikis: nothing in the file knows how it got there. An engine inside the artifact was tried and set aside, because a transport stack, its runtime and a relay dependency ride in the same portable executable that exists to open with no network at all.
+
+That leaves one job for you: pick a syncer. Two are worth naming.
+
+### Syncthing
+
+The default here. MPL-2.0, one executable per device, no account, no central server, and a decade of doing exactly this. Point it at the folder your wikis live in (the one the GitHub button backs up, if you use that) and the folder converges between your devices within seconds of a save.
+
+* **Ignore `/.git`.** If that folder is also a GitHub backup it is a git repository, and two devices syncing one repository fight over `refs/`, `index` and `packed-refs`; a `.sync-conflict-*` file inside `.git` can corrupt it. Put `/.git` in the folder's ignore list (`.stignore`), and each device keeps its own local history while the syncer carries only the `.lith` files.
+* **A conflict is a file, not a lost edit.** When two devices change the same wiki while apart, Syncthing keeps both and writes the later one beside the original as `notes.sync-conflict-20261021-143012-ABCDEFG.lith`. Open both and merge by hand. That is the same answer the GitHub backup gives: nothing of yours is overwritten.
+* **The syncer moves wikis, not history.** Version history and the search cache live in the app's own storage on each device, so they are not in the folder and do not travel. Every device keeps its own clock icon.
+* **A synced folder is not a backup.** Syncthing propagates deletions and overwrites, so a file emptied on one device arrives empty on the other. That is what the GitHub backup, the version history and a downloaded copy are for.
+* **Back up from one device.** If you use GitHub sync as well, let the syncer be the transport and let one device do the pushing. Saves push without force, so two devices backing up one repository from their own separate histories end with one of them refused and its icon red until the two are brought back together.
+
+### Appa, and the iroh experiments
+
+[Appa](https://tangled.org/aly.codes/appa) is the same job built on [iroh](https://iroh.computer/): a per-user daemon plus a CLI, syncing a folder in place between devices that find each other by public key, hole punching where it can and falling back to an encrypted relay where it cannot. No server, no account. MIT, Rust, and installed as a service (systemd on Linux, launchd on macOS).
+
+* `appa folder add ~/liths` on one device, `appa folder invite ~/liths` there, `appa folder join ~/liths` on the other. The invitation is the permission, so there is nothing to sign up for.
+* **Both sides of a conflicting edit are kept**, along with about ten local revisions, and `appa folder conflicts` lists them. The same policy as above, enforced by the tool rather than by its users.
+* **`.appaignore`** takes gitignore syntax, which is where `/.git` goes for the same reason it goes into `.stignore`.
+* **It is early.** One author, a small install base, and Windows is not documented yet. Try it beside a syncer you already trust rather than instead of one, and expect to read its log.
+
+The rest of that ecosystem is thinner than the name suggests: nearly everything built on iroh is a one-shot transfer (`sendme`, Dropwire), which moves a file once and is a different job from reconciling a folder. Appa is the only in-place folder syncer there worth pointing at today.
+
+### Which one
+
+Syncthing if you want it to work and stop thinking about it. Appa if you want the connection addressed by key and nothing else in the path, and can live with a young tool, or if watching that ecosystem is the point. Neither needs anything from Lithic, which is the property that makes them safe to recommend: swapping syncers later touches your filesystem, never your wikis.
+
 ## GitHub Sync (Desktop App)
 
 The GitHub button in the launcher links the folder holding your wikis to a repository. Every save of a file in that folder is committed and pushed to `main`, so the repository is a backup you can restore from.
