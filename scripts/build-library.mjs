@@ -7,8 +7,8 @@
  * Loads every plugin under wiki/local-plugins (minus archive/) from the staging tree,
  * then runs TiddlyWiki's own library recipe (the one its pluginlibrary edition uses):
  * --makelibrary bundles them, --savelibrarytiddlers writes one JSON per plugin plus the
- * catalogue, and --rendertiddler writes index.html. The output lands in docs/library/,
- * which GitHub Pages serves beside docs/index.html (the white-label wiki that carries
+ * catalogue, and --rendertiddler writes index.html. The output lands in library/,
+ * which GitHub Pages serves from the repo root beside index.html (the white-label wiki that carries
  * the drag-and-drop tiddler).
  *
  * Needs the staging tree (npm run mirror, then flatten-plugins.js). It does not hit the
@@ -25,7 +25,7 @@ const localPlugins = path.join(repoRoot, 'wiki', 'local-plugins');
 const pluginsStage = path.join(repoRoot, 'wiki', 'plugins');
 const themesStage = path.join(repoRoot, 'wiki', 'themes');
 const editionDir = path.join(repoRoot, 'wiki', 'library-edition');
-const outputDir = path.join(repoRoot, 'docs', 'library');
+const outputDir = path.join(repoRoot, 'library');
 
 if (!existsSync(path.join(repoRoot, 'node_modules', 'tiddlywiki', 'tiddlywiki.js'))) {
   console.error('node_modules/tiddlywiki is missing. Run `npm ci` first.');
@@ -93,14 +93,14 @@ if (result.status !== 0) {
   process.exit(1);
 }
 
-// Publish the output: recipes/library/* and index.html, under docs/library/.
+// Publish the output: recipes/library/* and index.html, under library/.
 rmSync(outputDir, { recursive: true, force: true });
 mkdirSync(outputDir, { recursive: true });
 cpSync(path.join(editionDir, 'output'), outputDir, { recursive: true });
 
 const libDir = path.join(outputDir, 'recipes', 'library', 'tiddlers');
 const count = existsSync(libDir) ? readdirSync(libDir).filter((f) => f.endsWith('.json')).length : 0;
-console.log(`library: ${count} plugin files written to docs/library (${plugins.length} expected)`);
+console.log(`library: ${count} plugin files written to library (${plugins.length} expected)`);
 if (count !== plugins.length) {
   console.error('plugin count mismatch: some local-plugins did not reach the library.');
   process.exit(1);
