@@ -259,6 +259,13 @@ Every backup keeps a history of its own, and the sync dialog shows the newest te
 * **It is there wherever there is a history.** The desktop app and the shim read the folder's own git object store; a self-hosted instance runs `git log` on `/data`, so an instance kept in local git with no GitHub account still has a trail to go back through, and the dialog offers it before the instance is connected. A folder that is not a repository has no trail at all, and the dialog shows no section rather than claiming an empty one.
 * **This is not the per-wiki version history.** The clock icon lists saved versions of one wiki and is download-only (see above). The trail is the instance-wide history the backup itself makes.
 
+## Plugin Library
+
+The Lithic plugins are also published as a TiddlyWiki plugin library, at [lithic.uk/library](https://lithic.uk/library/). Any plugin on the page can be installed into a wiki by its title, the same way as any other TiddlyWiki plugin library.
+
+* **It is built from the same sources as the wiki.** `npm run build:library` writes `docs/library/` from `wiki/local-plugins/`, and the release run rebuilds it on every prod build, so it arrives in the same review pull request as the wiki.
+* **Only Lithic's own plugins are listed.** Third-party plugins are fetched at build time from their own hosts, so they are not bundled into the library.
+
 ## Language
 
 The launcher reads in the language of the device it is opened on, in all three shapes of it: the published web app, the launcher a self-hosted instance serves, and the desktop app, which follows the machine. English, Spanish, French and German ship today, and a language the launcher cannot say falls back to English. Two things override that, for when a machine's language is not the one somebody wants to read.
