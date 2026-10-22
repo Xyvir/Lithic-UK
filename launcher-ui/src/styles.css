@@ -1998,22 +1998,39 @@ body.drag-over::after {
 .history-badge.unsaved { border-color: var(--lithic-amber-rim); background: var(--lithic-amber-wash-16); color: var(--lithic-amber-soft); }
 /*
  * The unsaved row, drawn rather than written: a dashed rim and the faintest amber wash, so it
- * reads as a row qualifying for the list above it rather than as the first version in it. The
- * trailing word replaces both the size and the download, since the capture has neither.
+ * reads as a row qualifying for the list above it rather than as the first version in it. It
+ * carries no size, because a capture is a patch rather than a version, but it does carry the
+ * download every other row has: what it hands over is the edits.
  */
 .history-entry.inline { border-style: dashed; border-color: var(--lithic-amber-rim); background: var(--lithic-amber-wash-12); }
-.history-inline-note { flex: none; color: var(--lithic-amber-soft); font-size: 0.76em; white-space: nowrap; }
+/*
+ * The stamp is the row's identity and the note is its caption, so the stamp keeps its width and
+ * the caption gives way: `2026-10-22 12:35:06 UTC` is the one column a trail is read down, and
+ * a truncation there is a different time. The caption ellipsizes, and on a phone it goes
+ * altogether, because the badge beside it already says the row is not saved.
+ */
+.history-inline-note {
+  flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis;
+  color: var(--lithic-amber-soft); font-size: 0.76em; white-space: nowrap; text-align: right;
+}
+.history-entry.inline .history-time { flex: 0 0 auto; }
+@media (max-width: 460px) { .history-inline-note { display: none; } }
 /*
  * The capture row is a disclosure, so the row's frame stays (a capture qualifies for the list
  * rather than being a version in it) and the padding moves onto the head, which is a button:
  * the whole first line is the target, and the body opens inside the same dashed frame instead
  * of drawing a second panel that would read as another row. The chevron is pushed to the far
  * side so it reads as the row's own control rather than as punctuation after the note.
+ *
+ * The head shares that line with the download, which is the trailing control every version row
+ * below carries and now sits in the same place here. The head takes what is left rather than a
+ * full width, or the two would fight over the line on a narrow phone.
  */
 .history-entry.inline { display: block; padding: 0; }
 .history-entry.inline.capture-open { border-color: var(--lithic-amber-soft); }
+.history-capture-head-row { display: flex; align-items: center; gap: 4px; padding-right: 8px; }
 .history-capture-head {
-  display: flex; align-items: center; gap: 10px; width: 100%;
+  display: flex; align-items: center; gap: 10px; flex: 1 1 auto; min-width: 0;
   padding: 8px 10px; border: 0; border-radius: 7px; background: none;
   color: inherit; font: inherit; text-align: left; cursor: pointer;
 }
@@ -2030,7 +2047,9 @@ body.drag-over::after {
 /* The rung's own sentence, in the amber of the row it belongs to: what recovering will have to
    work from, said where the two buttons that depend on it are. */
 .history-capture-body > .history-capture-why { color: var(--lithic-amber-soft); }
-.history-capture-body > .history-capture-notice { color: var(--lithic-ok); }
+/* The result of a merge or a download, drawn beside the list rather than inside the row that
+   produced it: a merge retires that row, and a sentence inside it would leave with it. */
+.history-capture-notice { margin-top: 12px; color: var(--lithic-ok); font-size: 0.84em; }
 .history-capture-actions { display: flex; gap: 8px; margin-top: 10px; }
 .history-capture-actions .modal-action { padding: 5px 12px; font-size: 0.84em; }
 .history-empty { color: var(--lithic-ink-muted); }

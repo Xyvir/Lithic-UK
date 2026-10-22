@@ -464,14 +464,36 @@ const en = {
        */
       inlinePill: 'live',
       inlineNote: 'Not saved yet',
-      saveCopy: 'Save a copy',
+      /**
+       * The capture's download, as the icon the version rows carry rather than a button under
+       * the disclosure: every row on this trail that can produce a file produces it the same
+       * way, and the live row was the one exception. The disclosure is left for the two
+       * decisions the row actually needs (merge it, or throw it away), because opening the
+       * Lith is what the list itself is for.
+       */
+      downloadCaptureTitle: 'Download the unsaved edits',
+      downloadCaptureAria: (when: string) => `Download the unsaved edits from ${when}`,
       savedCopy: (edits: number) => `Saved a copy of ${edits} edit${edits === 1 ? '' : 's'}.`,
       /** The browser's download, which cannot confirm the bytes landed. Says so. */
       startedCopy: (edits: number) => `Download started for ${edits} edit${edits === 1 ? '' : 's'}.`,
+      /**
+       * Writing the capture on top of the document without opening it: the workflow this exists
+       * for is a stale capture on a Lith whose file is fine, where opening the whole wiki to
+       * press Save is the cost of resolving it.
+       */
+      merge: 'Merge',
+      merged: (edits: number) => `Merged ${edits} edit${edits === 1 ? '' : 's'} into this Lith.`,
+      /** The same answer where the browser's copy is the document, so there is no file involved. */
+      mergedIntoCopy: (edits: number) =>
+        `Merged ${edits} edit${edits === 1 ? '' : 's'} into the copy this browser holds.`,
+      mergeFailed: (detail: string) => `The edits could not be merged (${detail}).`,
+      mergeUnreadable: 'The document could not be read, so nothing was merged.',
+      /** The browser's own permission prompt, which a refused answer needs to account for. */
+      mergeNeedsPermission: 'Merge needs permission to write this file.',
       /** The rung where the file cannot be reached but the browser still holds a saved copy. */
-      rebuildNote: 'No file here, so recovering rebuilds it from the last saved copy.',
-      /** The last rung: nothing to rebuild onto, so the edits can only be written out. */
-      captureOnlyNote: 'No file or saved copy remains. Save a copy to keep these edits.',
+      rebuildNote: 'No file here, so merging writes the edits into the copy this browser holds.',
+      /** The last rung: nothing to merge onto, so the edits can only be written out. */
+      captureOnlyNote: 'No file or saved copy remains, so download the edits to keep them.',
       noCapture: 'These edits are no longer in this browser.',
       backupGroupAria: 'Back up this Lith',
       localOnly: (folder: string) => `Not backed up. Copy it into ${folder} to have it synced.`,
@@ -1157,11 +1179,19 @@ const es: Copy = {
       title: (name: string) => `Sendero del historial de ${name}`,
       inlinePill: 'en vivo',
       inlineNote: 'Aún sin guardar',
-      saveCopy: 'Guardar una copia',
+      downloadCaptureTitle: 'Descargar las ediciones sin guardar',
+      downloadCaptureAria: (when: string) => `Descargar las ediciones sin guardar del ${when}`,
       savedCopy: (edits: number) => `Copia guardada de ${edits} ${edits === 1 ? 'edición' : 'ediciones'}.`,
       startedCopy: (edits: number) => `Descarga iniciada de ${edits} ${edits === 1 ? 'edición' : 'ediciones'}.`,
-      rebuildNote: 'Aquí no hay archivo, así que recuperar lo reconstruye desde la última copia guardada.',
-      captureOnlyNote: 'No queda archivo ni copia guardada. Guarda una copia para conservar estas ediciones.',
+      merge: 'Fusionar',
+      merged: (edits: number) => `Se fusionaron ${edits} ${edits === 1 ? 'edición' : 'ediciones'} en este Lith.`,
+      mergedIntoCopy: (edits: number) =>
+        `Se fusionaron ${edits} ${edits === 1 ? 'edición' : 'ediciones'} en la copia que guarda este navegador.`,
+      mergeFailed: (detail: string) => `No se pudieron fusionar las ediciones (${detail}).`,
+      mergeUnreadable: 'No se pudo leer el documento, así que no se fusionó nada.',
+      mergeNeedsPermission: 'Fusionar necesita permiso para escribir este archivo.',
+      rebuildNote: 'Aquí no hay archivo, así que fusionar escribe las ediciones en la copia que guarda este navegador.',
+      captureOnlyNote: 'No queda archivo ni copia guardada, así que descarga las ediciones para conservarlas.',
       noCapture: 'Estas ediciones ya no están en este navegador.',
       backupGroupAria: 'Respaldar este Lith',
       localOnly: (folder: string) => `Sin respaldo. Cópialo a ${folder} para que se sincronice.`,
@@ -1800,11 +1830,19 @@ const fr: Copy = {
       title: (name: string) => `Sentier de l’historique de ${name}`,
       inlinePill: 'en cours',
       inlineNote: 'Pas encore enregistré',
-      saveCopy: 'Enregistrer une copie',
+      downloadCaptureTitle: 'Télécharger les modifications non enregistrées',
+      downloadCaptureAria: (when: string) => `Télécharger les modifications non enregistrées du ${when}`,
       savedCopy: (edits: number) => `Copie enregistrée de ${edits} ${edits === 1 ? 'modification' : 'modifications'}.`,
       startedCopy: (edits: number) => `Téléchargement lancé de ${edits} ${edits === 1 ? 'modification' : 'modifications'}.`,
-      rebuildNote: 'Aucun fichier ici, donc récupérer reconstruit le Lith depuis la dernière copie enregistrée.',
-      captureOnlyNote: 'Il ne reste ni fichier ni copie enregistrée. Enregistrez une copie pour garder ces modifications.',
+      merge: 'Fusionner',
+      merged: (edits: number) => `Fusion de ${edits} ${edits === 1 ? 'modification' : 'modifications'} dans ce Lith.`,
+      mergedIntoCopy: (edits: number) =>
+        `Fusion de ${edits} ${edits === 1 ? 'modification' : 'modifications'} dans la copie conservée par ce navigateur.`,
+      mergeFailed: (detail: string) => `Les modifications n’ont pas pu être fusionnées (${detail}).`,
+      mergeUnreadable: 'Le document n’a pas pu être lu, donc rien n’a été fusionné.',
+      mergeNeedsPermission: 'Fusionner demande l’autorisation d’écrire ce fichier.',
+      rebuildNote: 'Aucun fichier ici, donc fusionner écrit les modifications dans la copie conservée par ce navigateur.',
+      captureOnlyNote: 'Il ne reste ni fichier ni copie enregistrée, donc téléchargez les modifications pour les garder.',
       noCapture: 'Ces modifications ne sont plus dans ce navigateur.',
       backupGroupAria: 'Sauvegarder ce Lith',
       localOnly: (folder: string) => `Pas sauvegardé. Copiez-le dans ${folder} pour le synchroniser.`,
@@ -2440,11 +2478,18 @@ const de: Copy = {
       title: (name: string) => `Spur des Verlaufs von ${name}`,
       inlinePill: 'live',
       inlineNote: 'Noch nicht gespeichert',
-      saveCopy: 'Kopie speichern',
+      downloadCaptureTitle: 'Ungespeicherte Änderungen herunterladen',
+      downloadCaptureAria: (when: string) => `Ungespeicherte Änderungen vom ${when} herunterladen`,
       savedCopy: (edits: number) => `Kopie mit ${edits} ${edits === 1 ? 'Änderung' : 'Änderungen'} gespeichert.`,
       startedCopy: (edits: number) => `Download von ${edits} ${edits === 1 ? 'Änderung' : 'Änderungen'} gestartet.`,
-      rebuildNote: 'Hier gibt es keine Datei, also baut Wiederherstellen sie aus der zuletzt gespeicherten Kopie neu auf.',
-      captureOnlyNote: 'Es bleibt weder Datei noch gespeicherte Kopie. Speichere eine Kopie, um diese Änderungen zu behalten.',
+      merge: 'Zusammenführen',
+      merged: (edits: number) => `Änderungen in diesen Lith zusammengeführt (${edits}).`,
+      mergedIntoCopy: (edits: number) => `Änderungen in die Kopie dieses Browsers zusammengeführt (${edits}).`,
+      mergeFailed: (detail: string) => `Die Änderungen konnten nicht zusammengeführt werden (${detail}).`,
+      mergeUnreadable: 'Das Dokument ließ sich nicht lesen, also wurde nichts zusammengeführt.',
+      mergeNeedsPermission: 'Zusammenführen braucht die Erlaubnis, diese Datei zu schreiben.',
+      rebuildNote: 'Hier gibt es keine Datei, also schreibt Zusammenführen die Änderungen in die Kopie dieses Browsers.',
+      captureOnlyNote: 'Es bleibt weder Datei noch gespeicherte Kopie, also lade die Änderungen herunter, um sie zu behalten.',
       noCapture: 'Diese Änderungen sind nicht mehr in diesem Browser.',
       backupGroupAria: 'Diesen Lith sichern',
       localOnly: (folder: string) => `Nicht gesichert. Kopiere ihn nach ${folder}, damit er synchronisiert wird.`,

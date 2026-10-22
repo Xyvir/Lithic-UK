@@ -3658,6 +3658,22 @@ try {
           // really closed would take the rest of its leg with it.
           installHold.quits += 1;
           return null;
+        case 'read_lith_path':
+          // A document on this machine, from a map a leg seeds before it presses anything, in
+          // the shape Rust answers (`name`, `path`, `text`) rather than the text alone. The
+          // default is still the empty answer every other leg already lives with, so seeding
+          // the map is the only thing that changes this mock's behaviour.
+          return window.__lithicDocuments?.[args.path] ?? null;
+        case 'save_lith_file':
+          // A write aimed at a path, which is what a save and the history trail's Merge both
+          // do. Only a call that names a path is answered, because one that does not asks the
+          // desktop for a picker, and this mock has none: those stay the unconfirmed hand-off
+          // every other leg on this page already asserts. The bytes are kept on the window so
+          // a leg reads what was written rather than the sentence drawn about it.
+          if (!args.path) return null;
+          window.__lithicWrites = window.__lithicWrites ?? [];
+          window.__lithicWrites.push({ path: args.path, text: args.text });
+          return { name: args.suggestedName, path: args.path };
         case 'install_update_check':
           // This build is the newest release, from the mock's side. The release
           // question belongs to the gallery and the Rust tests, and a browser test that
@@ -5537,6 +5553,297 @@ try {
     });
     db.close();
   });
+  // --- The live row's own controls ----------------------------------------------
+  // A capture used to answer a disclosure holding `Recover edits` and `Save a copy`, so the
+  // only download on the trail was a button in a body. Every version row carries its download
+  // at the trailing edge, and the live row now does too; what is left under the disclosure is
+  // the two decisions that do not need the Lith opened. Merge writes the capture on top of the
+  // document and records a real version, so a stale capture is resolved without mounting the
+  // whole wiki to press Save. Discard is the mount prompt's own answer. Opening is neither,
+  // because the row in the list behind the dialog already opens.
+  //
+  // The row here is browser-only, which is the rung where the cached copy is the document: it
+  // is the one shape a browser can merge into without a file handle, and it is the rung that
+  // has a sentence to explain itself.
+  const seedCapture = (name) =>
+    vaultPage.evaluate(async (name) => {
+      const request = indexedDB.open('keyval-store', 1);
+      await new Promise((ok, fail) => {
+        request.onerror = () => fail(request.error);
+        request.onsuccess = () => ok();
+      });
+      const db = request.result;
+      await new Promise((ok, fail) => {
+        const tx = db.transaction('keyval', 'readwrite');
+        const store = tx.objectStore('keyval');
+        store.put([{ handle: null, tauriPath: null, name, browserOnly: true }], 'recentFiles');
+        localStorage.setItem('lithic-recent-liths', JSON.stringify([{ name, browserOnly: true }]));
+        store.put({ text: '[]' }, `search_cache_${name}`);
+        store.put(
+          { ts: Date.now(), tiddlers: [{ title: 'A', text: 'unsaved' }] },
+          `dirty_state_${name}`
+        );
+        tx.oncomplete = ok;
+        tx.onerror = () => fail(tx.error);
+      });
+      db.close();
+    }, name);
+  const forgetCaptureRow = (name) =>
+    vaultPage.evaluate(async (name) => {
+      const request = indexedDB.open('keyval-store', 1);
+      await new Promise((ok, fail) => {
+        request.onerror = () => fail(request.error);
+        request.onsuccess = () => ok();
+      });
+      const db = request.result;
+      const keys = await new Promise((ok, fail) => {
+        const read = db.transaction('keyval', 'readonly').objectStore('keyval').getAllKeys();
+        read.onsuccess = () => ok(read.result);
+        read.onerror = () => fail(read.error);
+      });
+      await new Promise((ok, fail) => {
+        const tx = db.transaction('keyval', 'readwrite');
+        const store = tx.objectStore('keyval');
+        for (const key of keys) {
+          if (String(key).includes(name)) store.delete(key);
+        }
+        store.put([], 'recentFiles');
+        localStorage.setItem('lithic-recent-liths', JSON.stringify([]));
+        tx.oncomplete = ok;
+        tx.onerror = () => fail(tx.error);
+      });
+      db.close();
+    }, name);
+  const captureState = (name) =>
+    vaultPage.evaluate(async (name) => {
+      const request = indexedDB.open('keyval-store', 1);
+      await new Promise((ok, fail) => {
+        request.onerror = () => fail(request.error);
+        request.onsuccess = () => ok();
+      });
+      const db = request.result;
+      const read = (key) =>
+        new Promise((ok, fail) => {
+          const query = db.transaction('keyval', 'readonly').objectStore('keyval').get(key);
+          query.onsuccess = () => ok(query.result);
+          query.onerror = () => fail(query.error);
+        });
+      const dirty = await read(`dirty_state_${name}`);
+      const cache = await read(`search_cache_${name}`);
+      const meta = await read(`search_cache_meta_${name}`);
+      db.close();
+      return {
+        dirty: dirty !== undefined,
+        cached: typeof cache?.text === 'string' ? cache.text : null,
+        versions: Array.isArray(meta?.versions) ? meta.versions.length : 0
+      };
+    }, name);
+
+  await seedCapture('merge.lith');
+  await reopenLauncher();
+  await vaultPage.waitForSelector('.recent-row .cache-history-button.modified');
+  await vaultPage.click('.recent-row .cache-history-button.modified');
+  await vaultPage.waitForSelector('.history-entry.inline');
+  const liveRow = await vaultPage.evaluate(() => {
+    const row = document.querySelector('.history-entry.inline');
+    const head = row.querySelector('.history-capture-head');
+    const download = row.querySelector('.history-download-button');
+    return {
+      badge: row.querySelector('.history-badge')?.textContent?.trim() ?? '',
+      expanded: head?.getAttribute('aria-expanded') ?? null,
+      downloadBesideHead: Boolean(download) && !head?.contains(download),
+      downloadIcon: download?.querySelector('.history-download-icon') !== null,
+      downloadAria: download?.getAttribute('aria-label') ?? null
+    };
+  });
+  assert.equal(liveRow.badge, 'live', 'The capture row still says what it is');
+  assert.equal(liveRow.expanded, 'false', `...and opens closed: ${JSON.stringify(liveRow)}`);
+  assert.equal(
+    liveRow.downloadBesideHead,
+    true,
+    'The capture row carries its download beside the disclosure, as a control of its own'
+  );
+  assert.equal(liveRow.downloadIcon, true, '...drawn with the same clock-with-arrow every version row uses');
+  assert.match(
+    liveRow.downloadAria ?? '',
+    /^Download the unsaved edits from /,
+    `...naming the edits rather than a version, because that is what it hands over: ${JSON.stringify(liveRow.downloadAria)}`
+  );
+
+  await vaultPage.click('.history-entry.inline .history-capture-head');
+  await vaultPage.waitForSelector('.history-capture-actions');
+  const captureBody = await vaultPage.evaluate(() => ({
+    buttons: [...document.querySelectorAll('.history-capture-actions .modal-action')].map((node) => ({
+      label: node.textContent?.trim() ?? '',
+      danger: node.classList.contains('danger'),
+      disabled: node.disabled
+    })),
+    why: document.querySelector('.history-capture-why')?.textContent?.trim() ?? null,
+    edits: [...document.querySelectorAll('.history-capture-body .dirty-tiddler-list li')].map((node) => node.textContent?.trim() ?? '')
+  }));
+  assert.deepEqual(
+    captureBody.buttons,
+    [
+      { label: 'Merge', danger: false, disabled: false },
+      { label: 'Discard', danger: true, disabled: false }
+    ],
+    'The disclosure offers the two answers that need no mount, and no third way out'
+  );
+  assert.equal(
+    captureBody.why,
+    'No file here, so merging writes the edits into the copy this browser holds.',
+    '...and says where an edit lands when there is no file to put it in'
+  );
+  assert.deepEqual(captureBody.edits, ['A'], 'The edits on offer are the ones the capture holds');
+
+  await vaultPage.click('.history-capture-actions .modal-action:not(.danger)');
+  await vaultPage.waitForFunction(() => document.querySelector('.history-entry.inline') === null, POLL);
+  const afterMerge = await vaultPage.evaluate(() => ({
+    notice: document.querySelector('.history-capture-notice')?.textContent?.trim() ?? null,
+    versions: [...document.querySelectorAll('.history-modal .history-entry')].map(
+      (node) => node.querySelector('.history-badge')?.textContent?.trim() ?? ''
+    )
+  }));
+  const mergedState = await captureState('merge.lith');
+  assert.equal(
+    afterMerge.notice,
+    'Merged 1 edit into the copy this browser holds.',
+    `Merge says what it did, on the dialog rather than inside the row that just went: ${JSON.stringify(afterMerge.notice)}`
+  );
+  assert.ok(
+    afterMerge.versions.length >= 1,
+    `...and the trail gains a real version where the live row was: ${JSON.stringify(afterMerge.versions)}`
+  );
+  assert.equal(mergedState.dirty, false, 'The capture is gone, so the next mount has nothing to ask about');
+  assert.match(mergedState.cached ?? '', /unsaved/, '...and the edits landed in the copy the row opens');
+  assert.ok(mergedState.versions >= 1, `...as a suspended version, not only a flat cache: ${JSON.stringify(mergedState)}`);
+
+  // Discard is the other answer, and it writes nothing: the row goes, the edits go, and the
+  // trail does not gain a version for work nobody kept.
+  await vaultPage.click('.history-modal .modal-close');
+  await vaultPage.waitForFunction(() => document.querySelector('.history-modal') === null, POLL);
+  await vaultPage.evaluate(async () => {
+    const request = indexedDB.open('keyval-store', 1);
+    await new Promise((ok, fail) => {
+      request.onerror = () => fail(request.error);
+      request.onsuccess = () => ok();
+    });
+    const db = request.result;
+    await new Promise((ok, fail) => {
+      const tx = db.transaction('keyval', 'readwrite');
+      tx.objectStore('keyval').put(
+        { ts: Date.now(), tiddlers: [{ title: 'B', text: 'also unsaved' }] },
+        'dirty_state_merge.lith'
+      );
+      tx.oncomplete = ok;
+      tx.onerror = () => fail(tx.error);
+    });
+    db.close();
+  });
+  const beforeDiscard = await captureState('merge.lith');
+  await reopenLauncher();
+  await vaultPage.waitForSelector('.recent-row .cache-history-button.modified');
+  await vaultPage.click('.recent-row .cache-history-button.modified');
+  await vaultPage.waitForSelector('.history-entry.inline');
+  await vaultPage.click('.history-entry.inline .history-capture-head');
+  await vaultPage.waitForSelector('.history-capture-actions .modal-action.danger');
+  await vaultPage.click('.history-capture-actions .modal-action.danger');
+  await vaultPage.waitForFunction(() => document.querySelector('.history-entry.inline') === null, POLL);
+  const afterDiscard = await captureState('merge.lith');
+  assert.equal(afterDiscard.dirty, false, 'Discard drops the capture');
+  assert.equal(
+    afterDiscard.versions,
+    beforeDiscard.versions,
+    '...without recording a version, because nothing was merged'
+  );
+  await vaultPage.click('.history-modal .modal-close');
+  await vaultPage.waitForFunction(() => document.querySelector('.history-modal') === null, POLL);
+  // The same decision over a real file, which is the shape most merges take. The browser-only
+  // row above proves the answer is recorded; this proves the bytes reach the document, so the
+  // trail's own promise (your edits are in the file, without the wiki being opened) is what is
+  // read back rather than what the launcher says about itself.
+  const diskPath = 'C:/fixture/on-disk.lith';
+  const diskDocument = [
+    'title: Home',
+    '',
+    'the page as it was saved',
+    '⁂⁂⁂',
+    'title: Notes',
+    '',
+    'older text'
+  ].join('\n');
+  await vaultPage.evaluate(async (path) => {
+    const request = indexedDB.open('keyval-store', 1);
+    await new Promise((ok, fail) => {
+      request.onerror = () => fail(request.error);
+      request.onsuccess = () => ok();
+    });
+    const db = request.result;
+    await new Promise((ok, fail) => {
+      const tx = db.transaction('keyval', 'readwrite');
+      const store = tx.objectStore('keyval');
+      store.put([{ handle: null, tauriPath: path, name: 'on-disk.lith' }], 'recentFiles');
+      localStorage.setItem('lithic-recent-liths', JSON.stringify([{ name: 'on-disk.lith', tauriPath: path }]));
+      store.put({ text: '[]' }, 'search_cache_on-disk.lith');
+      store.put(
+        { ts: Date.now(), tiddlers: [{ title: 'Notes', text: 'the edit that was never saved' }] },
+        'dirty_state_on-disk.lith'
+      );
+      tx.oncomplete = ok;
+      tx.onerror = () => fail(tx.error);
+    });
+    db.close();
+  }, diskPath);
+  await reopenLauncher();
+  // Seeded after the reload, because the bridge is reinstalled with every document and a
+  // window property does not survive one.
+  await vaultPage.evaluate(({ path, text }) => {
+    window.__lithicDocuments = { [path]: { name: 'on-disk.lith', path, text } };
+    window.__lithicWrites = [];
+  }, { path: diskPath, text: diskDocument });
+  await vaultPage.waitForSelector('.recent-row .cache-history-button.modified');
+  await vaultPage.click('.recent-row .cache-history-button.modified');
+  await vaultPage.waitForSelector('.history-entry.inline');
+  await vaultPage.click('.history-entry.inline .history-capture-head');
+  await vaultPage.waitForSelector('.history-capture-actions');
+  const fileRung = await vaultPage.evaluate(() => ({
+    mergeDisabled: document.querySelector('.history-capture-actions .modal-action')?.disabled ?? null,
+    why: document.querySelector('.history-capture-why')?.textContent?.trim() ?? null
+  }));
+  assert.equal(fileRung.mergeDisabled, false, 'A row with a file on disk can be merged');
+  assert.equal(fileRung.why, null, '...and needs no sentence explaining where the edits will land');
+  await vaultPage.click('.history-capture-actions .modal-action:not(.danger)');
+  // Settled either way, so a merge that refused reports the launcher's own sentence instead
+  // of a selector timeout that says nothing about why.
+  await vaultPage.waitForFunction(
+    () =>
+      document.querySelector('.history-capture-notice') !== null ||
+      document.querySelector('.history-modal .status-line.error') !== null,
+    POLL
+  );
+  const written = await vaultPage.evaluate(() => ({
+    notice: document.querySelector('.history-capture-notice')?.textContent?.trim() ?? null,
+    error: document.querySelector('.history-modal .status-line.error')?.textContent?.trim() ?? null,
+    writes: (window.__lithicWrites ?? []).map((write) => write.path),
+    text: (window.__lithicWrites ?? [])[0]?.text ?? '',
+    live: document.querySelector('.history-entry.inline') !== null
+  }));
+  assert.equal(
+    written.notice,
+    'Merged 1 edit into this Lith.',
+    `A merge over a file says the edits are in the Lith: ${JSON.stringify({ notice: written.notice, error: written.error })}`
+  );
+  assert.deepEqual(written.writes, [diskPath], '...and it was written back to the file the row names, through the path route');
+  assert.match(written.text, /the edit that was never saved/, 'The edit is in the bytes the file received');
+  assert.match(written.text, /the page as it was saved/, '...beside the tiddler it never touched, which a merge must not drop');
+  assert.equal(written.live, false, '...and the live row is gone, because the capture is no longer waiting');
+  await vaultPage.click('.history-modal .modal-close');
+  await vaultPage.waitForFunction(() => document.querySelector('.history-modal') === null, POLL);
+  // The row and every key it owned go, so the sections below start from the empty list they
+  // expect rather than from a fixture this one left behind.
+  await forgetCaptureRow('merge.lith');
+  await forgetCaptureRow('on-disk.lith');
+
   // --- The folder a backup acts on, and the picker that changes it ---------------
   // The dialog named a folder nobody chose: it was inferred from the open Lith, else the
   // newest recent row, else a library folder Lithic already had a repository in, and moving

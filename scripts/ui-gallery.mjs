@@ -2355,10 +2355,10 @@ const SHEETS = [
       {
         // The capture row opened. This is the answer the mark's own warning never had: the
         // dialog it leads to describes saves, so the edits get a row that can be unfolded
-        // into what they are called, how many there are, and the two ways to take them
-        // somewhere real. Recover here mounts the Lith the row belongs to, with the capture
-        // already merged, rather than opening the three-way prompt about a decision the
-        // dialog has just explained.
+        // into what they are called, how many there are, and the two decisions that need no
+        // mount. Merge writes them on top of the document and records a real version;
+        // Discard is the mount prompt's other answer. Opening the Lith is neither, because
+        // the row in the list behind this dialog already opens it.
         name: '637-capture-actions',
         view: 'wide',
         modal: 'history-title',
@@ -2388,10 +2388,11 @@ const SHEETS = [
         expect: '.history-capture-actions'
       },
       {
-        // The mount-free answer, driven rather than described: Save a copy writes the edits out
-        // as a `.lith` and the row then says what the platform confirmed. What this deck can
-        // stage is the unconfirmed hand-off, because the app's own save dialog is not here to
-        // name a path, and that is the sentence the browser download earns anyway.
+        // The mount-free download, driven rather than described: the row's own trailing icon
+        // writes the edits out as a `.lith` and the dialog then says what the platform
+        // confirmed. What this deck can stage is the unconfirmed hand-off, because the app's
+        // own save dialog is not here to name a path, and that is the sentence the browser
+        // download earns anyway.
         name: '638-capture-saved',
         view: 'wide',
         modal: 'history-title',
@@ -2414,9 +2415,7 @@ const SHEETS = [
         drive: async (page) => {
           await page.click('.cache-history-button.modified');
           await page.waitForSelector('.history-entry.inline');
-          await page.click('.history-capture-head');
-          await page.waitForSelector('.history-capture-actions');
-          await clickAction(page, '.history-capture-actions .modal-action', 'Save a copy');
+          await page.click('.history-entry.inline .history-download-button');
           await page.waitForSelector('.history-capture-notice');
           await settle(page, 300);
         },
