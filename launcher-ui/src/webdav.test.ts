@@ -15,6 +15,7 @@ import {
   createLockHeartbeat,
   lithUploadName,
   probePatchApi,
+  probeAppliance,
   fetchRemoteWiki,
   fetchRemoteWikiMeta,
   parseRemoteMeta,
@@ -270,6 +271,24 @@ test('probePatchApi gates the git path on the instance capability', async () => 
   assert.equal(await probePatchApi(fakeFetch(() => json({ error: 'route_not_found' }, 404))), false, 'an older instance 404s and falls back to PUT');
   assert.equal(await probePatchApi(fakeFetch(() => { throw new Error('offline'); })), false);
   assert.equal(await probePatchApi(fakeFetch(() => text('<html>not json</html>'))), false);
+});
+
+test('probeAppliance reads the board that names itself and leaves every instance alone', async () => {
+  let asked = '';
+  const board = await probeAppliance(fakeFetch((url) => {
+    asked = url;
+    return json({ device: 'esp32' });
+  }));
+  assert.equal(board, true);
+  assert.equal(asked, `${LITHIC_API_BASE}device`, 'asked beside the patch API, not of some other host');
+  // An instance is every other answer: it does not serve the route at all, or it answers with
+  // something this build does not know, and either way it keeps the backup control it has always
+  // had rather than being read as a board.
+  assert.equal(await probeAppliance(fakeFetch(() => text('Not Found', 404))), false);
+  assert.equal(await probeAppliance(fakeFetch(() => json({ service: 'lithic-sync' }))), false);
+  assert.equal(await probeAppliance(fakeFetch(() => json({ device: 'something-else' }))), false);
+  assert.equal(await probeAppliance(fakeFetch(() => { throw new Error('offline'); })), false);
+  assert.equal(await probeAppliance(fakeFetch(() => text('<html>not json</html>'))), false);
 });
 
 test('fetchRemoteWiki returns the text with the digest the server will verify', async () => {

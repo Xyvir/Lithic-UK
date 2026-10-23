@@ -235,20 +235,99 @@ async function browserPicks(): Promise<PickedLith[]> {
       // Fall back to standard file input
     }
   }
+  return classicPicks();
+}
+
+/**
+ * How long the system's chooser may leave no trace at all before it is taken not to have opened.
+ *
+ * A chooser answers in one of three ways: a file (`change`), a dismissal (`cancel`, or the
+ * window coming back with no file), or nothing at all, which is a browser that refused to open
+ * one. The first two arrive in a moment, and the third is what this measures: a system dialog
+ * takes the window with it, so a window that never went away was never handed a dialog.
+ */
+const PICK_SILENCE_MS = 4000;
+
+/**
+ * The classic `<input type=file>`, driven the way a page is allowed to drive it.
+ *
+ * Three things here are load-bearing, and each of them was a way the launcher could sit on its
+ * own `Opening` line with nothing happening:
+ *
+ * 1. **The input lives in the page while it is used.** A system chooser is the platform's, and
+ *    some of them only offer one to an element the document holds. It is drawn off-screen and
+ *    transparent rather than `display: none`, which is the one hiding that puts it back where it
+ *    started, and it is taken out again the moment the trip ends.
+ * 2. **Every way a trip can end is listened for.** A chosen file is `change`. A dismissed chooser
+ *    is `cancel` where the platform sends it, and otherwise the window coming back with no file:
+ *    a dismissal used to resolve nothing at all, so the promise never settled and the launcher
+ *    stayed busy for the rest of the session, which reads as a frozen page.
+ * 3. **A chooser that never opened says so.** No dialog can open without taking the window, so a
+ *    window still focused and visible after `PICK_SILENCE_MS` was never handed one; the promise
+ *    rejects with that, which the caller puts on its failure line instead of leaving the dots
+ *    turning. A phone that is slow to draw its picker has already blurred by then, so a real
+ *    chooser is never taken for a refusal.
+ */
+function classicPicks(): Promise<PickedLith[]> {
   return new Promise((resolve, reject) => {
     const input = document.createElement('input');
     input.type = 'file';
     // The extension list, except where the platform's chooser resolves extensions to MIME
     // types and would drop this project's own type on the floor: see `inputAcceptTypes`.
-    input.accept = inputAcceptTypes();
-    input.onchange = () => {
-      const file = input.files?.[0];
-      if (!file) return resolve([]);
-      const reader = new FileReader();
-      reader.onerror = () => reject(reader.error ?? new Error('Unable to read file'));
-      reader.onload = () => resolve([{ name: file.name, text: String(reader.result ?? '') }]);
-      reader.readAsText(file);
+    const accept = inputAcceptTypes();
+    if (accept) input.accept = accept;
+    input.style.cssText = 'position: fixed; left: -100vw; top: 0; width: 1px; height: 1px; opacity: 0';
+    input.setAttribute('aria-hidden', 'true');
+
+    let settled = false;
+    let handedOver = false;
+    let silence: ReturnType<typeof setTimeout> | undefined;
+
+    /** End the trip once, whichever way it ended. */
+    const finish = (answer: PickedLith[] | Error) => {
+      if (settled) return;
+      settled = true;
+      if (silence !== undefined) clearTimeout(silence);
+      window.removeEventListener('blur', departed);
+      window.removeEventListener('focus', returned);
+      input.remove();
+      if (answer instanceof Error) reject(answer);
+      else resolve(answer);
     };
+    /** The chooser took the window, which is what a dialog that opened looks like from here. */
+    const departed = () => { handedOver = true; };
+    /**
+     * The window came back. A file arrives with its own `change`, so this is read a turn later,
+     * and only for a page that came back empty: that is a chooser that was dismissed.
+     */
+    const returned = () => {
+      setTimeout(() => {
+        if (settled || !handedOver || (input.files?.length ?? 0) > 0) return;
+        finish([]);
+      }, 250);
+    };
+
+    input.addEventListener('change', () => {
+      const file = input.files?.[0];
+      if (!file) return finish([]);
+      const reader = new FileReader();
+      reader.onerror = () => finish(reader.error ?? new Error('Unable to read file'));
+      reader.onload = () => finish([{ name: file.name, text: String(reader.result ?? '') }]);
+      reader.readAsText(file);
+    });
+    // Chrome, Edge and Safari say a dismissed chooser this way, and it is the answer that needs
+    // no timing at all.
+    input.addEventListener('cancel', () => finish([]));
+    window.addEventListener('blur', departed);
+    window.addEventListener('focus', returned);
+
+    silence = setTimeout(() => {
+      if (settled || handedOver) return;
+      if (document.visibilityState !== 'visible' || !document.hasFocus()) return;
+      finish(new Error('the file chooser did not open'));
+    }, PICK_SILENCE_MS);
+
+    document.body.appendChild(input);
     input.click();
   });
 }

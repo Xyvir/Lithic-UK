@@ -40,7 +40,7 @@
   import { offlineMode, looksUnreachable } from './offline-mode';
   import { createStageBeat, type InstallPreflight, type StageBeat } from './launcher-stage';
   import PinEntry from './PinEntry.svelte';
-  import { deleteRemoteFile, fetchRemoteFiles, fetchRemoteWiki, fetchRemoteWikiMeta, probePatchApi, createLockHeartbeat, readRemoteLock, uploadRemoteFile, webdavUrl, resolveSessionId, lithUploadName, type WebdavFile } from './webdav';
+  import { deleteRemoteFile, fetchRemoteFiles, fetchRemoteWiki, fetchRemoteWikiMeta, probeAppliance, probePatchApi, createLockHeartbeat, readRemoteLock, uploadRemoteFile, webdavUrl, resolveSessionId, lithUploadName, type WebdavFile } from './webdav';
   import { normalizeLithName } from './legacy-saver';
   import { esp32PasswordOk, esp32Percent, esp32StageLine, flashLithicAppliance, serialFlashSupported } from './esp32-flash';
   import { documentStem, typedDocumentName } from './document-format';
@@ -365,6 +365,16 @@ import { backupFileName, collectInstanceBackup, mergeBookmarks, parseInstanceBac
   let online = typeof navigator === 'undefined' ? true : navigator.onLine;
   let remoteUnreachable = false;
   let patchApiAvailable = false;
+  /**
+   * Whether the thing serving this page is a bare appliance rather than an instance (`probeAppliance`).
+   *
+   * It decides one thing, and it is the round control in the heading: a board carries no
+   * repository and no introduction either, so the heading draws no round control at all rather
+   * than a way into GitHub backups that could never complete. False is every instance, including
+   * one that did not answer, because a question that could not be asked must leave the control it
+   * has always had.
+   */
+  let appliance = false;
   let activeRemote: { name: string; digest: string; api: boolean } | null = null;
   // Set when the server reports a live lock held by someone else: the open is
   // paused on a choice (read-only / ignore / cancel) instead of guessing.
@@ -3999,6 +4009,18 @@ import { backupFileName, collectInstanceBackup, mergeBookmarks, parseInstanceBac
   }
 
   /**
+   * Ask what is serving this page, once, at boot.
+   *
+   * One question with one consequence: an appliance answers with its own name and the heading
+   * draws no round control, while every instance answers 404 and keeps the backup control it has
+   * always had. Asked at boot because the heading is the first thing the page draws, and a
+   * control that changes its meaning after the first paint was drawn saying the wrong thing.
+   */
+  async function refreshAppliance(): Promise<void> {
+    appliance = await probeAppliance();
+  }
+
+  /**
    * List the server's Liths and ask whether it exposes the git-backed patch
    * API. An older deployment answers 404 and simply lists with whole-file
    * saves, so a failure here degrades rather than blocks.
@@ -5551,6 +5573,7 @@ import { backupFileName, collectInstanceBackup, mergeBookmarks, parseInstanceBac
     // (and the tab icon) before anything else renders.
     void restoreInstanceIcon();
     if (mode === 'self-host') {
+      void refreshAppliance();
       void refreshRemoteList();
       // Whether this instance is backed up, which is a question only the instance
       // can answer, and one that keeps changing on its own, because the server
@@ -6625,8 +6648,15 @@ import { backupFileName, collectInstanceBackup, mergeBookmarks, parseInstanceBac
       declaration is what tells the two apart. A browser-only page therefore draws the sync
       button alone, matching the desktop app it is the Linux half of, and its header carries
       no way into the intro even though the shim still ships the payload for it.
+
+      An appliance is the other page the mode cannot separate: it answers as a self-host
+      instance because that is what it is (a store of Liths and a launcher to open them with),
+      yet it has no repository and no GitHub machinery at all, so the backup control would open
+      a dialog about something the board cannot do. It says what it is (`probeAppliance`) and
+      then the heading draws neither button: the intro's place is a page with an introduction
+      beside it, and a board carries the wiki and nothing else.
     -->
-    {#if (hasLocalSync && platformGitSync) || isSelfHost()}<button class="sync-button {headingSyncState}" aria-label={copy.dialogs.gitSync.title} title={headingSyncTitle} on:click={openGitSyncModal}><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 17.6A5 5 0 0 0 18 8h-1.3A8 8 0 1 0 4 16.3"/><path d="M12 12v9"/><path d="m8.5 15.5 3.5-3.5 3.5 3.5"/></svg>{#if headingSyncState === 'checking'}<span class="sync-glyph ring" aria-hidden="true"></span>{:else if headingSyncState === 'error'}<span class="sync-glyph alert" aria-hidden="true">!</span>{:else if headingSyncState === 'connected'}<span class="sync-glyph dot" aria-hidden="true"></span>{/if}</button>{/if}
+    {#if (hasLocalSync && platformGitSync) || (isSelfHost() && !appliance)}<button class="sync-button {headingSyncState}" aria-label={copy.dialogs.gitSync.title} title={headingSyncTitle} on:click={openGitSyncModal}><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 17.6A5 5 0 0 0 18 8h-1.3A8 8 0 1 0 4 16.3"/><path d="M12 12v9"/><path d="m8.5 15.5 3.5-3.5 3.5 3.5"/></svg>{#if headingSyncState === 'checking'}<span class="sync-glyph ring" aria-hidden="true"></span>{:else if headingSyncState === 'error'}<span class="sync-glyph alert" aria-hidden="true">!</span>{:else if headingSyncState === 'connected'}<span class="sync-glyph dot" aria-hidden="true"></span>{/if}</button>{/if}
     </div>
   </header>
   <!--

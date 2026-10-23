@@ -314,7 +314,6 @@ void setup() {
     });
 
 
-
     // --- Captive Portal Traps (Android, Windows, Apple) ---
     server.on("/generate_204", HTTP_GET, [](AsyncWebServerRequest *request){ request->redirect("http://192.168.4.1/"); }); // Android
     server.on("/redirect", HTTP_GET, [](AsyncWebServerRequest *request){ request->redirect("http://192.168.4.1/"); });      // Android
@@ -323,6 +322,18 @@ void setup() {
     server.on("/hotspot-detect.html", HTTP_GET, [](AsyncWebServerRequest *request){ request->redirect("http://192.168.4.1/"); }); // Apple
     server.on("/library/test/success.html", HTTP_GET, [](AsyncWebServerRequest *request){ request->redirect("http://192.168.4.1/"); }); // Apple
     server.on("/success.txt", HTTP_GET, [](AsyncWebServerRequest *request){ request->redirect("http://192.168.4.1/"); }); // Generic
+
+    // --- What this page is ---
+    // A launcher page cannot say what served it (the same bytes are an instance's own launcher),
+    // so the board says so. It comes before the GitHub status below because it is the honest
+    // version of that answer: this board has no repository, so the heading draws no backup
+    // control rather than a dialog it could never complete.
+    server.on("/api/lithic/device", HTTP_GET, [](AsyncWebServerRequest *request){
+        AsyncWebServerResponse *response = request->beginResponse(200, "application/json", "{\"device\":\"esp32\"}");
+        response->addHeader("Cache-Control", "no-store");
+        addCorsHeaders(response);
+        request->send(response);
+    });
 
     // --- Lithic "Phantom" Mocking ---
     server.on("/api/github/status", HTTP_GET, [](AsyncWebServerRequest *request){

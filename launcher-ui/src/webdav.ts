@@ -307,6 +307,30 @@ export async function probePatchApi(fetcher: typeof fetch = fetch, apiBase = LIT
   }
 }
 
+/**
+ * Is the thing serving this page a bare appliance rather than an instance?
+ *
+ * An instance is a machine with a repository behind it: its saves are commits, and the round
+ * control in the heading is the way into GitHub backups. An appliance is a board in a pocket
+ * that carries the wiki and nothing else, so there is no repository to back up and no GitHub
+ * machinery to offer, and its heading draws no round control rather than a dead one.
+ *
+ * The board has to say so, because a launcher page cannot: the same bytes are an instance's own
+ * launcher. `device` names what answered, so a second appliance is a new word here rather than
+ * a new rule, and every instance that does not serve this endpoint (which is all of them) simply
+ * answers 404 and keeps its backup control.
+ */
+export async function probeAppliance(fetcher: typeof fetch = fetch, apiBase = LITHIC_API_BASE): Promise<boolean> {
+  try {
+    const response = await fetcher(`${apiBase}device`, { method: 'GET' });
+    if (!response.ok) return false;
+    const payload = (await response.json()) as { device?: string };
+    return payload?.device === 'esp32';
+  } catch {
+    return false;
+  }
+}
+
 function headerValue(response: Response, name: string): string {
   // The API sends X-Lithic-<name>; accept the bare name too so a proxy that
   // rewrites or strips the custom prefix cannot silently disable patch saving.
