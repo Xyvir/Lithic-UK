@@ -85,6 +85,27 @@ class LithicBridge(private val activity: Activity) : Plugin(activity) {
     }
   }
 
+  /**
+   * The board this app was asked to open, once.
+   *
+   * A sign-in window's hand-off reaches the app as a `lithic://` address on its launch intent (see
+   * `MainActivity`), and this is the page asking for it. Reading it consumes it, so a reload of the
+   * app's own launcher is not sent to the board again after the person has come back from it.
+   */
+  @Command
+  fun takeDeepLink(invoke: Invoke) {
+    val answer = JSObject()
+    try {
+      val link = MainActivity.pendingHandoff
+      MainActivity.pendingHandoff = null
+      if (link != null) answer.put("link", link)
+      invoke.resolve(answer)
+    } catch (ex: Exception) {
+      Logger.error(ex.message ?: "Failed to read the hand-off")
+      invoke.reject(ex.message ?: "Failed to read the hand-off")
+    }
+  }
+
   /** Ask the platform for a new document, and answer with the reference it made. */
   @Command
   fun createDocument(invoke: Invoke) {

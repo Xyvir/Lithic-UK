@@ -239,6 +239,30 @@ async function browserPicks(): Promise<PickedLith[]> {
 }
 
 /**
+ * The chooser was never drawn: the press reached the control, and the platform answered as though a
+ * dialog had opened and been dismissed.
+ *
+ * A dismissal takes as long as a person takes, so one that arrives in the instant after the press
+ * was no dismissal. Android's captive portal window is the case this exists for: a file input is
+ * inert in that window, and the browser reports the inertness as a dismissal at once.
+ */
+export class PickerUnavailableError extends Error {
+  constructor() {
+    super('the file chooser did not open');
+    this.name = 'PickerUnavailableError';
+  }
+}
+
+/**
+ * How soon a dismissal has to arrive to be a refusal instead.
+ *
+ * A system dialog has to be drawn before anybody can close it, and drawing one takes a moment on
+ * every platform this ships to. Half a second is under the fastest draw seen and far over the
+ * fastest dismissal a person could make, so nothing here is a judgement about their speed.
+ */
+const PICK_REFUSAL_MS = 500;
+
+/**
  * How long the system's chooser may leave no trace at all before it is taken not to have opened.
  *
  * A chooser answers in one of three ways: a file (`change`), a dismissal (`cancel`, or the
@@ -281,6 +305,7 @@ function classicPicks(): Promise<PickedLith[]> {
 
     let settled = false;
     let handedOver = false;
+    let askedAt = 0;
     let silence: ReturnType<typeof setTimeout> | undefined;
 
     /** End the trip once, whichever way it ended. */
@@ -317,17 +342,20 @@ function classicPicks(): Promise<PickedLith[]> {
     });
     // Chrome, Edge and Safari say a dismissed chooser this way, and it is the answer that needs
     // no timing at all.
-    input.addEventListener('cancel', () => finish([]));
+    input.addEventListener('cancel', () =>
+      finish(performance.now() - askedAt < PICK_REFUSAL_MS ? new PickerUnavailableError() : [])
+    );
     window.addEventListener('blur', departed);
     window.addEventListener('focus', returned);
 
     silence = setTimeout(() => {
       if (settled || handedOver) return;
       if (document.visibilityState !== 'visible' || !document.hasFocus()) return;
-      finish(new Error('the file chooser did not open'));
+      finish(new PickerUnavailableError());
     }, PICK_SILENCE_MS);
 
     document.body.appendChild(input);
+    askedAt = performance.now();
     input.click();
   });
 }

@@ -2,9 +2,15 @@
   import { onMount } from 'svelte';
   // Every word this component shows. Nothing below spells copy of its own.
   import { LOCALE_TAG, copy, type LaunchEntry } from './copy';
-  import { declaresBrowserOnly, handoffQuery, LAUNCHER_QUERY_PARAM, launcherReturn, withLauncherHandoff, type LauncherMode } from './mode';
+  import { boardFromDeepLink, declaresBrowserOnly, handoffIntent, handoffQuery, LAUNCHER_QUERY_PARAM, launcherReturn, openedInApp, withLauncherHandoff, type LauncherMode } from './mode';
   import { armStatusClear, armStatusHold } from './status-lifetime';
-  import { createFileBridge, tauriInvoke, tauriListen, saveTextVerifiably } from './file-bridge';
+  import {
+    createFileBridge,
+    PickerUnavailableError,
+    saveTextVerifiably,
+    tauriInvoke,
+    tauriListen
+  } from './file-bridge';
   import { opensInstanceInBrowser, type PlatformCapabilities } from './platform-capabilities';
   import { backupGate, orphanPill, orphanDownloadNote, type OrphanDownloadState } from './orphan-download';
   import { isScratchFileName, isHtmlMonolithName, tracksUnsavedEdits, resolveMountName, resolveScratchKind, type ScratchKind } from './scratch-editor';
@@ -43,7 +49,7 @@
   import { deleteRemoteFile, fetchRemoteFiles, fetchRemoteWiki, fetchRemoteWikiMeta, probeAppliance, probePatchApi, createLockHeartbeat, readRemoteLock, uploadRemoteFile, webdavUrl, resolveSessionId, lithUploadName, type WebdavFile } from './webdav';
   import { normalizeLithName } from './legacy-saver';
   import { esp32PasswordOk, esp32Percent, esp32StageLine, flashLithicAppliance, serialFlashSupported } from './esp32-flash';
-  import { documentStem, typedDocumentName } from './document-format';
+  import { documentStem, runsInWebView, typedDocumentName } from './document-format';
   import { searchCachedWikis } from './cache-search';
   import { matchMarkup, showsForQuery, titleMatches, titleMarkup } from './name-match';
   import { cachedStamp, modifiedTitle } from './last-modified';
@@ -97,6 +103,15 @@ import { backupFileName, collectInstanceBackup, mergeBookmarks, parseInstanceBac
    */
   const documents = platformCapabilities?.local_files !== false;
   const files = createFileBridge(documents);
+  /**
+   * Whether this page is inside a WebView, which is what the board's sign-in window is.
+   *
+   * Read once, because what hosts the page cannot change while it lives. Where it is true the
+   * mount control is the hand-off to a browser from the first press, which is the one-tap version
+   * of what `pickerRefused` otherwise reaches only after a refusal: that window answers no file
+   * chooser, so a press that asked for one would do nothing at all.
+   */
+  const inWebView = runsInWebView();
   /**
    * Where this page's saves can land: a real file, or (on a platform with no
    * File System Access API (Safari and Firefox, which is the whole of macOS
@@ -413,6 +428,16 @@ import { backupFileName, collectInstanceBackup, mergeBookmarks, parseInstanceBac
   let newLithName = '';
   let newLithError = '';
   let newLithInputElement: HTMLInputElement;
+  /**
+   * Whether a chooser has been refused on this page, which is the one signal that the window
+   * cannot pick a file at all.
+   *
+   * Set from the failure rather than guessed from the user agent, because every in-app browser and
+   * every webview claims nothing in particular and only one of them cannot pick. Once it is true
+   * the mount control stops asking for a chooser and offers the app instead, which is the only
+   * hand-off a page in that window can still make.
+   */
+  let pickerRefused = false;
 
   // Desktop install: copies the app executable to a stable per-user location
   // and registers Windows "Open with" entries for the editor file types.
@@ -3591,7 +3616,14 @@ import { backupFileName, collectInstanceBackup, mergeBookmarks, parseInstanceBac
       // No full stop: the status line strips trailing punctuation, because the
       // activity dots sit right after it.
       status = copy.status.added(picks.length);
-    } catch (error) { reportHeld(copy.status.openFailed(error instanceof Error ? error.message : String(error))); }
+    } catch (error) {
+      // A chooser the platform never drew is not a failure of a file: it is a page that cannot
+      // ask for one, and the sentence that helps is the address this page is served from. The
+      // `Opening` line goes with it, because nothing was ever being opened.
+      const refused = refusedPicker(error);
+      if (refused) status = '';
+      reportHeld(refused ?? copy.status.openFailed(error instanceof Error ? error.message : String(error)));
+    }
     finally { busy = false; }
   }
 
@@ -3614,7 +3646,10 @@ import { backupFileName, collectInstanceBackup, mergeBookmarks, parseInstanceBac
     busy = true; status = copy.status.opening;
     try {
       const picks = await files.openMany();
-      if (picks.length === 0) { status = ''; return; }
+      // A dismissed chooser is an answer, and the control has to come back: this branch used to
+      // return with `busy` still set, which left the mount button disabled for the rest of the
+      // session after nothing more than closing a dialog.
+      if (picks.length === 0) { status = ''; busy = false; return; }
       // A Lith lands under the server's name for it, so everything said about the
       // uploads below (the replace question and the progress line) uses that name.
       const uploaded = picks.map((pick) => ({ ...pick, name: lithUploadName(pick.name) }));
@@ -3649,9 +3684,67 @@ import { backupFileName, collectInstanceBackup, mergeBookmarks, parseInstanceBac
       }
       await openRemoteFile(uploaded[0].name);
     } catch (error) {
-      remoteError = copy.status.uploadFailed(error instanceof Error ? error.message : String(error));
+      const refused = refusedPicker(error);
+      if (refused) status = '';
+      remoteError = refused ?? copy.status.uploadFailed(error instanceof Error ? error.message : String(error));
       busy = false;
     }
+  }
+
+  /**
+   * What a refused chooser says instead of a failure about a file.
+   *
+   * A platform that never drew a chooser has told us nothing about the Lith, and saying so would
+   * send somebody looking at their file. The address is this page's own, so the sentence names the
+   * one place the same page works: a browser, which is where a file input is not inert. Android's
+   * captive portal window is the case, and the address is also the fact worth having in hand when
+   * the phone is on mobile data and cannot reach it (see `PICK_REFUSAL_MS`).
+   */
+  function refusedPicker(error: unknown): string | null {
+    if (!(error instanceof PickerUnavailableError)) return null;
+    pickerRefused = true;
+    return copy.status.pickerUnavailable();
+  }
+
+  /**
+   * This page's own address, asked for where it can actually open a file picker.
+   *
+   * Chrome's intent syntax is the one hand-off a page in a window that refuses a chooser can still
+   * make, and it was measured on the board: a plain link to another host, a new window and a link
+   * to the board under another name all stayed in the window, while an intent reached a browser
+   * with the page loaded and its picker working.
+   *
+   * The app is named first, because where it is installed the page opens in a window of its own
+   * with no address bar, and the app answers a picker itself. Nothing has to detect which phone
+   * this is: the intent names the app and carries the browser as its fallback, so a phone without
+   * it lands in Chrome exactly as it did before. Inside the app the order flips, because there the
+   * app is the window that cannot pick and naming it would bring it forward onto itself.
+   */
+  function mountHandoff(): string {
+    return handoffIntent(location, openedInApp(location) ? 'browser' : 'app');
+  }
+
+  /**
+   * Open the board the app was started for, when it was started for one.
+   *
+   * A tap in the board's sign-in window reaches the app two ways: as the intent that launched it, or
+   * as an intent handed to a copy already running in the background. Both end here, because this is
+   * asked once at boot and again every time the page is shown.
+   *
+   * The board page then runs in this window with the marker the app put on it, which is what it
+   * reads to know that a refused chooser should be handed to a browser rather than back here.
+   */
+  async function openHandedBoard(): Promise<void> {
+    if (mode !== 'tauri') return;
+    let link: string | null = null;
+    try {
+      link = await tauriInvoke<string | null>('take_deep_link');
+    } catch {
+      // A build with no such command is a build from before the app could be handed anything.
+      return;
+    }
+    const board = boardFromDeepLink(link);
+    if (board) location.assign(board);
   }
 
   async function openRecent(
@@ -5539,6 +5632,9 @@ import { backupFileName, collectInstanceBackup, mergeBookmarks, parseInstanceBac
   }
 
   onMount(() => {
+    // A board this app was launched from is opened before anything else, since that is the page
+    // the person asked for and this one is only the way in.
+    void openHandedBoard();
     // The wire's liveness, asked once and never awaited by anything: no render waits on
     // it, and a backend that does not answer leaves the flag false rather than an error.
     if (shimToken) {
@@ -5624,6 +5720,9 @@ import { backupFileName, collectInstanceBackup, mergeBookmarks, parseInstanceBac
       if (document.hidden) return;
       refreshGitSyncIcon();
       void runGitSyncHeartbeat();
+      // A tap in the board's sign-in window brings this app forward rather than starting it, so
+      // the intent is read again each time the page is shown.
+      void openHandedBoard();
     };
     document.addEventListener('visibilitychange', onVisibilityChange);
     // Proactive quota relief, deliberately not run in the index-db-only
@@ -7728,7 +7827,17 @@ import { backupFileName, collectInstanceBackup, mergeBookmarks, parseInstanceBac
       {:else}
         <button class="action-button new-blank-button" use:alignNewLithLabel on:click={openNewLithModal} disabled={busy}><span class="new-blank-label">{copy.actions.newBlank}</span></button>
       {/if}
-      <button class="action-button mount-button" on:click={mountFromDisk} disabled={busy}><span class="mount-label">{mode === 'self-host' ? copy.actions.upload : copy.actions.mount}</span></button>
+      {#if pickerRefused || (inWebView && mode !== 'tauri')}
+        <!--
+          A window that refused a chooser has told us the one thing it can still do is hand the page
+          to the browser, so that is what the control becomes: the same face, an intent address for
+          the page the person is already on, and a browser at the other end where a chooser opens.
+          The line above it says what the second tap will do.
+        -->
+        <a class="action-button mount-button" href={mountHandoff()}><span class="mount-label">{mode === 'self-host' ? copy.actions.upload : copy.actions.mount}</span></a>
+      {:else}
+        <button class="action-button mount-button" on:click={mountFromDisk} disabled={busy}><span class="mount-label">{mode === 'self-host' ? copy.actions.upload : copy.actions.mount}</span></button>
+      {/if}
       {#if showBookmarks}
       <button class="bookmark-button" aria-label={copy.actions.bookmarkAria} title={copy.actions.bookmarkTitle} on:click={openBookmarkModal}><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 21V5a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v16l-6-4z" /></svg></button>
       {/if}

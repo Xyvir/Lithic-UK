@@ -31,6 +31,7 @@
  */
 package com.lithic.app
 
+import android.content.Intent
 import android.os.Bundle
 import android.view.ViewGroup
 import androidx.activity.enableEdgeToEdge
@@ -39,6 +40,9 @@ import androidx.core.view.WindowInsetsCompat
 
 class MainActivity : TauriActivity() {
   override fun onCreate(savedInstanceState: Bundle?) {
+    // Before `super`, because the webview is built inside it and a page that starts asking at once
+    // should find the address already waiting rather than arrive one turn late.
+    rememberHandoff(intent)
     enableEdgeToEdge()
     super.onCreate(savedInstanceState)
 
@@ -50,5 +54,37 @@ class MainActivity : TauriActivity() {
       view.setPadding(bars.left, bars.top, bars.right, bars.bottom)
       insets
     }
+  }
+
+  /**
+   * A board hand-off arriving at a copy of this app that is already running.
+   *
+   * A tap in the board's sign-in window usually brings the app forward rather than starting it, and
+   * the new address arrives here instead of in `onCreate`. Nothing is opened from this method: the
+   * page asks for it when it is next shown, which is a page in a webview that may not exist yet.
+   */
+  override fun onNewIntent(intent: Intent) {
+    super.onNewIntent(intent)
+    setIntent(intent)
+    rememberHandoff(intent)
+  }
+
+  /** Keep a `lithic://` address for the page, and ignore every other intent this app receives. */
+  private fun rememberHandoff(intent: Intent?) {
+    val link = intent?.data ?: return
+    if (link.scheme != "lithic") return
+    pendingHandoff = link.toString()
+  }
+
+  companion object {
+    /**
+     * The address this app was asked to open, waiting for the page's own question.
+     *
+     * Held here rather than in the bridge because the intent arrives before any plugin exists, and
+     * read once by `LithicBridge.takeDeepLink`, which is what makes it a hand-off rather than a
+     * setting: the page may only be sent to a board once.
+     */
+    @Volatile
+    var pendingHandoff: String? = null
   }
 }

@@ -372,6 +372,18 @@ fn platform_capabilities() -> platform::Capabilities {
     platform::capabilities()
 }
 
+/// The board this app was asked to open, if it was asked, and only once.
+///
+/// A tap in a board's sign-in window hands this app a `lithic://` address, which the phone's own
+/// activity keeps and `platform::take_deep_link` reads. The page asks here at boot and again
+/// whenever it is shown, because a tap on a running app brings it forward rather than starting it,
+/// and an answer is consumed so that coming back from the board does not send the window there
+/// again.
+#[tauri::command]
+fn take_deep_link(app: tauri::AppHandle) -> Option<String> {
+    platform::take_deep_link(&app)
+}
+
 /// This window, as the other Lithic windows on this machine see it.
 ///
 /// The page owns the stage: it is the only side that knows whether the engine has taken the
@@ -3435,6 +3447,7 @@ pub fn run() {
             install_monolith,
             install_status,
             platform_capabilities,
+            take_deep_link,
             flash_in_browser,
             install_offer_status,
             set_install_dismissed,

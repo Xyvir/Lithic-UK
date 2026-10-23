@@ -1,13 +1,18 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
+  boardFromDeepLink,
+  handoffIntent,
   handoffQuery,
   hostedInApp,
   launcherReturn,
+  LITHIC_APP_PACKAGE,
+  openedInApp,
   resolveMode,
   servedByApp,
   servedByInstance,
   tauriApiAvailable,
+  withAppMarker,
   withLauncherHandoff
 } from './mode.ts';
 
@@ -238,6 +243,50 @@ test('a process that says it is browser-only is a browser mount, wherever it is 
   // somebody runs on their own machine readable.
   assert.equal(resolveMode(location('http://127.0.0.1:17800/src/launcher.html'), browserDoc(false)), 'self-host');
   assert.equal(resolveMode(location('http://localhost:17800/src/launcher.html'), browserDoc(false)), 'self-host');
+});
+
+test('the hand-off names the app, and keeps the browser for a phone without it', () => {
+  const board = location('http://192.168.4.1/src/launcher.html?v=1.0.4');
+  assert.equal(
+    handoffIntent(board, 'app'),
+    'intent://192.168.4.1/src/launcher.html?v=1.0.4&lithic-scheme=http#Intent;' +
+      `scheme=lithic;package=${LITHIC_APP_PACKAGE};` +
+      'S.browser_fallback_url=http%3A%2F%2F192.168.4.1%2Fsrc%2Flauncher.html%3Fv%3D1.0.4;end'
+  );
+  // The browser form is the one this shipped before the app existed, unchanged: a phone with the app
+  // never needs it, and a phone without one has nothing else.
+  assert.equal(
+    handoffIntent(board, 'browser'),
+    'intent://192.168.4.1/src/launcher.html?v=1.0.4#Intent;scheme=http;package=com.android.chrome;' +
+      'S.browser_fallback_url=http%3A%2F%2F192.168.4.1%2Fsrc%2Flauncher.html%3Fv%3D1.0.4;end'
+  );
+  // An https instance is asked for over https, because the page is the one that knows.
+  const instance = location('https://notes.example.uk/src/launcher.html');
+  assert.ok(handoffIntent(instance, 'app').includes('lithic-scheme=https'));
+  assert.ok(handoffIntent(instance, 'browser').includes('scheme=https'));
+  // And a page with no query at all still builds an address with the marker on it.
+  assert.ok(handoffIntent(location('http://192.168.4.1/'), 'app').includes('/?lithic-scheme=http#'));
+});
+
+test('a hand-off comes back as the address the app should open', () => {
+  assert.equal(
+    boardFromDeepLink('lithic://192.168.4.1/src/launcher.html?v=1.0.4&lithic-scheme=http'),
+    'http://192.168.4.1/src/launcher.html?v=1.0.4&in=app'
+  );
+  assert.equal(
+    boardFromDeepLink('lithic://notes.example.uk/src/launcher.html?lithic-scheme=https'),
+    'https://notes.example.uk/src/launcher.html?in=app'
+  );
+  // The marker is how the page knows not to name the app it is already in, and it is stripped from
+  // what the app reconstructs rather than passed on as part of the board's own address.
+  assert.equal(openedInApp(location('http://192.168.4.1/?in=app')), true);
+  assert.equal(openedInApp(location('http://192.168.4.1/')), false);
+  assert.equal(withAppMarker('http://192.168.4.1/a?in=b'), 'http://192.168.4.1/a?in=app');
+  // Nothing else is opened: not another scheme, not an address with no host, not noise.
+  assert.equal(boardFromDeepLink('https://192.168.4.1/'), null);
+  assert.equal(boardFromDeepLink('lithic:///no-host'), null);
+  assert.equal(boardFromDeepLink(''), null);
+  assert.equal(boardFromDeepLink(null), null);
 });
 
 test('an instance outranks the browser-only declaration, however it declares itself', () => {

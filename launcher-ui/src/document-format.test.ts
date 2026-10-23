@@ -13,6 +13,7 @@ import {
   typedDocumentName,
   pickerFiltersByMimeType,
   resolveDocumentFormat,
+  runsInWebView,
   serverDocumentName,
   writesLith
 } from './document-format.ts';
@@ -25,6 +26,24 @@ test('a chooser that filters by MIME type is not given a list it would drop .lit
   assert.equal(pickerFiltersByMimeType('Mozilla/5.0 (Windows NT 10.0; Win64; x64) Firefox/141.0'), false);
   assert.equal(pickerFiltersByMimeType(''), false, 'a page with no user agent keeps the useful filter');
   assert.equal(inputAcceptTypes(true), '*/*');
+
+  // The window a board's sign-in page is drawn in, and the reason the mount control can hand the
+  // page to a browser on the first press: a WebView says it is one, Chrome does not.
+  assert.equal(
+    runsInWebView(
+      'Mozilla/5.0 (Linux; Android 15; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko) Version/4.0 Chrome/141.0.7390.122 Mobile Safari/537.36; wv'
+    ),
+    true
+  );
+  assert.equal(
+    runsInWebView(
+      'Mozilla/5.0 (Linux; Android 15; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/141.0.7390.122 Mobile Safari/537.36'
+    ),
+    false,
+    'Chrome on the same phone picks files, so its control stays a button'
+  );
+  assert.equal(runsInWebView('Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/141.0'), false);
+  assert.equal(runsInWebView(''), false, 'a page with no user agent is not taken for a WebView');
   // Every kind this launcher opens, by extension as well as by media type, is still named where
   // the platform honours extensions.
   const filtered = inputAcceptTypes(false);

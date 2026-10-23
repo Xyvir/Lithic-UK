@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /*
- * The Android project `tauri android init` writes is Tauri's template, and two things in it are
+ * The Android project `tauri android init` writes is Tauri's template, and three things in it are
  * wrong for this project. Both were measured on the published APK rather than assumed:
  *
  *   1. The launcher icon is the template's placeholder. The APK carried
@@ -15,6 +15,10 @@
  *
  *   2. The activity draws the page under the system bars with nothing reserving their space
  *      (`src-tauri/android/MainActivity.kt` carries the reasoning and the fix).
+ *
+ *   3. Nothing in the manifest claims the `lithic://` scheme, so a board's sign-in window cannot
+ *      hand its page to this app and every phone falls through to the browser instead. The filter
+ *      is added to the activity that hosts the webview; see `DEEP_LINK_FILTER`.
  *
  * `init` rewrites this tree on every run, so the patch cannot be an edit of the generated files:
  * it is this script, run after `init` and before the build, in the release workflow and in the
@@ -66,6 +70,60 @@ function walk(dir, base = dir) {
     } else out.push(relative(base, full));
   }
   return out;
+}
+
+/**
+ * The intent filter that lets a board's sign-in window hand its page to this app.
+ *
+ * A WebView cannot open a file chooser, so the launcher in a board's captive portal window hands
+ * the window to an `intent://` address that names this app first and a browser second. Without a
+ * filter here nothing in the app matches that address, and every phone falls through to the
+ * browser, which is why this is a manifest fact rather than something the Kotlin can add at run
+ * time. The scheme is the only thing the filter claims: it names no host, so a board at any
+ * address can reach this app, and the activity decides what to do with the address it is given.
+ */
+const DEEP_LINK_FILTER = [
+  '<intent-filter>',
+  '  <action android:name="android.intent.action.VIEW" />',
+  '  <category android:name="android.intent.category.DEFAULT" />',
+  '  <category android:name="android.intent.category.BROWSABLE" />',
+  '  <data android:scheme="lithic" />',
+  '</intent-filter>'
+];
+
+/**
+ * Add the hand-off filter to the activity that owns the webview, once.
+ *
+ * The manifest is the template's and the template is rewritten on every `init`, so the edit is
+ * made here and read back: a manifest that already claims the scheme is left alone, and one with
+ * no activity to attach the filter to is a failure rather than an APK that silently cannot be
+ * reached.
+ *
+ * Answers whether it wrote anything.
+ */
+function addDeepLinkFilter(manifestPath) {
+  if (!existsSync(manifestPath)) fail(`no AndroidManifest.xml at ${manifestPath}`);
+  const text = readFileSync(manifestPath, 'utf8');
+  if (/android:scheme\s*=\s*"lithic"/.test(text)) return false;
+  // The activity block, found by the class it hosts rather than by a line number: the template's
+  // attributes vary between Tauri versions and the class it launches does not.
+  const block = /<activity\b[\s\S]*?MainActivity[\s\S]*?<\/activity>/.exec(text);
+  if (!block) {
+    fail(`${manifestPath} has no <activity> element hosting MainActivity, so nothing can claim the lithic scheme`);
+  }
+  const lines = block[0].split(/\r?\n/);
+  const closing = lines.pop();
+  const indent = (/^\s*/.exec(lines[0]) ?? [''])[0];
+  const inner = `${indent}  `;
+  const filter = DEEP_LINK_FILTER.map((line) => `${inner}${line}`).join('\n');
+  const patched = [...lines, filter, closing].join('\n');
+  const start = text.indexOf(block[0]);
+  const written = text.slice(0, start) + patched + text.slice(start + block[0].length);
+  writeFileSync(manifestPath, written);
+  if (!/android:scheme\s*=\s*"lithic"/.test(readFileSync(manifestPath, 'utf8'))) {
+    fail(`the hand-off filter did not survive the write to ${manifestPath}`);
+  }
+  return true;
 }
 
 /** The `package x.y` line of a Kotlin file, or null when it declares none. */
@@ -230,7 +288,22 @@ export function patchAndroid(root = REPO) {
     }
   }
 
-  return { icons, bytes, roundIcon, activity: relative(root, activityFile), replaced, bridge: relative(root, bridgeFile), bridgeReplaced };
+  // 4. The hand-off. A board's sign-in window reaches this app through the scheme this filter
+  // claims, and the activity that receives it does nothing with the address until the page asks
+  // (see `MainActivity` and `LithicBridge.takeDeepLink`).
+  const manifest = join(mainDir(activityFile), 'AndroidManifest.xml');
+  const deepLink = addDeepLinkFilter(manifest);
+
+  return {
+    icons,
+    bytes,
+    roundIcon,
+    activity: relative(root, activityFile),
+    replaced,
+    bridge: relative(root, bridgeFile),
+    bridgeReplaced,
+    deepLink
+  };
 }
 
 /**
@@ -264,6 +337,21 @@ function selfTest() {
     write(join(base, 'src-tauri/icons/android/values/ic_launcher_background.xml'), '<resources/>');
     write(join(base, 'src-tauri/gen/android/app/src/main/res/mipmap-mdpi/ic_launcher.png'), 'template-placeholder');
     write(join(base, 'src-tauri/gen/android/app/src/main/res/mipmap-anydpi-v26/ic_launcher_round.xml'), TEMPLATE_ROUND);
+    // The manifest as `init` writes it: no hand-off filter, and the activity's own launcher filter
+    // beside the block the patch has to add to.
+    const templateManifest =
+      '<?xml version="1.0" encoding="utf-8"?>\n' +
+      '<manifest xmlns:android="http://schemas.android.com/apk/res/android">\n' +
+      '  <application android:label="@string/app_name">\n' +
+      '    <activity android:name=".MainActivity" android:exported="true">\n' +
+      '      <intent-filter>\n' +
+      '        <action android:name="android.intent.action.MAIN" />\n' +
+      '        <category android:name="android.intent.category.LAUNCHER" />\n' +
+      '      </intent-filter>\n' +
+      '    </activity>\n' +
+      '  </application>\n' +
+      '</manifest>\n';
+    write(join(base, 'src-tauri/gen/android/app/src/main/AndroidManifest.xml'), templateManifest);
     write(join(base, 'src-tauri/gen/android/app/src/main/java/com/lithic/app/MainActivity.kt'), templateActivity);
     write(join(base, 'src-tauri/android/MainActivity.kt'), readFileSync(join(REPO, 'src-tauri/android/MainActivity.kt'), 'utf8'));
     write(join(base, 'src-tauri/android/LithicBridge.kt'), readFileSync(join(REPO, 'src-tauri/android/LithicBridge.kt'), 'utf8'));
@@ -301,8 +389,28 @@ function selfTest() {
       )
   );
 
+  const manifestPath = join(base, 'src-tauri/gen/android/app/src/main/AndroidManifest.xml');
+  const patchedManifest = readFileSync(manifestPath, 'utf8');
+  check(
+    'claims the lithic scheme inside the activity that hosts the page',
+    first.deepLink === true &&
+      patchedManifest.includes('<data android:scheme="lithic" />') &&
+      patchedManifest.indexOf('android:scheme="lithic"') < patchedManifest.indexOf('</activity>'),
+    first.deepLink ? '' : 'the filter was not written'
+  );
+  check(
+    'keeps the template launch filter beside the new one',
+    patchedManifest.includes('android.intent.category.LAUNCHER') &&
+      patchedManifest.includes('android.intent.category.BROWSABLE')
+  );
+
   const second = patchAndroid(base);
   check('is idempotent for the activity', second.replaced === false);
+  check(
+    'is idempotent for the hand-off filter',
+    second.deepLink === false &&
+      (readFileSync(manifestPath, 'utf8').match(/android:scheme="lithic"/g) ?? []).length === 1
+  );
   check('is idempotent for the round definition', second.roundIcon === false);
   check('is idempotent for the bridge', second.bridgeReplaced === false);
 
@@ -344,6 +452,25 @@ function selfTest() {
     bridgeMismatch !== null && bridgeMismatch.includes('LithicBridge.kt'),
     bridgeMismatch ?? ''
   );
+
+  // A manifest with no activity hosting the page has nothing to claim the scheme, and an APK with
+  // no filter is one a board's hand-off can only ever miss.
+  seed();
+  write(
+    join(base, 'src-tauri/gen/android/app/src/main/AndroidManifest.xml'),
+    '<manifest xmlns:android="http://schemas.android.com/apk/res/android">\n  <application />\n</manifest>\n'
+  );
+  const noActivity = throws(() => patchAndroid(base));
+  check(
+    'refuses a manifest with no activity to attach the hand-off to',
+    noActivity !== null && noActivity.includes('nothing can claim the lithic scheme'),
+    noActivity ?? ''
+  );
+
+  seed();
+  rmSync(join(base, 'src-tauri/gen/android/app/src/main/AndroidManifest.xml'), { force: true });
+  const noManifest = throws(() => patchAndroid(base));
+  check('refuses a project with no manifest', noManifest !== null && noManifest.includes('no AndroidManifest.xml'), noManifest ?? '');
 
   seed();
   rmSync(join(base, 'src-tauri/android/LithicBridge.kt'), { force: true });

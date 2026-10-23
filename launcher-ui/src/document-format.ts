@@ -260,6 +260,24 @@ export function pickerFiltersByMimeType(
  * an "all files" rung beside the typed ones (the desktop dialog's own filter list), so a page
  * that reaches this rung is not a page that can pick something the launcher cannot read.
  */
+/**
+ * Whether this page is drawn inside a WebView, which is what a board's captive portal window is.
+ *
+ * The window Android shows for a network sign-in is a WebView around the board's own page, and its
+ * client answers no file chooser: measured on the board with three different launchers and with the
+ * stock wiki importer, all silent, while the same pages pick files in Chrome. A WebView says so in
+ * its user agent (`; wv`), which is the only notice it gives before a press, and it is what lets the
+ * mount control be the hand-off to a browser instead of a button that fails first.
+ *
+ * Asked of the user agent for the same reason as the MIME question above: the window is not
+ * reachable from the page, so the page's own description of itself is all there is to read.
+ */
+export function runsInWebView(
+  userAgent = typeof navigator === 'undefined' ? '' : navigator.userAgent
+): boolean {
+  return /;\s*wv\b/.test(userAgent);
+}
+
 export function inputAcceptTypes(filtersByMimeType = pickerFiltersByMimeType()): string {
   return filtersByMimeType
     ? '*/*'

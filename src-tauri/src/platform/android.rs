@@ -165,6 +165,37 @@ pub fn pick_save(app: &AppHandle, suggested_name: &str) -> Result<Option<FilePat
     }
 }
 
+/// The board this app was asked to open, if it was asked, and only once.
+///
+/// A tap in a board's sign-in window is an intent: the page there hands a `lithic://` address to
+/// this app, and the address arrives on the launch intent (or, for an app already running, on
+/// `onNewIntent`). `MainActivity` keeps it and `LithicBridge.takeDeepLink` answers with it, so this
+/// is the page asking. Reading it consumes it: coming back from the board must not send the window
+/// there again.
+///
+/// `None` is every other answer, and there are three of them: a build with no bridge (a desktop, or
+/// a phone build whose patch step has not run), an app nobody handed anything to, and a hand-off
+/// that has already been taken.
+pub fn take_deep_link(app: &AppHandle) -> Option<String> {
+    #[cfg(target_os = "android")]
+    {
+        #[derive(serde::Deserialize)]
+        struct Answer {
+            #[serde(default)]
+            link: Option<String>,
+        }
+        // A bridge that cannot be reached is the same answer as no hand-off: the page has nothing
+        // to open either way, and saying so twice would only be a sentence nobody can act on.
+        let answer: Answer = bridge(app).ok()?.run_mobile_plugin("takeDeepLink", serde_json::json!({})).ok()?;
+        answer.link.filter(|link| !link.is_empty())
+    }
+    #[cfg(not(target_os = "android"))]
+    {
+        let _ = app;
+        None
+    }
+}
+
 /// A document's text, read through the platform's own resolver.
 ///
 /// The reference is not a path and cannot be handed to `std::fs`: `tauri-plugin-fs` turns a

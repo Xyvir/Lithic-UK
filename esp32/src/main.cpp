@@ -13,7 +13,9 @@
 const byte DNS_PORT = 53;
 IPAddress apIP(192, 168, 4, 1);
 DNSServer dnsServer;
-const char* UI_VERSION = "1.0.0"; // Increment this to force a cache refresh
+// The page is served with a year-long cache, so this is the only lever that makes a phone ask for
+// the new one: the root redirect carries the value, and a query string is a different cache key.
+const char* UI_VERSION = "1.0.4"; // Increment this to force a cache refresh
 AsyncWebServer server(80);
 
 // --- WiFi Config (flashed with the firmware, then overridden by /config.txt) ---

@@ -310,3 +310,109 @@ export function resolveMode(
 
   return isSelfHost ? 'self-host' : 'webapp';
 }
+
+/**
+ * The package an `intent://` link names to reach the app itself, and the whole of what "the app
+ * is installed" means to a web page.
+ *
+ * Naming it explicitly is what makes the chooser unnecessary: Android hands the intent to that one
+ * app, and when nothing answers, Chrome loads the browser fallback the same intent carries. So one
+ * address serves both audiences and neither has to be detected.
+ */
+export const LITHIC_APP_PACKAGE = 'com.lithic.app';
+
+/**
+ * Query key the app adds to the board's address when it opens that page in its own window, so the
+ * page can tell it is in the app rather than in a sign-in window.
+ *
+ * Both are WebViews and both answer no file chooser, but only one of them has somewhere better to
+ * go: naming the app from inside the app would bring the app forward onto itself, while naming the
+ * browser reaches the place a chooser works.
+ */
+export const LITHIC_APP_PARAM = 'in';
+
+/**
+ * Query key carrying the scheme the app should reopen the page with.
+ *
+ * A `lithic://` address says nothing about http and https, and the board is reached over http while
+ * an instance is reached over https. The page that wrote the link knows which, so it says so rather
+ * than the app guessing.
+ */
+export const LITHIC_APP_SCHEME_PARAM = 'lithic-scheme';
+
+/** Whether this page was opened by the app, at an address the app marked. */
+export function openedInApp(location: Pick<Location, 'search'>): boolean {
+  try {
+    return new URLSearchParams(location.search).get(LITHIC_APP_PARAM) === 'app';
+  } catch {
+    return false;
+  }
+}
+
+/** The same address, marked as one the app opened. */
+export function withAppMarker(url: string): string {
+  try {
+    const marked = new URL(url);
+    marked.searchParams.set(LITHIC_APP_PARAM, 'app');
+    return marked.href;
+  } catch {
+    return url;
+  }
+}
+
+/**
+ * The address an app hand-off was carrying, or null when it was not one.
+ *
+ * The app receives `lithic://<host><path>?<query>`, which is the page's own address with the scheme
+ * swapped so that Android has something to route to the app. Turning it back is the reverse swap,
+ * with the marker that says the page is now in the app and the scheme the page recorded before it
+ * left. Anything that is not a `lithic` address with a host is refused rather than guessed at: the
+ * one thing this must never do is send the window somewhere the intent did not name.
+ */
+export function boardFromDeepLink(link: string | null | undefined): string | null {
+  if (!link) return null;
+  let url: URL;
+  try {
+    url = new URL(link);
+  } catch {
+    return null;
+  }
+  if (url.protocol !== 'lithic:' || !url.host) return null;
+  const scheme = url.searchParams.get(LITHIC_APP_SCHEME_PARAM) === 'https' ? 'https' : 'http';
+  url.searchParams.delete(LITHIC_APP_SCHEME_PARAM);
+  return withAppMarker(`${scheme}://${url.host}${url.pathname}${url.search}`);
+}
+
+/**
+ * The address of this page, asked for in the app where it will answer a chooser, and in the browser
+ * where the app cannot.
+ *
+ * Chrome's intent syntax is the one hand-off a page in a window that refuses a chooser can still
+ * make, and it was measured on the board: a plain link to another host, a new window and a link to
+ * the board under another name all stayed in the window, while an intent reached the browser with
+ * the page loaded and its picker working. The browser form is the one to keep beside it: it is what
+ * a device without the app installs, and what a board's own window reaches on every phone that has
+ * never seen this app.
+ */
+export function handoffIntent(
+  location: Pick<Location, 'protocol' | 'host' | 'pathname' | 'search'>,
+  target: 'app' | 'browser'
+): string {
+  const scheme = location.protocol.replace(':', '');
+  const here = `${location.protocol}//${location.host}${location.pathname}${location.search}`;
+  const fallback = `S.browser_fallback_url=${encodeURIComponent(here)};`;
+  if (target === 'browser') {
+    return (
+      `intent://${location.host}${location.pathname}${location.search}#Intent;` +
+      `scheme=${scheme};package=com.android.chrome;${fallback}end`
+    );
+  }
+  // The app is asked for a `lithic://` address, which is this page's own with the scheme swapped,
+  // and it carries the real scheme so the app can rebuild the address it was actually about.
+  const separator = location.search ? '&' : '?';
+  const carried = `${location.search}${separator}${LITHIC_APP_SCHEME_PARAM}=${scheme}`;
+  return (
+    `intent://${location.host}${location.pathname}${carried}#Intent;` +
+    `scheme=lithic;package=${LITHIC_APP_PACKAGE};${fallback}end`
+  );
+}

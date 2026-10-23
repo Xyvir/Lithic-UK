@@ -293,6 +293,22 @@ pub fn document_name(app: &tauri::AppHandle, document: &str) -> String {
     }
 }
 
+/// The board this app was asked to open, if it was asked, and only once.
+///
+/// Android alone has an answer, and it is not a capability the page can read from
+/// `capabilities()`: a hand-off is something that happened, not something the platform can do. A
+/// tap in a board's sign-in window reaches this app as a `lithic://` address on its launch intent,
+/// which `android.rs` keeps and hands over here exactly once so that coming back from the board
+/// does not send the window there again.
+///
+/// Every desktop answers `None`, which is also what a phone that was started normally answers.
+pub fn take_deep_link(app: &tauri::AppHandle) -> Option<String> {
+    match current() {
+        Os::Android => android::take_deep_link(app),
+        _ => None,
+    }
+}
+
 /// Whether a pick on this platform answers with a reference rather than a path.
 ///
 /// True on Android alone, where the platform's chooser hands over a `content://` URI whose grant

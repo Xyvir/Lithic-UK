@@ -528,6 +528,18 @@ h1 { flex: none; min-width: 0; margin: 0; color: var(--lithic-ink-strong); font-
 }
 .action-pair .bookmark-button svg { width: 20px; height: 24px; overflow: visible; }
 .action-button:disabled { cursor: wait; opacity: 0.55; }
+/*
+ * The mount control once a chooser has been refused: an anchor wearing the button's face, because
+ * what it does now is hand the page to another app rather than open anything here. A button
+ * centres its own label and an anchor does not, hence the grid.
+ */
+a.action-button {
+  display: grid;
+  place-items: center;
+  box-sizing: border-box;
+  text-align: center;
+  text-decoration: none;
+}
 .bookmark-button {
   display: grid;
   place-items: center;

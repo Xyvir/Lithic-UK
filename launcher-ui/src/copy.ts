@@ -782,6 +782,11 @@ const en = {
       names.length === 1 ? `Uploading ${names[0]}…` : `Uploading ${names.length} Liths…`,
     uploaded: (count: number) => `Uploaded ${count} Liths`,
     uploadFailed: (detail: string) => `Could not upload: ${detail}`,
+    /**
+     * A chooser the platform never drew, which leaves one action: the control hands this page to a
+     * browser, and this says what one press will do. No address: the link carries it.
+     */
+    pickerUnavailable: () => 'This screen cannot open a file picker. Tap to open this page in your browser.',
     replaceOne: 'Replace this Lith?',
     replaceMany: 'Replace these Liths?',
     replaceBodyOne: (name: string) => `${name} is already on this server. Uploading replaces it.`,
@@ -1460,6 +1465,7 @@ const es: Copy = {
       names.length === 1 ? `Subiendo ${names[0]}…` : `Subiendo ${names.length} Liths…`,
     uploaded: (count: number) => `${count} Liths subidos`,
     uploadFailed: (detail: string) => `No se pudo subir: ${detail}`,
+    pickerUnavailable: () => 'Esta pantalla no puede abrir un selector de archivos. Toca para abrir esta página en tu navegador.',
     replaceOne: '¿Sustituir este Lith?',
     replaceMany: '¿Sustituir estos Liths?',
     replaceBodyOne: (name: string) => `${name} ya está en este servidor. Subirlo lo sustituye.`,
@@ -2130,6 +2136,7 @@ const fr: Copy = {
       names.length === 1 ? `Envoi de ${names[0]}…` : `Envoi de ${names.length} Liths…`,
     uploaded: (count: number) => `${count} Liths envoyés`,
     uploadFailed: (detail: string) => `Impossible d’envoyer : ${detail}`,
+    pickerUnavailable: () => 'Cet écran ne peut pas ouvrir un sélecteur de fichiers. Touchez pour ouvrir cette page dans votre navigateur.',
     replaceOne: 'Remplacer ce Lith ?',
     replaceMany: 'Remplacer ces Liths ?',
     replaceBodyOne: (name: string) => `${name} est déjà sur ce serveur. L’envoyer le remplace.`,
@@ -2796,6 +2803,7 @@ const de: Copy = {
       names.length === 1 ? `Lade ${names[0]} hoch…` : `Lade ${names.length} Liths hoch…`,
     uploaded: (count: number) => `${count} Liths hochgeladen`,
     uploadFailed: (detail: string) => `Hochladen fehlgeschlagen: ${detail}`,
+    pickerUnavailable: () => 'Dieser Bildschirm kann keine Dateiauswahl öffnen. Tippe, um diese Seite im Browser zu öffnen.',
     replaceOne: 'Diesen Lith ersetzen?',
     replaceMany: 'Diese Liths ersetzen?',
     replaceBodyOne: (name: string) => `${name} ist bereits auf diesem Server. Hochladen ersetzt ihn.`,
