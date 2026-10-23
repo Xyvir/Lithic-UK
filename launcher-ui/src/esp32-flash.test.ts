@@ -1,5 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
 import type { FlashOptions } from 'esptool-js';
 import {
   ESP32_CONFIG_REGION,
@@ -38,6 +40,56 @@ function images(): Esp32Image[] {
 }
 
 const PLAN_ADDRESSES = [0x1000, 0x8000, 0xe000, 0x10000, 0x150000, 0x3f0000];
+
+/**
+ * The partition table, read the way the board is built with it.
+ *
+ * `esp32/partitions.csv` is the file the firmware is linked against, and the table above is the
+ * same fact written a second time for the flasher. A region moved in one and not the other is the
+ * one mistake that reaches a person as a board that will not boot, so the two are compared here
+ * rather than trusted to stay in step.
+ */
+function partition(name: string): { offset: number; size: number } {
+  const csv = readFileSync(fileURLToPath(new URL('../../esp32/partitions.csv', import.meta.url)), 'utf8');
+  const rows = csv
+    .split(/\r?\n/)
+    .map((line) => line.replace(/#.*/, '').trim())
+    .filter(Boolean)
+    .map((line) => line.split(',').map((field) => field.trim()));
+  const row = rows.find((fields) => fields[0] === name);
+  assert.ok(row, `esp32/partitions.csv has a ${name} row`);
+  const offset = Number(row[3]);
+  const size = Number(row[4]);
+  assert.ok(Number.isFinite(offset) && Number.isFinite(size), `${name} has a readable offset and size`);
+  return { offset, size };
+}
+
+test('the flash plan follows the partition table the board is built with', () => {
+  const inPlan = (file: string) => {
+    const region = ESP32_REGIONS.find((candidate) => candidate.file === file);
+    assert.ok(region, `${file} is in the flash plan`);
+    return region;
+  };
+
+  // The three regions the table places, and the blocks that are written at them.
+  const app = partition('app0');
+  assert.equal(inPlan('firmware.bin').address, app.offset);
+  assert.equal(inPlan('firmware.bin').limit, app.size);
+  const spiffs = partition('spiffs');
+  assert.equal(inPlan('littlefs.bin').address, spiffs.offset);
+  assert.equal(inPlan('littlefs.bin').limit, spiffs.size);
+  const cfg = partition('cfg');
+  assert.equal(ESP32_CONFIG_REGION.address, cfg.offset);
+  assert.equal(ESP32_CONFIG_REGION.limit, cfg.size);
+  // And the one the table moves without the flasher having to be told twice: the OTA data block
+  // that decides which application slot the ROM boots.
+  assert.equal(inPlan('boot_app0.bin').address, partition('otadata').offset);
+
+  // The two addresses that are the ROM's rather than the table's, said out loud so a table edit
+  // cannot quietly move a board's bootloader.
+  assert.equal(inPlan('bootloader.bin').address, 0x1000);
+  assert.equal(inPlan('partitions.bin').address, 0x8000);
+});
 
 test('the images are written at the offsets the partition table fixes', () => {
   assert.deepEqual(

@@ -70,14 +70,14 @@ jobs:
       - name: Build the application
         run: pio run --project-dir esp32
 
-      # A build that still fetched pages from a URL would leave no .gz behind, and the
-      # firmware serving /src/*.gz would answer 404 on every page. Said here rather
-      # than discovered on a board.
+      # The board serves these three files, so they have to be this commit's. A build that
+      # still fetched pages from a URL would leave no .gz behind and the firmware would answer
+      # 404 on every page; a staging step that left an older page would put a UI on the board
+      # that is not the one in this repository, visible only on a phone. Each staged file is
+      # inflated and compared with its source, and the missing case fails here too (the check
+      # takes `--if-staged` only where nothing has been built yet).
       - name: Check the staged pages
-        run: |
-          test -s esp32/data/src/launcher.html.gz
-          test -s esp32/data/src/lithic.html.gz
-          test -s esp32/data/offline-service-worker.js
+        run: node scripts/check-esp32-staged-pages.mjs
 
       - name: Build the filesystem image
         run: pio run --project-dir esp32 --target buildfs
@@ -101,9 +101,25 @@ jobs:
           git -c user.name='github-actions[bot]' \
               -c user.email='41898282+github-actions[bot]@users.noreply.github.com' \
               commit -q -m "ESP32 firmware for ${GITHUB_SHA}"
-          git push --force \
-            "https://x-access-token:${GITHUB_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" \
-            esp32-firmware
+          # GitHub answers a push of several megabytes with an HTTP 408 now and then, and a run
+          # that has already built five images should not be thrown away over one. Three tries,
+          # waiting longer each time; the push is idempotent, so a retry after an attempt that
+          # actually landed reports everything up to date and succeeds.
+          pushed=0
+          for attempt in 1 2 3; do
+            if git push --force \
+                 "https://x-access-token:${GITHUB_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" \
+                 esp32-firmware; then
+              pushed=1
+              break
+            fi
+            echo "push attempt ${attempt} failed; retrying"
+            sleep "$((attempt * 10))"
+          done
+          if [ "$pushed" != 1 ]; then
+            echo 'The esp32-firmware branch was not updated after three attempts.' >&2
+            exit 1
+          fi
 
       - name: Publish the flash images
         uses: softprops/action-gh-release@v2
