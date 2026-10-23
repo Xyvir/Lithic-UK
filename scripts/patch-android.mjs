@@ -20,12 +20,12 @@
  *      hand its page to this app and every phone falls through to the browser instead. The filter
  *      is added to the activity that hosts the webview; see `DEEP_LINK_FILTER`.
  *
- *   4. A release build carries no signing config, so `--release` writes an unsigned APK that
- *      Android refuses to install. The key cannot live in the repository and the tree it has to
- *      land in is rewritten on every run, so the configuration is written here from the
- *      environment, and only when the release workflow has put the secrets there. A local run
- *      leaves the template alone (`patchReleaseSigning` answers false) and still builds a debug
- *      APK; the release workflow builds `--release` and this is what signs it.
+ *   4. A release build carries no signing config in the template, so building for release writes
+ *      an unsigned APK that Android refuses to install. The key cannot live in the repository
+ *      and the tree it has to land in is rewritten on every run, so the configuration is written
+ *      here from the environment, and only when the release workflow has put the secrets there.
+ *      A local run leaves the template alone (`patchReleaseSigning` answers false) and still builds a
+ *      debug APK; the release workflow builds a release APK and this is what signs it.
  *
  * `init` rewrites this tree on every run, so the patch cannot be an edit of the generated files:
  * it is this script, run after `init` and before the build, in the release workflow and in the

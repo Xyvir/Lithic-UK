@@ -324,10 +324,10 @@ function checkCargoAvailable() {
  * bar overlapped the launcher's header.
  *
  * Two more facts are pinned because each is a silent failure rather than a visible one. The
- * build must be `--release`, because the signing config the patch writes lives on the release
- * build type: a `--debug` build ignores it and ships something signed with a key the runner
- * invented, which installs once and then never updates. And the patch step must be handed the
- * keystore at all, because without it the same thing happens one layer earlier.
+ * build must be a release build (not `--debug`), because the signing config the patch writes
+ * lives on the release build type: a `--debug` build ignores it and ships something signed with
+ * a key the runner invented, which installs once and then never updates. And the patch step
+ * must be handed the keystore at all, because without it the same thing happens one layer earlier.
  *
  * Returns null when the job patches what init wrote, else a failure message.
  */
@@ -360,8 +360,8 @@ function checkAndroidPatchWiring() {
     return `${file}: the Android patch runs after the build, which has already packaged the unpatched project`;
   }
   const build = buildIndex === -1 ? null : steps[buildIndex];
-  if (build && !/--release\b/.test(run(build))) {
-    return `${file}: the Android build does not pass --release, so the signing config the patch wrote is unused and the APK cannot update an installed copy`;
+  if (build && /--debug\b|-d\b/.test(run(build))) {
+    return `${file}: the Android build passes --debug, so the signing config the patch wrote is unused and the APK cannot update an installed copy`;
   }
   const patch = steps[patchIndex];
   if (patch && !(patch.env && patch.env.LITHIC_ANDROID_KEYSTORE)) {
