@@ -1,0 +1,10 @@
+app:
+  name: Lithic
+  authors: Xyvir
+  category: productivity
+  description: A portability-first outliner and knowledge base that keeps each wiki in a single file.
+  icon: https://raw.githubusercontent.com/Xyvir/Lithic-UK/refs/heads/main/android-chrome-512x512.png
+  id: com.lithic.app
+  type: curated
+  releases:
+    url: https://github.com/Xyvir/Lithic-UK/releases
