@@ -33,7 +33,9 @@ Lithic ESP32 follows a **"Software as Hardware"** philosophy. By embedding the e
 
 ### 📶 WiFi Configuration
 
-By default, the ESP32 creates an access point named `Lithic_XXXX` (unique per chip) with the password `lithic123`. To customize this, create a `data/config.txt` file:
+The launcher asks for a password before it flashes a board, and writes it into the `cfg` partition in the same flash, so a flashed board comes up with the password its owner chose. The firmware copies that block into `/config.txt` on the first boot.
+
+To change the name, the password or both without flashing again, edit `data/config.txt` before the filesystem upload:
 
 ```
 # WiFi AP Settings
@@ -45,7 +47,7 @@ pass=mysecretpassword
 - **`pass`** — Access point password (minimum 8 characters for WPA2).
 - Lines starting with `#` are treated as comments.
 
-This file is listed in `.gitignore` so your credentials stay local. If no `config.txt` is present, the firmware falls back to defaults.
+This file is listed in `.gitignore` so your credentials stay local. `/config.txt` always wins over the flashed block, and with neither the board falls back to `Lithic_XXXX` and `lithic123`.
 
 ### Updating UI Assets (Without Wiping Data)
 If you want to update the Lithic UI but keep your saved files on the ESP32:

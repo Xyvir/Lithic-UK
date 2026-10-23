@@ -3,6 +3,7 @@
 #include <AsyncTCP.h>
 #include <ESPAsyncWebServer.h>
 #include <LittleFS.h>
+#include <esp_partition.h>
 #include <esp_task_wdt.h>
 
 // --- Configuration ---
@@ -15,9 +16,32 @@ DNSServer dnsServer;
 const char* UI_VERSION = "1.0.0"; // Increment this to force a cache refresh
 AsyncWebServer server(80);
 
-// --- WiFi Config (loaded from /config.txt at boot) ---
+// --- WiFi Config (flashed with the firmware, then overridden by /config.txt) ---
 String cfgSSID = "";
 String cfgPassword = "lithic123";
+// The text the launcher wrote into the `cfg` partition while it flashed this board.
+String flashedConfig = "";
+
+// One `key=value` line, shared by the flashed block and /config.txt so the two
+// cannot disagree about what a setting is called.
+void applyConfigLine(const String &rawLine) {
+    String line = rawLine;
+    line.trim();
+    if (line.length() == 0 || line.startsWith("#")) return; // skip blanks & comments
+    int sep = line.indexOf('=');
+    if (sep < 0) return;
+    String key = line.substring(0, sep);
+    String val = line.substring(sep + 1);
+    key.trim();
+    val.trim();
+    if (key == "ssid" && val.length() > 0) {
+        cfgSSID = val;
+        Serial.printf("[CONFIG] SSID override: %s\n", cfgSSID.c_str());
+    } else if (key == "pass" && val.length() > 0) {
+        cfgPassword = val;
+        Serial.println("[CONFIG] Password override loaded.");
+    }
+}
 
 // --- Dynamic SSID Generation ---
 String getDynamicSSID() {
@@ -26,6 +50,61 @@ String getDynamicSSID() {
     char ssid[25];
     snprintf(ssid, 25, "Lithic_%04X", chip);
     return String(ssid);
+}
+
+// --- Settings the launcher flashed, read from the `cfg` partition ---
+// `partitions.csv` keeps 64 KB at the end of the flash for it, outside the
+// filesystem, because the launcher cannot write a file: it hands the loader a
+// block of bytes and the loader writes them at an address.
+void loadFlashedConfig() {
+    const esp_partition_t *part = esp_partition_find_first(
+        ESP_PARTITION_TYPE_DATA, ESP_PARTITION_SUBTYPE_ANY, "cfg");
+    if (!part) {
+        Serial.println("[CONFIG] No cfg partition on this build.");
+        return;
+    }
+    static uint8_t buf[512];
+    size_t len = part->size < sizeof(buf) - 1 ? part->size : sizeof(buf) - 1;
+    if (esp_partition_read(part, 0, buf, len) != ESP_OK) {
+        Serial.println("[CONFIG] The cfg partition could not be read.");
+        return;
+    }
+    // Erased flash is 0xFF, and an older, longer block can leave bytes behind the
+    // new one. Either way the settings end at the first byte that is not text.
+    String text;
+    for (size_t i = 0; i < len; i++) {
+        if (buf[i] == 0xFF || buf[i] == 0) break;
+        text += (char)buf[i];
+    }
+    if (text.length() == 0) return;
+    int start = 0;
+    while (start < (int)text.length()) {
+        int nl = text.indexOf('\n', start);
+        if (nl < 0) {
+            applyConfigLine(text.substring(start));
+            break;
+        }
+        applyConfigLine(text.substring(start, nl));
+        start = nl + 1;
+    }
+    flashedConfig = text;
+    Serial.println("[CONFIG] Read the settings the launcher flashed.");
+}
+
+// The flashed block becomes an editable file on the first boot, so the documented
+// /config.txt exists from the start and stays the thing that wins over it.
+void seedConfigFile() {
+    if (flashedConfig.length() == 0) return;
+    if (LittleFS.exists("/config.txt")) return;
+    File f = LittleFS.open("/config.txt", "w");
+    if (!f) {
+        Serial.println("[CONFIG] /config.txt could not be created.");
+        return;
+    }
+    f.print(flashedConfig);
+    if (!flashedConfig.endsWith("\n")) f.print("\n");
+    f.close();
+    Serial.println("[CONFIG] Wrote /config.txt from the flashed settings.");
 }
 
 // --- Load WiFi Config from LittleFS ---
@@ -37,22 +116,7 @@ void loadConfig() {
     }
     Serial.println("[CONFIG] Reading /config.txt...");
     while (f.available()) {
-        String line = f.readStringUntil('\n');
-        line.trim();
-        if (line.length() == 0 || line.startsWith("#")) continue; // skip blanks & comments
-        int sep = line.indexOf('=');
-        if (sep < 0) continue;
-        String key = line.substring(0, sep);
-        String val = line.substring(sep + 1);
-        key.trim();
-        val.trim();
-        if (key == "ssid" && val.length() > 0) {
-            cfgSSID = val;
-            Serial.printf("[CONFIG] SSID override: %s\n", cfgSSID.c_str());
-        } else if (key == "pass" && val.length() > 0) {
-            cfgPassword = val;
-            Serial.println("[CONFIG] Password override loaded.");
-        }
+        applyConfigLine(f.readStringUntil('\n'));
     }
     f.close();
 }
@@ -211,6 +275,8 @@ void setup() {
     LittleFS.mkdir("/src");
 
 
+    loadFlashedConfig();
+    seedConfigFile();
     loadConfig();
 
     String currentSSID = cfgSSID.length() > 0 ? cfgSSID : getDynamicSSID();
@@ -276,11 +342,26 @@ void setup() {
     server.on("/mstile-150x150.png", HTTP_GET, [](AsyncWebServerRequest *request){ request->send(204); });
 
     // --- WEBDAV DIRECTORY LISTING (Manual PROPFIND Fallback) ---
+    // A listing belongs to a WebDAV client, and PROPFIND is the only verb that asks for one.
+    // This route used to answer every method, so a browser that landed here (a bookmark, a
+    // typed address, the old `/sync` redirect) was handed `application/xml` and drew the
+    // multistatus tree as a page, on top of whatever it had painted before. GET and HEAD are
+    // what a browser sends for a page, so this address now answers them as one.
     server.on("/sync/", HTTP_ANY, [](AsyncWebServerRequest *request){
         if (request->method() == HTTP_OPTIONS) {
             AsyncWebServerResponse *response = request->beginResponse(200);
             addCorsHeaders(response);
             request->send(response);
+            return;
+        }
+
+        if (request->method() == HTTP_GET || request->method() == HTTP_HEAD) {
+            request->redirect("/");
+            return;
+        }
+
+        if (request->method() != HTTP_PROPFIND) {
+            request->send(405, "text/plain", "Method Not Allowed");
             return;
         }
 
@@ -306,12 +387,21 @@ void setup() {
         xml += "</D:multistatus>";
         
         AsyncWebServerResponse *response = request->beginResponse(207, "application/xml", xml);
+        // A directory read is worth nothing once it is stale, and a replayed listing is a
+        // page describing files the store may no longer hold.
+        response->addHeader("Cache-Control", "no-store");
         addCorsHeaders(response);
         request->send(response);
     });
 
     server.on("/sync", HTTP_ANY, [](AsyncWebServerRequest *request){
-        request->redirect("/sync/");
+        // Without its slash this is either someone typing the store's address or a client
+        // that wants the collection listed: a browser gets the launcher, a client the listing.
+        if (request->method() == HTTP_GET || request->method() == HTTP_HEAD) {
+            request->redirect("/");
+        } else {
+            request->redirect("/sync/");
+        }
     });
 
     // --- WEBDAV .LOCK FILES AND CATCH-ALL ---

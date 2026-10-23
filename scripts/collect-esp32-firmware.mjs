@@ -26,7 +26,7 @@ const IMAGES = [
   { file: 'partitions.bin', from: 'build', limit: 0x6000 },
   { file: 'boot_app0.bin', from: 'framework', limit: 0x2000 },
   { file: 'firmware.bin', from: 'build', limit: 0x140000 },
-  { file: 'littlefs.bin', from: 'build', limit: 0x2b0000 }
+  { file: 'littlefs.bin', from: 'build', limit: 0x2a0000 }
 ];
 
 function argument(name, fallback) {

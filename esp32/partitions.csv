@@ -2,4 +2,7 @@
 nvs,      data, nvs,     0x9000,  0x5000,
 otadata,  data, ota,     0xe000,  0x2000,
 app0,     app,  ota_0,   0x10000, 0x140000, 
-spiffs,   data, spiffs,  0x150000,0x2B0000,
+spiffs,   data, spiffs,  0x150000,0x2A0000,
+# The launcher writes the board's WiFi password here when it flashes it, and
+# the firmware turns that into /config.txt on the first boot.
+cfg,      data, 0x40,    0x3F0000,0x10000,

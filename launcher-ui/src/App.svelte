@@ -42,7 +42,7 @@
   import PinEntry from './PinEntry.svelte';
   import { deleteRemoteFile, fetchRemoteFiles, fetchRemoteWiki, fetchRemoteWikiMeta, probePatchApi, createLockHeartbeat, readRemoteLock, uploadRemoteFile, webdavUrl, resolveSessionId, lithUploadName, type WebdavFile } from './webdav';
   import { normalizeLithName } from './legacy-saver';
-  import { esp32Percent, esp32StageLine, flashLithicAppliance, serialFlashSupported } from './esp32-flash';
+  import { esp32PasswordOk, esp32Percent, esp32StageLine, flashLithicAppliance, serialFlashSupported } from './esp32-flash';
   import { documentStem, typedDocumentName } from './document-format';
   import { searchCachedWikis } from './cache-search';
   import { matchMarkup, showsForQuery, titleMatches, titleMarkup } from './name-match';
@@ -315,14 +315,19 @@ import { backupFileName, collectInstanceBackup, mergeBookmarks, parseInstanceBac
   let showBookmarkModal = false;
 
   /**
-   * The one-time flash offer. A blank board is its whole subject, so nothing on this page
-   * feeds it: the images come from the firmware branch and the run reports one line.
+   * The one-time flash offer. A blank board is its whole subject, so the page feeds it one
+   * thing: the password the board will broadcast its network with. The images come from the
+   * firmware branch, and the password is written into the flash beside them.
    */
   let flashShow = false;
   let flashBusy = false;
   let flashLine = '';
   let flashProblem = '';
   let flashPercent = 0;
+  let flashPassword = '';
+  /** Whether the flash may start, which is the one thing the field decides. */
+  let flashPasswordOk = false;
+  $: flashPasswordOk = esp32PasswordOk(flashPassword);
   /** The handoff in flight, so the row cannot be pressed twice while a browser starts. */
   let flashBrowserBusy = false;
   /**
@@ -6398,6 +6403,7 @@ import { backupFileName, collectInstanceBackup, mergeBookmarks, parseInstanceBac
     flashLine = copy.esp32.downloading;
     try {
       await flashLithicAppliance({
+        password: flashPassword,
         onStage: (stage) => {
           flashLine = esp32StageLine(stage);
         },
@@ -6405,6 +6411,8 @@ import { backupFileName, collectInstanceBackup, mergeBookmarks, parseInstanceBac
           flashPercent = esp32Percent(progress);
         }
       });
+      // The password is on the board now, so the field stops holding a secret.
+      flashPassword = '';
     } catch (error) {
       flashProblem = copy.esp32.failed(error instanceof Error ? error.message : String(error));
       flashLine = '';
@@ -6987,22 +6995,29 @@ import { backupFileName, collectInstanceBackup, mergeBookmarks, parseInstanceBac
   {/if}
   {#if flashShow}
     <!--
-      The one-time flash offer. A blank board is the subject, so the dialog asks for nothing:
-      it reads the published images, writes them, and lets go of the port. The stages share
-      one line because only one can be happening, and the button stays disabled for the run
-      rather than offering a second start over the top of the first. It opens only from the
-      manager row, which is drawn only where Web Serial exists, so there is no unsupported
-      shape to draw here.
+      The one-time flash offer. A blank board is the subject, so the dialog asks for one thing:
+      the password the board will broadcast its network with, which is written into the flash
+      beside the published images. The button waits for a usable password and then stays
+      disabled for the run rather than offering a second start over the top of the first. It
+      opens only from the manager row, which is drawn only where Web Serial exists, so there
+      is no unsupported shape to draw here.
     -->
     <div class="modal-overlay" role="presentation" on:click={(event) => event.currentTarget === event.target && closeFlash()}>
       <div class="launcher-modal flash-modal" role="dialog" aria-modal="true" aria-labelledby="flash-title">
         <button class="modal-close" aria-label={copy.esp32.closeAria} disabled={flashBusy} on:click={closeFlash}>×</button>
         <h2 id="flash-title">{copy.esp32.title}</h2>
         <p>{copy.esp32.intro}</p>
-        {#if flashLine}<p class="status-line" role="status">{flashLine}{#if flashBusy && flashPercent > 0} {flashPercent}%{/if}</p>{/if}
+        <label class="flash-field">
+          <span>{copy.esp32.passwordLabel}</span>
+          <input bind:value={flashPassword} type="password" autocomplete="new-password" aria-describedby="flash-password-rule" disabled={flashBusy} />
+        </label>
+        <p class="flash-rule" id="flash-password-rule">{copy.esp32.passwordRule}</p>
+        {#if flashLine}
+          <p class="status-line" role="status">{flashLine}{#if flashBusy && flashPercent > 0}{' - '}{flashPercent}%{/if}</p>
+        {/if}
         {#if flashProblem}<p class="status-line error" role="alert">{flashProblem}</p>{/if}
         <div class="modal-actions">
-          <button class="modal-action" disabled={flashBusy} on:click={runFlash}>{copy.esp32.flash}</button>
+          <button class="modal-action" disabled={flashBusy || !flashPasswordOk} on:click={runFlash}>{copy.esp32.flash}</button>
         </div>
       </div>
     </div>

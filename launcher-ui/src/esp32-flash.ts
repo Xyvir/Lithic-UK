@@ -3,9 +3,16 @@
  *
  * `esptool-js` speaks the ROM download protocol and writes bytes at an address. It
  * carries no filesystem, so it cannot produce the littlefs image the board serves its
- * pages from. That image, the bootloader, the partition table, the OTA block and the
- * application are all built by the ESP32 project's own PlatformIO build, published
- * beside each other, and written here at the offsets `esp32/partitions.csv` fixes.
+ * pages from, and it cannot write a file into one. That image, the bootloader, the
+ * partition table, the OTA block and the application are all built by the ESP32
+ * project's own PlatformIO build, published beside each other, and written here at the
+ * offsets `esp32/partitions.csv` fixes.
+ *
+ * The one thing built here rather than published is the board's own settings. A blank
+ * board arrives with a password nobody chose, so the dialog asks for one and this module
+ * turns it into a text block written to the `cfg` partition in the same flash. The
+ * firmware reads that block at boot and turns it into `/config.txt`, which is why no
+ * filesystem work is needed on this side.
  *
  * This is the single runtime read from another host anywhere in the launcher, and it
  * is the exception `agents.md` names: everything else the launcher needs is in the
@@ -41,20 +48,36 @@ export interface Esp32Region {
    * error page does not, which is what this catches before anything touches a chip.
    */
   magic: readonly number[];
+  /**
+   * Written by this module rather than downloaded: the board's own settings, which
+   * cannot be published because they belong to one person and one board.
+   */
+  generated?: boolean;
 }
+
+/** Where the password the dialog asks for is written, outside the filesystem. */
+export const ESP32_CONFIG_REGION: Esp32Region = {
+  file: 'config.bin',
+  address: 0x3f0000,
+  limit: 0x10000,
+  magic: [],
+  generated: true
+};
 
 /**
  * The layout read off `esp32/partitions.csv`: the bootloader, the partition table, the
  * OTA data block and the application fill the space below the filesystem, which owns
- * the rest of the 4 MB flash. The limits are the gaps between the regions, so a wrong
- * image fails before it can be written over its neighbour.
+ * the next 2.6 MB, and the `cfg` block owns the 64 KB after that. The limits are the
+ * gaps between the regions, so a wrong image fails before it can be written over its
+ * neighbour.
  */
 export const ESP32_REGIONS: readonly Esp32Region[] = [
   { file: 'bootloader.bin', address: 0x1000, limit: 0x7000, magic: [0xe9] },
   { file: 'partitions.bin', address: 0x8000, limit: 0x6000, magic: [0xaa, 0x50] },
   { file: 'boot_app0.bin', address: 0xe000, limit: 0x2000, magic: [] },
   { file: 'firmware.bin', address: 0x10000, limit: 0x140000, magic: [0xe9] },
-  { file: 'littlefs.bin', address: 0x150000, limit: 0x2b0000, magic: [] }
+  { file: 'littlefs.bin', address: 0x150000, limit: 0x2a0000, magic: [] },
+  ESP32_CONFIG_REGION
 ];
 
 /** One image held in memory, ready to be handed to the loader. */
@@ -122,17 +145,57 @@ export function checkEsp32Image(region: Esp32Region, data: Uint8Array): void {
   if (wrong) throw new Error(`${region.file}: not an ESP image`);
 }
 
+/** WPA2's own floor, and the longest passphrase it accepts. */
+export const ESP32_PASSWORD_MIN = 8;
+export const ESP32_PASSWORD_MAX = 63;
+
 /**
- * Download every image, in layout order. The fetch is the offer's one network read;
- * anything that fails names the file so the dialog can say which one.
+ * The password the board will store, which is what was typed without the spaces
+ * around it: the firmware trims both ends of a config value, so a trailing space
+ * would be a password nobody could type back in.
+ */
+export function normalizeEsp32Password(raw: string): string {
+  return raw.trim();
+}
+
+/** Whether the dialog may flash with this password. */
+export function esp32PasswordOk(raw: string): boolean {
+  const password = normalizeEsp32Password(raw);
+  return (
+    password.length >= ESP32_PASSWORD_MIN &&
+    password.length <= ESP32_PASSWORD_MAX &&
+    !/[\u0000-\u001f\u007f]/.test(password)
+  );
+}
+
+/**
+ * The `cfg` block: the two lines `/config.txt` holds, with the password the person
+ * chose. Written as bytes because the loader has no filesystem, and the firmware
+ * writes the same text to `/config.txt` on the first boot.
+ */
+export function esp32ConfigImage(password: string): Uint8Array {
+  const board = normalizeEsp32Password(password);
+  if (!esp32PasswordOk(board)) {
+    throw new Error(`the board password needs ${ESP32_PASSWORD_MIN} to ${ESP32_PASSWORD_MAX} characters`);
+  }
+  return new TextEncoder().encode(
+    `# Written by the launcher when this board was flashed.\npass=${board}\n`
+  );
+}
+
+/**
+ * Download every published image, in layout order. The generated block is made here
+ * rather than fetched, so it is not in this loop. The fetch is the offer's one network
+ * read; anything that fails names the file so the dialog can say which one.
  */
 export async function fetchEsp32Images(
   fetchImpl: typeof fetch = fetch,
   onProgress?: (file: string, index: number, count: number) => void
 ): Promise<Esp32Image[]> {
   const images: Esp32Image[] = [];
-  for (const [index, region] of ESP32_REGIONS.entries()) {
-    onProgress?.(region.file, index + 1, ESP32_REGIONS.length);
+  const published = ESP32_REGIONS.filter((region) => !region.generated);
+  for (const [index, region] of published.entries()) {
+    onProgress?.(region.file, index + 1, published.length);
     const response = await fetchImpl(esp32ImageUrl(region.file));
     if (!response.ok) throw new Error(`${region.file}: HTTP ${response.status}`);
     const data = new Uint8Array(await response.arrayBuffer());
@@ -181,10 +244,10 @@ export interface WriteEsp32Options {
  */
 export async function writeEsp32(options: WriteEsp32Options): Promise<void> {
   const plan = esp32FlashPlan(options.images);
-  const sizes = options.images
-    .slice()
-    .sort((left, right) => left.address - right.address)
-    .map((image) => image.data.length);
+  // The plan is the address-ordered list, so the names a progress report carries have
+  // to come from that list rather than from the order the images arrived in.
+  const ordered = [...options.images].sort((left, right) => left.address - right.address);
+  const sizes = ordered.map((image) => image.data.length);
   const totals = sizes.map((_, index) => sizes.slice(0, index + 1).reduce((sum, size) => sum + size, 0));
   const grandTotal = totals[totals.length - 1] ?? 1;
 
@@ -199,7 +262,7 @@ export async function writeEsp32(options: WriteEsp32Options): Promise<void> {
     reportProgress: (fileIndex, written, total) => {
       const before = fileIndex > 0 ? totals[fileIndex - 1] : 0;
       options.onProgress?.({
-        file: options.images[fileIndex]?.file ?? '',
+        file: ordered[fileIndex]?.file ?? '',
         written: before + Math.min(written, total),
         total: grandTotal
       });
@@ -224,6 +287,8 @@ const quietTerminal = {
 
 export interface FlashLithicOptions {
   fetchImpl?: typeof fetch;
+  /** The WiFi password the person chose, flashed into the `cfg` partition. */
+  password: string;
   onStage?: (stage: Esp32Stage, detail: string) => void;
   onProgress?: (progress: Esp32FlashProgress) => void;
 }
@@ -233,7 +298,7 @@ export interface FlashLithicOptions {
  * new firmware, and let go of the port either way. A blank board needs no buttons
  * pressed; the loader's own reset sequence puts it in download mode.
  */
-export async function flashLithicAppliance(options: FlashLithicOptions = {}): Promise<void> {
+export async function flashLithicAppliance(options: FlashLithicOptions): Promise<void> {
   const { fetchImpl = fetch, onStage, onProgress } = options;
   // Asked before the download rather than after it: a browser with no serial port would
   // otherwise pull about four megabytes and only then say it cannot reach a board. That is
@@ -242,6 +307,11 @@ export async function flashLithicAppliance(options: FlashLithicOptions = {}): Pr
   const images = await fetchEsp32Images(fetchImpl, (file, index, count) =>
     onStage?.('downloading', `${index}/${count} ${file}`)
   );
+  images.push({
+    file: ESP32_CONFIG_REGION.file,
+    address: ESP32_CONFIG_REGION.address,
+    data: esp32ConfigImage(options.password)
+  });
   onStage?.('connecting', '');
   const port = await navigator.serial.requestPort();
   const transport = new Transport(port, true);

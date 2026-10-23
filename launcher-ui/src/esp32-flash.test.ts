@@ -2,12 +2,18 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import type { FlashOptions } from 'esptool-js';
 import {
+  ESP32_CONFIG_REGION,
+  ESP32_PASSWORD_MAX,
+  ESP32_PASSWORD_MIN,
   ESP32_REGIONS,
   checkEsp32Image,
+  esp32ConfigImage,
   esp32FlashPlan,
   esp32ImageUrl,
+  esp32PasswordOk,
   fetchEsp32Images,
   flashLithicAppliance,
+  normalizeEsp32Password,
   serialFlashSupported,
   writeEsp32,
   type Esp32Image
@@ -22,15 +28,18 @@ function imageBytes(file: string, length = 4): Uint8Array {
   return bytes;
 }
 
+/** Everything a run writes: the published images plus the settings it builds here. */
 function images(): Esp32Image[] {
   return ESP32_REGIONS.map((region) => ({
     file: region.file,
     address: region.address,
-    data: imageBytes(region.file)
+    data: region.generated ? esp32ConfigImage('correct horse') : imageBytes(region.file)
   }));
 }
 
-test('the five images are written at the offsets the partition table fixes', () => {
+const PLAN_ADDRESSES = [0x1000, 0x8000, 0xe000, 0x10000, 0x150000, 0x3f0000];
+
+test('the images are written at the offsets the partition table fixes', () => {
   assert.deepEqual(
     ESP32_REGIONS.map((region) => [region.file, region.address]),
     [
@@ -38,15 +47,38 @@ test('the five images are written at the offsets the partition table fixes', () 
       ['partitions.bin', 0x8000],
       ['boot_app0.bin', 0xe000],
       ['firmware.bin', 0x10000],
-      ['littlefs.bin', 0x150000]
+      ['littlefs.bin', 0x150000],
+      ['config.bin', 0x3f0000]
     ]
   );
-  // The filesystem owns the rest of the flash, and its limit is the partition's size.
-  const littlefs = ESP32_REGIONS[ESP32_REGIONS.length - 1];
-  assert.equal(littlefs.address + littlefs.limit, 0x400000);
+  // The filesystem ends where the settings block begins, and the block ends at 4 MB.
+  const littlefs = ESP32_REGIONS.find((region) => region.file === 'littlefs.bin');
+  assert.ok(littlefs);
+  assert.equal(littlefs.address + littlefs.limit, ESP32_CONFIG_REGION.address);
+  assert.equal(ESP32_CONFIG_REGION.address + ESP32_CONFIG_REGION.limit, 0x400000);
 });
 
-test('every image is fetched from one fixed address a page is allowed to read', () => {
+test('the settings block is the text /config.txt holds, with the chosen password', () => {
+  const text = new TextDecoder().decode(esp32ConfigImage('  correct horse  '));
+  assert.equal(text, '# Written by the launcher when this board was flashed.\npass=correct horse\n');
+  // The firmware writes this same text to the file, so it has to parse as one.
+  assert.ok(text.split('\n').includes('pass=correct horse'));
+});
+
+test('a password the board cannot use is refused before anything is written', () => {
+  assert.throws(() => esp32ConfigImage('short'), /8 to 63/);
+  assert.throws(() => esp32ConfigImage('x'.repeat(ESP32_PASSWORD_MAX + 1)), /8 to 63/);
+  assert.throws(() => esp32ConfigImage('long enough\nsecond line'), /8 to 63/);
+  assert.equal(esp32PasswordOk('x'.repeat(ESP32_PASSWORD_MIN)), true);
+  assert.equal(esp32PasswordOk('short'), false);
+  assert.equal(esp32PasswordOk(''), false);
+  assert.equal(normalizeEsp32Password('  correct horse  '), 'correct horse');
+  // The spaces around it are trimmed for the person rather than turned into a
+  // password nobody can type back in.
+  assert.equal(esp32PasswordOk('  correct horse  '), true);
+});
+
+test('every published image is fetched from one fixed address a page is allowed to read', () => {
   const url = esp32ImageUrl('firmware.bin');
   assert.equal(url, 'https://raw.githubusercontent.com/Xyvir/Lithic-UK/esp32-firmware/firmware.bin');
   // Not a release download: GitHub sends no CORS header on those, so a page cannot read
@@ -74,7 +106,7 @@ test('the plan sorts by address and refuses an overlap', () => {
   const plan = esp32FlashPlan([...images()].reverse());
   assert.deepEqual(
     plan.map((entry) => entry.address),
-    [0x1000, 0x8000, 0xe000, 0x10000, 0x150000]
+    PLAN_ADDRESSES
   );
 
   const overlapping = [...images(), { file: 'second-firmware.bin', address: 0x10000, data: imageBytes('firmware.bin') }];
@@ -86,7 +118,7 @@ test('the plan refuses an address nothing belongs at', () => {
   assert.throws(() => esp32FlashPlan(stray), /nothing belongs/);
 });
 
-test('a download reports progress per file and keeps the layout order', async () => {
+test('a download asks for the published images and leaves the settings block alone', async () => {
   const requested: string[] = [];
   const seen: string[] = [];
   const fetched = await fetchEsp32Images(
@@ -97,9 +129,15 @@ test('a download reports progress per file and keeps the layout order', async ()
     }) as typeof fetch,
     (file) => seen.push(file)
   );
-  assert.deepEqual(fetched.map((image) => image.file), ESP32_REGIONS.map((region) => region.file));
-  assert.deepEqual(requested, ESP32_REGIONS.map((region) => region.file));
-  assert.equal(seen.length, ESP32_REGIONS.length);
+  assert.deepEqual(fetched.map((image) => image.file), [
+    'bootloader.bin',
+    'partitions.bin',
+    'boot_app0.bin',
+    'firmware.bin',
+    'littlefs.bin'
+  ]);
+  assert.deepEqual(requested, fetched.map((image) => image.file));
+  assert.equal(seen.length, fetched.length);
 });
 
 test('a missing asset names the file it could not download', async () => {
@@ -125,7 +163,7 @@ test('the write hands one plan to one writeFlash call', async () => {
   const flash = calls[0];
   assert.deepEqual(
     flash.fileArray.map((entry) => entry.address),
-    [0x1000, 0x8000, 0xe000, 0x10000, 0x150000]
+    PLAN_ADDRESSES
   );
   // A blank board is the offer's subject, and the chip's own settings survive.
   assert.equal(flash.eraseAll, true);
@@ -135,23 +173,33 @@ test('the write hands one plan to one writeFlash call', async () => {
   assert.equal(flash.flashSize, 'keep');
 });
 
-test('progress is measured across the whole plan, not per file', async () => {
-  const reported: number[] = [];
+test('progress is measured across the whole plan and names the file at its address', async () => {
+  const reported: Array<{ written: number; file: string }> = [];
   await writeEsp32({
-    images: images(),
+    // Deliberately not in address order: the names a report carries belong to the
+    // plan, which is sorted, not to the order the images arrived in.
+    images: [...images()].reverse(),
     loader: {
       main: async () => 'ESP32',
       writeFlash: async (options) => {
-        // Two files done, each reporting its own bytes written.
-        options.reportProgress?.(0, 4, 4);
-        options.reportProgress?.(1, 4, 4);
+        for (let index = 0; index < 6; index += 1) options.reportProgress?.(index, 4, 4);
       }
     },
-    onProgress: (progress) => reported.push(progress.written)
+    onProgress: (progress) => reported.push({ written: progress.written, file: progress.file })
   });
 
-  assert.equal(reported.length, 2);
-  assert.ok(reported[0] > 0 && reported[0] < reported[1]);
+  assert.equal(reported.length, 6);
+  assert.deepEqual(reported.map((entry) => entry.file), [
+    'bootloader.bin',
+    'partitions.bin',
+    'boot_app0.bin',
+    'firmware.bin',
+    'littlefs.bin',
+    'config.bin'
+  ]);
+  for (let index = 1; index < reported.length; index += 1) {
+    assert.ok(reported[index].written > reported[index - 1].written);
+  }
 });
 
 test('Web Serial is absent where there is no browser', () => {
@@ -165,6 +213,6 @@ test('a browser with no serial port is told so before anything is downloaded', a
     return { ok: true, status: 200, arrayBuffer: async () => new ArrayBuffer(0) } as Response;
   }) as typeof fetch;
 
-  await assert.rejects(flashLithicAppliance({ fetchImpl: fetcher }), /Web Serial is not available/);
+  await assert.rejects(flashLithicAppliance({ password: 'correct horse', fetchImpl: fetcher }), /Web Serial is not available/);
   assert.equal(fetched, 0);
 });

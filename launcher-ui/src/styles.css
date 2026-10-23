@@ -901,6 +901,11 @@ footer > * { pointer-events: auto; }
 .launcher-modal p { color: var(--lithic-ink-soft); line-height: 1.5; }
 .launcher-modal input { width: 100%; padding: 12px 10px; border: 1px solid var(--lithic-line); border-radius: 7px; background: var(--lithic-surface-control); color: var(--lithic-ink); font: inherit; }
 .launcher-modal input:focus { outline: none; border-color: var(--lithic-amber); }
+/* The one field the flash offer draws: the password the board will broadcast with,
+ * and the rule the button waits on under it. */
+.flash-modal .flash-field { display: block; margin: 14px 0 0; }
+.flash-modal .flash-field > span { display: block; margin-bottom: 5px; color: var(--lithic-ink-muted); font-size: 0.85rem; }
+.flash-modal .flash-rule { margin: 6px 0 0; color: var(--lithic-ink-muted); font-size: 0.8rem; }
 .new-lith-inline {
   flex: 1 1 auto;
   min-width: 0;

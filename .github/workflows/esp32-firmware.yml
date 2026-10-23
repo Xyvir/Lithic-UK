@@ -126,4 +126,8 @@ jobs:
 
             The same five files are on the `esp32-firmware` branch, which is where the
             launcher's flash offer reads them from.
+
+            The offer also writes a sixth block it builds itself: the board's own WiFi
+            password, at 0x3F0000 in the `cfg` partition, which the firmware turns into
+            `/config.txt` on the first boot.
           files: esp32-firmware/*.bin
