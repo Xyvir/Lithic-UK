@@ -1,6 +1,6 @@
 name: Android Manual Release
 
-# The phone build: one debug-signed, universal APK, added to the same release the wiki
+# The phone build: one signed, universal APK, added to the same release the wiki
 # artifacts and the four desktop installers land on. Chained from publish-release.yml
 # once the release exists, so a build's download page carries every platform a Lithic
 # can be installed on.
@@ -22,49 +22,57 @@ name: Android Manual Release
 # "Desktop Manual Release" keeps meaning that, and it means this job can be dispatched on
 # its own while the platform is being brought up, which is the state it is in.
 #
-# WHY THE APK IS A DEBUG ONE, and it is the whole of the signing story rather than a first
-# shot at it. Android refuses an unsigned APK outright and refuses an APK whose signature
-# does not match the installed copy, so there are exactly two honest options: generate a
-# keystore and keep it, or use the debug key that `--debug` brings with it. A generated
-# keystore cannot live in the repository and nobody has put one in the secrets yet, and a
-# key generated fresh on each run would be worse than none: every release would be
-# uninstallable-over, with a "signatures do not match" the user has to work out for
-# themselves. So this build is debug-signed on purpose, the name says so, and a
-# release-signed APK (or an AAB for Play) is a follow-up that needs the two secrets and
-# nothing else in here. What that costs today is a debug Rust profile, which is slower
-# than a release one; what it buys is an artifact that installs, today, with no key
-# anywhere.
+# WHAT SIGNS IT, AND WHY THE KEY IS A SECRET RATHER THAN A FILE HERE. Android refuses an
+# unsigned package and refuses one whose signature does not match the installed copy, so an
+# updater is only as good as a key that stays the same from release to release. Every build
+# before this one was signed with a debug key the runner invented on that run: measured on
+# the published APK, the v2 certificate read `CN=Android Debug` with a `notBefore` ten
+# seconds before its own upload, so each release was uninstallable over the last one. The
+# key is now a keystore generated once for this project (RSA 4096, PKCS12, valid until
+# 2054) and kept in four repository secrets: the keystore base64, its store password, the
+# alias and the key password. Nothing in the tree holds it, and `scripts/patch-android.mjs`
+# writes the copy and the `keystore.properties` Gradle reads into the generated project,
+# because `tauri android init` rewrites that tree on every run. `--release` is what makes
+# Gradle use it; a local run names no key, leaves the template alone, and still builds a
+# debug APK. The break this makes is one release wide and deliberate: a phone holding a
+# previously published debug build has to uninstall it once to adopt a signed one, which is
+# cheaper now than after a store is listing it.
+#
+# WHAT VERSION THE APK CARRIES, and a fault this fixed rather than restated. `tauri android
+# build` writes `app/tauri.properties` from the CLI's merged config, and the CLI only ever
+# SETS `TAURI_CONFIG` (for the Rust build) and never reads it, so the `TAURI_CONFIG` line
+# this file used to carry never reached the APK at all: the published build carried
+# `versionName=0.2.0` and `versionCode=2000` from `tauri.conf.json`, read out of its
+# manifest, while the release page named a stamp. The version now goes in through
+# `--config`, which the CLI does merge: versionName is the release stamp's date and
+# versionCode is minutes since the epoch, so every build orders after the one before it,
+# which is the single property an updater needs. `LITHIC_BUILD_TAG` is still a separate
+# thing and is still what the launcher compares against the newest release.
 #
 # WHICH PHONES IT OPENS ON, and why two architectures rather than the four the template
 # assumes. The APK is gradle's `universal` flavor, which packages every ABI it is handed:
 # arm64-v8a and armeabi-v7a for phones, and x86 with x86_64 for the emulator, which is what
 # an emulator runs and no phone sold this decade does. Measured on the one published APK
-# (`Lithic_10.10.26-1817_debug.apk`, 632,262,452 bytes) by reading its zip directory rather
-# than downloading it: 595.4 MB of the 603 MB is four `lib/<abi>/libapp_lib.so` files, each
+# (`Lithic_10.10.26-1817_debug.apk`, 632,262,452 bytes, named before the key change) by
+# reading its zip directory rather than downloading it: 595.4 MB of the 603 MB is four
+# `lib/<abi>/libapp_lib.so` files, each
 # stored uncompressed (155.5 MB arm64-v8a, 156.8 MB x86_64, 146.1 MB x86, 137.1 MB
 # armeabi-v7a), and everything else together (eight `classes*.dex`, `resources.arsc`, 884
 # `res/` entries, `META-INF` and one `assets/tauri.conf.json`) is 7.3 MB, with the last
 # ~0.2 MB the zip directory and the signing block. So the emulator pair was 302.9 MB of a
 # download that no phone has ever installed. `--target aarch64 armv7` is what leaves it out:
-# cargo-mobile2 turns that into `assembleUniversalDebug -PabiList=arm64-v8a,armeabi-v7a
+# cargo-mobile2 turns that into `assembleUniversalRelease -PabiList=arm64-v8a,armeabi-v7a
 # -ParchList=arm64,armv7 -PtargetList=aarch64,armv7`, and the verification step below fails
 # the run if an `x86` slice comes back, so the saving is a fact about the artifact rather
 # than an intention. What it costs is named rather than hidden: an emulator cannot install
 # this APK, and the day one is wanted the flag loses its x86 half rather than the build
 # growing a second flavor.
 #
-# WHAT THE DEBUG KEY ACTUALLY IS, because the paragraph above was reasoned from an
-# assumption the published APK contradicts. `--debug` does not bring a debug key with it: it
-# lets the Android Gradle plugin create one at `$HOME/.android/debug.keystore` the first
-# time it needs it, and a CI runner has none. That APK's v2 signing block carries
-# `CN=Android Debug, O=Android, C=US` with `notBefore Oct 10 19:24:55 2026 GMT`, ten seconds
-# before its 19:25:05Z upload, so the key that signed it was made by that run. Android
-# compares a new signature against the installed copy and refuses a mismatch, so the next
-# APK installs over this one only after an uninstall, and that uninstall takes the app's
-# stored state with it. Which is the outcome the paragraph above calls the worst of the
-# three options, arriving by the route it says avoids it: a keystore in the repository's
-# secrets is not only the way to a `release` profile, it is the way to an APK that updates
-# in place.
+# WHY IT IS A RELEASE BUILD AND NOT A TUNED DEBUG ONE. The debug profile used to be tuned
+# from here (`CARGO_PROFILE_DEV_DEBUG=0`, `opt-level=s`, `strip=symbols`) because `--debug`
+# was the only path to an installable file. `--release` needs none of that: `Cargo.toml`'s
+# release profile already asks for LTO and a strip, and the debug tune is gone rather than
+# left in place unread.
 #
 # WHY THE GRADLE PROJECT IS NOT IN THE REPOSITORY: `tauri android init` writes
 # `src-tauri/gen/android/`, and `src-tauri/gen/` is gitignored because everything in it is
@@ -216,91 +224,92 @@ jobs:
           echo "date=$tag" >> "$GITHUB_OUTPUT"
           # The same stamp rule as the exe and the four downloads beside it
           # (MM.DD.YY-HHMM), so one release's files still read as one set rather than as a
-          # fifth naming scheme. `_debug` is part of the name and not a detail: the name is
-          # the only thing a person sees before downloading, and it is the difference
-          # between an APK that sideloads over the last one and an artifact somebody will
-          # try to update from a store build it has no signature in common with. Anything
-          # unparseable falls back to the whole tag, so a build never fails here.
+          # fifth naming scheme. The `_debug` suffix is gone with the debug key: the name now
+          # states the platform rather than the key, and every APK installs over the last one.
+          # Anything unparseable falls back to the whole tag, so a build never fails here.
           if [[ "$tag" =~ ([0-9]{4})\.([0-9]{2})\.([0-9]{2})-([0-9]{4}) ]]; then
-            apk="Lithic_${BASH_REMATCH[2]}.${BASH_REMATCH[3]}.${BASH_REMATCH[1]:2:2}-${BASH_REMATCH[4]}_debug.apk"
+            apk="Lithic_${BASH_REMATCH[2]}.${BASH_REMATCH[3]}.${BASH_REMATCH[1]:2:2}-${BASH_REMATCH[4]}.apk"
           else
-            apk="Lithic_${tag}_debug.apk"
+            apk="Lithic_${tag}.apk"
           fi
           echo "apk=$apk" >> "$GITHUB_OUTPUT"
-          # Semver for the APK's versionName, patched through TAURI_CONFIG the way the
-          # desktop jobs patch the exe's file version, with leading zeros stripped and the
-          # config's version as the fallback. Not cosmetic on Android: a leading zero is
-          # rejected outright, so an unpadded stamp is the difference between an APK and a
-          # Gradle failure.
+          # The versionName, with leading zeros stripped because Android rejects one that has
+          # them, and the versionCode, which is minutes since the epoch: monotonic across builds
+          # however the tag is spelled, and far inside Android's 2,100,000,000 ceiling. Both are
+          # handed to the build command as `--config`, which the CLI merges into the config it
+          # writes `tauri.properties` from. `TAURI_CONFIG` is what the CLI *sets* for the Rust
+          # build and never reads, which is why the line this step used to emit never reached the
+          # APK: the published builds carried versionName 0.2.0 and versionCode 2000.
           if [[ "$tag" =~ ([0-9]+)\.([0-9]+)\.([0-9]+) ]]; then
             ver="${BASH_REMATCH[1]}.$((10#${BASH_REMATCH[2]})).$((10#${BASH_REMATCH[3]}))"
           else
             ver="0.2.0"
           fi
+          code=$(( $(date -u +%s) / 60 ))
           echo "version=$ver" >> "$GITHUB_OUTPUT"
-          echo "tauri_config={\"version\":\"$ver\"}" >> "$GITHUB_OUTPUT"
+          echo "android_config={\"version\":\"$ver\",\"bundle\":{\"android\":{\"versionCode\":$code}}}" >> "$GITHUB_OUTPUT"
 
       # Generated here rather than committed (see the header). `--ci` is what stops it asking
       # whether to overwrite anything.
       - name: Initialize the Android Project
         run: npm run tauri android init -- --ci
 
-      # The project init has just written is Tauri's template, and this is where the two things
-      # wrong with it are put right: the placeholder launcher icon, and an activity that draws
-      # the page under the system bars with nothing reserving their space. The order is the
-      # point rather than a detail: init rewrites that tree on every run, so the patch has to
-      # come after it and before the build. `scripts/patch-android.mjs` verifies each thing it
-      # wrote and exits non-zero with a specific message when it cannot, because the failure
-      # mode here is an APK that installs and simply looks wrong.
+      # The key, decoded from the secret that carries it. It goes to the runner's temp directory
+      # rather than into the checkout; the patch step below copies it into the generated project,
+      # which is gitignored and dies with the runner. A missing secret fails here rather than
+      # producing an unsigned APK that Android refuses to install.
+      - name: Write the Signing Key
+        env:
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+        run: |
+          if [ -z "$ANDROID_KEYSTORE_BASE64" ]; then
+            echo "::error::ANDROID_KEYSTORE_BASE64 is not set, so there is no key to sign a release with."
+            exit 1
+          fi
+          umask 077
+          printf '%s' "$ANDROID_KEYSTORE_BASE64" | base64 -d > "$RUNNER_TEMP/lithic-release.jks"
+          if [ ! -s "$RUNNER_TEMP/lithic-release.jks" ]; then
+            echo "::error::the keystore secret decoded to nothing."
+            exit 1
+          fi
+
+      # The project init has just written is Tauri's template, and this is where the things wrong
+      # with it are put right: the placeholder launcher icon, an activity that draws the page
+      # under the system bars, the missing hand-off filter, and the release signing config the
+      # template does not carry. The order is the point rather than a detail: init rewrites that
+      # tree on every run, so the patch has to come after it and before the build.
+      # `scripts/patch-android.mjs` verifies each thing it wrote and exits non-zero with a
+      # specific message when it cannot, because the failure mode here is an APK that installs
+      # and simply looks wrong.
       - name: Patch the Generated Android Project
+        env:
+          LITHIC_ANDROID_KEYSTORE: ${{ runner.temp }}/lithic-release.jks
+          LITHIC_ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          LITHIC_ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          LITHIC_ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
         run: node scripts/patch-android.mjs
 
-      # `--apk` and not `--aab`: an AAB is a Play upload, not something a person can install,
-      # and there is no Play listing to upload to yet. No `--split-per-abi` either, because
-      # one download that opens on whichever phone fetched it is the whole point of a
+      # `--release` and not `--debug`: the release build type is the one the patch gave the
+      # keystore to, and the release Rust profile `Cargo.toml` already asks for (LTO and a strip)
+      # is both smaller and faster than the debug profile this job used to tune from its own
+      # environment. `--apk` and not `--aab`: an AAB is a Play upload, not something a person can
+      # install, and there is no Play listing to upload to yet. No `--split-per-abi` either,
+      # because one download that opens on whichever phone fetched it is the whole point of a
       # universal build; that flag is for the day the size matters more than the confusion.
-      # `--target aarch64 armv7` is the other half of that choice: the universal flavor
-      # packages every ABI it is handed, and handing it the two phone architectures is what
-      # keeps the emulator pair out of a phone's download (see the header for the numbers).
+      # `--target aarch64 armv7` is the other half of that choice: the universal flavor packages
+      # every ABI it is handed, and handing it the two phone architectures is what keeps the
+      # emulator pair out of a phone's download (see the header for the numbers).
+      #
+      # `--config` is how the version reaches `tauri.properties`; see the tag step for why the
+      # `TAURI_CONFIG` environment variable never did.
       - name: Build the APK
         env:
-          TAURI_CONFIG: ${{ steps.tag.outputs.tauri_config }}
           # Baked in for the same reason the desktop jobs bake it: the launcher compares it
           # against the newest release and offers the download page when they differ. A build
           # without it offers nothing.
           LITHIC_BUILD_TAG: ${{ steps.tag.outputs.date }}
-          # WHY THE DEBUG PROFILE IS TUNED FROM HERE RATHER THAN IN CARGO.TOML.
-          #
-          # `--debug` is what makes this APK installable at all: Android refuses an unsigned
-          # package, no keystore is in the secrets, and the debug key is the one thing this
-          # build can be signed with today. What arrives with it is cargo's `dev` profile,
-          # which is the wrong profile for a file a person downloads: full debug info, no
-          # optimisation, no dead-code elimination, and all of it inside each ABI's own
-          # library, because an ELF keeps its DWARF in the shared object rather than
-          # beside it the way a Windows build keeps a PDB.
-          #
-          # Measured on this crate's desktop build, same source, before and after the three
-          # settings below: the executable 24 MB to 13 MB, its debug information 162 MB to
-          # 9 MB, and the library target's own debug information 317 MB to 3 MB. For scale,
-          # the whole program in `release`, with the LTO and strip `Cargo.toml` already asks
-          # for, is 14 MB. The APK pays that difference once per ABI it carries, and that is
-          # where most of its size comes from: the published four-ABI APK was 603 MB of
-          # which 595.4 MB was these libraries, so this line is the whole of the story.
-          #
-          # An environment override rather than a `[profile.dev]` table, because that profile
-          # is also how the developer and the local gate iterate: `cargo check`, clippy and the
-          # test run all use it, and none of them should pay for an optimisation pass or lose
-          # the symbols a failing test's backtrace is read from. This is the one place the
-          # profile is built for a download, so this is the one place it is tuned.
-          #
-          # `debug = 0` is the whole of the size story, since the debug information is the
-          # bulk and nobody steps through a build they downloaded. The other two make what is
-          # left smaller rather than faster. No LTO: that would be paid for on each ABI of a
-          # job that is already long, for a fraction of what the first line saves.
-          CARGO_PROFILE_DEV_DEBUG: '0'
-          CARGO_PROFILE_DEV_OPT_LEVEL: 's'
-          CARGO_PROFILE_DEV_STRIP: 'symbols'
-        run: npm run tauri android build -- --debug --apk --ci --target aarch64 armv7
+          ANDROID_CONFIG: ${{ steps.tag.outputs.android_config }}
+        run: npm run tauri android build -- --release --apk --ci --target aarch64 armv7 --config "$ANDROID_CONFIG"
 
       - name: Rename Artifact
         run: |
@@ -325,8 +334,10 @@ jobs:
       # The signer is read off the CERTIFICATE rather than off one of apksigner's own labels,
       # and both its output and its silence are printed before either check: the label for a
       # signer's distinguished name is apksigner's wording and moves with its version, while
-      # what has to be behind a file called `_debug.apk` is the debug key's own `CN`, and a step
-      # that grepped for the wording once failed on a file apksigner had already accepted.
+      # what has to be behind this file is the project's own `CN`, and a step that grepped for
+      # the wording once failed on a file apksigner had already accepted. An unsigned release
+      # build fails the first check; one that fell back to the debug key fails the second,
+      # which is the difference between an APK that updates and one that does not.
       - name: Verify the APK
         run: |
           sdk="${ANDROID_SDK_ROOT}"
@@ -347,8 +358,8 @@ jobs:
             echo "::error::apksigner accepted the APK and named no signer, so there is nothing to read here."
             exit 1
           fi
-          grep -qi 'android debug' apk-certs.txt || {
-            echo "::error::the APK is not signed by the debug key, so the name it is published under is not true of it."
+          grep -q 'CN=Lithic' apk-certs.txt || {
+            echo "::error::the APK is not signed by the project's release key, so it cannot update an installed copy."
             exit 1
           }
           # The character class carries the hyphen because the two slices that matter are the two
@@ -389,8 +400,8 @@ jobs:
           echo "| ${{ steps.tag.outputs.apk }} | $mb MB |" >> "$GITHUB_STEP_SUMMARY"
           echo "" >> "$GITHUB_STEP_SUMMARY"
           echo "arm64-v8a and armeabi-v7a only, so an emulator cannot install this APK." >> "$GITHUB_STEP_SUMMARY"
-          echo "Debug-signed, so it sideloads and cannot be updated by a store build." >> "$GITHUB_STEP_SUMMARY"
-          echo "The debug key is made per run, so installing over the last APK needs an uninstall first." >> "$GITHUB_STEP_SUMMARY"
+          echo "Signed with the project's release key, so each build installs over the last one." >> "$GITHUB_STEP_SUMMARY"
+          echo "The version code is minutes since the epoch, so every build orders after the one before it." >> "$GITHUB_STEP_SUMMARY"
 
       - name: Add to Release
         uses: softprops/action-gh-release@v3

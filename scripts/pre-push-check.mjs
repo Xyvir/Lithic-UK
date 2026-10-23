@@ -41,6 +41,11 @@
  *      ever sees a drop. The wiki's stream rows are the thing that stops working, and
  *      no browser harness can see it because the harness has no Tauri window.
  *
+ *  14. the ESP32 staged pages: a board serves the pages `stage-esp32.mjs` put in
+ *      `esp32/data`, so a staged copy that is not this commit's is a board with the wrong UI
+ *      and no way to tell from the phone. The check inflates each one and compares it with
+ *      its source, and passes without a word on a machine that has never built the firmware.
+ *
  * Exit 0 = safe to push; nonzero = fix before pushing.
  *
  * Requires: node, launcher-ui deps, VS Build Tools (MSVC) on PATH-adjacent
@@ -309,13 +314,20 @@ function checkCargoAvailable() {
 }
 
 /**
- * The Android project the release builds is Tauri's template, and two things in it are wrong
- * for this project: the template's placeholder launcher icon, and an activity that draws the
- * page under the system bars with nothing reserving their space. `scripts/patch-android.mjs`
- * is the answer to both, and it has to run *after* `tauri android init` (which rewrites that
- * tree on every run) and before the build. This pins the order rather than trusting a
- * comment in the workflow, because both faults shipped twice with the intent already written
- * down: the icon was the template's PNG, and the status bar overlapped the launcher's header.
+ * The Android project the release builds is Tauri's template, and three things in it are wrong
+ * for this project: the template's placeholder launcher icon, an activity that draws the page
+ * under the system bars with nothing reserving their space, and no release signing config at
+ * all. `scripts/patch-android.mjs` is the answer to all three, and it has to run *after*
+ * `tauri android init` (which rewrites that tree on every run) and before the build. This pins
+ * the order rather than trusting a comment in the workflow, because both visual faults shipped
+ * twice with the intent already written down: the icon was the template's PNG, and the status
+ * bar overlapped the launcher's header.
+ *
+ * Two more facts are pinned because each is a silent failure rather than a visible one. The
+ * build must be `--release`, because the signing config the patch writes lives on the release
+ * build type: a `--debug` build ignores it and ships something signed with a key the runner
+ * invented, which installs once and then never updates. And the patch step must be handed the
+ * keystore at all, because without it the same thing happens one layer earlier.
  *
  * Returns null when the job patches what init wrote, else a failure message.
  */
@@ -346,6 +358,14 @@ function checkAndroidPatchWiring() {
   const buildIndex = steps.findIndex((step) => /android build/.test(run(step)));
   if (buildIndex !== -1 && patchIndex > buildIndex) {
     return `${file}: the Android patch runs after the build, which has already packaged the unpatched project`;
+  }
+  const build = buildIndex === -1 ? null : steps[buildIndex];
+  if (build && !/--release\b/.test(run(build))) {
+    return `${file}: the Android build does not pass --release, so the signing config the patch wrote is unused and the APK cannot update an installed copy`;
+  }
+  const patch = steps[patchIndex];
+  if (patch && !(patch.env && patch.env.LITHIC_ANDROID_KEYSTORE)) {
+    return `${file}: the Android patch is handed no keystore, so a release build is unsigned`;
   }
   return null;
 }
@@ -461,6 +481,14 @@ const spawned = [
     name: 'android face (git stub)',
     cmd: 'node',
     args: ['scripts/check-android-face.mjs'],
+  },
+  // The board's pages, compared with the files they were staged from. `--if-staged` because
+  // staging is PlatformIO's job and a machine that has never built the firmware has nothing to
+  // compare; CI runs the same script without it, where a missing page must fail.
+  {
+    name: 'esp32 staged pages',
+    cmd: 'node',
+    args: ['scripts/check-esp32-staged-pages.mjs', '--if-staged'],
   },
 ];
 
