@@ -32,7 +32,7 @@ name: Android Manual Release
 # 2054) and kept in four repository secrets: the keystore base64, its store password, the
 # alias and the key password. Nothing in the tree holds it, and `scripts/patch-android.mjs`
 # writes the copy and the `keystore.properties` Gradle reads into the generated project,
-# because `tauri android init` rewrites that tree on every run. `--release` is what makes
+# because `tauri android init` rewrites that tree on every run. A release build (the default) is what makes
 # Gradle use it; a local run names no key, leaves the template alone, and still builds a
 # debug APK. The break this makes is one release wide and deliberate: a phone holding a
 # previously published debug build has to uninstall it once to adopt a signed one, which is
@@ -70,7 +70,7 @@ name: Android Manual Release
 #
 # WHY IT IS A RELEASE BUILD AND NOT A TUNED DEBUG ONE. The debug profile used to be tuned
 # from here (`CARGO_PROFILE_DEV_DEBUG=0`, `opt-level=s`, `strip=symbols`) because `--debug`
-# was the only path to an installable file. `--release` needs none of that: `Cargo.toml`'s
+# was the only path to an installable file. Release builds need none of that: `Cargo.toml`'s
 # release profile already asks for LTO and a strip, and the debug tune is gone rather than
 # left in place unread.
 #
@@ -289,7 +289,7 @@ jobs:
           LITHIC_ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
         run: node scripts/patch-android.mjs
 
-      # `--release` and not `--debug`: the release build type is the one the patch gave the
+      # Release build type (default) and not `--debug`: the release build type is the one the patch gave the
       # keystore to, and the release Rust profile `Cargo.toml` already asks for (LTO and a strip)
       # is both smaller and faster than the debug profile this job used to tune from its own
       # environment. `--apk` and not `--aab`: an AAB is a Play upload, not something a person can
@@ -309,7 +309,7 @@ jobs:
           # without it offers nothing.
           LITHIC_BUILD_TAG: ${{ steps.tag.outputs.date }}
           ANDROID_CONFIG: ${{ steps.tag.outputs.android_config }}
-        run: npm run tauri android build -- --release --apk --ci --target aarch64 armv7 --config "$ANDROID_CONFIG"
+        run: npm run tauri android build -- --apk --ci --target aarch64 armv7 --config "$ANDROID_CONFIG"
 
       - name: Rename Artifact
         run: |
