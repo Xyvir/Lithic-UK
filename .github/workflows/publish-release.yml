@@ -89,7 +89,7 @@ jobs:
       stamp: ${{ steps.decide.outputs.stamp }}
     steps:
       - name: Checkout Code
-        uses: actions/checkout@v5
+        uses: actions/checkout@v4
         with:
           # Depth 0, and it is load-bearing rather than cautious: the gate below ranges over
           # the push's own commits and diffs against `github.event.before`, neither of which
@@ -200,7 +200,7 @@ jobs:
         run: zip -r wiki.zip wiki
 
       - name: Create Release
-        uses: softprops/action-gh-release@v3
+        uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ steps.stamp.outputs.tag }}
           name: Build ${{ steps.stamp.outputs.date }}

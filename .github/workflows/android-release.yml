@@ -139,7 +139,7 @@ jobs:
       # pinning the Linux jobs to 22.04: the toolchain that produces a release should not
       # change because a runner image was rolled forward.
       - name: Setup Java
-        uses: actions/setup-java@v6
+        uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: 17
@@ -404,7 +404,7 @@ jobs:
           echo "The version code is minutes since the epoch, so every build orders after the one before it." >> "$GITHUB_STEP_SUMMARY"
 
       - name: Add to Release
-        uses: softprops/action-gh-release@v3
+        uses: softprops/action-gh-release@v2
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:

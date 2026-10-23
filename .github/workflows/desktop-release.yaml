@@ -216,7 +216,7 @@ jobs:
           }
 
       - name: Add to Release
-        uses: softprops/action-gh-release@v3
+        uses: softprops/action-gh-release@v2
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
@@ -366,7 +366,7 @@ jobs:
           echo "Created ${{ steps.tag.outputs.appimage }}"
 
       - name: Add to Release
-        uses: softprops/action-gh-release@v3
+        uses: softprops/action-gh-release@v2
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
@@ -492,7 +492,7 @@ jobs:
           echo "This download carries no web engine: the browser already on the machine is the engine. A build that carried its own would be about 82 MB." >> "$GITHUB_STEP_SUMMARY"
 
       - name: Add to Release
-        uses: softprops/action-gh-release@v3
+        uses: softprops/action-gh-release@v2
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
@@ -670,7 +670,7 @@ jobs:
           done
 
       - name: Add to Release
-        uses: softprops/action-gh-release@v3
+        uses: softprops/action-gh-release@v2
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:

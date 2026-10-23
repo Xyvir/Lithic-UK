@@ -397,7 +397,7 @@ jobs:
       # build-server.yml, where docker/build-push-action@v6 is still node20 and only @v7 is not.
       - name: Upload Built Wiki Artifact
         if: ${{ env.CREATE_RELEASE == 'true' && env.BUILD_CONFIG == 'prod' }}
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@v4
         with:
           name: built-wiki
           path: wiki/output/lith.html
@@ -411,7 +411,7 @@ jobs:
 
       - name: Upload Build Artifacts (Dry Run)
         if: ${{ env.CREATE_RELEASE == 'false' }}
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@v4
         with:
           name: build-artifacts-dry-run
           path: |
@@ -421,7 +421,7 @@ jobs:
 
       - name: Upload Built Launcher (prod only)
         if: env.BUILD_CONFIG == 'prod'
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@v4
         with:
           name: launcher-html
           path: src/launcher.html
@@ -429,7 +429,7 @@ jobs:
 
       - name: Upload Debug Logs
         if: always()
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@v4
         with:
           name: debug-logs
           path: |
@@ -492,7 +492,7 @@ jobs:
       # upload-artifact stores a single file at the artifact's root and a directory keeps
       # its shape.
       - name: Take the built launcher
-        uses: actions/download-artifact@v7
+        uses: actions/download-artifact@v4
         with:
           name: launcher-html
           path: .launcher-artifact
@@ -578,7 +578,7 @@ jobs:
       # and no pull request, so this artifact is how its pictures are looked at.
       - name: Upload the deck report
         if: always()
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@v4
         with:
           name: deck-report
           path: |-
@@ -605,7 +605,7 @@ jobs:
         uses: $/.github/actions/setup
 
       - name: Take the deck's report
-        uses: actions/download-artifact@v7
+        uses: actions/download-artifact@v4
         continue-on-error: true
         with:
           name: deck-report
