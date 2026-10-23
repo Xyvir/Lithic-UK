@@ -44,7 +44,7 @@ runs:
         sudo chown -R "$(id -u):$(id -g)" /var/cache/apt/archives
 
     - name: Cache the downloaded packages
-      uses: actions/cache@v5
+      uses: actions/cache@v4
       with:
         path: /var/cache/apt/archives
         key: apt-${{ runner.os }}-${{ hashFiles('.github/actions/linux-deps/action.yml') }}

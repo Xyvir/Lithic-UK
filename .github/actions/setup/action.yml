@@ -33,12 +33,12 @@ runs:
   using: composite
   steps:
     - name: Checkout
-      uses: actions/checkout@v5
+      uses: actions/checkout@v4
 
     # The one copy of the Node version in this repository. 24 is the line that does not need
     # revisiting: Node 20 reached end of life on 2026-04-30 and 22 follows on 2027-04-30.
     - name: Set up Node
-      uses: actions/setup-node@v5
+      uses: actions/setup-node@v4
       with:
         node-version: '24'
         # One caching mechanism, and it is setup-node's own: it caches the same directory the
