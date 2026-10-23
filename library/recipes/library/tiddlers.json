@@ -118,18 +118,6 @@
         "requires-reload": "yes"
     },
     {
-        "title": "$:/plugins/xyvir/lithic-patch-browserstorage",
-        "description": "Environment-specific persistence settings to maintain Lithic's clean-slate architecture across different browser sessions.",
-        "name": "Browser Storage_LithicPatch",
-        "plugin-type": "plugin",
-        "parent-plugin": "$:/plugins/tiddlywiki/browser-storage",
-        "version": "0.0.1",
-        "plugin-priority": "2",
-        "dependents": "",
-        "type": "application/json",
-        "requires-reload": "no"
-    },
-    {
         "title": "$:/plugins/xyvir/lithic-patch-calendar",
         "author": "Xyvir",
         "description": "Lithic ToDo Highlighting added to Extendable Calendar",
