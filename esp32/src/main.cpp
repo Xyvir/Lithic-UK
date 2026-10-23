@@ -355,8 +355,17 @@ void setup() {
             return;
         }
 
+        // The matcher reads a trailing slash as a prefix, so this route also sees every
+        // path beneath it. Only the collection itself is a page: a file nobody has is a
+        // 404, because a client reading a missing file has to be told it is missing. That
+        // redirect used to answer the launcher's own icon probe with the launcher page,
+        // which is how the page's source ended up drawn as the instance's icon.
         if (request->method() == HTTP_GET || request->method() == HTTP_HEAD) {
-            request->redirect("/");
+            if (request->url() == "/sync/") {
+                request->redirect("/");
+            } else {
+                request->send(404, "text/plain", "Not Found");
+            }
             return;
         }
 

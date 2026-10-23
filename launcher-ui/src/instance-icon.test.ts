@@ -228,6 +228,20 @@ test('readServerEmoji tells "no icon" apart from "cannot ask"', async () => {
   assert.equal(await readServerEmoji({ fetcher: offline }), null, 'and neither has one that cannot be reached');
 });
 
+test('a page answering the icon probe is not an icon', async () => {
+  // The ESP32's captive portal redirects `/sync/favicon.conf` to `/` and on to the
+  // launcher, so the launcher's own source arrives where one character was asked for.
+  const source = '<!doctype html><html><head><title>Lithic - Launcher</title></head></html>';
+  const page = respondingFetcher(() => new Response(source, { status: 200 }));
+  assert.equal(await readServerEmoji({ fetcher: page.fetcher }), '', 'a page is "no icon", not the icon');
+
+  const store = storage();
+  store.setItem(INSTANCE_EMOJI_KEY, source);
+  assert.equal(readInstanceEmoji(store), '', 'and a mirror holding one is ignored');
+  store.setItem(INSTANCE_EMOJI_KEY, '🌿');
+  assert.equal(readInstanceEmoji(store), '🌿', 'while a real character still reads back');
+});
+
 test('the choice round-trips through the store', async () => {
   const { calls, fetcher } = recordingFetcher();
   assert.equal(await writeServerEmoji('🎨', { fetcher }), true);

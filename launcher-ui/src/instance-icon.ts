@@ -198,6 +198,24 @@ export function emojiFaviconUrl(
 export type UploadResult = { ok: boolean; saved: number; total: number; error?: string };
 
 /**
+ * Whether an answer is one icon character rather than whatever the address returned.
+ *
+ * The chooser's value is read back from a file on the instance, and a server is free to
+ * answer a path it does not hold with something else. The ESP32's captive portal does
+ * exactly that: its WebDAV collection matches by prefix, so `/sync/favicon.conf` was
+ * redirected to `/`, which redirects to the launcher, and the page's own source arrived
+ * here as the instance's icon and was drawn in the header's 52px chip over the launcher.
+ * An icon is a handful of UTF-16 units (a family emoji with joiners is the longest at
+ * eleven), never whitespace and never markup.
+ */
+const MAX_ICON_LENGTH = 32;
+function isIconName(value: string): boolean {
+  const trimmed = value.trim();
+  if (!trimmed || trimmed.length > MAX_ICON_LENGTH) return false;
+  return !/[\s\u0000-\u001f\u007f<>&"']/.test(trimmed);
+}
+
+/**
  * The instance's icon, as the instance itself records it.
  *
  * Two different answers matter here and are told apart on purpose: `null` is "the
@@ -216,7 +234,10 @@ export async function readServerEmoji(
     // Nothing stored is the ordinary state of an instance nobody has given an icon.
     if (response.status === 404) return '';
     if (!response.ok) return null;
-    return (await response.text()).trim();
+    // An answer that is not an icon says the same as an empty file: this instance has
+    // none, whatever it answered with.
+    const text = (await response.text()).trim();
+    return isIconName(text) ? text : '';
   } catch {
     return null;
   }
@@ -357,7 +378,10 @@ export function bustIconCache(delayMs = 2000): void {
  */
 export function readInstanceEmoji(storage: Storage | undefined = safeStorage()): string {
   try {
-    return storage?.getItem(INSTANCE_EMOJI_KEY) ?? '';
+    const stored = storage?.getItem(INSTANCE_EMOJI_KEY) ?? '';
+    // A mirror written before `isIconName` existed can hold a page rather than a glyph,
+    // and the mirror is the only answer when the instance cannot be asked at all.
+    return isIconName(stored) ? stored : '';
   } catch {
     return '';
   }
