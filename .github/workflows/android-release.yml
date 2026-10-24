@@ -22,21 +22,8 @@ name: Android Manual Release
 # "Desktop Manual Release" keeps meaning that, and it means this job can be dispatched on
 # its own while the platform is being brought up, which is the state it is in.
 #
-# WHAT SIGNS IT, AND WHY THE KEY IS A SECRET RATHER THAN A FILE HERE. Android refuses an
-# unsigned package and refuses one whose signature does not match the installed copy, so an
-# updater is only as good as a key that stays the same from release to release. Every build
-# before this one was signed with a debug key the runner invented on that run: measured on
-# the published APK, the v2 certificate read `CN=Android Debug` with a `notBefore` ten
-# seconds before its own upload, so each release was uninstallable over the last one. The
-# key is now a keystore generated once for this project (RSA 4096, PKCS12, valid until
-# 2054) and kept in four repository secrets: the keystore base64, its store password, the
-# alias and the key password. Nothing in the tree holds it, and `scripts/patch-android.mjs`
-# writes the copy and the `keystore.properties` Gradle reads into the generated project,
-# because `tauri android init` rewrites that tree on every run. A release build (the default) is what makes
-# Gradle use it; a local run names no key, leaves the template alone, and still builds a
-# debug APK. The break this makes is one release wide and deliberate: a phone holding a
-# previously published debug build has to uninstall it once to adopt a signed one, which is
-# cheaper now than after a store is listing it.
+# WHAT SIGNS IT: The build is signed with a debug key generated per run by Gradle
+# (CN=Android Debug).
 #
 # WHAT VERSION THE APK CARRIES, and a fault this fixed rather than restated. `tauri android
 # build` writes `app/tauri.properties` from the CLI's merged config, and the CLI only ever
@@ -255,45 +242,19 @@ jobs:
       - name: Initialize the Android Project
         run: npm run tauri android init -- --ci
 
-      # The key, decoded from the secret that carries it. It goes to the runner's temp directory
-      # rather than into the checkout; the patch step below copies it into the generated project,
-      # which is gitignored and dies with the runner. A missing secret fails here rather than
-      # producing an unsigned APK that Android refuses to install.
-      - name: Write the Signing Key
-        env:
-          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
-        run: |
-          if [ -z "$ANDROID_KEYSTORE_BASE64" ]; then
-            echo "::error::ANDROID_KEYSTORE_BASE64 is not set, so there is no key to sign a release with."
-            exit 1
-          fi
-          umask 077
-          printf '%s' "$ANDROID_KEYSTORE_BASE64" | base64 -d > "$RUNNER_TEMP/lithic-release.jks"
-          if [ ! -s "$RUNNER_TEMP/lithic-release.jks" ]; then
-            echo "::error::the keystore secret decoded to nothing."
-            exit 1
-          fi
-
       # The project init has just written is Tauri's template, and this is where the things wrong
       # with it are put right: the placeholder launcher icon, an activity that draws the page
-      # under the system bars, the missing hand-off filter, and the release signing config the
-      # template does not carry. The order is the point rather than a detail: init rewrites that
-      # tree on every run, so the patch has to come after it and before the build.
+      # under the system bars, and the missing hand-off filter. The order is the point rather than
+      # a detail: init rewrites that tree on every run, so the patch has to come after it and
+      # before the build.
       # `scripts/patch-android.mjs` verifies each thing it wrote and exits non-zero with a
       # specific message when it cannot, because the failure mode here is an APK that installs
       # and simply looks wrong.
       - name: Patch the Generated Android Project
-        env:
-          LITHIC_ANDROID_KEYSTORE: ${{ runner.temp }}/lithic-release.jks
-          LITHIC_ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
-          LITHIC_ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
-          LITHIC_ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
         run: node scripts/patch-android.mjs
 
-      # Release build type (default) and not `--debug`: the release build type is the one the patch gave the
-      # keystore to, and the release Rust profile `Cargo.toml` already asks for (LTO and a strip)
-      # is both smaller and faster than the debug profile this job used to tune from its own
-      # environment. `--apk` and not `--aab`: an AAB is a Play upload, not something a person can
+      # Debug build with `--debug` for cycling debug keystore.
+      # `--apk` and not `--aab`: an AAB is a Play upload, not something a person can
       # install, and there is no Play listing to upload to yet. No `--split-per-abi` either,
       # because one download that opens on whichever phone fetched it is the whole point of a
       # universal build; that flag is for the day the size matters more than the confusion.
@@ -310,7 +271,7 @@ jobs:
           # without it offers nothing.
           LITHIC_BUILD_TAG: ${{ steps.tag.outputs.date }}
           ANDROID_CONFIG: ${{ steps.tag.outputs.android_config }}
-        run: npm run tauri android build -- --apk --ci --target aarch64 armv7 --config "$ANDROID_CONFIG"
+        run: npm run tauri android build -- --apk --ci --debug --target aarch64 armv7 --config "$ANDROID_CONFIG"
 
       - name: Rename Artifact
         run: |
@@ -359,8 +320,8 @@ jobs:
             echo "::error::apksigner accepted the APK and named no signer, so there is nothing to read here."
             exit 1
           fi
-          grep -q 'CN=Lithic' apk-certs.txt || {
-            echo "::error::the APK is not signed by the project's release key, so it cannot update an installed copy."
+          grep -q 'CN=Android Debug' apk-certs.txt || {
+            echo "::error::the APK is not signed by the debug key."
             exit 1
           }
           # The character class carries the hyphen because the two slices that matter are the two
@@ -401,7 +362,7 @@ jobs:
           echo "| ${{ steps.tag.outputs.apk }} | $mb MB |" >> "$GITHUB_STEP_SUMMARY"
           echo "" >> "$GITHUB_STEP_SUMMARY"
           echo "arm64-v8a and armeabi-v7a only, so an emulator cannot install this APK." >> "$GITHUB_STEP_SUMMARY"
-          echo "Signed with the project's release key, so each build installs over the last one." >> "$GITHUB_STEP_SUMMARY"
+          echo "Signed with debug key (cycling keystore)." >> "$GITHUB_STEP_SUMMARY"
           echo "The version code is minutes since the epoch, so every build orders after the one before it." >> "$GITHUB_STEP_SUMMARY"
 
       - name: Add to Release

@@ -20,13 +20,6 @@
  *      hand its page to this app and every phone falls through to the browser instead. The filter
  *      is added to the activity that hosts the webview; see `DEEP_LINK_FILTER`.
  *
- *   4. A release build carries no signing config in the template, so building for release writes
- *      an unsigned APK that Android refuses to install. The key cannot live in the repository
- *      and the tree it has to land in is rewritten on every run, so the configuration is written
- *      here from the environment, and only when the release workflow has put the secrets there.
- *      A local run leaves the template alone (`patchReleaseSigning` answers false) and still builds a
- *      debug APK; the release workflow builds a release APK and this is what signs it.
- *
  * `init` rewrites this tree on every run, so the patch cannot be an edit of the generated files:
  * it is this script, run after `init` and before the build, in the release workflow and in the
  * README's local recipe alike. It verifies what it wrote and exits non-zero with a specific
@@ -172,119 +165,6 @@ function mainDir(activityFile) {
   return dir;
 }
 
-/**
- * The Gradle module the activity belongs to: the nearest directory above `src/main` that has a
- * `build.gradle.kts`. Found rather than assumed (`../..` from the source set) so a template that
- * grows another source set between the module and its sources still lands in the right place.
- */
-function appModuleDir(activityFile) {
-  let dir = mainDir(activityFile);
-  while (dir !== dirname(dir)) {
-    if (existsSync(join(dir, 'build.gradle.kts'))) return dir;
-    dir = dirname(dir);
-  }
-  fail(`no build.gradle.kts above ${activityFile}, so there is nowhere to install the release key`);
-}
-
-/**
- * The marker the signing block is found by, so a second run does not append a second copy.
- */
-const SIGNING_MARKER = '// Lithic release signing (scripts/patch-android.mjs)';
-
-/**
- * The Gradle that gives the release build type a key.
- *
- * It is appended as a second `android { }` block rather than spliced into the template's own,
- * because the template is a file nobody here owns and a splice that has to find `buildTypes` by
- * pattern is the kind of patch that fails a release the day upstream reorders it. Kotlin DSL
- * allows the same extension to be configured more than once, so this block adds two facts and
- * depends on nothing about the file it is appended to except that it is Kotlin DSL.
- *
- * `create("release")` rather than `getByName`: the template ships no release signing config, and
- * `patchReleaseSigning` refuses a file that already has one rather than letting the two collide.
- */
-const SIGNING_BLOCK = [
-  '',
-  SIGNING_MARKER + ':',
-  '// The keystore and its properties are written beside this file by the release workflow,',
-  '// out of the repository secrets, and `tauri android init` rewrites this whole tree on',
-  '// every run, so the configuration is generated here instead of a file carrying it forward.',
-  '// A release build with no signing config is an unsigned APK, which Android will not install.',
-  'android {',
-  '    signingConfigs {',
-  '        create("release") {',
-  '            val keystore = java.util.Properties().apply {',
-  '                file("keystore.properties").inputStream().use { load(it) }',
-  '            }',
-  '            storeFile = file(keystore.getProperty("storeFile"))',
-  '            storePassword = keystore.getProperty("storePassword")',
-  '            keyAlias = keystore.getProperty("keyAlias")',
-  '            keyPassword = keystore.getProperty("keyPassword")',
-  '        }',
-  '    }',
-  '    buildTypes {',
-  '        getByName("release") {',
-  '            signingConfig = signingConfigs.getByName("release")',
-  '        }',
-  '    }',
-  '}',
-  ''
-].join('\n');
-
-/**
- * Install the release key into the generated project: the keystore, the properties Gradle reads,
- * and the block that puts them together.
- *
- * Answers false when the environment names no keystore, which is every local run and every test
- * that is not about signing. When it does name one, all four values are required, the copy is
- * compared byte for byte, and the Gradle file is read back: a release build that quietly fell
- * back to the debug key would be an APK whose name and signature disagree, which is the failure
- * this whole path exists to stop.
- */
-function patchReleaseSigning(appDir, gradlePath) {
-  const source = process.env.LITHIC_ANDROID_KEYSTORE;
-  if (!source) return false;
-  const values = {
-    LITHIC_ANDROID_KEYSTORE_PASSWORD: process.env.LITHIC_ANDROID_KEYSTORE_PASSWORD,
-    LITHIC_ANDROID_KEY_ALIAS: process.env.LITHIC_ANDROID_KEY_ALIAS,
-    LITHIC_ANDROID_KEY_PASSWORD: process.env.LITHIC_ANDROID_KEY_PASSWORD
-  };
-  for (const [name, value] of Object.entries(values)) {
-    if (!value) fail(`LITHIC_ANDROID_KEYSTORE is set but ${name} is not, so the release build cannot be signed`);
-    // A Java properties file has no way to carry these, and a value silently truncated at one
-    // would be a signing failure at the far end of the build rather than here.
-    if (/[\s\\]/.test(value)) fail(`${name} contains whitespace or a backslash, which a properties file cannot carry`);
-  }
-  if (!existsSync(source)) fail(`no keystore at ${source}, which LITHIC_ANDROID_KEYSTORE names`);
-
-  const keystore = join(appDir, 'lithic-release.jks');
-  cpSync(source, keystore);
-  if (!readFileSync(source).equals(readFileSync(keystore))) fail(`the keystore copy at ${keystore} does not match ${source}`);
-
-  const properties = [
-    'storeFile=lithic-release.jks',
-    `storePassword=${values.LITHIC_ANDROID_KEYSTORE_PASSWORD}`,
-    `keyAlias=${values.LITHIC_ANDROID_KEY_ALIAS}`,
-    `keyPassword=${values.LITHIC_ANDROID_KEY_PASSWORD}`,
-    ''
-  ].join('\n');
-  const propertiesPath = join(appDir, 'keystore.properties');
-  writeFileSync(propertiesPath, properties, { mode: 0o600 });
-  if (readFileSync(propertiesPath, 'utf8') !== properties) fail(`${propertiesPath} did not survive the write`);
-
-  const gradle = readFileSync(gradlePath, 'utf8');
-  if (!gradle.includes(SIGNING_MARKER)) {
-    if (gradle.includes('create("release")')) {
-      fail(`${gradlePath} already declares a release signing config, so appending a second one would collide`);
-    }
-    writeFileSync(gradlePath, `${gradle.replace(/\s*$/, '')}\n${SIGNING_BLOCK}`);
-  }
-  const written = readFileSync(gradlePath, 'utf8');
-  if (!written.includes(SIGNING_MARKER) || !written.includes('signingConfigs.getByName("release")')) {
-    fail(`the release signing block did not survive the write to ${gradlePath}`);
-  }
-  return true;
-}
 
 /**
  * Copy the generated icon set over the template's, then install the tracked activity.
@@ -415,12 +295,6 @@ export function patchAndroid(root = REPO) {
   const manifest = join(mainDir(activityFile), 'AndroidManifest.xml');
   const deepLink = addDeepLinkFilter(manifest);
 
-  // 5. The release key, when this run has one. It is last because it is the only step a local
-  // run skips, so everything above still runs and still reports itself when there is no key.
-  const appDir = appModuleDir(activityFile);
-  const gradleFile = join(appDir, 'build.gradle.kts');
-  const signing = patchReleaseSigning(appDir, gradleFile);
-
   return {
     icons,
     bytes,
@@ -429,8 +303,7 @@ export function patchAndroid(root = REPO) {
     replaced,
     bridge: relative(root, bridgeFile),
     bridgeReplaced,
-    deepLink,
-    signing
+    deepLink
   };
 }
 
@@ -560,61 +433,6 @@ function selfTest() {
   check('is idempotent for the round definition', second.roundIcon === false);
   check('is idempotent for the bridge', second.bridgeReplaced === false);
 
-  // The signing half. Local runs and every test above carry no key, so the template has to come
-  // through untouched; a release run has one, and then all three files have to be there.
-  const gradlePath = join(base, 'src-tauri/gen/android/app/build.gradle.kts');
-  check(
-    'leaves a keyless run unsigned and the template untouched',
-    first.signing === false && readFileSync(gradlePath, 'utf8') === TEMPLATE_GRADLE
-  );
-
-  const keystoreSource = join(REPO, 'tmp', 'patch-android-test-keystore.jks');
-  write(keystoreSource, 'not a real keystore, but bytes that have to survive a copy');
-  const signingEnv = {
-    LITHIC_ANDROID_KEYSTORE: keystoreSource,
-    LITHIC_ANDROID_KEYSTORE_PASSWORD: 'storepassword',
-    LITHIC_ANDROID_KEY_ALIAS: 'lithic',
-    LITHIC_ANDROID_KEY_PASSWORD: 'keypassword'
-  };
-  const previousEnv = Object.fromEntries(Object.keys(signingEnv).map((name) => [name, process.env[name]]));
-  Object.assign(process.env, signingEnv);
-  try {
-    const signed = patchAndroid(base);
-    check(
-      'installs the keystore and the properties Gradle reads',
-      signed.signing === true &&
-        readFileSync(join(base, 'src-tauri/gen/android/app/lithic-release.jks'), 'utf8') ===
-          readFileSync(keystoreSource, 'utf8') &&
-        readFileSync(join(base, 'src-tauri/gen/android/app/keystore.properties'), 'utf8').includes('keyAlias=lithic')
-    );
-    const gradle = readFileSync(gradlePath, 'utf8');
-    check(
-      'gives the release build type the key',
-      gradle.includes('signingConfigs.getByName("release")') &&
-        gradle.includes('file("keystore.properties").inputStream()') &&
-        gradle.trimEnd().endsWith('}'),
-      gradle.includes('signingConfigs.getByName("release")') ? '' : 'the block was not written'
-    );
-    const again = patchAndroid(base);
-    check(
-      'is idempotent for the signing block',
-      again.signing === true && (readFileSync(gradlePath, 'utf8').match(/Lithic release signing/g) ?? []).length === 1
-    );
-    delete process.env.LITHIC_ANDROID_KEY_PASSWORD;
-    const noPassword = throws(() => patchAndroid(base));
-    check(
-      'refuses a key with no password beside it',
-      noPassword !== null && noPassword.includes('LITHIC_ANDROID_KEY_PASSWORD'),
-      noPassword ?? ''
-    );
-  } finally {
-    for (const [name, value] of Object.entries(previousEnv)) {
-      if (value === undefined) delete process.env[name];
-      else process.env[name] = value;
-    }
-    rmSync(keystoreSource, { force: true });
-  }
-
   // The layout this patch must not assume: a project whose packages and source set differ from
   // the one this file was written against still gets its icons and its activity, because both
   // paths are read off the project rather than hardcoded.
@@ -709,8 +527,7 @@ function main() {
       `Android project patched: ${done.icons} icon files (${done.bytes} bytes), ` +
         `activity ${done.replaced ? 'replaced' : 'already current'}, ` +
         `bridge ${done.bridgeReplaced ? 'installed' : 'already current'}` +
-        (done.roundIcon ? ', round adaptive icon written' : '') +
-        (done.signing ? ', release key installed' : '')
+        (done.roundIcon ? ', round adaptive icon written' : '')
     );
     return 0;
   } catch (error) {
