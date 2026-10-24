@@ -72,7 +72,3 @@ wiki/library-carrier/
 # Build output, uploaded by CI, never committed.
 /esp32-firmware/
 
-# The Android release signing key and the password beside it. Never tracked: this
-# file is the app's identity, and losing it means no future APK can install over a
-# copy already on a phone. The CI copy lives in the ANDROID_KEYSTORE_BASE64 secret.
-/.android-signing/

@@ -314,20 +314,13 @@ function checkCargoAvailable() {
 }
 
 /**
- * The Android project the release builds is Tauri's template, and three things in it are wrong
- * for this project: the template's placeholder launcher icon, an activity that draws the page
- * under the system bars with nothing reserving their space, and no release signing config at
- * all. `scripts/patch-android.mjs` is the answer to all three, and it has to run *after*
- * `tauri android init` (which rewrites that tree on every run) and before the build. This pins
- * the order rather than trusting a comment in the workflow, because both visual faults shipped
- * twice with the intent already written down: the icon was the template's PNG, and the status
- * bar overlapped the launcher's header.
+ * The Android project the release builds is Tauri's template, and two things in it are wrong
+ * for this project: the template's placeholder launcher icon, and an activity that draws the page
+ * under the system bars with nothing reserving their space. `scripts/patch-android.mjs` is the
+ * answer to both, and it has to run *after* `tauri android init` (which rewrites that tree on every
+ * run) and before the build.
  *
- * Two more facts are pinned because each is a silent failure rather than a visible one. The
- * build must be a release build (not `--debug`), because the signing config the patch writes
- * lives on the release build type: a `--debug` build ignores it and ships something signed with
- * a key the runner invented, which installs once and then never updates. And the patch step
- * must be handed the keystore at all, because without it the same thing happens one layer earlier.
+ * The build uses `--debug` for a cycling debug keystore.
  *
  * Returns null when the job patches what init wrote, else a failure message.
  */
@@ -360,12 +353,8 @@ function checkAndroidPatchWiring() {
     return `${file}: the Android patch runs after the build, which has already packaged the unpatched project`;
   }
   const build = buildIndex === -1 ? null : steps[buildIndex];
-  if (build && /--debug\b|-d\b/.test(run(build))) {
-    return `${file}: the Android build passes --debug, so the signing config the patch wrote is unused and the APK cannot update an installed copy`;
-  }
-  const patch = steps[patchIndex];
-  if (patch && !(patch.env && patch.env.LITHIC_ANDROID_KEYSTORE)) {
-    return `${file}: the Android patch is handed no keystore, so a release build is unsigned`;
+  if (build && !/--debug\b|-d\b/.test(run(build))) {
+    return `${file}: the Android build must pass --debug for a cycling debug keystore build`;
   }
   return null;
 }
