@@ -169,17 +169,18 @@ jobs:
           fi
           echo "ANDROID_HOME=$sdk" >> "$GITHUB_ENV"
           echo "ANDROID_SDK_ROOT=$sdk" >> "$GITHUB_ENV"
-          ndk="$(ls -1 "$sdk/ndk" 2>/dev/null | sort -V | tail -1 || true)"
-          if [ -z "$ndk" ]; then
-            echo "No NDK on the image; installing the pinned one."
-            yes | "$sdk/cmdline-tools/latest/bin/sdkmanager" --install "ndk;27.0.12077973" > /dev/null
-            ndk="27.0.12077973"
+          ndk="27.0.12077973"
+          if [ ! -d "$sdk/ndk/$ndk" ]; then
+            echo "NDK $ndk not found on image; installing pinned NDK."
+            yes | "$sdk/cmdline-tools/latest/bin/sdkmanager" --install "ndk;$ndk" > /dev/null
           fi
           if [ ! -d "$sdk/ndk/$ndk" ]; then
             echo "::error::$sdk/ndk/$ndk is not there after setup."
             exit 1
           fi
           echo "NDK_HOME=$sdk/ndk/$ndk" >> "$GITHUB_ENV"
+          echo "ANDROID_NDK_ROOT=$sdk/ndk/$ndk" >> "$GITHUB_ENV"
+          echo "ANDROID_NDK_HOME=$sdk/ndk/$ndk" >> "$GITHUB_ENV"
           echo "Using NDK $ndk"
 
       - name: Install Dependencies
