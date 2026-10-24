@@ -295,6 +295,11 @@ export function patchAndroid(root = REPO) {
   const manifest = join(mainDir(activityFile), 'AndroidManifest.xml');
   const deepLink = addDeepLinkFilter(manifest);
 
+  // 5. Release signing config. Ensure release build type uses the debug signing config
+  // (cycling debug keystore) so release builds produced without `--debug` are signed.
+  const gradlePath = join(paths.generated, 'app', 'build.gradle.kts');
+  const releaseSigning = configureReleaseSigning(gradlePath);
+
   return {
     icons,
     bytes,
@@ -303,8 +308,30 @@ export function patchAndroid(root = REPO) {
     replaced,
     bridge: relative(root, bridgeFile),
     bridgeReplaced,
-    deepLink
+    deepLink,
+    releaseSigning
   };
+}
+
+/**
+ * Ensure the release build type in `app/build.gradle.kts` uses the debug signing config
+ * (cycling debug keystore), so release builds without `--debug` are signed and installable.
+ */
+function configureReleaseSigning(gradlePath) {
+  if (!existsSync(gradlePath)) fail(`no build.gradle.kts at ${gradlePath}`);
+  let text = readFileSync(gradlePath, 'utf8');
+  if (text.includes('signingConfig = signingConfigs.getByName("debug")')) return false;
+
+  const releaseMatch = /getByName\("release"\)\s*\{/;
+  if (!releaseMatch.test(text)) {
+    fail(`${gradlePath} has no getByName("release") block`);
+  }
+  text = text.replace(releaseMatch, (match) => `${match}\n            signingConfig = signingConfigs.getByName("debug")`);
+  writeFileSync(gradlePath, text);
+  if (!readFileSync(gradlePath, 'utf8').includes('signingConfig = signingConfigs.getByName("debug")')) {
+    fail(`release signing config did not survive the write to ${gradlePath}`);
+  }
+  return true;
 }
 
 /**
@@ -423,6 +450,14 @@ function selfTest() {
       patchedManifest.includes('android.intent.category.BROWSABLE')
   );
 
+  check(
+    'configures release build type to sign with debug key',
+    first.releaseSigning === true &&
+      readFileSync(join(base, 'src-tauri/gen/android/app/build.gradle.kts'), 'utf8').includes(
+        'signingConfig = signingConfigs.getByName("debug")'
+      )
+  );
+
   const second = patchAndroid(base);
   check('is idempotent for the activity', second.replaced === false);
   check(
@@ -432,6 +467,7 @@ function selfTest() {
   );
   check('is idempotent for the round definition', second.roundIcon === false);
   check('is idempotent for the bridge', second.bridgeReplaced === false);
+  check('is idempotent for release signing config', second.releaseSigning === false);
 
   // The layout this patch must not assume: a project whose packages and source set differ from
   // the one this file was written against still gets its icons and its activity, because both

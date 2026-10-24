@@ -253,7 +253,7 @@ jobs:
       - name: Patch the Generated Android Project
         run: node scripts/patch-android.mjs
 
-      # Debug build with `--debug` for cycling debug keystore.
+      # Release build (no `--debug`) signed with cycling debug keystore (~30 MB).
       # `--apk` and not `--aab`: an AAB is a Play upload, not something a person can
       # install, and there is no Play listing to upload to yet. No `--split-per-abi` either,
       # because one download that opens on whichever phone fetched it is the whole point of a
@@ -271,7 +271,7 @@ jobs:
           # without it offers nothing.
           LITHIC_BUILD_TAG: ${{ steps.tag.outputs.date }}
           ANDROID_CONFIG: ${{ steps.tag.outputs.android_config }}
-        run: npm run tauri android build -- --apk --ci --debug --target aarch64 armv7 --config "$ANDROID_CONFIG"
+        run: npm run tauri android build -- --apk --ci --target aarch64 armv7 --config "$ANDROID_CONFIG"
 
       - name: Rename Artifact
         run: |

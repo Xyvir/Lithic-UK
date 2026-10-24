@@ -320,7 +320,7 @@ function checkCargoAvailable() {
  * answer to both, and it has to run *after* `tauri android init` (which rewrites that tree on every
  * run) and before the build.
  *
- * The build uses `--debug` for a cycling debug keystore.
+ * The build runs in release mode (no `--debug`) so Cargo produces optimized, stripped binaries (~30 MB).
  *
  * Returns null when the job patches what init wrote, else a failure message.
  */
@@ -353,8 +353,8 @@ function checkAndroidPatchWiring() {
     return `${file}: the Android patch runs after the build, which has already packaged the unpatched project`;
   }
   const build = buildIndex === -1 ? null : steps[buildIndex];
-  if (build && !/--debug\b|-d\b/.test(run(build))) {
-    return `${file}: the Android build must pass --debug for a cycling debug keystore build`;
+  if (build && /--debug\b|-d\b/.test(run(build))) {
+    return `${file}: the Android build must not pass --debug (it causes unoptimized debug builds ~300 MB instead of release builds ~30 MB)`;
   }
   return null;
 }
