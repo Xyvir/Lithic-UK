@@ -15,13 +15,18 @@ import app.tauri.plugin.JSObject
 import app.tauri.plugin.Plugin
 
 /**
- * The two document dialogs this project needs and Tauri's own plugin cannot give it.
+ * The two document dialogs this project needs and Tauri's own plugin cannot give it, and the one
+ * intent only Kotlin can read.
  *
  * `tauri-plugin-dialog` picks with `ACTION_GET_CONTENT`, which hands over a one-shot read the
  * app never gets back: a Lith opened that way can be read once and never saved, and the launcher
  * is a thing that saves. `ACTION_OPEN_DOCUMENT` is the contract that keeps the grant, and asking
  * the platform to persist it (`takePersistableUriPermission`) is what makes the reference the
  * launcher stores in a recents row still writable after the app is restarted.
+ *
+ * The third command is not a dialog at all: `takeSharedText` hands over what `MainActivity` kept
+ * from a share another app made, because an intent's extras are not something a page in a webview
+ * can read for itself.
  *
  * The document's bytes are not read here. A `content://` reference is read and written through
  * Tauri's filesystem plugin, which turns it into a file descriptor with the ContentResolver, so
@@ -103,6 +108,34 @@ class LithicBridge(private val activity: Activity) : Plugin(activity) {
     } catch (ex: Exception) {
       Logger.error(ex.message ?: "Failed to read the hand-off")
       invoke.reject(ex.message ?: "Failed to read the hand-off")
+    }
+  }
+
+  /**
+   * What another app shared with this one, once.
+   *
+   * A share from the platform's own sheet reaches the app as an `ACTION_SEND` intent on its launch
+   * intent (or on `onNewIntent` for a copy already running), and `MainActivity` keeps it. This is
+   * the page asking for it, and asking consumes it: a reload of the launcher must not queue the
+   * same shared note a second time.
+   *
+   * An app nobody shared anything into answers with neither field, which is the same shape a share
+   * of nothing takes. The launcher reads the two as one thing and queues nothing for either.
+   */
+  @Command
+  fun takeSharedText(invoke: Invoke) {
+    val answer = JSObject()
+    try {
+      val share = MainActivity.pendingShare
+      MainActivity.pendingShare = null
+      if (share != null) {
+        answer.put("text", share.text)
+        answer.put("title", share.title)
+      }
+      invoke.resolve(answer)
+    } catch (ex: Exception) {
+      Logger.error(ex.message ?: "Failed to read the share")
+      invoke.reject(ex.message ?: "Failed to read the share")
     }
   }
 

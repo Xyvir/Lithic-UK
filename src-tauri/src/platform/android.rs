@@ -196,6 +196,46 @@ pub fn take_deep_link(app: &AppHandle) -> Option<String> {
     }
 }
 
+/// What another app shared with this one, if anything did, and only once.
+///
+/// The phone's share sheet is KOTLIN's: the content arrives as an `ACTION_SEND` intent's extras,
+/// which is a platform object a page in a webview cannot read, so `MainActivity` keeps it and
+/// `LithicBridge.takeSharedText` hands it over. Reading it clears it, which is what makes this a
+/// one-time hand-off rather than a setting: a reload of the launcher must not queue the same
+/// shared note twice.
+///
+/// The same three nothings as `take_deep_link` answer `None`: a build with no bridge, an app
+/// nobody shared into, and a share already taken. On every other platform the capability belongs
+/// to a phone, and this says so by having nothing to answer with.
+pub fn take_shared_text(app: &AppHandle) -> Option<super::SharedText> {
+    #[cfg(target_os = "android")]
+    {
+        #[derive(serde::Deserialize)]
+        struct Answer {
+            #[serde(default)]
+            text: Option<String>,
+            #[serde(default)]
+            title: Option<String>,
+        }
+        // A bridge that cannot be reached is the same answer as no share: the page has nothing to
+        // queue either way, and saying so twice would only be a sentence nobody can act on.
+        let answer: Answer = bridge(app).ok()?.run_mobile_plugin("takeSharedText", serde_json::json!({})).ok()?;
+        let text = answer.text.unwrap_or_default();
+        let title = answer.title.unwrap_or_default();
+        // A share of nothing is not a share. `MainActivity` does not keep one either, so this is
+        // the second half of one decision rather than a second rule.
+        if text.trim().is_empty() && title.trim().is_empty() {
+            return None;
+        }
+        Some(super::SharedText { text, title })
+    }
+    #[cfg(not(target_os = "android"))]
+    {
+        let _ = app;
+        None
+    }
+}
+
 /// A document's text, read through the platform's own resolver.
 ///
 /// The reference is not a path and cannot be handed to `std::fs`: `tauri-plugin-fs` turns a

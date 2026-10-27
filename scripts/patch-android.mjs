@@ -17,8 +17,10 @@
  *      (`src-tauri/android/MainActivity.kt` carries the reasoning and the fix).
  *
  *   3. Nothing in the manifest claims the `lithic://` scheme, so a board's sign-in window cannot
- *      hand its page to this app and every phone falls through to the browser instead. The filter
- *      is added to the activity that hosts the webview; see `DEEP_LINK_FILTER`.
+ *      hand its page to this app and every phone falls through to the browser instead, and nothing
+ *      claims the share sheet either, so no other app can share a link or a paragraph into it. Both
+ *      filters are added to the activity that hosts the webview; see `DEEP_LINK_FILTER` and
+ *      `SHARE_FILTER`.
  *
  * `init` rewrites this tree on every run, so the patch cannot be an edit of the generated files:
  * it is this script, run after `init` and before the build, in the release workflow and in the
@@ -92,38 +94,91 @@ const DEEP_LINK_FILTER = [
 ];
 
 /**
- * Add the hand-off filter to the activity that owns the webview, once.
+ * The intent filter that puts Lithic in the platform's own share sheet.
+ *
+ * `ACTION_SEND` with `text/plain` is what "Share to..." means for a link, a selected paragraph or a
+ * note out of another app: the content rides in `EXTRA_TEXT` and the sender's own title in
+ * `EXTRA_TITLE` or `EXTRA_SUBJECT`. Claiming the type is the whole of what the manifest has to say,
+ * because a share target is an intent filter and nothing else; `MainActivity.rememberShare` is what
+ * reads what arrives, and the launcher decides what a share becomes.
+ *
+ * `text/plain` alone, and deliberately. It is the type every app that shares a link or a paragraph
+ * sends, so it is the one that covers "arbitrary content" as a person means it. A share of an
+ * image or a file is a different feature with a different destination (bytes rather than text), and
+ * claiming those types here would list Lithic on share sheets for content it would then have to
+ * refuse.
+ *
+ * `DEFAULT` is required for the system to consider the filter at all, and `BROWSABLE` is absent on
+ * purpose: it belongs to addresses a browser may hand over, not to content another app sends.
+ */
+const SHARE_FILTER = [
+  '<intent-filter>',
+  '  <action android:name="android.intent.action.SEND" />',
+  '  <category android:name="android.intent.category.DEFAULT" />',
+  '  <data android:mimeType="text/plain" />',
+  '</intent-filter>'
+];
+
+/**
+ * The two filters this patch adds, each with the evidence it is already there and the sentence a
+ * manifest with nothing to attach it to fails with.
+ *
+ * Both are found by what they claim rather than by a marker comment, so a manifest that already has
+ * one of them (a future `init` that ships one, or a second run of this script) is recognised rather
+ * than rewritten, and neither can be added twice.
+ */
+const ACTIVITY_FILTERS = [
+  {
+    name: 'hand-off filter',
+    lines: DEEP_LINK_FILTER,
+    present: /android:scheme\s*=\s*"lithic"/,
+    complaint: 'nothing can claim the lithic scheme'
+  },
+  {
+    name: 'share filter',
+    lines: SHARE_FILTER,
+    present: /android\.intent\.action\.SEND/,
+    complaint: 'nothing can be shared into this app'
+  }
+];
+
+/**
+ * Add the hand-off filter and the share filter to the activity that owns the webview, once each.
  *
  * The manifest is the template's and the template is rewritten on every `init`, so the edit is
- * made here and read back: a manifest that already claims the scheme is left alone, and one with
- * no activity to attach the filter to is a failure rather than an APK that silently cannot be
- * reached.
+ * made here and read back: a manifest that already claims what a filter claims is left alone, and
+ * one with no activity to attach the missing filters to is a failure rather than an APK that
+ * silently cannot be reached or shared into.
  *
- * Answers whether it wrote anything.
+ * Both are appended together in one write, because they go in the same place and a second pass over
+ * the activity block would have to find it again after the first one moved it.
+ *
+ * Answers which of them it wrote.
  */
-function addDeepLinkFilter(manifestPath) {
+function addActivityFilters(manifestPath) {
   if (!existsSync(manifestPath)) fail(`no AndroidManifest.xml at ${manifestPath}`);
-  const text = readFileSync(manifestPath, 'utf8');
-  if (/android:scheme\s*=\s*"lithic"/.test(text)) return false;
+  const before = readFileSync(manifestPath, 'utf8');
+  const missing = ACTIVITY_FILTERS.filter((filter) => !filter.present.test(before));
+  if (missing.length === 0) return { deepLink: false, share: false };
   // The activity block, found by the class it hosts rather than by a line number: the template's
   // attributes vary between Tauri versions and the class it launches does not.
-  const block = /<activity\b[\s\S]*?MainActivity[\s\S]*?<\/activity>/.exec(text);
+  const block = /<activity\b[\s\S]*?MainActivity[\s\S]*?<\/activity>/.exec(before);
   if (!block) {
-    fail(`${manifestPath} has no <activity> element hosting MainActivity, so nothing can claim the lithic scheme`);
+    fail(`${manifestPath} has no <activity> element hosting MainActivity, so ${missing[0].complaint}`);
   }
   const lines = block[0].split(/\r?\n/);
   const closing = lines.pop();
   const indent = (/^\s*/.exec(lines[0]) ?? [''])[0];
   const inner = `${indent}  `;
-  const filter = DEEP_LINK_FILTER.map((line) => `${inner}${line}`).join('\n');
-  const patched = [...lines, filter, closing].join('\n');
-  const start = text.indexOf(block[0]);
-  const written = text.slice(0, start) + patched + text.slice(start + block[0].length);
-  writeFileSync(manifestPath, written);
-  if (!/android:scheme\s*=\s*"lithic"/.test(readFileSync(manifestPath, 'utf8'))) {
-    fail(`the hand-off filter did not survive the write to ${manifestPath}`);
+  const added = missing.map((filter) => filter.lines.map((line) => `${inner}${line}`).join('\n')).join('\n');
+  const patched = [...lines, added, closing].join('\n');
+  const start = before.indexOf(block[0]);
+  writeFileSync(manifestPath, before.slice(0, start) + patched + before.slice(start + block[0].length));
+  const after = readFileSync(manifestPath, 'utf8');
+  for (const filter of ACTIVITY_FILTERS) {
+    if (!filter.present.test(after)) fail(`the ${filter.name} did not survive the write to ${manifestPath}`);
   }
-  return true;
+  return { deepLink: missing.includes(ACTIVITY_FILTERS[0]), share: missing.includes(ACTIVITY_FILTERS[1]) };
 }
 
 /** The `package x.y` line of a Kotlin file, or null when it declares none. */
@@ -289,11 +344,12 @@ export function patchAndroid(root = REPO) {
     }
   }
 
-  // 4. The hand-off. A board's sign-in window reaches this app through the scheme this filter
-  // claims, and the activity that receives it does nothing with the address until the page asks
-  // (see `MainActivity` and `LithicBridge.takeDeepLink`).
+  // 4. The two intents the app answers. A board's sign-in window reaches it through the scheme the
+  // first filter claims, and any other app reaches it through the share sheet the second claims.
+  // What receives either does nothing with it until the page asks (see `MainActivity`,
+  // `LithicBridge.takeDeepLink` and `LithicBridge.takeSharedText`).
   const manifest = join(mainDir(activityFile), 'AndroidManifest.xml');
-  const deepLink = addDeepLinkFilter(manifest);
+  const { deepLink, share } = addActivityFilters(manifest);
 
   // 5. Release signing config. Ensure release build type uses the debug signing config
   // (cycling debug keystore) so release builds produced without `--debug` are signed.
@@ -309,6 +365,7 @@ export function patchAndroid(root = REPO) {
     bridge: relative(root, bridgeFile),
     bridgeReplaced,
     deepLink,
+    share,
     releaseSigning
   };
 }
@@ -444,8 +501,22 @@ function selfTest() {
       patchedManifest.indexOf('android:scheme="lithic"') < patchedManifest.indexOf('</activity>'),
     first.deepLink ? '' : 'the filter was not written'
   );
+  // The share sheet, which is what puts the app beside every other share target on the phone. The
+  // mime type is the whole claim, and it has to be inside the activity so the extras arrive there.
   check(
-    'keeps the template launch filter beside the new one',
+    'claims the share sheet inside the same activity',
+    first.share === true &&
+      patchedManifest.includes('<action android:name="android.intent.action.SEND" />') &&
+      patchedManifest.includes('<data android:mimeType="text/plain" />') &&
+      patchedManifest.indexOf('android.intent.action.SEND') < patchedManifest.indexOf('</activity>'),
+    first.share ? '' : 'the share filter was not written'
+  );
+  check(
+    'leaves the shared filter Browsable-free, which belongs to addresses and not to content',
+    (patchedManifest.match(/BROWSABLE/g) ?? []).length === 1
+  );
+  check(
+    'keeps the template launch filter beside the new ones',
     patchedManifest.includes('android.intent.category.LAUNCHER') &&
       patchedManifest.includes('android.intent.category.BROWSABLE')
   );
@@ -465,9 +536,32 @@ function selfTest() {
     second.deepLink === false &&
       (readFileSync(manifestPath, 'utf8').match(/android:scheme="lithic"/g) ?? []).length === 1
   );
+  check(
+    'is idempotent for the share filter',
+    second.share === false &&
+      (readFileSync(manifestPath, 'utf8').match(/android.intent.action.SEND/g) ?? []).length === 1
+  );
   check('is idempotent for the round definition', second.roundIcon === false);
   check('is idempotent for the bridge', second.bridgeReplaced === false);
   check('is idempotent for release signing config', second.releaseSigning === false);
+
+  // Half-claimed is the state a manifest written by a newer template could be in, and the two
+  // filters are decided separately: the one already claimed must not be added twice, and the one
+  // missing must still arrive.
+  seed();
+  const halfManifest = readFileSync(join(base, 'src-tauri/gen/android/app/src/main/AndroidManifest.xml'), 'utf8').replace(
+    '</activity>',
+    '  <intent-filter>\n        <action android:name="android.intent.action.VIEW" />\n        <data android:scheme="lithic" />\n      </intent-filter>\n    </activity>'
+  );
+  write(join(base, 'src-tauri/gen/android/app/src/main/AndroidManifest.xml'), halfManifest);
+  const half = patchAndroid(base);
+  const halfWritten = readFileSync(join(base, 'src-tauri/gen/android/app/src/main/AndroidManifest.xml'), 'utf8');
+  check(
+    'adds only the filter a manifest is missing',
+    half.deepLink === false &&
+      half.share === true &&
+      (halfWritten.match(/android:scheme="lithic"/g) ?? []).length === 1
+  );
 
   // The layout this patch must not assume: a project whose packages and source set differ from
   // the one this file was written against still gets its icons and its activity, because both
@@ -563,7 +657,9 @@ function main() {
       `Android project patched: ${done.icons} icon files (${done.bytes} bytes), ` +
         `activity ${done.replaced ? 'replaced' : 'already current'}, ` +
         `bridge ${done.bridgeReplaced ? 'installed' : 'already current'}` +
-        (done.roundIcon ? ', round adaptive icon written' : '')
+        (done.roundIcon ? ', round adaptive icon written' : '') +
+        (done.deepLink ? ', hand-off filter claimed' : '') +
+        (done.share ? ', share filter claimed' : '')
     );
     return 0;
   } catch (error) {

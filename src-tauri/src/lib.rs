@@ -384,6 +384,19 @@ fn take_deep_link(app: tauri::AppHandle) -> Option<String> {
     platform::take_deep_link(&app)
 }
 
+/// What another app shared with this one, if anything did, and only once.
+///
+/// The phone's own share sheet is the way content arrives from outside the app: a link out of a
+/// browser, a paragraph out of a reader. The activity keeps the intent's own extras (an intent is
+/// a platform object, which a page in a webview cannot read) and `platform::take_shared_text`
+/// reads them here. The page asks at boot and again whenever it is shown, because a share into a
+/// running app brings it forward rather than starting it, and the answer is consumed so a reload
+/// does not queue the same note twice. Every desktop answers `None`, so nothing changes there.
+#[tauri::command]
+fn take_shared_text(app: tauri::AppHandle) -> Option<platform::SharedText> {
+    platform::take_shared_text(&app)
+}
+
 /// This window, as the other Lithic windows on this machine see it.
 ///
 /// The page owns the stage: it is the only side that knows whether the engine has taken the
@@ -3448,6 +3461,7 @@ pub fn run() {
             install_status,
             platform_capabilities,
             take_deep_link,
+            take_shared_text,
             flash_in_browser,
             install_offer_status,
             set_install_dismissed,

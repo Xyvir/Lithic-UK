@@ -80,6 +80,7 @@ import { backupFileName, collectInstanceBackup, mergeBookmarks, parseInstanceBac
     replacingTitles,
     isPayloadShareUrl,
     pinCachedTiddler,
+    sharedPayload,
     type PendingTiddler
   } from './pending-imports';
 
@@ -3747,6 +3748,38 @@ import { backupFileName, collectInstanceBackup, mergeBookmarks, parseInstanceBac
     if (board) location.assign(board);
   }
 
+  /**
+   * Queue what another app shared into this one, when one did.
+   *
+   * The phone's own share sheet is how content arrives from outside: a link out of a browser, a
+   * paragraph out of a reader, the text of anything at all. The app receives it as an intent
+   * (`MainActivity`), holds it beside the board hand-off, and this is the page asking for it. The
+   * answer is consumed when read, so a reload is not handed the same share twice.
+   *
+   * Nothing mounts here. The share joins the pending imports panel and waits, which is the whole
+   * point: the person picks which Lith it belongs in, or starts a new one, and every mount drains
+   * the queue into whatever opens. That is why this is asked at boot and again whenever the page
+   * is shown: sharing to an app that is already running brings this window forward and runs no
+   * boot code, exactly as a board hand-off does.
+   *
+   * A build with no such command, and every desktop, answer nothing, so this is silent where the
+   * platform has no share sheet to receive from.
+   */
+  async function openHandedShare(): Promise<void> {
+    if (mode !== 'tauri') return;
+    let shared: { text?: string; title?: string } | null = null;
+    try {
+      shared = await tauriInvoke<{ text?: string; title?: string } | null>('take_shared_text');
+    } catch {
+      return;
+    }
+    if (!shared) return;
+    const payload = sharedPayload(shared.text ?? '', shared.title ?? '');
+    if (payload.length === 0) return;
+    enqueuePending(payload);
+    status = copy.pending.sharedReady(payload.length);
+  }
+
   async function openRecent(
     recent: RecentEntry | { name?: string; path?: string; text?: string; handle?: any },
     /**
@@ -5635,6 +5668,9 @@ import { backupFileName, collectInstanceBackup, mergeBookmarks, parseInstanceBac
     // A board this app was launched from is opened before anything else, since that is the page
     // the person asked for and this one is only the way in.
     void openHandedBoard();
+    // Content another app shared into this one is queued for a Lith to be chosen, so this page is
+    // not only the way in here: it is where the share waits until its home is decided.
+    void openHandedShare();
     // The wire's liveness, asked once and never awaited by anything: no render waits on
     // it, and a backend that does not answer leaves the flag false rather than an error.
     if (shimToken) {
@@ -5721,8 +5757,10 @@ import { backupFileName, collectInstanceBackup, mergeBookmarks, parseInstanceBac
       refreshGitSyncIcon();
       void runGitSyncHeartbeat();
       // A tap in the board's sign-in window brings this app forward rather than starting it, so
-      // the intent is read again each time the page is shown.
+      // the intent is read again each time the page is shown. The same is true of a share, which
+      // arrives on the same kind of intent.
       void openHandedBoard();
+      void openHandedShare();
     };
     document.addEventListener('visibilitychange', onVisibilityChange);
     // Proactive quota relief, deliberately not run in the index-db-only

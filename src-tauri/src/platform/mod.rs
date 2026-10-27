@@ -309,6 +309,42 @@ pub fn take_deep_link(app: &tauri::AppHandle) -> Option<String> {
     }
 }
 
+/// Something another app shared with this one, as the platform's own share sheet carried it.
+///
+/// Two fields because a share has two halves and they are not interchangeable: the content is
+/// what the person asked to send, and the title is what the sending app chose to call it, which
+/// is often the better name for a note (a browser shares a page's own title beside its address).
+/// Both are strings as the sending app wrote them, unparsed and untrimmed, because what a share
+/// becomes is one decision and it lives on the launcher's side (`sharedPayload` in
+/// `pending-imports.ts`). Either may be empty, which is why both are plain strings rather than an
+/// `Option`: an absent extra and an empty one are the same nothing, and the launcher already
+/// treats them that way.
+#[derive(Clone, Debug, serde::Serialize)]
+pub struct SharedText {
+    /// The content that was shared. A link arrives here as text, because that is what the share
+    /// sheet carries and the platform never resolves one into anything else.
+    pub text: String,
+    /// The title the sending app offered, or the empty string when it offered none.
+    pub title: String,
+}
+
+/// What another app shared with this app, if anything did, and only once.
+///
+/// The same shape as `take_deep_link` and for the same reason: a share is something that
+/// happened rather than something a platform can do, so this is not a row in `capabilities()`, and
+/// reading it consumes it so a reload of the launcher is not handed the same share twice.
+///
+/// Android alone has an answer: the share sheet is its own mechanism, and `android.rs` keeps what
+/// `MainActivity` took off the intent. Every desktop answers `None`, where a shared link or a
+/// selected paragraph reaches an app by other means (a paste, a file association) than a sheet
+/// this app appears in.
+pub fn take_shared_text(app: &tauri::AppHandle) -> Option<SharedText> {
+    match current() {
+        Os::Android => android::take_shared_text(app),
+        _ => None,
+    }
+}
+
 /// Whether a pick on this platform answers with a reference rather than a path.
 ///
 /// True on Android alone, where the platform's chooser hands over a `content://` URI whose grant
