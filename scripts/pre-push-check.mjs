@@ -250,6 +250,26 @@ function checkReleaseTrigger() {
   if (/ci-push-main\.sh/.test(shell(prodStage))) {
     return `${file}: the prod release pushes to main again — it must stage a review branch, so that nothing publishes before it is merged`;
   }
+
+  // The half a path list cannot answer, and it was missing until 2026-10-27. A release lands on
+  // main by MERGING the pull request this pipeline opened, and that push carries the vendored
+  // refresh and the PWA bump — paths that must stay live, for the reason above. So the landing is
+  // recognised from the push's own commits, in a `landing` job that `build` gates on, and what is
+  // checked here is that the wiring is still there. Without it the merge of a release starts
+  // another release: measured in PR #88, whose only diff was the PWA bump.
+  const landing = (doc.jobs && doc.jobs.landing) || null;
+  if (!landing) {
+    return `${file}: no \`landing\` job — a release landing on main would start another release, which is how the PWA-bump-only PR #88 was opened`;
+  }
+  const buildIf = String((doc.jobs.build && doc.jobs.build.if) || '');
+  if (!/needs\.landing\.outputs\.build/.test(buildIf)) {
+    return `${file}: the build job does not gate on \`landing\`'s answer — a release landing on main would start another release`;
+  }
+  const landingSteps = Array.isArray(landing.steps) ? landing.steps : [];
+  const landingRun = shell(landingSteps.find((step) => String(step.id || '') === 'decide') || {});
+  if (!/Release build-/.test(landingRun) || !/\/release\//.test(landingRun)) {
+    return `${file}: \`landing\` no longer recognises release commits (\`Release build-\` and \`.../release/\`) — a release landing on main would start another release`;
+  }
   return null;
 }
 

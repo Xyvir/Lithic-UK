@@ -47,7 +47,10 @@ on:
   #
   #   * the files THIS RUN WRITES (see "Stage the release on a branch" below).
   #     A run whose own commit triggers another run never ends, so every path
-  #     the release commits is excluded here by name.
+  #     the release commits is excluded here by name. A release landing on main
+  #     by MERGING its pull request is the half a path list cannot answer, since
+  #     the vendored libraries it carries are live paths a hand edit must still
+  #     rebuild: the `landing` job below reads the push's own commits instead.
   #   * docs, the licence and CI config: nothing in them reaches an artifact.
   #     That is also why editing this file does not run it — dispatch it.
   #   * the local-only harness (the push gate, the gallery, the Puppeteer smoke,
@@ -110,7 +113,79 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  # DID MAIN JUST RECEIVE A RELEASE, OR A SOURCE CHANGE? A release this pipeline built lands
+  # on main by MERGING its pull request, and that merge is a push like any other: it carries
+  # src/lithic.html, the launcher, the PWA bump and, when the vendored refresh found a new
+  # version, `vendored-lock.json` and a `wiki/local-plugins/` tiddler. None of those can be
+  # excluded from the trigger above, because a hand edit to any of them must still rebuild the
+  # wiki (checkReleaseTrigger in scripts/pre-push-check.mjs is the rule). So the run starts,
+  # and this job answers the one question the path list cannot.
+  #
+  # It has to be answered, because a landing that starts another release is a cycle, and the
+  # cycle is not hypothetical: on 2026-10-27 the merge of release/2026.10.27-0024 (PR #87)
+  # landed the refreshed `vendored-lock.json` and one tiddler, this workflow rebuilt a tree
+  # that was already the reviewed build, the deck shot the same launcher again, the PWA version
+  # was bumped a second time, and PR #88 opened whose only diff was that bump. Every merge of a
+  # release carrying a vendored refresh minted one of those, and there was never anything in it
+  # to review.
+  #
+  # What it reads is the push's own commit subjects, the same evidence publish-release.yml uses
+  # to find the stamp it tags: a release commit is `Release build-<stamp>: ...` (a squash merge
+  # appends `(#N)`, so the colon is not required after the stamp), and a merge commit names the
+  # branch it brought, which is where `.../release/` comes from. Every commit release-shaped
+  # means there is nothing here to build; one commit that is not means this is a source change,
+  # and it builds exactly as it always did.
+  landing:
+    name: Release landing or source change
+    runs-on: ubuntu-latest
+    outputs:
+      build: ${{ steps.decide.outputs.build }}
+    steps:
+      # The repository's one definition of Node, so the payload below is parsed by the same
+      # runtime every other job uses rather than by whatever the runner image happens to ship.
+      - name: Checkout and set up Node
+        uses: $/.github/actions/setup
+
+      - name: Read the push's own commits
+        id: decide
+        env:
+          COMMITS: ${{ toJSON(github.event.commits) }}
+        run: |
+          # A dispatch and the weekly tick are asked for by name, and neither is a landing.
+          if [ '${{ github.event_name }}' != 'push' ]; then
+            echo "build=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          # The subject alone is read, since a release commit's body lists the artifacts it carried
+          # and a merge commit's carries the pull request title. `?? []` because a dispatch has no
+          # commits array at all.
+          SUBJECTS=$(printf '%s' "$COMMITS" | node -e 'let raw="";process.stdin.on("data",(chunk)=>raw+=chunk).on("end",()=>{for(const commit of JSON.parse(raw || "null") ?? []) console.log(String(commit.message ?? "").split("\n")[0]);})')
+          # Nothing to build until a commit says otherwise. A push whose commits cannot be read is
+          # not evidence of anything, so it builds: the safe answer here is the old behaviour.
+          BUILD=true
+          if [ -n "$SUBJECTS" ]; then
+            BUILD=false
+            while IFS= read -r SUBJECT; do
+              [ -n "$SUBJECT" ] || continue
+              case "$SUBJECT" in
+                'Release build-'*) continue ;;
+                'Merge pull request '*'/release/'*) continue ;;
+                # Belt and braces: a bump-only push cannot reach here (the two files it writes are
+                # excluded above), but it is the same class of push, so it is named rather than left
+                # to a path list that would have to stay in step with it.
+                'chore: bump PWA version '*) continue ;;
+              esac
+              echo "This push is a source change, so it builds: $SUBJECT"
+              BUILD=true
+            done <<< "$SUBJECTS"
+          fi
+          echo "build=$BUILD" >> "$GITHUB_OUTPUT"
+          [ "$BUILD" = 'true' ] || echo "::notice::a release this pipeline already built has landed on main, so nothing is rebuilt and no pull request is opened"
+
   build:
+    needs: landing
+    # Skipped when main just received a release: its bytes are the bytes that were reviewed.
+    if: needs.landing.outputs.build == 'true'
     runs-on: ubuntu-latest
     outputs:
       # Read by the jobs below: the branch the release was staged on and the stamp that
