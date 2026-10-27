@@ -85,7 +85,7 @@ test('a node created in the streams UI is written one level under its parent', (
   const doc1 = nodes.find((t) => t.text === 'Root')!;
   doc1['stream-list'] = (doc1['stream-list'] ?? '') + ' [[NewNode]]';
   const out = serializeScratchWiki('Doc', (title) => byTitle.get(title));
-  assert.equal(out, 'Root\n\tStored child\n\tNew node\n');
+  assert.equal(out, 'Root\n\n\tStored child\n\n\tNew node\n');
 });
 
 test('UI-created top-level nodes (children of the document root) get indent 0', () => {
@@ -96,7 +96,7 @@ test('UI-created top-level nodes (children of the document root) get indent 0', 
   byTitle.set('TopNode', { title: 'TopNode', 'lithic-gap': '0', text: 'Top-level' });
   root['stream-list'] += ' [[TopNode]]';
   const out = serializeScratchWiki('Doc', (title) => byTitle.get(title));
-  assert.equal(out, 'Root\nTop-level\n');
+  assert.equal(out, 'Root\n\nTop-level\n');
 });
 
 // The gap this closes. `lithic-indent` used to record where a node sat in the
@@ -112,7 +112,7 @@ test('a node re-parented in the streams UI is saved where it now sits', () => {
   const child = nodes.find((t) => t.text === 'Child')!;
   const stray = nodes.find((t) => t.text === 'Stray')!;
 
-  assert.equal(save(), 'Parent\n\tChild\n\nStray\n');
+  assert.equal(save(), 'Parent\n\n\tChild\n\nStray\n');
 
   // What the streams indent action does, and nothing else: the node leaves its
   // parent's stream-list, joins the new parent's, and its `parent` follows.
@@ -120,7 +120,7 @@ test('a node re-parented in the streams UI is saved where it now sits', () => {
   child['stream-list'] = '[[Doc 3]]';
   stray.parent = child.title;
 
-  assert.equal(save(), 'Parent\n\tChild\n\n\t\tStray\n');
+  assert.equal(save(), 'Parent\n\n\tChild\n\n\t\tStray\n');
 });
 
 test('serializeScratchWiki guards against hand-edited stream-list cycles', () => {
@@ -194,16 +194,21 @@ test('scratch tiddlers carry stream-type so stream walks reach the nodes', () =>
   }
 });
 
-test('serializeScratchWiki reconstructs flat text from wiki fields', () => {
+// The save writes a DOCUMENT: every node is its own block with a blank line
+// between it and the node before it, and the file's own larger gaps ride on top
+// of that floor. So what comes back is not the source byte for byte, and that is
+// the point of the rule: two top-level nodes on adjacent lines would re-import as
+// ONE paragraph, and the structure the document is showing would be lost.
+test('serializeScratchWiki writes every node separated, keeping the file own gaps', () => {
   const source = 'Alpha\n\tbeta one\n\n\tbeta two\nGamma\n';
   const parsed = parseScratchText(source);
   const { root, nodes } = scratchTiddlers('Doc', parsed);
   const byTitle = new Map([root, ...nodes].map((t) => [t.title, t]));
   const result = serializeScratchWiki('Doc', (title) => byTitle.get(title));
-  assert.equal(result, source);
+  assert.equal(result, 'Alpha\n\n\tbeta one\n\n\tbeta two\n\nGamma\n');
 });
 
-test('serializeScratchWiki survives deleted nodes (gaps collapse)', () => {
+test('serializeScratchWiki survives deleted nodes', () => {
   const source = 'Alpha\n\tbeta one\n\tbeta two\nGamma\n';
   const parsed = parseScratchText(source);
   const { root, nodes } = scratchTiddlers('Doc', parsed);
@@ -213,7 +218,7 @@ test('serializeScratchWiki survives deleted nodes (gaps collapse)', () => {
   const parent = nodes.find((t) => t.title === betaOne.parent)!;
   parent['stream-list'] = parent['stream-list'].replace('[[Doc 2]]', '').trim();
   const result = serializeScratchWiki('Doc', (title) => byTitle.get(title));
-  assert.equal(result, 'Alpha\n\tbeta two\nGamma\n');
+  assert.equal(result, 'Alpha\n\n\tbeta two\n\nGamma\n');
 });
 
 test('tid round-trip: simple header and body', () => {

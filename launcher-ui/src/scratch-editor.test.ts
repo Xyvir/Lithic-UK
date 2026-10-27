@@ -171,16 +171,18 @@ test('parseHandoffTiddlers routes scratch files through scratch and liths throug
   assert.deepEqual(parseHandoffTiddlers('blank.lith', ''), []);
 });
 
-test('scratch text payloads re-serialize byte-identically through the wiki fields', () => {
+test('scratch text payloads re-serialize through the wiki fields with every node separated', () => {
   const source = 'Para one\nwrapped line\n\n\tIndented\n\t\tDeep\nGamma\n';
   const plan = resolveScratchPlan('Doc.txt')!;
   const tiddlers = parseScratchSource(source, plan);
 
   // Serialize through the function the save path uses, given the field map the
-  // engine's getTiddlersAsJson would produce.
+  // engine's getTiddlersAsJson would produce. The blank line after `wrapped line`
+  // is the file's own; the ones before `Deep` and `Gamma` are the floor, because
+  // each node is its own block and nothing may run two of them together.
   const byTitle = new Map(tiddlers.map((t) => [t.title, t]));
   const serialized = serializeScratchWiki(plan.base, (title) => byTitle.get(title));
-  assert.equal(serialized, source);
+  assert.equal(serialized, 'Para one\nwrapped line\n\n\tIndented\n\n\t\tDeep\n\nGamma\n');
 });
 
 // Keep the import surface honest: parseScratchText/serializeScratchText are

@@ -4,8 +4,9 @@
  * The primary Lithic usage is streams (node/block) mode, so opening a flat
  * file (.txt / .md / .tid) should not present it as one giant tiddler.
  * Instead the file is split into a node tree by whitespace intent:
- *   - blank lines separate nodes (the gap count is preserved so untouched
- *     files re-serialize byte-identically)
+ *   - blank lines separate nodes (the gap count is recorded, so a parse can be
+ *     replayed exactly and a save knows how much air the file put between two
+ *     nodes)
  *   - leading tabs (or 4-space groups) define node depth (children), stored
  *     as an ABSOLUTE indent so serialization replays the source exactly
  *   - adjacent top-level (indent 0) lines soft-wrap into one paragraph node;
@@ -27,9 +28,21 @@
  * written as tabs, so a source indented with 4-space groups comes back as one
  * tab per level; that was already true before the tree became authoritative.
  *
- * `parseScratchText`/`serializeScratchText` are the pure form of the same shape:
- * they replay the parse's own indents, gaps, trailing blank lines and final
- * newline, and they are what the parser's round-trip tests exercise.
+ * What is NOT kept is a pair of nodes the file ran together: ONE blank line is
+ * the floor between two nodes, and it applies on both sides. The copy floors it
+ * in `stream-indent`, and the two savers here floor it as well, because on
+ * screen every node is its own block with air around it, a node added in the
+ * streams UI carries no gap of its own to separate it, and two top-level nodes
+ * written on adjacent lines would re-import as ONE paragraph (see the soft-wrap
+ * rule above). A file's own larger gaps are still replayed; the floor only ever
+ * adds air, never removes it.
+ *
+ * `parseScratchText`/`serializeScratchText` are the PARSER's pair rather than a
+ * save path: they replay the parse's own indents, gaps, trailing blank lines and
+ * final newline byte for byte, which is what proves the parse loses nothing, and
+ * they are what the parser's round-trip tests exercise. Nothing writes a file
+ * with them. The savers below write a DOCUMENT, so they floor every gap, and
+ * `scratch-copy-parity.test.ts` holds the copy and the save to the same rule.
  */
 
 export type ScratchNode = {
@@ -118,6 +131,9 @@ export function parseScratchText(source: string): ScratchParseResult {
 /**
  * Serialize a node tree back to flat text. Node indents are absolute, gaps
  * replay as blank lines, and `endsWithNewline` controls the EOF newline.
+ *
+ * This replays a PARSE, it does not write a document: it is the pair that proves
+ * the parse loses nothing, so it does not floor a gap the way the savers do.
  */
 export function serializeScratchText(
   roots: ScratchNode[],
@@ -287,7 +303,9 @@ export function scratchTiddlers(
  * shape `getTiddlersAsJson` yields per tiddler) back to the flat source text.
  * Walks `stream-list` from the root; unknown/missing tiddlers are skipped.
  * Every node is written one tab under its parent, which is where the streams UI
- * is showing it, and gaps replay as blank lines. The file ends with a newline.
+ * is showing it, and every node is separated from the one before it by at least
+ * one blank line, with the file's own larger gaps replayed on top of that floor.
+ * The document's own first line opens without one. The file ends with a newline.
  */
 export function serializeScratchWiki(
   rootTitle: string,
@@ -314,7 +332,12 @@ export function serializeScratchWiki(
     if (!tiddler) return;
     visiting.add(title);
     const gap = parseInt(tiddler['lithic-gap'] ?? '0', 10);
-    for (let i = 0; i < (Number.isFinite(gap) ? gap : 0) && lines.length > 0; i++) lines.push('');
+    // One blank line is the floor between two nodes, whatever the file recorded:
+    // a node added in the streams UI carries no gap of its own, and two top-level
+    // nodes on adjacent lines would re-import as one paragraph. The
+    // `lines.length > 0` guard keeps the floor off the document's first line.
+    const blanks = Math.max(Number.isFinite(gap) ? gap : 0, 1);
+    for (let i = 0; i < blanks && lines.length > 0; i++) lines.push('');
     const indent = parentIndent + 1;
     const pad = '\t'.repeat(Math.max(0, indent));
     (tiddler.text ?? '').split('\n').forEach((line) => lines.push(pad + line));
@@ -359,6 +382,10 @@ export const SCRATCH_SERIALIZE_RUNTIME = `(function (root) {
       visiting[title] = true;
       var gap = parseInt(tiddler['lithic-gap'] || '0', 10);
       if (isNaN(gap) || gap < 0) gap = 0;
+      // One blank line between two nodes is the floor, as in the module above:
+      // a node with no gap of its own still gets air, and the first line of the
+      // document still opens without it (the lines.length guard below).
+      if (gap < 1) gap = 1;
       for (var i = 0; i < gap && lines.length > 0; i++) lines.push('');
       var indent = parentIndent + 1;
       if (indent < 0) indent = 0;

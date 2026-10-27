@@ -11,13 +11,12 @@ import { parseScratchText, scratchTiddlers, serializeScratchWiki, SCRATCH_SERIAL
 // used to sit is gone, because a stored copy of the layout went stale the moment
 // the streams UI re-indented anything and the next save then undid that edit.
 //
-// The two outputs agree on all of that and part company on one thing, the floor:
-// the copy guarantees at least one blank line between two nodes, because a node
-// added in the streams UI carries no gap of its own and on screen it is its own
-// block with air around it, so the plaintext has to separate it. The save writes
-// the file it came from exactly, so a file that ran two lines together saves
-// that way and is copied separated. Where the file recorded its own blank lines
-// the two are the same bytes.
+// One rule covers both, floor included: at least one blank line between two
+// nodes, because a node added in the streams UI carries no gap of its own and on
+// screen it is its own block with air around it. The save floors it in
+// scratch-wiki.ts, the copy floors it in stream-indent, and both replay the
+// file's own larger gaps, so the copy of an unedited document is byte for byte
+// what a save writes. That equality is what this file asserts.
 //
 // The button's filter chain is mirrored in JS here rather than executed, because
 // a filter expression only runs inside a wiki. `the copy button builds the
@@ -150,18 +149,6 @@ function documentOf(source: string): Fields[] {
   return [root, ...nodes];
 }
 
-/**
- * The same tiddlers with every gap floored at one: what the copy has to make of
- * the saver's exact output. No node needs exempting from the floor here, because
- * the saver cannot emit a blank line above the document's own opening line, so a
- * floored gap on that node changes nothing.
- */
-function withSeparatedNodes(tiddlers: Fields[]): Fields[] {
-  return tiddlers.map((tiddler) => {
-    const gap = Number.parseInt(tiddler['lithic-gap'] ?? '0', 10);
-    return { ...tiddler, 'lithic-gap': String(Math.max(Number.isFinite(gap) ? gap : 0, 1)) };
-  });
-}
 
 const FIXTURES = {
   outline: '# Title\n\nIntro paragraph\nwrapped line\n\n- one\n\t- nested\n\ttrailing\n',
@@ -183,15 +170,11 @@ test('the copy button builds the clipboard from the flat-text format', () => {
   );
 });
 
-test('the copy of an unedited document is the file with a blank line between blocks', () => {
+test('the copy of an unedited document is the file the scratch saver writes', () => {
   const operator = loadStreamIndent();
   for (const [name, source] of Object.entries(FIXTURES)) {
     const tiddlers = documentOf(source);
-    assert.equal(
-      copyStoryRiver(['doc.md'], tiddlers, operator),
-      savedBytes('doc.md', withSeparatedNodes(tiddlers)),
-      `${name}: the clipboard is not the file with every node separated`
-    );
+    assert.equal(copyStoryRiver(['doc.md'], tiddlers, operator), savedBytes('doc.md', tiddlers), `${name}: clipboard differs from the saver`);
   }
 });
 
@@ -255,17 +238,16 @@ test('a node re-parented in the UI is copied and saved where it now sits', () =>
   child['stream-list'] = '[[doc.md 3]]';
   stray.parent = child.title;
 
-  // The two are asserted against each other's literals, because this is the case
-  // that tells them apart: the save reproduces the file the node came from, gaps
-  // and all, and the copy separates every pair of blocks.
-  assert.equal(copyStoryRiver(['doc.md'], tiddlers, operator), 'Parent\n\n\tChild\n\n\t\tStray\n');
-  assert.equal(savedBytes('doc.md', tiddlers), 'Parent\n\tChild\n\n\t\tStray\n');
+  // Both sides floor the separation, so they share one literal here.
+  const expected = 'Parent\n\n\tChild\n\n\t\tStray\n';
+  assert.equal(copyStoryRiver(['doc.md'], tiddlers, operator), expected);
+  assert.equal(savedBytes('doc.md', tiddlers), expected);
 
   // A file whose indentation skips a level is the same question at import time,
   // and both sides read the tree: one level under the parent, one tab.
   const skipped = documentOf('Alpha\n\t\tBeta\n');
   assert.equal(copyStoryRiver(['doc.md'], skipped, operator), 'Alpha\n\n\tBeta\n');
-  assert.equal(savedBytes('doc.md', skipped), 'Alpha\n\tBeta\n');
+  assert.equal(savedBytes('doc.md', skipped), 'Alpha\n\n\tBeta\n');
 });
 
 test('a node created in the streams UI copies the way the saver writes it', () => {
@@ -288,7 +270,7 @@ test('a node created in the streams UI copies the way the saver writes it', () =
   root['stream-list'] = `${root['stream-list']} [[doc.md 99]]`;
 
   const copied = copyStoryRiver(['doc.md'], tiddlers, operator);
-  assert.equal(copied, savedBytes('doc.md', withSeparatedNodes(tiddlers)));
+  assert.equal(copied, savedBytes('doc.md', tiddlers));
   assert.ok(copied.includes('\tadded under it'), 'the nested node is one tab in, not two spaces');
   assert.ok(copied.includes('\n\nadded at the top level'), 'a node with no gap of its own is still separated');
 });
