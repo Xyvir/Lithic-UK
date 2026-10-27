@@ -1,0 +1,83 @@
+name: Launcher Firefox gate
+
+# WHY THIS JOB EXISTS. The launcher has two storage modes (`resolveStorageMode` in
+# `launcher-ui/src/browser-storage.ts`): `file` where the File System Access API is present and
+# `index-db` where it is not. Chromium on every desktop has the API, so every leg of the Chrome
+# smoke suite walks the file path, and Safari cannot be driven headless on a Linux runner at all.
+# Firefox has never shipped the API on any platform, which makes it the only browser CI can reach
+# whose every user is in the fallback from the moment the launcher opens: no file is opened or
+# written, and browser storage *is* the document. That is also the path every phone uses and the
+# path the shelved extension prong would have lived on, so it gets a run instead of a hope.
+#
+# WHY IT IS ITS OWN FILE rather than a step beside the Chrome suite in `build-launcher.yml`: that
+# workflow is a dispatch-only preview build whose later steps bump and commit the PWA version, which
+# is the last thing that should run on a pull request. This one builds, tests and reports, and
+# writes nothing back, so it can run on every change that could move the path.
+
+on:
+  pull_request:
+    paths:
+      - 'launcher-ui/**'
+      - 'scripts/test-firefox-launcher.mjs'
+      - 'scripts/build-launcher.mjs'
+      - 'src/launcher.html'
+      - 'src/lithic.html'
+      - 'package.json'
+      - 'package-lock.json'
+      - '.github/actions/browser/**'
+      - '.github/workflows/launcher-firefox.yml'
+  push:
+    branches:
+      - main
+    paths:
+      - 'launcher-ui/**'
+      - 'scripts/test-firefox-launcher.mjs'
+      - 'scripts/build-launcher.mjs'
+      - 'src/launcher.html'
+      - 'src/lithic.html'
+      - 'package.json'
+      - 'package-lock.json'
+      - '.github/actions/browser/**'
+      - '.github/workflows/launcher-firefox.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# The only step that installs a browser is the shared action below, and it installs Firefox: the
+# suite reads the artifact and the engine this job builds, and never a copy fetched on purpose.
+env:
+  PUPPETEER_SKIP_DOWNLOAD: 'true'
+
+# A superseded run is worth nothing, and the suite takes a couple of minutes on a fresh browser
+# cache, so a second push to the same pull request ends the first.
+concurrency:
+  group: launcher-firefox-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  firefox:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout and set up Node
+        uses: $/.github/actions/setup
+
+      - name: Install repository dependencies
+        run: npm ci
+
+      # Built rather than taken from the commit, because a pull request that changes the launcher
+      # has to have the launcher it changes tested. Nothing is committed: the artifact's own bytes
+      # remain CI's to write on the release branch.
+      - name: Build launcher
+        run: npm run build:launcher
+
+      # One definition for the browser a job drives, with a cache under it: see
+      # `.github/actions/browser`. It has to come after `npm ci`, because the command it runs is the
+      # repository's own puppeteer rather than one fetched from the registry.
+      - name: Install Puppeteer browser
+        uses: $/.github/actions/browser
+        with:
+          browser: firefox
+
+      - name: Run the Firefox smoke test
+        run: npm run test:firefox

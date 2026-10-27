@@ -16,6 +16,7 @@
     "build:light": "node scripts/build-light.mjs",
     "test:puppeteer": "node scripts/test-puppeteer-launcher.mjs",
     "test:puppeteer:headed": "HEADED=1 node scripts/test-puppeteer-launcher.mjs",
+    "test:firefox": "node scripts/test-firefox-launcher.mjs",
     "monkey:launcher": "node scripts/monkey-launcher.mjs",
     "monkey:launcher:headed": "HEADED=1 node scripts/monkey-launcher.mjs",
     "gallery": "node scripts/ui-gallery.mjs",
