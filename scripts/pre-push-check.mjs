@@ -491,14 +491,13 @@ const spawned = [
     cmd: 'node',
     args: ['scripts/check-android-face.mjs'],
   },
-  // The board's pages, compared with the files they were staged from. `--if-staged` because
-  // staging is PlatformIO's job and a machine that has never built the firmware has nothing to
-  // compare; CI runs the same script without it, where a missing page must fail.
-  {
-    name: 'esp32 staged pages',
-    cmd: 'node',
-    args: ['scripts/check-esp32-staged-pages.mjs', '--if-staged'],
-  },
+  // The board's staged pages are deliberately NOT compared here, although the firmware workflow
+  // does compare them. `esp32/data` is staged by PlatformIO, and the committed copy is whatever
+  // the last firmware build produced, so it trails every release that rebuilds the light variant
+  // until somebody builds the firmware again. The comparison has a subject only in the run that
+  // has just staged the pages, which is the workflow's own step, between `pio run` and
+  // `buildfs`; before a push it would fail on a tree in its ordinary state, and the remedy would
+  // be to re-stage pages that nothing here is building.
 ];
 
 let failed = false;

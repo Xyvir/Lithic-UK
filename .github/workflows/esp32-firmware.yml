@@ -74,8 +74,8 @@ jobs:
       # still fetched pages from a URL would leave no .gz behind and the firmware would answer
       # 404 on every page; a staging step that left an older page would put a UI on the board
       # that is not the one in this repository, visible only on a phone. Each staged file is
-      # inflated and compared with its source, and the missing case fails here too (the check
-      # takes `--if-staged` only where nothing has been built yet).
+      # inflated and compared with its source, and a missing file fails here too. This is the only
+      # place the comparison has a subject, since it is the step that has just staged them.
       - name: Check the staged pages
         run: node scripts/check-esp32-staged-pages.mjs
 

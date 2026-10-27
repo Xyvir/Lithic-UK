@@ -2,7 +2,7 @@
 /**
  * The board serves this repository's pages, not a copy of some earlier build.
  *
- *   node scripts/check-esp32-staged-pages.mjs [--if-staged]
+ *   node scripts/check-esp32-staged-pages.mjs
  *
  * `scripts/stage-esp32.mjs` gzips two pages and copies the service worker into `esp32/data`, and
  * PlatformIO packs whatever is in there into the littlefs image. So a staging step that wrote an
@@ -13,9 +13,13 @@
  * them back to bytes, the worker byte for byte. The pages are gzipped on the way in, so this is
  * also the check that the compression round trip is exact.
  *
- * `--if-staged` turns a missing `esp32/data` into a pass, which is what a machine that has never
- * built the firmware should say. CI never passes it: there, staging happens in the build step just
- * before this runs, and a missing page is a failure.
+ * It runs where the staging has just happened: the firmware workflow calls it between `pio run`
+ * (whose pre-script stages the pages) and `buildfs` (which packs them), so what is checked is the
+ * set about to be baked into the image. It is not a pre-push check, and the difference is not a
+ * matter of convenience: the committed `esp32/data` is whatever the last firmware build staged, so
+ * it trails every release that rebuilds the light variant until the next one, and a comparison
+ * before a push would fail on a tree in its ordinary state, with no remedy but re-staging pages
+ * nothing is building.
  */
 import { existsSync, readFileSync } from 'node:fs';
 import process from 'node:process';
@@ -27,12 +31,6 @@ const STAGED = [
   { staged: 'esp32/data/src/lithic.html.gz', source: 'variants/lithic-light.html', gzipped: true },
   { staged: 'esp32/data/offline-service-worker.js', source: 'offline-service-worker.js', gzipped: false }
 ];
-
-const ifStaged = process.argv.includes('--if-staged');
-if (ifStaged && !existsSync('esp32/data')) {
-  console.log('esp32/data is not staged yet, so there is nothing to compare. Run `pio run --project-dir esp32` first.');
-  process.exit(0);
-}
 
 let failed = false;
 for (const { staged, source, gzipped } of STAGED) {
