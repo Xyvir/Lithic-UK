@@ -9,6 +9,7 @@ import {
   readEnginePluginRoots,
   writeHandoff
 } from './legacy-launcher-runtime.ts';
+import { CLOSE_GUARD_REPORT, CLOSE_PENDING_KEY, CLOSE_PENDING_SETTLE_MS } from './close-guard.ts';
 
 test('resolves lithic.html as a sibling for file URLs', () => {
   assert.deepEqual(resolveEngineCandidates('file:///C:/Lithic/src/launcher.html'), [
@@ -483,6 +484,180 @@ test('the link bootstrap precedes the boot script, and is injected once', () => 
 
 // A monolith rewrite is the same rewrite as an engine mount: the listeners registered on the old
 // document go with it, so the bootstrap has to be in the page that replaces it.
+/**
+ * The close guard's own body, taken out of a built document and run the way the mounted document
+ * runs it.
+ *
+ * The two timers it arms are handed in rather than left as the real ones, so a poll can be advanced
+ * instead of waited on and no interval outlives the test.
+ */
+function closeGuardBody(html: string): string {
+  const body = inlineScriptBodies(html).find((script) => script.includes('__LITHIC_CLOSE_GUARD__'));
+  assert.ok(body, 'the mount injects a close guard');
+  return body;
+}
+
+function mountCloseGuardHarness(body: string, options: { shape?: 'v2' | 'v1' | 'bare' | 'none' } = {}) {
+  const reports: Array<{ command: string; dirty: boolean }> = [];
+  const invoke = (command: string, args: { dirty: boolean }) => {
+    reports.push({ command, dirty: args.dirty });
+    return Promise.resolve();
+  };
+  const shape = options.shape ?? 'v2';
+  const tauri = shape === 'none' ? undefined : shape === 'v1' ? { tauri: { invoke } } : shape === 'bare' ? { invoke } : { core: { invoke } };
+  // The two things the prompt writes to: the marker that outlives this document, and the
+  // navigation that raises the browser's own question.
+  const written = new Map<string, string>();
+  let reloads = 0;
+  const root: Record<string, unknown> = {
+    __TAURI__: tauri,
+    sessionStorage: {
+      getItem: (key: string) => written.get(key) ?? null,
+      setItem: (key: string, value: string) => { written.set(key, value); },
+      removeItem: (key: string) => { written.delete(key); }
+    },
+    location: { reload: () => { reloads += 1; } }
+  };
+
+  // A wiki answer just real enough to be read: `isDirty` is what the guard asks for, and
+  // `updateDirtyStatus` is what TiddlyWiki calls when that answer changes.
+  const saver = {
+    dirty: false,
+    isDirty() { return this.dirty; },
+    updateDirtyStatus() { return this.dirty; }
+  };
+  type FakeTimer = { callback: () => void; ms: number; live: boolean };
+  const intervals: FakeTimer[] = [];
+  const timeouts: FakeTimer[] = [];
+  const fakeSetInterval = (callback: () => void, ms: number) => {
+    const handle = { callback, ms, live: true };
+    intervals.push(handle);
+    return handle;
+  };
+  const fakeClearInterval = (handle: { live: boolean } | null) => {
+    if (handle) handle.live = false;
+  };
+  const fakeSetTimeout = (callback: () => void, ms: number) => {
+    const handle = { callback, ms, live: true };
+    timeouts.push(handle);
+    return handle;
+  };
+
+  const run = () =>
+    new Function('window', 'setInterval', 'clearInterval', 'setTimeout', body)(
+      root,
+      fakeSetInterval,
+      fakeClearInterval,
+      fakeSetTimeout
+    );
+  run();
+
+  return {
+    reports,
+    intervals,
+    timeouts,
+    root,
+    saver,
+    get reloads() { return reloads; },
+    /** Boot the engine under the guard, which is injected before it and polls for `$tw`. */
+    boot() { root.$tw = { saverHandler: saver }; },
+    /** Make an edit (or save one) the way TiddlyWiki does, and let the guard see the change. */
+    edit(dirty: boolean) { saver.dirty = dirty; saver.updateDirtyStatus(); },
+    /** Run every timer due within `ms`. */
+    tick(ms: number) {
+      for (const timer of [...intervals, ...timeouts].filter((entry) => entry.live && entry.ms <= ms)) timer.callback();
+    },
+    /** What the app reaches for when it hands a close back to this page. */
+    prompt() {
+      const ask = root.__LITHIC_CLOSE_PROMPT__ as (() => void) | undefined;
+      assert.ok(ask, 'the guard offers the app a prompt to raise');
+      ask();
+    },
+    /** Whether this page is carrying a close that the prompt interrupted. */
+    pending() { return written.has(CLOSE_PENDING_KEY); }
+  };
+}
+
+// The × destroys the webview without running the page's unload path, so the prompt that guards a
+// return to the launcher never appears and a Lith's edits go with the window. The app can only ask
+// on the strength of what the document says about itself, which is this.
+test('a mounted wiki tells the app what closing it would lose', () => {
+  const body = closeGuardBody(buildEngineHtml(ENGINE_STUB, { name: 'x.lith', text: '' }));
+  const guard = mountCloseGuardHarness(body);
+
+  // Injected ahead of the boot script, so there is nothing to report about yet.
+  assert.deepEqual(guard.reports, []);
+  guard.boot();
+  guard.tick(100);
+  assert.deepEqual(guard.reports, [{ command: CLOSE_GUARD_REPORT, dirty: false }], 'a fresh wiki has nothing to lose');
+
+  guard.edit(true);
+  assert.deepEqual(guard.reports.at(-1), { command: CLOSE_GUARD_REPORT, dirty: true }, 'an edit is reported where it happens');
+  guard.edit(true);
+  assert.equal(guard.reports.length, 2, 'the same answer twice is one report');
+
+  guard.edit(false);
+  assert.deepEqual(guard.reports.at(-1), { command: CLOSE_GUARD_REPORT, dirty: false }, 'a save clears it');
+  guard.tick(1000);
+  assert.equal(guard.reports.length, 3, 'and the slow net under the wrap repeats rather than adds');
+});
+
+test('the close guard only exists where there is an app to tell', () => {
+  const body = closeGuardBody(buildEngineHtml(ENGINE_STUB, { name: 'x.lith', text: '' }));
+  for (const shape of ['v1', 'bare'] as const) {
+    const guard = mountCloseGuardHarness(body, { shape });
+    guard.boot();
+    guard.tick(100);
+    guard.edit(true);
+    assert.deepEqual(guard.reports.at(-1), { command: CLOSE_GUARD_REPORT, dirty: true }, `${shape} resolves an invoke`);
+  }
+
+  const browser = mountCloseGuardHarness(body, { shape: 'none' });
+  browser.boot();
+  browser.tick(100);
+  browser.edit(true);
+  assert.deepEqual(browser.reports, [], 'a page opened without the app reports nothing');
+  assert.equal(browser.intervals.length, 0, 'and arms nothing to report with');
+});
+
+// The prompt itself is the browser's, which is the point: TiddlyWiki's unload task runs for a
+// navigation, so a close that would drop an edit is turned into one, and the answer to that prompt
+// is the navigation. A document cannot see which answer it got, so it leaves a marker behind and
+// takes it back if it is still here to take it back.
+test('a close with unsaved edits is handed to the browser, and a stay takes it back', () => {
+  const body = closeGuardBody(buildEngineHtml(ENGINE_STUB, { name: 'x.lith', text: '' }));
+  const guard = mountCloseGuardHarness(body);
+  guard.boot();
+  guard.tick(100);
+  guard.edit(true);
+  assert.deepEqual(guard.reports.at(-1), { command: CLOSE_GUARD_REPORT, dirty: true });
+
+  guard.prompt();
+  assert.equal(guard.reloads, 1, 'the navigation is what raises the prompt, and it is the answer');
+  assert.ok(guard.pending(), 'the close it interrupts is written where the page after it can read it');
+
+  // The timer firing at all is the proof this document survived, which is what "Stay" means.
+  guard.tick(CLOSE_PENDING_SETTLE_MS);
+  assert.equal(guard.pending(), false, 'somebody who stayed is not still holding a pending close');
+  assert.equal(guard.reloads, 1, 'and nothing navigates a second time');
+
+  // The other answer needs no test here: the document is gone, which is the marker being read by
+  // the launcher instead (see close-guard.test.ts on `takePendingClose`).
+});
+
+test('the close guard precedes the boot script, is injected once, and carries no escape', () => {
+  const engine = '<html><head></head><body><script src="/boot.js"></script></body></html>';
+  const html = buildEngineHtml(engine, { name: 'x.lith', text: '' });
+  const at = html.indexOf('__LITHIC_CLOSE_GUARD__');
+  assert.ok(at >= 0 && at < html.indexOf('src="/boot.js"'), 'the guard is watching before the engine can be edited');
+  assert.equal(html.split('__LITHIC_CLOSE_GUARD__ = true;').length - 1, 1, 'and exactly once');
+  // The body is one template literal, so a backslash in it is gone by the time the browser sees the
+  // script, and a guard that does not parse is a guard that is not there.
+  assert.equal(closeGuardBody(html).includes(String.fromCharCode(92)), false, 'no escape survives in the emitted script');
+  // One name for two halves: the emitted guard reports on the command the launcher module names.
+  assert.ok(closeGuardBody(html).includes(CLOSE_GUARD_REPORT), "the guard names the module's command");
+});
+
 test('an HTML monolith carries the link bootstrap as well', () => {
   let written = '';
   const globals = globalThis as unknown as { sessionStorage: unknown; document: unknown };

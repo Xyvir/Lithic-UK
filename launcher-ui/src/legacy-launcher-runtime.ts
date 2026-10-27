@@ -11,6 +11,7 @@ import { IPYNB_SERIALIZE_RUNTIME } from './ipynb.ts';
 import { LINE_PATCH_RUNTIME } from './line-patch.ts';
 import { LITHIC_API_BASE, WEBDAV_BASE, WEBDAV_UTILS_JS } from './webdav.ts';
 import { SHIM_COMMAND_PATH, SHIM_TOKEN_HEADER } from './shim-command.ts';
+import { CLOSE_GUARD_REPORT, CLOSE_PENDING_KEY, CLOSE_PENDING_SETTLE_MS } from './close-guard.ts';
 
 /** Scratch save behavior for the mounted engine's injected saver. */
 export type ScratchMode = 'off' | 'text' | 'tid' | 'json' | 'ipynb';
@@ -1185,6 +1186,125 @@ function injectMountedLinkBootstrap(html: string): string {
 }
 
 /**
+ * The page's half of the app's close guard, measured in the document the mount writes.
+ *
+ * The app intercepts the window's × and can keep the window open (see `close_guard_report`
+ * in `src-tauri/src/lib.rs`), but it has no way to know what the document on screen would
+ * lose, so this says. It reports rather than answering a question at close time, which is
+ * why there is nothing here to time against an event loop: the app's own default is
+ * "nothing unsaved", so a report that never arrives costs a question rather than a close.
+ *
+ * It lives in the document the mount writes for the reason `MOUNTED_LINK_BOOTSTRAP` does:
+ * the guard has to watch *this* wiki, and a listener held over from launcher JS does not
+ * survive `document.open()`. It precedes the boot script, so it is polling for `$tw` before
+ * the engine has anything to lose.
+ *
+ * Two constraints on the text below, both inherited from the other injected scripts: no
+ * backslash may appear in it (this whole script is one template literal, so `\s` would be
+ * chewed up at build time and emit a script that does not parse), and it is ES5, because it
+ * runs in whatever webview the app ships to.
+ */
+const MOUNTED_CLOSE_GUARD = `(function(){
+    var root = window;
+    if (!root || root.__LITHIC_CLOSE_GUARD__) return;
+
+    // v2 exposes the invoke on __TAURI__.core, v1 on __TAURI__.tauri, and the bare
+    // __TAURI__.invoke is accepted as well, since the global's shape is the one thing
+    // that differs between the app builds this bundle is loaded into.
+    var tauriInvoke = (function() {
+      var tauri = root.__TAURI__;
+      if (!tauri) return null;
+      if (tauri.invoke) return tauri.invoke;
+      if (tauri.core && tauri.core.invoke) return tauri.core.invoke;
+      return (tauri.tauri && tauri.tauri.invoke) || null;
+    })();
+    if (!tauriInvoke) return;
+    root.__LITHIC_CLOSE_GUARD__ = true;
+
+    // The last answer given, so one change is one report and a quiet wiki is none.
+    var reported = null;
+
+    function unsaved() {
+      var tw = root.$tw;
+      var handler = tw && tw.saverHandler;
+      if (!handler || typeof handler.isDirty !== 'function') return false;
+      return handler.isDirty() === true;
+    }
+
+    function report() {
+      var now = unsaved();
+      if (now === reported) return;
+      reported = now;
+      try {
+        var sent = tauriInvoke('${CLOSE_GUARD_REPORT}', { dirty: now });
+        if (sent && sent.catch) sent.catch(function() { /* an app older than this bundle */ });
+      } catch (e) { /* no app behind this page */ }
+    }
+
+    // The app hands a close that would drop an edit back here rather than drawing a question of
+    // its own, so the prompt is the browser's, raised by a navigation, which is the one thing that
+    // runs TiddlyWiki's unload task and the same prompt a return to the launcher goes through.
+    //
+    // That navigation is also the answer. If this document is still here a moment later the person
+    // chose to stay, and what the marker says is theirs to forget; if it is not, the page that
+    // boots in its place reads the marker and finishes the close, so "Leave" still means the
+    // window goes.
+    root.__LITHIC_CLOSE_PROMPT__ = function() {
+      try {
+        root.sessionStorage.setItem('${CLOSE_PENDING_KEY}', String(Date.now()));
+      } catch (e) { /* no session storage: the prompt still appears, only the finish is lost */ }
+      setTimeout(function() {
+        try { root.sessionStorage.removeItem('${CLOSE_PENDING_KEY}'); } catch (e) { /* nothing written */ }
+      }, ${CLOSE_PENDING_SETTLE_MS});
+      root.location.reload();
+    };
+
+    // TiddlyWiki recomputes its own dirty status on every change and at the end of every
+    // save, which is exactly the two moments this answer can change. Wrapping the instance
+    // method keeps the answer the one TiddlyWiki already reached, rather than a second
+    // reading of the saver filter that could disagree with the prompt TiddlyWiki itself
+    // would have shown.
+    function arm() {
+      var tw = root.$tw;
+      var handler = tw && tw.saverHandler;
+      if (!handler || typeof handler.updateDirtyStatus !== 'function') return false;
+      var original = handler.updateDirtyStatus;
+      handler.updateDirtyStatus = function() {
+        var result = original.apply(this, arguments);
+        report();
+        return result;
+      };
+      report();
+      // A slow net under the wrap, and the answer to it going quiet: a report that came
+      // only from a patched method would be one upstream change away from silence, and
+      // silence here closes a window over somebody's unsaved work without asking.
+      setInterval(report, 1000);
+      return true;
+    }
+
+    if (!arm()) {
+      var attempts = 0;
+      var armPoll = setInterval(function() {
+        attempts += 1;
+        if (arm() || attempts > 100) clearInterval(armPoll);
+      }, 100);
+    }
+  })();`;
+
+/**
+ * Put the close guard in a document, ahead of its boot script where there is one, which is
+ * the same placement the injected saver and the link opener take.
+ */
+function injectMountedCloseGuard(html: string): string {
+  const script = `<script>${MOUNTED_CLOSE_GUARD}</script>`;
+  const bootScript = /<script[^>]+(?:src=["'][^"']*boot[^"']*["']|data-tiddler-title=["']\$:\/boot\/)/i;
+  const tag = html.match(bootScript)?.[0] ?? '';
+  if (tag) return html.replace(tag, `${script}\n${tag}`);
+  if (/<\/head>/i.test(html)) return html.replace(/<\/head>/i, `${script}\n</head>`);
+  return `${html}\n${script}`;
+}
+
+/**
  * The engine boots in place via document.open/write/close, which preserves
  * the launcher window and its globals. Injecting the ones the mounted engine
  * needs (e.g. __EPHEMERAL_MODE__ for the Ephemeral widget) is kept as a
@@ -1339,8 +1459,9 @@ export function buildEngineHtml(
     // root tiddler injected by the scratch mount.
     html = injectEngineGlobals(html, { __LITHIC_SCRATCH_ROOT__: scratchRootTitle(handoff.name) });
   }
-  // Last, so the link bootstrap sits closest to the boot script the mount also injects ahead of.
-  return injectMountedLinkBootstrap(injectEngineGlobals(html, engineGlobals));
+  // Last, so the guard and the link bootstrap sit closest to the boot script the mount also
+  // injects ahead of.
+  return injectMountedLinkBootstrap(injectMountedCloseGuard(injectEngineGlobals(html, engineGlobals)));
 }
 
 export async function bootLegacyWiki(

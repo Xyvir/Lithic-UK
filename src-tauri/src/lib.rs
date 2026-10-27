@@ -542,6 +542,77 @@ fn install_preflight_blocking() -> InstallPreflight {
     }
 }
 
+/// What each window's page last said about its unsaved edits.
+///
+/// Pressing the window's × destroys the webview without running the page's unload path, so the
+/// prompt that guards a return to the launcher (TiddlyWiki's own `beforeunload` task, which a
+/// browser honours on a navigation) never appears, and a Lith's edits go with the window. Only
+/// the document on screen can say what it would lose, so it says (`close_guard_report`), and
+/// this is where the answer waits for a close to act on it. What the close then does is hand the
+/// question back to that document rather than draw one of its own, so the prompt is the browser's
+/// and the wording is the one a return to the launcher already shows.
+///
+/// The page reports rather than being asked at close time, and that is the whole reason there is
+/// nothing here to time: a report that never arrives leaves a window unguarded, which is exactly
+/// where this app started. Every way this can go wrong costs a question at the next close rather
+/// than a close that should have been questioned.
+#[derive(Default)]
+struct CloseGuard(Mutex<std::collections::HashMap<String, bool>>);
+
+impl CloseGuard {
+    /// Take the page's word for this window.
+    fn report(&self, label: &str, unsaved: bool) {
+        if let Ok(mut answers) = self.0.lock() {
+            answers.insert(label.to_string(), unsaved);
+        }
+    }
+
+    /// Whether closing this window right now would drop edits no save has written.
+    ///
+    /// A window whose page never said anything is unguarded, which is right for all three of the
+    /// documents that never report: the launcher (nothing on it is unsaved by design, see
+    /// `launcher-stage.ts`), a monolith (a page keeps its own edits, and the launcher does not
+    /// interpose on them), and a page opened without this app behind it.
+    fn unsaved(&self, label: &str) -> bool {
+        self.0
+            .lock()
+            .map(|answers| answers.get(label).copied().unwrap_or(false))
+            .unwrap_or(false)
+    }
+}
+
+/// The page's half of the close guard: what the document on screen would lose if this window
+/// closed now.
+///
+/// Invoked by the mounted engine as its own dirty status changes (`MOUNTED_CLOSE_GUARD` in
+/// `launcher-ui/src/legacy-launcher-runtime.ts`), and by the launcher once on boot, where the
+/// answer is always "nothing".
+#[tauri::command]
+fn close_guard_report(window: tauri::WebviewWindow, dirty: bool, state: tauri::State<CloseGuard>) {
+    state.report(window.label(), dirty);
+}
+
+/// Hand a close that would drop unsaved edits back to the page, so the question is the browser's.
+///
+/// The × destroys the webview without running the page's unload path, which is why TiddlyWiki's
+/// `beforeunload` task never ran and an edit could go without a word. That task *does* run for a
+/// navigation, so the close becomes one: the page navigates, and the browser asks its own question
+/// with the app's own Lith still behind it. The navigation is also the answer, and the page records
+/// which way it went (`__LITHIC_CLOSE_PROMPT__`), because a document cannot see that the person
+/// chose to stay.
+///
+/// A script rather than an event with a reply, and with the navigation as its fallback: a document
+/// without the guard would otherwise be a window that refuses to close with nothing on screen to
+/// explain it, which is the one shape this app is built to avoid. It answers whether the page was
+/// reached at all, so a window whose webview has gone is closed rather than held.
+fn prompt_before_closing_with_unsaved_edits(window: &tauri::Window) -> bool {
+    let script = "if (window.__LITHIC_CLOSE_PROMPT__) { window.__LITHIC_CLOSE_PROMPT__(); } else { window.location.reload(); }";
+    match tauri::Manager::get_webview_window(tauri::Manager::app_handle(window), window.label()) {
+        Some(webview) => webview.eval(script).is_ok(),
+        None => false,
+    }
+}
+
 /// Close this window, once an install has put the new copy where it can be launched from.
 ///
 /// Closing the window rather than exiting the process, so the app's own close handling (the
@@ -3414,6 +3485,25 @@ pub fn run() {
         .manage(StartupFile(Mutex::new(startup_file)))
         .manage(VaultState::new())
         .manage(LauncherStage::new())
+        .manage(CloseGuard::default())
+        // The window's own ×, and the one moment an unsaved Lith can be lost without a word:
+        // the page's unload prompt is not run when the app closes a window, so the question is
+        // asked here instead of being left to a navigation that never happens.
+        .on_window_event(|window, event| {
+            if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+                let unsaved = tauri::Manager::try_state::<CloseGuard>(window)
+                    .map(|guard| guard.unsaved(window.label()))
+                    .unwrap_or(false);
+                if !unsaved {
+                    return;
+                }
+                // Prevented only when there is a page to hand the question to, so a window whose
+                // webview cannot be reached is still a window that can be closed.
+                if prompt_before_closing_with_unsaved_edits(window) {
+                    api.prevent_close();
+                }
+            }
+        })
         .setup(|app| {
             // Window configuration is applied before this hook runs, so the
             // launcher's webview exists by now. The handler has to be attached
@@ -3457,6 +3547,7 @@ pub fn run() {
             launcher_stage,
             install_preflight,
             quit_launcher,
+            close_guard_report,
             install_monolith,
             install_status,
             platform_capabilities,
@@ -3521,6 +3612,20 @@ pub fn run() {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The close guard's whole state: a window's page answers for itself, an unasked window is
+    /// unguarded, and one window's answer is never read as another's.
+    #[test]
+    fn the_close_guard_believes_only_the_window_that_answered() {
+        let guard = CloseGuard::default();
+        assert!(!guard.unsaved("main"), "nothing said yet, so nothing is at risk");
+        guard.report("main", true);
+        assert!(guard.unsaved("main"));
+        guard.report("other", false);
+        assert!(guard.unsaved("main"), "another window's word is not this one's");
+        guard.report("main", false);
+        assert!(!guard.unsaved("main"), "a save clears it");
+    }
 
     /// The flash page's address is a file URL with the flash-only query on it, and the app's
     /// language when it has one. A blank language is not one: the browser's own is better than

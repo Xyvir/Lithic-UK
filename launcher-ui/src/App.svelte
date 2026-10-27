@@ -65,6 +65,7 @@ import { backupFileName, collectInstanceBackup, mergeBookmarks, parseInstanceBac
   import { createServerRepo, disconnectServerSync, fetchServerSyncHistory, fetchServerSyncStatus, listServerRepos, pollServerDeviceToken, requestServerDeviceCode, revertServerSync, serverSyncIndicator, setupServerSync, type ServerSyncStatus } from './server-git-sync';
   import { serializeJsonToLith, parseLithToJSON } from './lithic-format';
   import { mergeCaptureIntoDocument } from './dirty-merge';
+  import { reportUnsavedEdits, takePendingClose } from './close-guard';
   import { importIntoOpenWiki } from './open-wiki-import';
   // Inlined as a base64 data URL (assetsInlineLimit: Infinity) so the brand
   // mark survives when launcher.html is bundled into the Tauri app.
@@ -5907,6 +5908,19 @@ import { backupFileName, collectInstanceBackup, mergeBookmarks, parseInstanceBac
 
     // --- Tauri startup file (CLI arg / "Open with" association) ---
     if (mode === 'tauri') {
+      // Nothing on this screen is unsaved (see `launcher-stage.ts`), so the app is told so on
+      // every boot, and told before anything here tries to close: the answer is what decides
+      // whether a close is questioned. What the app would otherwise still hold is the answer the
+      // Lith mounted before this launcher gave, which is the one thing that could make the next
+      // close ask about edits that are already gone.
+      void (async () => {
+        await reportUnsavedEdits(false);
+        // A close the browser's own unload prompt interrupted: the person answered it, the page it
+        // interrupted is gone, and this launcher is what booted in its place (see `close-guard.ts`
+        // on the marker). The window goes, which is the press they made, and it goes now rather
+        // than after the work below, which is work for a launcher somebody is staying on.
+        if (takePendingClose(sessionStorage)) closeForInstall();
+      })();
       void refreshInstallState();
       // Where this window says it is, for the other copies of this app on this machine (see
       // `launcher-stage.ts`). Desktop only: a page with no app behind it has no registry to
