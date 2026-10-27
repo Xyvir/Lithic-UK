@@ -433,9 +433,9 @@ import { backupFileName, collectInstanceBackup, mergeBookmarks, parseInstanceBac
    *
    * The picker's names are kept, because the picker is still the largest thing inside it and
    * renaming them would touch every selector in the gallery and the smoke suite for a change
-   * of wording. What the dialog *is* has moved: the picker is drawn only on an instance, since
-   * that is the one page with an icon to set, and the docs link and the full backup are drawn
-   * everywhere.
+   * of wording. What the dialog *is* has moved: the picker is drawn only on an instance that can
+   * serve the icons it writes (not on an appliance, see `appliance`), and the docs link and the
+   * full backup are drawn everywhere.
    */
   let showEmojiPicker = false;
   let emojiChoice = '';
@@ -4457,8 +4457,9 @@ import { backupFileName, collectInstanceBackup, mergeBookmarks, parseInstanceBac
   /**
    * Open the heading mark's dialog.
    *
-   * Every mode opens it, which is the point: the picker inside is an instance's own job, and
-   * the docs link and the full backup belong to every page. The desktop app draws no footer
+   * Every mode opens it, which is the point: the picker inside is an instance's own job (an
+   * appliance has none of the machinery behind it, so it draws no picker), and the docs link and
+   * the full backup belong to every page. The desktop app draws no footer
    * link, so for that mode this is also the only way out to the project.
    */
   function openInstanceManagement(): void {
@@ -7566,10 +7567,15 @@ import { backupFileName, collectInstanceBackup, mergeBookmarks, parseInstanceBac
         <button class="modal-close" aria-label={copy.dialogs.icon.closeAria} on:click={closeInstanceManagement}>×</button>
         <h2 id="emoji-title">{copy.dialogs.icon.title}</h2>
         <!--
-          The picker, on an instance only: this is the one page whose icon can be set, and the
-          icon belongs to the deployment rather than to this browser.
+          The picker, on an instance that can actually serve the icons: this is the one page
+          whose icon can be set, and the icon belongs to the deployment rather than to this
+          browser. An appliance is the page mode cannot separate and this question can: a board
+          stores whatever is PUT into its `/sync/` and serves none of it, because the watcher
+          that turns a written icon set into the mark a tab draws is part of a deployment, not
+          of the firmware. So the picker is left out there rather than offering a change nothing
+          would make.
         -->
-        {#if isSelfHost()}
+        {#if isSelfHost() && !appliance}
         <p>{copy.dialogs.icon.intro}</p>
         <div class="emoji-preview" aria-hidden="true">
           {#if emojiChoice}
@@ -7612,8 +7618,13 @@ import { backupFileName, collectInstanceBackup, mergeBookmarks, parseInstanceBac
             so the one control a person could press there only ever failed. A platform with
             nothing to offer says nothing rather than drawing a button that does not work,
             which is the rule the install offer already follows.
+
+            The board itself is the third audience it is not for, and the one its own condition
+            cannot see: a flash writes a blank board, and the page a board serves is the thing
+            that would receive it, so an appliance is excluded (`appliance`) rather than offered
+            a second copy of itself.
           -->
-          {#if flashOfferable}
+          {#if flashOfferable && !appliance}
             <button class="modal-action secondary flash-button" type="button" disabled={flashBrowserBusy} on:click={openFlash} title={flashSupported ? copy.esp32.openTitle : copy.esp32.openBrowserTitle}>{copy.esp32.open}</button>
           {/if}
           <!--
