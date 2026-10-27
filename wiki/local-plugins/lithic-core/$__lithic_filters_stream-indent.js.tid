@@ -25,11 +25,36 @@ an agent. Nothing here needs a file behind the document.
   - the blank lines a node was preceded by (`lithic-gap`) are replayed above it,
     so two paragraphs stay two paragraphs on the way back in. That field is the
     only record paragraph separation has, and no streams gesture contradicts it.
+  - ONE blank line is the floor between two nodes, whatever the file recorded. A
+    node added in the streams UI carries no gap of its own, and on screen it is
+    its own block with air around it, so the plaintext copy reads the way the
+    document looks. The save is the other half of this and does NOT floor: it
+    writes back the file it came from, exactly, so a file that ran two lines
+    together saves that way and is copied separated.
+  - the node the document OPENS with carries no blank lines above it, and which
+    node that is cannot be counted: Copy Story River reaches this operator through
+    `:map`, which evaluates its subfilter once per node, so a counter inside the
+    operator reads zero for every one of them and no gap would ever replay
+    (measured 2026-10-27: a 5,851 character markdown note copied as 5,830
+    characters, all 22 of its blank lines gone). The document answers it instead:
+    the opening node is the root's first `stream-list` entry, or the root itself
+    when the root is the text being copied.
 \*/
 
 (function () {
 
     "use strict";
+
+    /**
+     * The first title in a `stream-list`, read without `$tw`: this module is
+     * loaded by a test harness as well as by the wiki, and a title holding a
+     * space is bracketed in that field.
+     */
+    function firstListEntry(value) {
+        if (!value) return "";
+        var match = /^\s*(?:\[\[([^\]]+)\]\]|(\S+))/.exec(value);
+        return match ? (match[1] !== undefined ? match[1] : match[2]) : "";
+    }
 
     exports["stream-indent"] = function (source, operator, options) {
         var results = [];
@@ -38,9 +63,9 @@ an agent. Nothing here needs a file behind the document.
         var rootNode = options.wiki.getTiddler(rootTitle);
         var rootIsBlank = (!rootNode || !rootNode.fields.text || rootNode.fields.text.trim() === "");
 
-        // The first line of a file has no blank lines above it, however the
-        // nodes were built.
-        var emitted = 0;
+        // The node the document's own first line belongs to: the one node that
+        // opens without a blank line above it, whatever the caller emits first.
+        var openingTitle = firstListEntry(rootNode && rootNode.fields["stream-list"]);
 
         source(function (tiddler, title) {
             var fields = (tiddler && tiddler.fields) ? tiddler.fields : {};
@@ -64,11 +89,11 @@ an agent. Nothing here needs a file behind the document.
 
             var gap = parseInt(fields["lithic-gap"], 10);
             if (!isFinite(gap) || gap < 0) gap = 0;
-            var lead = emitted === 0 ? "" : new Array(gap + 1).join("\n");
+            var opening = (title === rootTitle) || (openingTitle !== "" && title === openingTitle);
+            var lead = opening ? "" : new Array(Math.max(gap, 1) + 1).join("\n");
 
             var pad = new Array(depth + 1).join("\t");
             var indentedText = lead + pad + text.split("\n").join("\n" + pad);
-            emitted++;
             results.push(indentedText);
         });
         return results;
