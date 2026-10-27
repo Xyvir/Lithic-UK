@@ -12,7 +12,7 @@ import {
   parseScratchSource,
   parseHandoffTiddlers
 } from './scratch-editor.ts';
-import { parseScratchText, serializeScratchText } from './scratch-wiki.ts';
+import { parseScratchText, serializeScratchText, serializeScratchWiki } from './scratch-wiki.ts';
 
 test('scratch file name detection', () => {
   for (const ext of SCRATCH_EXTENSIONS) {
@@ -95,10 +95,47 @@ test('parseScratchSource (text) produces a streams payload that round-trips', ()
   assert.equal(tiddlers[1].parent, 'Notes.txt');
   // Node titles are the document title plus an index, extension included.
   assert.equal(tiddlers[1].title, 'Notes.txt 1');
-  // Nodes render as markdown and carry the scratch fields.
+  // Nodes render as markdown and carry their gap. The indent is not recorded:
+  // the node's place in the tree is where its layout comes from.
   const node = tiddlers.find((t) => t.text === 'Indented child');
   assert.equal(node?.type, 'text/markdown');
-  assert.equal(node?.['lithic-indent'], '1');
+  assert.equal(node?.['lithic-gap'], '0');
+  assert.equal(node?.['lithic-indent'], undefined);
+});
+
+test('an empty text document mounts with one node to type into', () => {
+  const plan = resolveScratchPlan('empty.txt')!;
+  const tiddlers = parseScratchSource('', plan);
+  assert.equal(tiddlers.length, 2, 'the document root and one node');
+  const [root, node] = tiddlers;
+  assert.equal(root['stream-list'], '[[empty.txt 1]]');
+  assert.equal(node.title, 'empty.txt 1');
+  assert.equal(node.parent, 'empty.txt');
+  assert.equal(node.text, '');
+  assert.equal(node.type, 'text/markdown');
+  // Without stream-type the streams operator refuses to walk the tree, so the
+  // document would mount as untypeable as it is empty.
+  assert.equal(node['stream-type'], 'default');
+
+  const lookup = new Map(tiddlers.map((tiddler) => [tiddler.title, tiddler]));
+  const save = () => serializeScratchWiki('empty.txt', (title) => lookup.get(title));
+  // An empty node is an empty line, and a file of nothing is an empty file, so
+  // opening and saving a blank document leaves it byte for byte as it was.
+  assert.equal(save(), '');
+  // Typing into it writes the file's first line.
+  lookup.set('empty.txt 1', { ...node, text: 'first line' });
+  assert.equal(save(), 'first line\n');
+
+  // Blank lines are a blank document too, and a file written by an editor as a
+  // single newline is the shape that arrives most often.
+  const blank = parseScratchSource('\n\n', resolveScratchPlan('blank.txt')!);
+  assert.equal(blank.length, 2);
+  assert.equal(blank[0]['stream-list'], '[[blank.txt 1]]');
+
+  // The other scratch kinds are one tiddler rather than a node tree, so they
+  // are not handed a node they would then have to write somewhere.
+  const tid = parseScratchSource('', resolveScratchPlan('blank.tid')!);
+  assert.equal(tid.length, 1);
 });
 
 test('parseScratchSource (tid) keeps header fields and body', () => {
@@ -139,41 +176,12 @@ test('scratch text payloads re-serialize byte-identically through the wiki field
   const plan = resolveScratchPlan('Doc.txt')!;
   const tiddlers = parseScratchSource(source, plan);
 
-  // Simulate the saver: build the field map the engine's getTiddlersAsJson
-  // would produce and serialize from it.
+  // Serialize through the function the save path uses, given the field map the
+  // engine's getTiddlersAsJson would produce.
   const byTitle = new Map(tiddlers.map((t) => [t.title, t]));
-  const serialized = serializeScratchWikiForTest(plan.base, (title) => byTitle.get(title));
+  const serialized = serializeScratchWiki(plan.base, (title) => byTitle.get(title));
   assert.equal(serialized, source);
 });
-
-function serializeScratchWikiForTest(
-  rootTitle: string,
-  getTiddler: (title: string) => Record<string, string> | undefined
-): string {
-  // Mirror of the engine runtime behavior tested behaviorally in
-  // scratch-wiki.test.ts; here we only assert payload fidelity.
-  const root = getTiddler(rootTitle);
-  assert.ok(root, 'root tiddler exists');
-  const list = (root['stream-list'] ?? '').match(/\[\[([^\]]+)\]\]|(\S+)/g) ?? [];
-  const lines: string[] = [];
-  const emit = (title: string, parentIndent: number, visiting: Set<string>) => {
-    if (visiting.has(title)) return;
-    const t = getTiddler(title);
-    if (!t) return;
-    visiting.add(title);
-    const gap = parseInt(t['lithic-gap'] ?? '0', 10) || 0;
-    for (let i = 0; i < gap && lines.length > 0; i++) lines.push('');
-    const stored = parseInt(t['lithic-indent'] ?? '', 10);
-    const indent = Number.isFinite(stored) ? stored : parentIndent + 1;
-    t.text.split('\n').forEach((line) => lines.push('\t'.repeat(Math.max(0, indent)) + line));
-    for (const child of (t['stream-list'] ?? '').match(/\[\[([^\]]+)\]\]|(\S+)/g) ?? []) {
-      emit(child.replace(/^\[\[|\]\]$/g, ''), indent, visiting);
-    }
-  };
-  for (const entry of list) emit(entry.replace(/^\[\[|\]\]$/g, ''), -1, new Set());
-  const body = lines.join('\n');
-  return body !== '' ? `${body}\n` : body;
-}
 
 // Keep the import surface honest: parseScratchText/serializeScratchText are
 // re-exported helpers of this module's contract.

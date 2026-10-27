@@ -1229,7 +1229,11 @@ function parseHandoffImported(name: string, text: string): Array<Record<string, 
     const trimmed = text.trim();
     if (trimmed.startsWith('[')) return parseLithToJSON(text);
   }
-  if (kind && text) {
+  // An empty text document is still a document, so it mounts as its root with
+  // one node to type into (see parseScratchSource). The other scratch kinds hold
+  // the file in a single tiddler rather than in a node tree, and a notebook's
+  // own JSON is what says it is a notebook, so an empty one is left alone.
+  if (kind && (text || kind === 'text')) {
     const plan = { kind, base: scratchRootTitle(name) };
     const parsed = parseScratchSource(text, plan);
     if (kind === 'tid') {
@@ -1269,7 +1273,16 @@ export function buildEngineHtml(
   engineGlobals: Record<string, string> = {},
   options: MountSaveOptions = {}
 ): string {
-  const imported = handoff.text
+  // A .md/.txt with nothing in it is still a document: it mounts as its root
+  // with one node to type into, rather than as an empty wiki with nowhere to put
+  // the first line. The guard on tiddlers the handoff already carries is load
+  // bearing: the read-only cache mount of a scratch document hands over an empty
+  // text and the cached tiddlers beside it, under that same file name, and those
+  // tiddlers are the document.
+  const emptyScratchFile = !handoff.text
+    && !handoff.payloadTiddlers?.length
+    && resolveScratchKind(handoff.name) === 'text';
+  const imported = handoff.text || emptyScratchFile
     ? parseHandoffImported(handoff.name, handoff.text)
     : (handoff.payloadTiddlers ?? []);
   // File tiddlers first, then queued pending imports (payload, Ephemeral

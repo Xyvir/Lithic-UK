@@ -226,6 +226,34 @@ test('scratch mode injects the flat-text serializers and publishes the root titl
   assert.match(html, /var scratchMode = "text"/);
 });
 
+// An empty file used to mount as a wiki with no tiddlers at all: the handoff's
+// text was empty, so nothing was parsed, and streams can only add a node beside
+// an existing one. The file was a dead end with no way to write its first line.
+test('an empty scratch file mounts one node to type into', () => {
+  const html = buildEngineHtml(ENGINE_STUB, { name: 'notes.txt', text: '' }, [], {}, { scratchMode: 'text' });
+  const store = readStore(html);
+  assert.equal(store.find((tiddler) => tiddler.title === 'notes.txt')?.['stream-list'], '[[notes.txt 1]]');
+  const node = store.find((tiddler) => tiddler.title === 'notes.txt 1');
+  assert.equal(node?.text, '');
+  assert.equal(node?.parent, 'notes.txt');
+});
+
+test('a handoff that already carries its tiddlers keeps them', () => {
+  const html = buildEngineHtml(
+    ENGINE_STUB,
+    {
+      name: 'notes.txt',
+      text: '',
+      payloadTiddlers: [{ title: 'notes.txt', text: '', 'stream-type': 'default' }, { title: 'notes.txt 1', text: 'cached line' }]
+    },
+    [],
+    {},
+    { scratchMode: 'text' }
+  );
+  const store = readStore(html);
+  assert.equal(store.find((tiddler) => tiddler.title === 'notes.txt 1')?.text, 'cached line');
+});
+
 test('non-scratch boots keep the scratch saver out of the document', () => {
   const html = buildEngineHtml(ENGINE_STUB, { name: 'wiki.lith', text: '' });
   // The save function may *reference* the runtime global, but the defining

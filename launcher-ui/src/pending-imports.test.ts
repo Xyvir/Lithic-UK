@@ -183,7 +183,6 @@ test('sharedPayload makes the streams tree the desktop association makes', () =>
     {
       title: 'An Article 1',
       parent: 'An Article',
-      'lithic-indent': '0',
       'lithic-gap': '0',
       type: 'text/markdown',
       'stream-type': 'default',
@@ -193,7 +192,6 @@ test('sharedPayload makes the streams tree the desktop association makes', () =>
     {
       title: 'An Article 2',
       parent: 'An Article 1',
-      'lithic-indent': '1',
       'lithic-gap': '0',
       type: 'text/markdown',
       'stream-type': 'default',
@@ -202,7 +200,6 @@ test('sharedPayload makes the streams tree the desktop association makes', () =>
     {
       title: 'An Article 3',
       parent: 'An Article',
-      'lithic-indent': '0',
       'lithic-gap': '1',
       type: 'text/markdown',
       'stream-type': 'default',
@@ -241,11 +238,15 @@ test('sharedPayload queues nothing for a share of nothing', () => {
   assert.deepEqual(sharedPayload('   \n\t ', ''), []);
 });
 
-// A share whose content is blank still has a name if the sender gave one, which is a document with
-// a title and no nodes rather than a row the engine cannot store.
+// A share whose content is blank still has a name if the sender gave one, which is a document
+// with a title rather than a row the engine cannot store. That document carries the same one
+// empty node an empty file mounts with: a share arrives by the same route and lands in the same
+// place, so a blank note waiting in the queue is one a person can type into rather than a dead
+// end under their own name.
 test('sharedPayload keeps a titled share whose body is blank', () => {
   assert.deepEqual(sharedPayload('', 'Named'), [
-    { title: 'Named', text: '', type: 'text/markdown', 'stream-type': 'default', 'lithic-scratch': 'yes', tags: 'Dogear' }
+    { title: 'Named', text: '', type: 'text/markdown', 'stream-type': 'default', 'stream-list': '[[Named 1]]', 'lithic-scratch': 'yes', tags: 'Dogear' },
+    { title: 'Named 1', parent: 'Named', 'lithic-gap': '0', type: 'text/markdown', 'stream-type': 'default', text: '' }
   ]);
 });
 

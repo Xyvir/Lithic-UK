@@ -123,7 +123,9 @@ export function parseScratchSource(source: string, plan: ScratchPlan): Array<Rec
     return [{ title: plan.base, type: 'text/markdown', 'lithic-tid': 'yes', ...fields, text: tid.text }];
   }
   const parsed = parseScratchText(source);
-  const { root, nodes } = scratchTiddlers(plan.base, parsed);
+  // A file with nothing in it is still a document, and one with no nodes has
+  // nowhere to put the first line: it mounts with one empty node to type into.
+  const { root, nodes } = scratchTiddlers(plan.base, parsed, {}, { emptyNode: true });
   root['lithic-scratch'] = 'yes';
   return [root, ...nodes];
 }

@@ -74,13 +74,13 @@ test('absolute indents are preserved through round-trip', () => {
   assert.equal(serializeScratchText(parsed.roots, parsed.trailingBlankLines, parsed.endsWithNewline), source);
 });
 
-test('UI-created nodes without stored indent inherit parent depth + 1', () => {
+test('a node created in the streams UI is written one level under its parent', () => {
   const source = 'Root\n\tStored child\n';
   const parsed = parseScratchText(source);
   const { root, nodes } = scratchTiddlers('Doc', parsed);
   const byTitle = new Map([root, ...nodes].map((t) => [t.title, t]));
-  // Simulate a streams-UI-created child of the top-level node (Doc 1):
-  // no lithic-indent field → one level past its parent.
+  // A node the streams UI created, which carries no scratch fields at all.
+  // Every node is written one level under its parent, wherever it came from.
   byTitle.set('NewNode', { title: 'NewNode', 'lithic-gap': '0', text: 'New node' });
   const doc1 = nodes.find((t) => t.text === 'Root')!;
   doc1['stream-list'] = (doc1['stream-list'] ?? '') + ' [[NewNode]]';
@@ -97,6 +97,30 @@ test('UI-created top-level nodes (children of the document root) get indent 0', 
   root['stream-list'] += ' [[TopNode]]';
   const out = serializeScratchWiki('Doc', (title) => byTitle.get(title));
   assert.equal(out, 'Root\nTop-level\n');
+});
+
+// The gap this closes. `lithic-indent` used to record where a node sat in the
+// file it was imported from, and the saver preferred that record over the tree.
+// Streams' indent action rewrites only `parent` and the two `stream-list`
+// fields, so a re-indent was undone by the next save and the file came back at
+// the old depth.
+test('a node re-parented in the streams UI is saved where it now sits', () => {
+  const parsed = parseScratchText('Parent\n\tChild\n\nStray\n');
+  const { root, nodes } = scratchTiddlers('Doc', parsed);
+  const byTitle = new Map([root, ...nodes].map((t) => [t.title, t]));
+  const save = () => serializeScratchWiki('Doc', (title) => byTitle.get(title));
+  const child = nodes.find((t) => t.text === 'Child')!;
+  const stray = nodes.find((t) => t.text === 'Stray')!;
+
+  assert.equal(save(), 'Parent\n\tChild\n\nStray\n');
+
+  // What the streams indent action does, and nothing else: the node leaves its
+  // parent's stream-list, joins the new parent's, and its `parent` follows.
+  root['stream-list'] = root['stream-list'].replace(' [[Doc 3]]', '');
+  child['stream-list'] = '[[Doc 3]]';
+  stray.parent = child.title;
+
+  assert.equal(save(), 'Parent\n\tChild\n\n\t\tStray\n');
 });
 
 test('serializeScratchWiki guards against hand-edited stream-list cycles', () => {
@@ -137,7 +161,9 @@ test('scratchTiddlers: root carries stream-list, nodes carry parent/gap/markdown
   assert.equal(nodes.length, 2);
   assert.equal(nodes[0].title, 'MyNotes 1');
   assert.equal(nodes[0].parent, 'MyNotes');
-  assert.equal(nodes[0]['lithic-indent'], '0');
+  // The file's absolute indent is deliberately not recorded: the tree holds the
+  // layout, and a second copy of it is what a re-indent could not keep in step.
+  assert.equal(nodes[0]['lithic-indent'], undefined);
   assert.equal(nodes[0]['lithic-gap'], '0');
   assert.equal(nodes[0].type, 'text/markdown');
   assert.equal(nodes[0].text, 'Root Node');

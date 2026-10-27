@@ -9,7 +9,24 @@ type: application/javascript
 module-type: filteroperator
 description: Returns an indented string for each level of depth of a stream node from a given root node, applying indentation to every line within the node
 
+Layout: the output is the flat text of the document as it now stands, which is
+what Copy Story River puts on the clipboard to paste into a chat, a message or
+an agent. Nothing here needs a file behind the document.
+
+  - indentation is read from the stream tree the document is showing (`parent`
+    and `stream-list`), never from the absolute indent recorded by the file it
+    was imported from (`lithic-indent`). This is the working copy: a node
+    re-parented in the streams UI is copied where it now sits. Where nothing has
+    been re-indented the two agree, and the copy is then also what the launcher's
+    scratch saver writes (serializeScratchWiki in launcher-ui/src/scratch-wiki.ts).
+  - one TAB per level, the unit the launcher's parser reads as one level (four
+    spaces would read as one too, but a two space indent reads as level zero and
+    flattens the whole outline)
+  - the blank lines a node was preceded by (`lithic-gap`) are replayed above it,
+    so two paragraphs stay two paragraphs on the way back in. That field is the
+    only record paragraph separation has, and no streams gesture contradicts it.
 \*/
+
 (function () {
 
     "use strict";
@@ -21,7 +38,13 @@ description: Returns an indented string for each level of depth of a stream node
         var rootNode = options.wiki.getTiddler(rootTitle);
         var rootIsBlank = (!rootNode || !rootNode.fields.text || rootNode.fields.text.trim() === "");
 
+        // The first line of a file has no blank lines above it, however the
+        // nodes were built.
+        var emitted = 0;
+
         source(function (tiddler, title) {
+            var fields = (tiddler && tiddler.fields) ? tiddler.fields : {};
+
             var depth = 0;
             var current = title;
             // Traverse parents until we hit the root node or a node with no parent
@@ -36,13 +59,16 @@ description: Returns an indented string for each level of depth of a stream node
             if (rootIsBlank) {
                 depth = Math.max(0, depth - 1);
             }
-            var indent = "";
-            for (var i = 0; i < depth; i++) {
-                indent += "  "; // 2 spaces per depth
-            }
 
-            var text = (tiddler && tiddler.fields.text) ? tiddler.fields.text : "";
-            var indentedText = indent + text.split('\n').join('\n' + indent);
+            var text = fields.text ? fields.text : "";
+
+            var gap = parseInt(fields["lithic-gap"], 10);
+            if (!isFinite(gap) || gap < 0) gap = 0;
+            var lead = emitted === 0 ? "" : new Array(gap + 1).join("\n");
+
+            var pad = new Array(depth + 1).join("\t");
+            var indentedText = lead + pad + text.split("\n").join("\n" + pad);
+            emitted++;
             results.push(indentedText);
         });
         return results;

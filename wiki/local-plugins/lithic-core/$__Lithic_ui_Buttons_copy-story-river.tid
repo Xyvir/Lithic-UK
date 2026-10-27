@@ -6,12 +6,12 @@ description: Copy Story River as Markdown
 
 \whitespace trim
 \define inner-map()
-[<currentTiddler>] [<currentTiddler>get-stream-nodes[]] :filter[get[text]trim[]!is[blank]] :map[stream-indent<..currentTiddler>] +[join[%0A]]
+[<currentTiddler>] [<currentTiddler>get-stream-nodes[]] :filter[get[text]trim[]!is[blank]] :map[stream-indent<..currentTiddler>encodeuricomponent[]] +[join[%0A]]
 \end
 <$button tooltip="Copy Story River" aria-label="Copy Story River" class=<<tv-config-toolbar-class>>>
 <$action-sendmessage
   $message="tm-copy-to-clipboard"
-  $param={{{ [list[$:/StoryList]] :map[subfilter<inner-map>] +[join[%0A]decodeuricomponent[]] }}}
+  $param={{{ [list[$:/StoryList]] :map[subfilter<inner-map>] :filter[!is[blank]] +[join[%0A]addsuffix[%0A]decodeuricomponent[]] }}}
 />
 <$list filter="[<tv-config-toolbar-icons>match[yes]]">
 {{$:/core/images/copy-clipboard}}

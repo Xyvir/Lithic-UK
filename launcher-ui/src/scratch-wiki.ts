@@ -14,10 +14,22 @@
  * All node tiddlers render as markdown (`type: text/markdown`) regardless of
  * the source extension. Double-clicking a block shows the source text.
  *
- * Round-trip guarantee: parse(serialize(tree)) === tree, and serializing a
- * freshly parsed tree reproduces the original bytes (CRLF aside). Nodes the
- * user adds in the streams UI have no stored indent and inherit
- * parent-indent + 1 on save.
+ * Layout rule: the tree IS the layout. `serializeScratchWiki` (the live save
+ * path, mirrored into the engine as SCRATCH_SERIALIZE_RUNTIME) writes every node
+ * one tab deeper than its parent, so a node re-indented or re-parented in the
+ * streams UI is saved where it now sits. The file's own absolute indent is
+ * therefore neither written nor read: recording it and preferring it meant a
+ * save after a re-indent replayed the old layout and silently undid the edit,
+ * because streams' indent actions rewrite only `parent` and `stream-list`.
+ *
+ * What is kept from the file is the blank lines between nodes (`lithic-gap`),
+ * which no streams gesture contradicts, and the trailing newline. Indentation is
+ * written as tabs, so a source indented with 4-space groups comes back as one
+ * tab per level; that was already true before the tree became authoritative.
+ *
+ * `parseScratchText`/`serializeScratchText` are the pure form of the same shape:
+ * they replay the parse's own indents, gaps, trailing blank lines and final
+ * newline, and they are what the parser's round-trip tests exercise.
  */
 
 export type ScratchNode = {
@@ -215,13 +227,23 @@ const STREAM_TYPE = { 'stream-type': 'default' };
 /**
  * Build the scratch wiki tiddlers for a parsed source.
  * The root tiddler carries `stream-list` (children order); each node gets
- * `parent`, its absolute indent (`lithic-indent`), its gap (`lithic-gap`), its
- * stream type, and renders as markdown.
+ * `parent`, its gap (`lithic-gap`), its stream type, and renders as markdown.
+ * The node's depth is NOT recorded, because the tree already holds it and a
+ * second copy of it is what a re-indent could not keep in step.
+ *
+ * `emptyNode` gives a source with no nodes at all one empty node. Streams adds
+ * a node beside an existing one, so a document that mounts with nothing in it
+ * offers nothing to double-click and the file stays empty for good. The node is
+ * built by the same walk as every other node, so its fields cannot drift from a
+ * parsed node's, and it sits at the top level with no stored gap: an untouched
+ * file still saves as the empty file it was, and the first line typed into it
+ * is the file's first line.
  */
 export function scratchTiddlers(
   base: string,
   parse: ScratchParseResult,
-  extraRootFields: Record<string, string> = {}
+  extraRootFields: Record<string, string> = {},
+  options: { emptyNode?: boolean } = {}
 ): ScratchWikiPayload {
   const nodes: Array<Record<string, string>> = [];
   let counter = 0;
@@ -233,7 +255,6 @@ export function scratchTiddlers(
     const tiddler: Record<string, string> = {
       title,
       parent: parentTitle,
-      'lithic-indent': String(node.indent),
       'lithic-gap': String(node.gapBefore),
       type: 'text/markdown',
       ...STREAM_TYPE,
@@ -247,6 +268,9 @@ export function scratchTiddlers(
   };
 
   const rootTitles = parse.roots.map((root) => walk(root, base));
+  if (options.emptyNode === true && rootTitles.length === 0) {
+    rootTitles.push(walk({ text: '', indent: 0, gapBefore: 0, children: [] }, base));
+  }
   const root: Record<string, string> = {
     title: base,
     text: '',
@@ -262,8 +286,8 @@ export function scratchTiddlers(
  * Serialize a mounted scratch wiki (given as field maps keyed by title, the
  * shape `getTiddlersAsJson` yields per tiddler) back to the flat source text.
  * Walks `stream-list` from the root; unknown/missing tiddlers are skipped.
- * Nodes created in the UI (no `lithic-indent`) indent one level past their
- * parent; gaps replay as blank lines and the file ends with a newline.
+ * Every node is written one tab under its parent, which is where the streams UI
+ * is showing it, and gaps replay as blank lines. The file ends with a newline.
  */
 export function serializeScratchWiki(
   rootTitle: string,
@@ -291,8 +315,7 @@ export function serializeScratchWiki(
     visiting.add(title);
     const gap = parseInt(tiddler['lithic-gap'] ?? '0', 10);
     for (let i = 0; i < (Number.isFinite(gap) ? gap : 0) && lines.length > 0; i++) lines.push('');
-    const stored = parseInt(tiddler['lithic-indent'] ?? '', 10);
-    const indent = Number.isFinite(stored) ? stored : parentIndent + 1;
+    const indent = parentIndent + 1;
     const pad = '\t'.repeat(Math.max(0, indent));
     (tiddler.text ?? '').split('\n').forEach((line) => lines.push(pad + line));
     for (const child of parseList(tiddler['stream-list'])) emit(child, indent);
@@ -337,8 +360,7 @@ export const SCRATCH_SERIALIZE_RUNTIME = `(function (root) {
       var gap = parseInt(tiddler['lithic-gap'] || '0', 10);
       if (isNaN(gap) || gap < 0) gap = 0;
       for (var i = 0; i < gap && lines.length > 0; i++) lines.push('');
-      var stored = parseInt(tiddler['lithic-indent'], 10);
-      var indent = isNaN(stored) ? parentIndent + 1 : stored;
+      var indent = parentIndent + 1;
       if (indent < 0) indent = 0;
       var pad = new Array(indent + 1).join('\\t');
       var text = tiddler.text === undefined || tiddler.text === null ? '' : String(tiddler.text);
