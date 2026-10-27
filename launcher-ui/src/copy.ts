@@ -129,6 +129,12 @@ const en = {
   pending: {
     aria: 'Pending imports',
     heading: 'Pending Imports',
+    /**
+     * The header's fold, which is what a phone starts with: the list is what covers the corner
+     * the actions sit in, and the bar above it is one row that leaves them reachable.
+     */
+    show: 'Show pending imports',
+    hide: 'Hide pending imports',
     clear: 'Clear pending imports',
     remove: (title: string) => `Remove ${title}`,
     untitled: 'Untitled note',
@@ -924,6 +930,8 @@ const es: Copy = {
   pending: {
     aria: 'Importaciones pendientes',
     heading: 'Importaciones pendientes',
+    show: 'Mostrar las importaciones pendientes',
+    hide: 'Ocultar las importaciones pendientes',
     clear: 'Borrar las importaciones pendientes',
     remove: (title: string) => `Quitar ${title}`,
     untitled: 'Nota sin título',
@@ -1595,6 +1603,8 @@ const fr: Copy = {
   pending: {
     aria: 'Importations en attente',
     heading: 'Importations en attente',
+    show: 'Afficher les importations en attente',
+    hide: 'Masquer les importations en attente',
     clear: 'Effacer les importations en attente',
     remove: (title: string) => `Retirer ${title}`,
     untitled: 'Note sans titre',
@@ -2263,6 +2273,8 @@ const de: Copy = {
   pending: {
     aria: 'Ausstehende Importe',
     heading: 'Ausstehende Importe',
+    show: 'Ausstehende Importe anzeigen',
+    hide: 'Ausstehende Importe ausblenden',
     clear: 'Ausstehende Importe verwerfen',
     remove: (title: string) => `${title} entfernen`,
     untitled: 'Notiz ohne Titel',

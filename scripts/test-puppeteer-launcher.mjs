@@ -1538,7 +1538,7 @@ try {
     `Live self-host: ...and then opens the Lith from the server, which is the row's own gesture: ${failedOpen}`
   );
   stub.state.liths.push(heldLith);
-  await livePage.click('.pending-imports-header button');
+  await livePage.click('.pending-imports .pending-clear');
   await livePage.waitForSelector('.pending-imports', { hidden: true });
   await livePage.click('.recent-search-clear');
   await livePage.waitForFunction(() => document.querySelectorAll('.recent-row.remote-row').length > 0, POLL);
@@ -6581,7 +6581,7 @@ try {
     '...and the queue is exactly as it was'
   );
   // The legs below open files with nothing queued, which is what those legs are about.
-  await mountPage.evaluate(() => document.querySelector('.pending-imports-header button')?.click());
+  await mountPage.evaluate(() => document.querySelector('.pending-imports .pending-clear')?.click());
   await mountPage.waitForSelector('.pending-imports', { hidden: true });
 
   // One file: added and opened, exactly as the button has always promised, and the row

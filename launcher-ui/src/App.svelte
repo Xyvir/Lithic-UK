@@ -308,6 +308,24 @@ import { backupFileName, collectInstanceBackup, mergeBookmarks, parseInstanceBac
   $: syncStatusDeadlines(status, heldStatus);
   let busy = false;
   let pendingImports: PendingTiddler[] = [];
+  /**
+   * Whether the pending panel draws its list or only its own bar.
+   *
+   * The panel is fixed over the corner that holds New Blank Lith and Mount a Lith, which is the
+   * pair a queued row exists to be acted on with. On a phone there is no room beside it, so a
+   * phone starts folded and leaves the bar, one row, over the heading; a desktop starts unfolded
+   * because the panel fits beside the actions and the list is the thing worth reading there.
+   *
+   * Decided once, when the page starts, rather than followed on every resize: the fold is the
+   * person's to open, and a window that grows afterwards must not shut what they just opened.
+   * The two shapes are the ones the stylesheet already treats as a phone (its own 600px row and
+   * its sideways-phone block), and both are true of a phone whichever way it is held.
+   */
+  const phonePanelQuery =
+    typeof window === 'undefined'
+      ? null
+      : window.matchMedia('(max-width: 600px), (orientation: landscape) and (max-height: 560px) and (max-width: 950px)');
+  let pendingCollapsed = phonePanelQuery ? phonePanelQuery.matches : false;
   /** Titles the last queue addition refused, because the queue already held them. */
   let skippedImports: string[] = [];
   /** The refusals still worth showing: their queued row has not been removed since. */
@@ -6817,12 +6835,29 @@ import { backupFileName, collectInstanceBackup, mergeBookmarks, parseInstanceBac
   {/if}
   </div>
   {#if pendingImports.length > 0}
-    <div class="pending-imports" role="status" aria-label={copy.pending.aria}>
+    <div class="pending-imports" class:collapsed={pendingCollapsed} role="status" aria-label={copy.pending.aria}>
       <div class="pending-imports-header">
-        <span>{copy.pending.heading}</span>
-        <button type="button" aria-label={copy.pending.clear} title={copy.pending.clear} on:click={() => { pendingImports = []; skippedImports = []; intentionalImports = []; }}>✕</button>
+        <!--
+          The fold sits against the title, where a disclosure belongs, and the clear stays at the
+          far end where it was: one control opens the list and the other abandons the queue, so
+          they are two decisions and are drawn as two. The chevron points down while the list is
+          drawn and turns to point right once it is folded away.
+        -->
+        <button
+          type="button"
+          class="pending-fold"
+          aria-expanded={!pendingCollapsed}
+          aria-controls="pending-imports-list"
+          aria-label={pendingCollapsed ? copy.pending.show : copy.pending.hide}
+          title={pendingCollapsed ? copy.pending.show : copy.pending.hide}
+          on:click={() => (pendingCollapsed = !pendingCollapsed)}
+        >
+          <span>{copy.pending.heading}</span>
+          <svg class="pending-chevron" viewBox="0 0 10 6" aria-hidden="true"><path d="M1 1l4 4 4-4" /></svg>
+        </button>
+        <button type="button" class="pending-clear" aria-label={copy.pending.clear} title={copy.pending.clear} on:click={() => { pendingImports = []; skippedImports = []; intentionalImports = []; }}>✕</button>
       </div>
-      <ul>
+      <ul id="pending-imports-list" hidden={pendingCollapsed}>
         {#each pendingImports as tiddler, index}
           <li class={/^\d{14}-\d{3,4}$/.test(tiddler.title ?? '') || Boolean(tiddler['stream-type']) ? 'tiddler-list' : ''}>
             <span class="pending-row">
@@ -6839,7 +6874,7 @@ import { backupFileName, collectInstanceBackup, mergeBookmarks, parseInstanceBac
         {/each}
       </ul>
       {#if shownSkipped.length > 0}
-        <p class="pending-note">
+        <p class="pending-note" hidden={pendingCollapsed}>
           {shownSkipped.length === 1 ? copy.pending.skippedOne(shownSkipped[0]) : copy.pending.skippedMany(shownSkipped.length)}
         </p>
       {/if}
