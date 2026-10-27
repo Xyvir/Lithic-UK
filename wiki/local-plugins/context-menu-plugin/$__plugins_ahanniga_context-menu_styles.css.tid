@@ -79,6 +79,16 @@ ul .menu-separator {
 	padding-bottom: 0;
 }
 
+/* The menu is promoted into the browser's top layer (popover="manual" on #contextMenu, set
+   in ContextListener.js), so nothing on the page can be drawn over it, whatever z-index it
+   uses. Only the parts of a popover's UA box that the rule above does not already override
+   are reset here; the menu's own chrome comes from .context-menu. */
+#contextMenu[popover] {
+	inset: auto;
+	margin: 0;
+	overflow: visible;
+}
+
 /* Context Menu Highlight Patch - applies when right-clicking a stream node or link.
    Palette-aware and live: the notify-bg/-fg contrast roles are derived from the SAME
    palette fields as the streams patch's own highlight band

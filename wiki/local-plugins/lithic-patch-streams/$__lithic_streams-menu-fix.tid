@@ -26,3 +26,17 @@ type: text/css
 .tc-popup:has(.sq-contextmenu) {
     z-index: 100000 !important;
 }
+
+/* The wrapper above is promoted into the browser's top layer (popover="manual", set by
+   $:/lithic/streams-contextmenu-invert.js), and that is what actually lifts the menu above
+   every story frame without touching any z-index on the frames. A popover also picks up the
+   UA box, and this node is only the positioning wrapper: the menu's own background, border,
+   radius and shadow live on the inner .sq-contextmenu, so the wrapper's UA box is cleared
+   here rather than letting a canvas-coloured border and padding show around it. */
+.tc-popup[popover] {
+    border: 0;
+    padding: 0;
+    background: transparent;
+    overflow: visible;
+    color: inherit;
+}

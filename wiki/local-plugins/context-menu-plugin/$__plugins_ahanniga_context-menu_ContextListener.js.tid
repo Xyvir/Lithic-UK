@@ -57,7 +57,29 @@ This widgets implements context menus to tiddlers
 
     var Widget = require("$:/core/modules/widgets/widget.js").widget;
     // Reverted to original class name
-    var template = `<div id="contextMenu" class="context-menu" style="display: none; z-index: 10000;"></div>`;
+    // popover="manual" puts the menu in the browser's top layer when it opens, so no story
+    // frame or overlay can be drawn over it however high their z-index is. "manual" leaves
+    // dismissal to this plugin's own click handler instead of the browser's light dismiss.
+    var template = `<div id="contextMenu" class="context-menu" popover="manual" style="display: none; z-index: 10000;"></div>`;
+
+    // Geometry is cleared because a popover's UA box sets inset 0 with auto margins, which
+    // would centre the menu instead of leaving it at the coordinates below. The rest of that
+    // UA box (border, padding, canvas background, overflow) is outranked by .context-menu,
+    // except for the scrolling, which #contextMenu[popover] turns off in styles.css.
+    var openMenu = function (menu) {
+        menu.style.inset = "auto";
+        menu.style.margin = "0";
+        if (menu.showPopover && !menu.matches(":popover-open")) {
+            try { menu.showPopover(); } catch (e) {}
+        }
+    };
+
+    var closeMenu = function (menu) {
+        if (menu.hidePopover && menu.matches(":popover-open")) {
+            try { menu.hidePopover(); } catch (e) {}
+        }
+        menu.style.display = "none";
+    };
 
     var ContextListener = function (parseTreeNode, options) {
         this.initialise(parseTreeNode, options);
@@ -245,6 +267,8 @@ This widgets implements context menus to tiddlers
             
             menu.style.left = left + "px";
             menu.style.top = top + "px";
+
+            openMenu(menu);
         }
 
         event.preventDefault();
@@ -406,7 +430,7 @@ This widgets implements context menus to tiddlers
     ContextListener.prototype.hideMenu = function () {
         var menu = document.getElementById("contextMenu");
         if (menu != null) {
-            menu.style.display = "none";
+            closeMenu(menu);
         }
         // --- HIGHLIGHT PATCH START ---
         document.querySelectorAll(".lithic-context-menu-active, .lithic-context-menu-active-children").forEach(function (el) {
