@@ -655,6 +655,107 @@ async function queuePendingImport(page, name) {
   await settle(page, 300);
 }
 
+/**
+ * Three notes as one dropped Lith. The titles are the whole of it, because a row draws a
+ * title and nothing else, and three is the number the list is worth reading with.
+ */
+const QUEUED_NOTES = ['Trip notes', 'Reading list', 'Sourdough recipe'];
+
+/**
+ * Queue notes by dropping a Lith on the launcher.
+ *
+ * This is the route to the queued-imports window that exists at EVERY width, which is why the
+ * window can be drawn on a phone at all: the panel a cached body match draws beside a row (the
+ * one pane 271 fills the queue through) is `display: none` below 950px, and a drop needs no
+ * panel. It is also the ordinary case: three notes and nowhere to put them yet.
+ *
+ * The drop is real — the monolith the launcher's own reader parses, handed over as a `File` the
+ * way the OS hands one over — so the rows are the dropped document's own titles rather than a
+ * queue this fixture wrote for itself. Nothing mounts, because a gesture carrying no page has no
+ * page to open: the launcher stays where it is and the window is the answer.
+ */
+async function dropQueuedNotes(page, titles) {
+  await page.evaluate((names) => {
+    const body = names
+      .map((title) => `title: ${title}\ntype: text/vnd.tiddlywiki\n\nWaiting for the next mount.`)
+      .join('\n⁂⁂⁂\n');
+    const transfer = new DataTransfer();
+    transfer.items.add(new File([body], 'queued-notes.lith', { type: 'text/plain' }));
+    window.dispatchEvent(new DragEvent('drop', { dataTransfer: transfer, bubbles: true, cancelable: true }));
+  }, titles);
+  await page.waitForSelector('.pending-imports', { timeout: 20000 });
+  await settle(page, 300);
+}
+
+/**
+ * Fold the window's list away, or open it, whichever the pane is about.
+ *
+ * The two states are one click apart and that click is the only way between them, because the
+ * launcher does not open this window the same way at every width: `pendingCollapsed` starts from
+ * the phone's own media query, so a phone and a sideways phone get the bar and a desktop gets the
+ * list. Asked of the DOM rather than assumed from the width, so each pane says which state it
+ * wants instead of the drive depending on a breakpoint staying what it is today.
+ */
+async function setPendingFold(page, folded) {
+  const isFolded = await page.evaluate(() => Boolean(document.querySelector('.pending-imports.collapsed')));
+  if (isFolded === folded) return;
+  await page.click('.pending-fold');
+  await settle(page, 250);
+}
+
+/**
+ * The claim every state of the queued-imports window makes, and the only thing that makes the six
+ * panes tests rather than pictures: the window is on the screen, it is inside the viewport it is
+ * fixed to the corner of, it says which state it is in, and an open one draws exactly the rows the
+ * drop carried.
+ *
+ * The window's own existence is the claim, not a formality. `expect` waits for presence, and a
+ * `display: none` element is present: a pane whose popover never appeared would be a picture of a
+ * launcher with nothing on it, which is the failure mode of every pane about an overlay and the one
+ * a reader cannot tell from a window that is simply very small.
+ *
+ * All six states are one of these two, which is the point of writing it once: the pair on each
+ * sheet has to make the same claim at every width, or the deck is six pictures of six different
+ * things that look alike.
+ */
+function assertQueuedWindow({ folded }) {
+  return async ({ query, evaluate }) => {
+    const shown = await evaluate(() => {
+      const node = document.querySelector('.pending-imports');
+      if (!node) return null;
+      const rect = node.getBoundingClientRect();
+      const style = getComputedStyle(node);
+      return {
+        drawn: style.display !== 'none' && style.visibility !== 'hidden' && rect.width > 0 && rect.height > 0,
+        inside:
+          rect.top >= 0 &&
+          rect.left >= 0 &&
+          rect.bottom <= window.innerHeight &&
+          rect.right <= window.innerWidth,
+        expanded: node.querySelector('.pending-fold')?.getAttribute('aria-expanded') ?? null
+      };
+    });
+    if (!shown) throw new Error('the queued-imports window is not on the page at all');
+    if (!shown.drawn) throw new Error('the queued-imports window is on the page and not drawn');
+    if (!shown.inside) throw new Error('the queued-imports window reaches outside the window it is fixed to');
+    if (shown.expanded !== String(!folded)) {
+      throw new Error(
+        `the window says its list is ${shown.expanded === 'true' ? 'shown' : 'hidden'}, and this pane is the other state`
+      );
+    }
+    if (folded) {
+      if ((await query('.pending-imports ul')).visibleCount !== 0) {
+        throw new Error('the folded window is still drawing its list');
+      }
+      return;
+    }
+    const rows = (await query('.pending-imports li')).visibleCount;
+    if (rows !== QUEUED_NOTES.length) {
+      throw new Error(`the open window draws ${rows} rows where the drop carried ${QUEUED_NOTES.length}`);
+    }
+  };
+}
+
 // --- the sheets -------------------------------------------------------------
 
 /**
@@ -673,7 +774,7 @@ async function queuePendingImport(page, name) {
  *           does not hold. This is what makes a pane a test rather than a photograph,
  *           and it is read-only by design — a pane's state is the `drive`'s business,
  *           so nothing here clicks anything, and the pane is framed as the `drive` left
- *           it. Six panes of the deck carry one; the rest are pictures, which is fine
+ *           it. A handful of panes of the deck carry one; the rest are pictures, which is fine
  *           until a number in a comment is the only thing holding a layout together.
  *           Where a claim is about a second state (the buttons coming back when a dialog
  *           closes), it belongs in the smoke test, which drives a page rather than
@@ -1600,6 +1701,45 @@ const SHEETS = [
         },
         expect: '.reset-cache'
       },
+      {
+        /*
+         * The queued-imports window at the width that decides its shape, in the state a phone
+         * opens it in. A phone and a sideways phone start FOLDED, because `pendingCollapsed`
+         * starts from the phone's own media query (`phonePanelQuery` in App.svelte), and this is
+         * why: the list is what covers the corner New Blank Lith and Mount a Lith sit in, and the
+         * bar is one row that leaves them reachable. The pair of panes on each sheet is the two
+         * states of that trade, in the same order everywhere, folded first.
+         *
+         * Reached by a drop, which is the route to this window that exists at EVERY width: the
+         * panel beside a cached row that pane 271 fills the queue through is `display: none` below
+         * 950px, so this window had no way onto a sheet at all until now.
+         */
+        name: '096-queued-imports-folded',
+        view: 'phone',
+        drive: async (page) => {
+          await dropQueuedNotes(page, QUEUED_NOTES);
+          await setPendingFold(page, true);
+        },
+        modal: 'Pending imports',
+        expect: '.pending-imports.collapsed',
+        verify: assertQueuedWindow({ folded: true })
+      },
+      {
+        /*
+         * The same window unfolded, holding the three notes the drop carried. This is what the
+         * fold gives back to a phone: the whole list at full height, over the corner the actions
+         * are in, with the rows being everything a person is deciding about before the mount.
+         */
+        name: '097-queued-imports-open',
+        view: 'phone',
+        drive: async (page) => {
+          await dropQueuedNotes(page, QUEUED_NOTES);
+          await setPendingFold(page, false);
+        },
+        modal: 'Pending imports',
+        expect: '.pending-imports:not(.collapsed)',
+        verify: assertQueuedWindow({ folded: false })
+      }
     ]
   },
   {
@@ -1960,6 +2100,40 @@ const SHEETS = [
           assertColumnsLevel({ card: measured.card, panelBottom: measured.list.bottom });
         }
       },
+      {
+        /*
+         * The window on a window 390 tall, folded, which is where the fold earns its place twice
+         * over: there is less room than a phone portrait has, and the list would cover the action
+         * card rather than a corner of a long page. Every landscape pane here asserts its card's
+         * own geometry for the same reason, and this one is the state that keeps the two columns
+         * and the controls in them reachable.
+         */
+        name: '141-queued-imports-folded',
+        view: 'landscape',
+        drive: async (page) => {
+          await dropQueuedNotes(page, QUEUED_NOTES);
+          await setPendingFold(page, true);
+        },
+        modal: 'Pending imports',
+        expect: '.pending-imports.collapsed',
+        verify: assertQueuedWindow({ folded: true })
+      },
+      {
+        /*
+         * The same window unfolded on that short page, which is the state a sideways phone has to
+         * fold away for itself: the list is drawn at its own height over the corner, and the
+         * three rows are what the fold was hiding.
+         */
+        name: '142-queued-imports-open',
+        view: 'landscape',
+        drive: async (page) => {
+          await dropQueuedNotes(page, QUEUED_NOTES);
+          await setPendingFold(page, false);
+        },
+        modal: 'Pending imports',
+        expect: '.pending-imports:not(.collapsed)',
+        verify: assertQueuedWindow({ folded: false })
+      }
     ]
   },
   {
@@ -2227,7 +2401,9 @@ const SHEETS = [
         // `display: none` below 950px (`launcher-ui/src/styles.css`, the `max-width: 950px`
         // block), so a phone and a sideways phone have no route to this window through the
         // gesture at all. Shot where it can be reached, cropped to itself: at this width the
-        // corner is a corner, and the window is a small box in it.
+        // corner is a corner, and the window is a small box in it. The window's own two states
+        // at all three widths are panes 096, 097, 141, 142, 272 and 273, which reach it by a
+        // drop; this pane is the other route, and the only picture of the panel that fills it.
         name: '271-instance-pending-imports',
         view: 'wide',
         mode: 'self-host',
@@ -2236,6 +2412,42 @@ const SHEETS = [
         modal: 'Pending imports',
         clip: '.pending-imports',
         expect: '.pending-imports li'
+      },
+      {
+        /*
+         * The same window at a desktop width in the state a phone has to ask for, which is the
+         * other half of the fold's rule: nothing here is folded until the phone's own media query
+         * says so, and a desktop is given the list. Drawn folded here so the pair reads in the same
+         * order on every sheet, and so the bar's own width and the one row it takes are comparable
+         * across the three styles.
+         */
+        name: '272-queued-imports-folded',
+        view: 'wide',
+        drive: async (page) => {
+          await dropQueuedNotes(page, QUEUED_NOTES);
+          await setPendingFold(page, true);
+        },
+        modal: 'Pending imports',
+        expect: '.pending-imports.collapsed',
+        verify: assertQueuedWindow({ folded: true })
+      },
+      {
+        /*
+         * The same window at a desktop width in the state it opens in there, holding the three
+         * notes a drop carries. It stands beside pane 271, and the two are not the same picture of
+         * one thing: that one queues a note through the panel a cached body match draws, which is a
+         * route only a window this wide has, while this one and its neighbour use the gesture the
+         * three styles share.
+         */
+        name: '273-queued-imports-open',
+        view: 'wide',
+        drive: async (page) => {
+          await dropQueuedNotes(page, QUEUED_NOTES);
+          await setPendingFold(page, false);
+        },
+        modal: 'Pending imports',
+        expect: '.pending-imports:not(.collapsed)',
+        verify: assertQueuedWindow({ folded: false })
       }
     ]
   },
