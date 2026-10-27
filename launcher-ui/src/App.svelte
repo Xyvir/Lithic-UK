@@ -65,6 +65,7 @@ import { backupFileName, collectInstanceBackup, mergeBookmarks, parseInstanceBac
   import { createServerRepo, disconnectServerSync, fetchServerSyncHistory, fetchServerSyncStatus, listServerRepos, pollServerDeviceToken, requestServerDeviceCode, revertServerSync, serverSyncIndicator, setupServerSync, type ServerSyncStatus } from './server-git-sync';
   import { serializeJsonToLith, parseLithToJSON } from './lithic-format';
   import { mergeCaptureIntoDocument } from './dirty-merge';
+  import { importIntoOpenWiki } from './open-wiki-import';
   // Inlined as a base64 data URL (assetsInlineLimit: Infinity) so the brand
   // mark survives when launcher.html is bundled into the Tauri app.
   import mstile150 from './mstile-150x150.png';
@@ -3504,6 +3505,9 @@ import { backupFileName, collectInstanceBackup, mergeBookmarks, parseInstanceBac
       // serialized page goes into the monolith's own recents row instead.
       stageBeat?.stage('wiki', safeName);
       await bootLegacyHtml(contents, safeName, path, indexDbOnly, shimToken);
+      // The mount replaced this document, and `document.open` took its listeners with it: the
+      // share ask is armed again on the document that is now showing.
+      armShareWatch();
       return;
     }
     const handoff = { name: safeName, path, text: contents };
@@ -3529,6 +3533,9 @@ import { backupFileName, collectInstanceBackup, mergeBookmarks, parseInstanceBac
       __EPHEMERAL_MODE__: mode === 'self-host' ? 'self-host' : 'paper-light',
       __LITHIC_LAUNCHER_MODE__: mode
     }, { driftedFromHead, scratchMode, remote, browserOnly: indexDbOnly, shimToken, openBoardFor });
+    // Same as the monolith branch above: the engine booted in place, so the share ask is armed
+    // again on the document it wrote.
+    armShareWatch();
     pendingImports = [];
     skippedImports = [];
     intentionalImports = [];
@@ -3767,18 +3774,28 @@ import { backupFileName, collectInstanceBackup, mergeBookmarks, parseInstanceBac
   }
 
   /**
-   * Queue what another app shared into this one, when one did.
+   * Take what another app shared into this one, when one did.
    *
    * The phone's own share sheet is how content arrives from outside: a link out of a browser, a
    * paragraph out of a reader, the text of anything at all. The app receives it as an intent
    * (`MainActivity`), holds it beside the board hand-off, and this is the page asking for it. The
    * answer is consumed when read, so a reload is not handed the same share twice.
    *
-   * Nothing mounts here. The share joins the pending imports panel and waits, which is the whole
-   * point: the person picks which Lith it belongs in, or starts a new one, and every mount drains
-   * the queue into whatever opens. That is why this is asked at boot and again whenever the page
-   * is shown: sharing to an app that is already running brings this window forward and runs no
-   * boot code, exactly as a board hand-off does.
+   * Where it goes is decided by what this window is showing, and there are only two answers.
+   *
+   * A Lith that has taken the window over takes the share, through its own import view, because
+   * the panel is not on screen there: the person is reading a document, and the note belongs in
+   * the one they have open or nowhere. That is also why the share cannot simply be queued while a
+   * Lith is showing, which is what this used to do: the queue drains into the *next* mount, so a
+   * share into an open Lith was held until the person saved and closed the thing they were
+   * already in, and nothing on screen said so.
+   *
+   * A window showing the launcher queues it in the panel, which is unchanged and is the right
+   * destination there: the person picks which Lith it belongs in, or starts a new one, and every
+   * mount drains the queue into whatever opens.
+   *
+   * The conversion is the same one either way (`sharedPayload`), so a share becomes the same
+   * tiddlers it would have become had it waited.
    *
    * A build with no such command, and every desktop, answer nothing, so this is silent where the
    * platform has no share sheet to receive from.
@@ -3794,8 +3811,33 @@ import { backupFileName, collectInstanceBackup, mergeBookmarks, parseInstanceBac
     if (!shared) return;
     const payload = sharedPayload(shared.text ?? '', shared.title ?? '');
     if (payload.length === 0) return;
+    // Asked of the window rather than of any state kept here: a Lith is in this window exactly
+    // when this window carries its `$tw`, and that is the same question the delivery itself has
+    // to answer (`open-wiki-import.ts`).
+    if (importIntoOpenWiki(payload, (window as any).$tw)) return;
     enqueuePending(payload);
     status = copy.pending.sharedReady(payload.length);
+  }
+
+  /**
+   * Ask for a share whenever this page is shown.
+   *
+   * Its own handler rather than a line in `onVisibilityChange`, because it is the one listener
+   * that has to outlive a mount. A share brings the app forward instead of starting it, so there
+   * is no boot to hang this on, and the ask has to be armed on the document that is showing.
+   * Measured in Chromium: a listener registered on the document is gone once the engine has taken
+   * it (the same Document object comes back with an empty body, so it is the document that was
+   * emptied and not a new one), and a listener registered afterwards is reached by the next event.
+   * Without this second arming, a Lith that has just taken the window would never read a share.
+   * Arming the same function twice is safe either way, because `addEventListener` ignores it.
+   */
+  function armShareWatch(): void {
+    document.addEventListener('visibilitychange', onShareVisible);
+  }
+
+  function onShareVisible(): void {
+    if (document.hidden) return;
+    void openHandedShare();
   }
 
   async function openRecent(
@@ -5775,12 +5817,12 @@ import { backupFileName, collectInstanceBackup, mergeBookmarks, parseInstanceBac
       refreshGitSyncIcon();
       void runGitSyncHeartbeat();
       // A tap in the board's sign-in window brings this app forward rather than starting it, so
-      // the intent is read again each time the page is shown. The same is true of a share, which
-      // arrives on the same kind of intent.
+      // the intent is read again each time the page is shown. The share's own ask is armed
+      // separately, because it is the one that has to survive a mount (`armShareWatch`).
       void openHandedBoard();
-      void openHandedShare();
     };
     document.addEventListener('visibilitychange', onVisibilityChange);
+    armShareWatch();
     // Proactive quota relief, deliberately not run in the index-db-only
     // fallback: it deletes the oldest-modified caches, and there the oldest
     // cache is somebody's only copy of a Lith. The same all-clear this mode
@@ -5903,6 +5945,7 @@ import { backupFileName, collectInstanceBackup, mergeBookmarks, parseInstanceBac
       stopGitSyncProgressTimer();
       window.removeEventListener('lithic-git-sync-saved', onGitSyncSaved);
       document.removeEventListener('visibilitychange', onVisibilityChange);
+      document.removeEventListener('visibilitychange', onShareVisible);
       gitPollAborted = true;
     };
   });
