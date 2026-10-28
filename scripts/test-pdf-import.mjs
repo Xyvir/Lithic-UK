@@ -24,8 +24,33 @@ function moduleBody(file) {
  * that renders one page of text. Shared by both tests so the drop and the open-request are
  * judged against the same engine.
  */
-function createPdfContext() {
+/**
+ * One page of the fake document, as the importer sees it: the `/Rotate` a page carries, and the
+ * text items with the matrix that says which way each one runs. Everything defaults to one
+ * upright portrait page, which is the document the existing tests are about.
+ *
+ * `viewports` records the rotation each render asks for, which is how the uprighting is judged:
+ * the importer never turns the pixels it has already drawn, it asks pdf.js for a turned viewport.
+ */
+function fakePage(spec, viewports) {
+  const rotate = spec.rotate || 0;
+  const items = spec.items || [{ str: 'Rasterized PDF text', transform: [1, 0, 0, 1, 0, 0] }];
+  return {
+    rotate,
+    getViewport: ({ rotation } = {}) => {
+      const applied = (((rotation === undefined ? rotate : rotation) % 360) + 360) % 360;
+      viewports.push(applied);
+      // A quarter turn swaps the sides, which is what makes a sideways page a wide one.
+      return applied % 180 === 0 ? { width: 600, height: 800 } : { width: 800, height: 600 };
+    },
+    render: () => ({ promise: Promise.resolve() }),
+    getTextContent: async () => ({ items }),
+  };
+}
+
+function createPdfContext({ pages = [{}] } = {}) {
   const listeners = {};
+  const viewports = [];
   const tiddlers = new Map();
   const canvasRequests = [];
   const errors = [];
@@ -43,14 +68,15 @@ function createPdfContext() {
     }
   }
 
-  const page = {
-    getViewport: () => ({ width: 600, height: 800 }),
-    render: () => ({ promise: Promise.resolve() }),
-    getTextContent: async () => ({ items: [{ str: 'Rasterized PDF text' }] }),
-  };
+  const documentPages = pages.map((spec) => fakePage(spec, viewports));
   const pdfjsLib = {
     GlobalWorkerOptions: {},
-    getDocument: () => ({ promise: Promise.resolve({ numPages: 1, getPage: async () => page }) }),
+    getDocument: () => ({
+      promise: Promise.resolve({
+        numPages: documentPages.length,
+        getPage: async (number) => documentPages[number - 1],
+      }),
+    }),
   };
   const wiki = {
     addTiddler(tiddler) {
@@ -137,11 +163,11 @@ function createPdfContext() {
     setTimeout,
   };
 
-  return { context, listeners, tiddlers, canvasRequests, errors, saves, saveStates, canvas };
+  return { context, listeners, tiddlers, canvasRequests, errors, saves, saveStates, canvas, viewports };
 }
 
-function loadPdfImportPlugin() {
-  const loaded = createPdfContext();
+function loadPdfImportPlugin(options) {
+  const loaded = createPdfContext(options);
   vm.runInNewContext(moduleBody(dropHandlerPath), loaded.context, { filename: dropHandlerPath });
   loaded.context.exports.startup();
   return loaded;
@@ -157,10 +183,11 @@ function loadPdfImportPlugin() {
  * store the launcher would have written it from.
  */
 function loadPdfOpenRequest({
+  pages = [{}],
   handoff = { __LITHIC_PDF_IMPORT__: { filename: 'imported-doc.pdf', base64: 'AAAAAQ==' } },
   tiddlers = [],
 } = {}) {
-  const loaded = createPdfContext();
+  const loaded = createPdfContext({ pages });
   tiddlers.forEach((fields) => loaded.tiddlers.set(fields.title, { fields }));
   loaded.context.window = handoff;
   vm.runInNewContext(moduleBody(dropHandlerPath), loaded.context, { filename: dropHandlerPath });
@@ -183,7 +210,7 @@ const FULLSCREEN_LAYOUT = '$:/plugins/linonetwo/tw-whiteboard/tiddlywiki-ui/Page
 const BOARD_STATE = '$:/state/Whiteboard/PageLayout/tiddler';
 
 test('PDF import embeds a compressed raster image in its whiteboard page', async () => {
-  const { listeners, tiddlers, canvasRequests, errors, canvas } = loadPdfImportPlugin();
+  const { listeners, tiddlers, canvasRequests, errors, canvas, viewports } = loadPdfImportPlugin();
   const file = {
     name: 'raster-regression.pdf',
     type: 'application/pdf',
@@ -204,6 +231,7 @@ test('PDF import embeds a compressed raster image in its whiteboard page', async
 
   assert.deepEqual(errors, [], 'the importer should finish without reporting an error');
   assert.deepEqual(canvasRequests, [['image/webp', 0.75]], 'PDF pages must use WebP so a deck does not embed PNG-sized pages');
+  assert.deepEqual(viewports, [0], 'an upright document is drawn at the angle it already has');
   assert.deepEqual(canvas.getContext('2d').getImageData().data, [220, 25, 20, 255], 'the canvas should contain rendered page pixels');
 
   const container = tiddlers.get('raster-regression');
@@ -355,4 +383,58 @@ test('a Lith opened on its own keeps the layout it was saved in', () => {
   assert.equal(tiddlers.has(BOARD_STATE), false, 'no board is forced on it');
   assert.equal(tiddlers.has('$:/StoryList'), false, 'and the river is left as the file left it');
   assert.deepEqual(saves, [], 'a plain mount writes nothing by itself');
+});
+
+// A document printed sideways is drawn upright, and the page geometry is what proves it: pdf.js
+// is asked for a turned viewport rather than the pixels being turned afterwards, so the page the
+// board gets is already wide rather than a tall page with a sideways picture in it.
+test('a document whose text runs sideways is drawn upright', async () => {
+  const sideways = { str: 'Everything on this page is written bottom to top', transform: [0, 1, -1, 0, 0, 0] };
+  const { context, errors, viewports } = loadPdfImportPlugin({
+    pages: [{ items: [sideways] }, { items: [sideways] }],
+  });
+
+  const imported = await context.$tw.lithic.convertPdfToTiddlers(
+    new ArrayBuffer(8),
+    'sideways-doc.pdf',
+    () => {}
+  );
+
+  assert.deepEqual(errors, [], 'the import finishes without reporting an error');
+  assert.deepEqual(viewports, [90, 90], 'both pages are asked for a quarter turn clockwise');
+  const whiteboard = imported.find((tiddler) => tiddler.title === 'sideways-doc-whiteboard');
+  const document = JSON.parse(whiteboard.text).document;
+  const shape = Object.values(document.pages.page.shapes)[0];
+  assert.deepEqual(shape.size, [800, 600], 'the page is wide, because it was turned before it was drawn');
+  assert.equal(
+    whiteboard['whiteboard-height'],
+    '540px',
+    'and the board is laid out for a landscape page, the same rule an upright document takes'
+  );
+});
+
+// The other half of that rule: a page that leans one way and a page that leans another is a
+// jumbled file, and straightening it would leave pages facing different ways. Nothing is turned.
+test('a document whose pages disagree about direction is left as it is', async () => {
+  const upright = { str: 'x'.repeat(100), transform: [1, 0, 0, 1, 0, 0] };
+  const sideways = { str: 'x'.repeat(100), transform: [0, 1, -1, 0, 0, 0] };
+  const { context, viewports } = loadPdfImportPlugin({
+    pages: [{ items: [upright] }, { items: [sideways] }],
+  });
+
+  await context.$tw.lithic.convertPdfToTiddlers(new ArrayBuffer(8), 'jumbled-doc.pdf', () => {});
+
+  assert.deepEqual(viewports, [0, 0], 'a file that cannot be straightened as a whole is not touched');
+});
+
+// And the floor under the judgement: a page with too little text on it for a direction to mean
+// anything (a stamp, a form field, a scan of a picture) is left alone rather than turned on the
+// strength of two words.
+test('a page with almost no text is not turned', async () => {
+  const stamp = { str: 'DRAFT', transform: [0, 1, -1, 0, 0, 0] };
+  const { context, viewports } = loadPdfImportPlugin({ pages: [{ items: [stamp] }] });
+
+  await context.$tw.lithic.convertPdfToTiddlers(new ArrayBuffer(8), 'stamped-doc.pdf', () => {});
+
+  assert.deepEqual(viewports, [0], 'five letters on one page are not a document direction');
 });

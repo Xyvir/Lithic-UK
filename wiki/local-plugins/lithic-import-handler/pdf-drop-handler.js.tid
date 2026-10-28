@@ -198,6 +198,92 @@ function convertImageDataToTiddlers(image) {
     });
 }
 
+// --- Which way the document is written ---------------------------------------
+//
+// A document printed sideways arrives as a page to turn your head for: a slide deck saved from a
+// landscape view, or anything that reached PDF through a print driver pointed the wrong way.
+// Nothing in the page geometry says so, because the page is simply portrait with landscape
+// content drawn on it, but the text does: every text item carries the direction its own baseline
+// runs in.
+//
+// So the text is read before anything is rendered, and the pages are then drawn at the angle
+// that puts that text back on the line. The judgement is the document's, never the page's. A
+// direction is applied only when the whole document agrees on it, because a document straightened
+// page by page can come out as a deck whose pages face different ways, and a reader can no longer
+// tell which way any of it opens.
+
+// The most pages carrying text that are read before the direction is settled. A ceiling rather
+// than a threshold: a document shorter than this is read whole, so a one-page slide is judged on
+// its own single page. The cap is what stops a hundred-page deck being read twice, and eight is
+// enough that a cover page or two cannot swing the answer.
+var READING_SAMPLE = 8;
+
+// How many characters the document needs, counted across everything sampled, before its direction
+// is worth believing. Below this the text is a stamp, a form field, or nothing at all, and a
+// scanned page has no text to read. Four or five words on one page clear it.
+var READING_FLOOR = 40;
+
+// How far one page may lean from the document's own answer, in degrees, before the file is called
+// jumbled and left exactly as it is.
+var READING_AGREEMENT = 30;
+
+/**
+ * The reading direction of one page's text, as a vector weighted by characters: `x` is how much
+ * of it runs left to right and `y` how much runs bottom to top. The page's own `/Rotate` is added
+ * because that turn is already applied by the time a reader sees the page.
+ */
+function pageReading(content, rotation) {
+    var reading = { x: 0, y: 0, weight: 0 };
+    var turn = (rotation || 0) * Math.PI / 180;
+    for (var i = 0; i < content.items.length; i++) {
+        var item = content.items[i];
+        if (!item.str || !item.str.trim() || !item.transform) {
+            continue;
+        }
+        var angle = Math.atan2(item.transform[1], item.transform[0]) + turn;
+        var weight = item.str.length;
+        reading.x += Math.cos(angle) * weight;
+        reading.y += Math.sin(angle) * weight;
+        reading.weight += weight;
+    }
+    return reading;
+}
+
+/**
+ * The turn, in degrees clockwise, that puts a document's text back on the line, or 0 to leave the
+ * document as it stands. Only quarter turns are ever answered: that is what a page printed
+ * sideways needs, and it is all a word's own matrix can be trusted to say.
+ */
+function uprightTurn(readings) {
+    var x = 0, y = 0, weight = 0;
+    for (var i = 0; i < readings.length; i++) {
+        x += readings[i].x;
+        y += readings[i].y;
+        weight += readings[i].weight;
+    }
+    if (weight < READING_FLOOR) {
+        return 0;
+    }
+    var mean = Math.atan2(y, x);
+    var turn = Math.round(mean / (Math.PI / 2)) * 90;
+    turn = ((turn % 360) + 360) % 360;
+    if (turn === 0) {
+        return 0;
+    }
+    // One page leaning the other way is enough to call the document jumbled.
+    for (var j = 0; j < readings.length; j++) {
+        if (!readings[j].weight) {
+            continue;
+        }
+        var lean = Math.atan2(readings[j].y, readings[j].x) - mean;
+        var apart = Math.abs(Math.atan2(Math.sin(lean), Math.cos(lean))) * 180 / Math.PI;
+        if (apart > READING_AGREEMENT) {
+            return 0;
+        }
+    }
+    return turn;
+}
+
 async function convertPdfDataToTiddlers(arrayBuffer, fileName, setProgress) {
     const pdfjsLib = require("$:/plugins/lithic/lithic-import-handler/pdf.js");
     
@@ -225,12 +311,25 @@ async function convertPdfDataToTiddlers(arrayBuffer, fileName, setProgress) {
     const images = [];
     var pageTexts = [];
 
+    // Which way the document is written, read before a single page is drawn so that every page is
+    // rendered once, at the angle this answers.
+    setProgress("Converting " + fileName + " — reading the page direction...");
+    var readings = [];
+    for (var sampled = 1; sampled <= pdf.numPages && readings.length < READING_SAMPLE; sampled++) {
+        var sampledPage = await pdf.getPage(sampled);
+        var reading = pageReading(await sampledPage.getTextContent(), sampledPage.rotate);
+        if (reading.weight) {
+            readings.push(reading);
+        }
+    }
+    var turn = uprightTurn(readings);
+
     for (let i = 1; i <= pdf.numPages; i++) {
         setProgress("Converting " + fileName + " — rendering page " + i + "/" + pdf.numPages + "...");
 
         const page = await pdf.getPage(i);
         const scale = 2.0; 
-        const viewport = page.getViewport({ scale: scale });
+        const viewport = page.getViewport({ scale: scale, rotation: ((page.rotate || 0) + turn) % 360 });
 
         const canvas = document.createElement("canvas");
         const context = canvas.getContext("2d");
