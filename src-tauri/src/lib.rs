@@ -27,6 +27,10 @@ mod instance_copy;
 // which ones may be closed, and which one is holding the copy it is about to write.
 mod instances;
 mod cdp;
+// The page's own `confirm`/`alert`, captured before the dialog plugin replaces them with async
+// IPC calls that this app's capability set then refuses. See the module: without it, every
+// `$action-confirm` in the wiki (Streams splits and merges) runs its action without asking.
+mod native_dialogs;
 mod platform;
 mod git_sync_contract;
 #[path = "../../shared/sync_core.rs"]
@@ -118,6 +122,9 @@ fn read_file_base64(path: String) -> Result<String, String> {
 /// it decides the whole gesture: an existing Lith is opened as it stands, since the import is a
 /// copy of the source and running it again would replace whatever has been written in that copy
 /// since.
+///
+/// Nothing is created by asking. A file with no Lith beside it opens as a view of that file, and
+/// the first save is what writes this path (see `importIntoNewLith` in the launcher).
 #[derive(serde::Serialize)]
 struct ImportTarget {
     path: String,
@@ -3509,6 +3516,11 @@ pub fn run() {
     let startup_file = args.get(1).cloned();
 
     tauri::Builder::default()
+        // Ahead of the dialog plugin on purpose: init scripts run in registration order, and this
+        // one has to hold the engine's own `confirm`/`alert` before the dialog plugin overwrites
+        // them. Moving it below `tauri_plugin_dialog::init()` silently restores the do-nothing
+        // replacement the module documents.
+        .plugin(native_dialogs::plugin())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_fs::init())
         .plugin(tauri_plugin_opener::init())

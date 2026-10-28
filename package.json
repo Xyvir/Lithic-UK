@@ -18,6 +18,7 @@
     "test:puppeteer:headed": "HEADED=1 node scripts/test-puppeteer-launcher.mjs",
     "test:firefox": "node scripts/test-firefox-launcher.mjs",
     "monkey:launcher": "node scripts/monkey-launcher.mjs",
+    "probe:webview": "node scripts/probe-webview-globals.mjs",
     "monkey:launcher:headed": "HEADED=1 node scripts/monkey-launcher.mjs",
     "gallery": "node scripts/ui-gallery.mjs",
     "check:pdf-plugin": "node scripts/check-pdf-plugin-unminified.mjs",
