@@ -112,11 +112,12 @@ fn read_file_base64(path: String) -> Result<String, String> {
 
 /// Where a file the app renders or draws on is written, and whether that file is already there.
 ///
-/// The Lith beside the source file: `thesis.pdf` becomes `thesis.lith` and `photo.png` becomes
-/// `photo.lith`, in the same folder, which is the shape an annotation app uses and the reason
-/// the source is never a save target. The flag is answered here because it decides the whole
-/// gesture: an existing Lith is opened as it stands, since the import is a copy of the source
-/// and running it again would replace whatever has been written in that copy since.
+/// The Lith beside the source file: `statement.pdf` becomes `statement_pdf.lith` and
+/// `photo.png` becomes `photo_png.lith`, in the same folder, which is the shape an annotation
+/// app uses and the reason the source is never a save target. The flag is answered here because
+/// it decides the whole gesture: an existing Lith is opened as it stands, since the import is a
+/// copy of the source and running it again would replace whatever has been written in that copy
+/// since.
 #[derive(serde::Serialize)]
 struct ImportTarget {
     path: String,
@@ -124,17 +125,38 @@ struct ImportTarget {
 }
 
 /// The sibling rule, kept pure so it can be pinned without a file on disk.
+///
+/// The Lith is named for the file *and* for its extension, joined by an underscore. The
+/// extension stays in the name because the sibling of a PDF and the sibling of a picture are
+/// different documents, and a folder holding `foobar.pdf` beside `foobar.png` is an ordinary
+/// folder rather than an unlucky one: replacing the extension there would hand the second file
+/// the first file's board.
 fn lith_sibling_of(source: &Path) -> Option<(PathBuf, bool)> {
     let stem = source.file_stem()?;
     if stem.is_empty() {
         return None;
     }
-    let target = source.with_extension("lith");
     // A path whose extension is already `lith` is not a source file, and answering with itself
     // would point the import's save at the file it is reading.
-    if target == source {
+    let extension = source
+        .extension()
+        .filter(|extension| !extension.is_empty());
+    if extension.is_some_and(|extension| extension.eq_ignore_ascii_case("lith")) {
         return None;
     }
+    // The extension is carried through as the file writes it, never folded: `PHOTO.JPG` and
+    // `photo.jpg` are one file on Windows and two on Linux, and a fold would name both of them
+    // the same Lith. A file with no extension is named for its stem alone rather than trailing
+    // an underscore.
+    let name = match extension {
+        Some(extension) => format!(
+            "{}_{}.lith",
+            stem.to_string_lossy(),
+            extension.to_string_lossy()
+        ),
+        None => format!("{}.lith", stem.to_string_lossy()),
+    };
+    let target = source.with_file_name(name);
     let exists = target.is_file();
     Some((target, exists))
 }
@@ -3706,7 +3728,7 @@ mod tests {
 
         let pdf = folder.join("thesis.pdf");
         let (target, exists) = lith_sibling_of(&pdf).expect("a named PDF has a sibling");
-        assert_eq!(target, folder.join("thesis.lith"));
+        assert_eq!(target, folder.join("thesis_pdf.lith"));
         assert!(!exists, "nothing has been written beside it yet");
 
         fs::write(&target, "existing").unwrap();
@@ -3714,11 +3736,12 @@ mod tests {
         assert_eq!(same, target);
         assert!(exists, "a Lith that is already there is what opens instead of a re-import");
 
-        // The extension is replaced rather than extended, and a path with no stem has
-        // nowhere to write.
+        // The extension is part of the name rather than replaced by it, and a path with no
+        // stem has nowhere to write.
         assert_eq!(
             lith_sibling_of(&folder.join("paper.PDF")).map(|(path, _)| path),
-            Some(folder.join("paper.lith"))
+            Some(folder.join("paper_PDF.lith")),
+            "the extension is carried through as the file spells it"
         );
         assert!(lith_sibling_of(Path::new("")).is_none());
         assert!(lith_sibling_of(Path::new("notes.lith")).is_none(), "a Lith is not a PDF to import");
@@ -3727,9 +3750,9 @@ mod tests {
     }
 
     /// An image is the second file this app imports rather than edits, and it lands under the
-    /// same rule: a Lith beside it with the extension replaced. Every extension the association
-    /// registers resolves to that one name, so the two spellings of JPEG and the four formats
-    /// each land in their own file rather than colliding on a shared one.
+    /// same rule: a Lith beside it, named for the file and its extension. Every format the
+    /// association registers lands in its own Lith, and so does each spelling of one, because
+    /// the name says which file the board came from.
     ///
     /// The stem's case is carried through rather than folded, which is what a path means on
     /// Windows and macOS (one file however it is spelled) and the only safe answer on Linux,
@@ -3740,23 +3763,30 @@ mod tests {
         let _ = fs::remove_dir_all(&folder);
         fs::create_dir_all(&folder).unwrap();
 
-        for name in ["photo.png", "photo.jpeg", "photo.jpg", "photo.bmp", "photo.webp"] {
+        for (name, sibling) in [
+            ("photo.png", "photo_png.lith"),
+            ("photo.jpeg", "photo_jpeg.lith"),
+            ("photo.jpg", "photo_jpg.lith"),
+            ("photo.bmp", "photo_bmp.lith"),
+            ("photo.webp", "photo_webp.lith"),
+        ] {
             let (target, exists) = lith_sibling_of(&folder.join(name))
                 .unwrap_or_else(|| panic!("{name} has no name to write a Lith beside"));
-            assert_eq!(target, folder.join("photo.lith"), "{name} names the Lith beside it");
+            assert_eq!(target, folder.join(sibling), "{name} names the Lith beside it");
             assert!(!exists, "nothing has been written beside {name} yet");
         }
         assert_eq!(
             lith_sibling_of(&folder.join("PHOTO.JPG")).map(|(path, _)| path),
-            Some(folder.join("PHOTO.lith")),
+            Some(folder.join("PHOTO_JPG.lith")),
             "the case of the name is the file's business, not this rule's"
         );
-        // The same name in two formats is one Lith, which is the rule rather than an accident:
-        // a PNG and a JPEG of the same picture are the same picture, and the second one opened
-        // finds the board the first one made. Said here so nobody "fixes" it into two files.
-        assert_eq!(
-            lith_sibling_of(&folder.join("photo.png")).map(|(path, _)| path),
-            lith_sibling_of(&folder.join("photo.jpeg")).map(|(path, _)| path)
+        // Two files that share a stem keep their own Liths, which is the point of naming each
+        // one after its own extension: `foobar.png` beside `foobar.pdf` is an ordinary folder,
+        // and the second file opened must not land on the board the first one made.
+        assert_ne!(
+            lith_sibling_of(&folder.join("foobar.png")).map(|(path, _)| path),
+            lith_sibling_of(&folder.join("foobar.pdf")).map(|(path, _)| path),
+            "a picture and a PDF of the same name are two documents"
         );
         assert!(lith_sibling_of(&folder.join("photo.lith")).is_none(), "a Lith is not an image to import");
 
