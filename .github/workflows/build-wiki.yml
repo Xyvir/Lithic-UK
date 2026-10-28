@@ -95,9 +95,9 @@ env:
   # the tick is for.
   BUILD_CONFIG: ${{ (github.event_name == 'push' || github.event_name == 'schedule') && 'prod' || inputs.build_config }}
   CREATE_RELEASE: ${{ github.event_name == 'push' || github.event_name == 'schedule' || inputs.create_release }}
-  # The build job installs the root dependencies and drives no browser, so puppeteer's install
-  # step is told not to fetch Chrome. The deck job below DOES drive one, and installs it in the
-  # step that uses it, which is why this is a skip rather than a disable.
+  # Puppeteer's own install step is told not to fetch Chrome: the two jobs that drive a browser
+  # install it in the step that uses it, which is the deck job below and the build job's
+  # prod-only context menu probe. Every other job here fetches no browser at all.
   PUPPETEER_SKIP_DOWNLOAD: 'true'
 
 # One writer to main at a time, repo-wide: concurrency groups are shared across
@@ -328,6 +328,18 @@ jobs:
           # the plugin's own text is what gets asserted: rename a tiddler, or lose the
           # config tiddler, and this fails here rather than in somebody's whiteboard.
           node scripts/check-pdf-plugin-unminified.mjs wiki/output/index.html
+
+      # The one behavioural check on the built wiki, and the only one that asks WHERE something
+      # lands rather than whether it is present. Every check above opens nothing: the context menu
+      # regression of build 2026.10.27 opened the menu, drew it above every frame and ran every
+      # item, and still painted it at the top of the page instead of at the pointer.
+      - name: Install Puppeteer browser (prod only)
+        if: ${{ env.BUILD_CONFIG == 'prod' }}
+        uses: $/.github/actions/browser
+
+      - name: Verify the Context Menu Opens at the Pointer (prod only)
+        if: ${{ env.BUILD_CONFIG == 'prod' }}
+        run: node scripts/test-puppeteer-context-menu.mjs wiki/output/index.html
 
       - name: Rename Output
         if: ${{ env.BUILD_CONFIG != 'light' }}

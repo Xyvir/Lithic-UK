@@ -62,16 +62,32 @@ This widgets implements context menus to tiddlers
     // dismissal to this plugin's own click handler instead of the browser's light dismiss.
     var template = `<div id="contextMenu" class="context-menu" popover="manual" style="display: none; z-index: 10000;"></div>`;
 
-    // Geometry is cleared because a popover's UA box sets inset 0 with auto margins, which
-    // would centre the menu instead of leaving it at the coordinates below. The rest of that
-    // UA box (border, padding, canvas background, overflow) is outranked by .context-menu,
-    // except for the scrolling, which #contextMenu[popover] turns off in styles.css.
-    var openMenu = function (menu) {
-        menu.style.inset = "auto";
-        menu.style.margin = "0";
+    // The one place the menu is placed. The popover UA box (inset 0 with auto margins, which would
+    // centre the menu) is cleared by #contextMenu[popover] in styles.css, so nothing here touches
+    // "inset": it is a shorthand for left/top, and writing it after the coordinates is what once
+    // dropped the fixed menu to its static position instead of the pointer.
+    var placeMenu = function (menu, x, y) {
+        menu.style.display = "block";
+        var width = menu.offsetWidth;
+        var height = menu.offsetHeight;
+        var left = x;
+        var top = y;
+        // Flip left/up where the menu would overflow the window, keeping it on screen.
+        if (left + width > window.innerWidth) {
+            left = left - width;
+            if (left < 0) left = window.innerWidth - width - 5;
+            if (left < 0) left = 5;
+        }
+        if (top + height > window.innerHeight) {
+            top = top - height;
+            if (top < 0) top = window.innerHeight - height - 5;
+            if (top < 0) top = 5;
+        }
         if (menu.showPopover && !menu.matches(":popover-open")) {
             try { menu.showPopover(); } catch (e) {}
         }
+        menu.style.left = left + "px";
+        menu.style.top = top + "px";
     };
 
     var closeMenu = function (menu) {
@@ -241,34 +257,7 @@ This widgets implements context menus to tiddlers
             }
             // --- HIGHLIGHT PATCH END ---
 
-            menu.style.display = 'block';
-
-            var menuWidth = menu.offsetWidth;
-            var menuHeight = menu.offsetHeight;
-            var windowWidth = window.innerWidth;
-            var windowHeight = window.innerHeight;
-            
-            var left = event.clientX;
-            var top = event.clientY;
-            
-            // Adjust X axis if going off screen
-            if (left + menuWidth > windowWidth) {
-                left = left - menuWidth;
-                if (left < 0) left = windowWidth - menuWidth - 5;
-                if (left < 0) left = 5;
-            }
-            
-            // Adjust Y axis if going off screen (invert above cursor)
-            if (top + menuHeight > windowHeight) {
-                top = top - menuHeight;
-                if (top < 0) top = windowHeight - menuHeight - 5;
-                if (top < 0) top = 5;
-            }
-            
-            menu.style.left = left + "px";
-            menu.style.top = top + "px";
-
-            openMenu(menu);
+            placeMenu(menu, event.clientX, event.clientY);
         }
 
         event.preventDefault();
