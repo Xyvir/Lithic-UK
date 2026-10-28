@@ -52,6 +52,10 @@ ${E}`;continue}const v={text:E,indent:u,gapBefore:l,children:[]};for(l=0;s.lengt
       visiting[title] = true;
       var gap = parseInt(tiddler['lithic-gap'] || '0', 10);
       if (isNaN(gap) || gap < 0) gap = 0;
+      // One blank line between two nodes is the floor, as in the module above:
+      // a node with no gap of its own still gets air, and the first line of the
+      // document still opens without it (the lines.length guard below).
+      if (gap < 1) gap = 1;
       for (var i = 0; i < gap && lines.length > 0; i++) lines.push('');
       var indent = parentIndent + 1;
       if (indent < 0) indent = 0;
