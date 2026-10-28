@@ -7,8 +7,9 @@ title: $:/plugins/lithic/lithic-import-handler/pdf-open-request.js
 type: application/javascript
 module-type: startup
 
-Opens the PDF the desktop app was handed: as a new Lith when none sits beside it, and as the
-board of the Lith that does.
+Opens the file the desktop app was handed when it is not a document this wiki edits: a PDF's
+pages, or an image, each as a new Lith when none sits beside the file, and as the board of the
+Lith that does.
 
 The launcher cannot render a PDF, because the renderer lives in this wiki, so it reads the
 file's bytes, hands them over on the window, and mounts the new Lith. This module takes that
@@ -22,6 +23,11 @@ There are no bytes to hand over in that case, only the container the import name
 file, because the gesture is still `open the PDF` and what a double-click on a PDF means is
 the board laid over its pages rather than whatever layout that Lith happened to be saved in.
 A Lith opened on its own carries no request and keeps what it says.
+
+An image is the same gesture with a different converter. The launcher reads the picture's
+bytes and hands them over on the window; this module draws them on a board and opens it, so a
+double-click on a photograph is the same outcome as a double-click on a PDF: a canvas to write
+on, laid over the thing you opened rather than beside it in the river.
 \*/
 (function(){
 
@@ -54,6 +60,49 @@ var WHITEBOARD_LAYOUT = "$:/plugins/linonetwo/tw-whiteboard/tiddlywiki-ui/PageLa
 var BOARD_STATE = "$:/state/Whiteboard/PageLayout/tiddler";
 // The document type a board is, which is also how the layout finds the boards to offer.
 var BOARD_TYPE = "application/tldr";
+
+// The launcher's half of the second handoff: an image rather than a PDF. One gesture is one of
+// the two and never both, so each is read only when the other is absent.
+var IMAGE_REQUEST = "__LITHIC_IMAGE_IMPORT__";
+
+// What each registered extension is, as the type a data URL has to declare for the browser's own
+// decoder to read the bytes. `jpg` and `jpeg` are one format under the two spellings it has.
+var IMAGE_MIME = {
+    png: "image/png",
+    jpg: "image/jpeg",
+    jpeg: "image/jpeg",
+    bmp: "image/bmp",
+    webp: "image/webp"
+};
+
+/**
+ * An image's bytes as something an `<img>` will read.
+ *
+ * A data URL rather than an object URL: this is read once, during a boot, and the page replaces
+ * itself by the end of it, so an address there is nothing to revoke afterwards.
+ */
+function dataUrlOf(filename, base64) {
+    var match = /\.([^.]+)$/.exec(String(filename));
+    var mime = match ? IMAGE_MIME[match[1].toLowerCase()] : "";
+    return "data:" + (mime || "application/octet-stream") + ";base64," + base64;
+}
+
+// The one alert both converters use. The page is otherwise blank between the mount and the
+// board, and a large image or a long PDF takes long enough that saying so is the difference
+// between working and looking broken.
+var PROGRESS_TITLE = "$:/temp/alerts/lithic-import-progress";
+function setProgress(message) {
+    $tw.wiki.addTiddler(new $tw.Tiddler({
+        title: PROGRESS_TITLE,
+        text: message,
+        component: "import-handler",
+        tags: "$:/tags/Alert",
+        modified: new Date()
+    }));
+}
+function clearProgress() {
+    $tw.wiki.deleteTiddler(PROGRESS_TITLE);
+}
 
 /**
  * Show one board full screen: the two sidebars out of the way, the white board page layout
@@ -149,17 +198,6 @@ function openRequestedPdf(request) {
         return;
     }
 
-    var alertTitle = "$:/temp/alerts/lithic-import-progress";
-    function setProgress(msg) {
-        $tw.wiki.addTiddler(new $tw.Tiddler({
-            title: alertTitle,
-            text: msg,
-            component: "import-handler",
-            tags: "$:/tags/Alert",
-            modified: new Date()
-        }));
-    }
-
     Promise.resolve(convert(base64ToArrayBuffer(base64), filename, setProgress)).then(function(tiddlers){
         var whiteboard = null;
         tiddlers.forEach(function(fields){
@@ -172,7 +210,7 @@ function openRequestedPdf(request) {
                 whiteboard = fields.title;
             }
         });
-        $tw.wiki.deleteTiddler(alertTitle);
+        clearProgress();
         if (whiteboard) {
             // The board is the point of the gesture, so it is what opens. The container and
             // its extracted text stay in the wiki beside it, and a PDF is opened to be
@@ -185,7 +223,7 @@ function openRequestedPdf(request) {
             $tw.rootWidget.dispatchEvent({ type: "tm-save-wiki" });
         }
     }).catch(function(error){
-        $tw.wiki.deleteTiddler(alertTitle);
+        clearProgress();
         setProgress("Could not open the PDF: " + (error && error.message ? error.message : error));
     });
 }
@@ -204,6 +242,51 @@ function openRequestedBoard(board) {
     openBoard(boardOf(board.container));
 }
 
+/**
+ * The image itself: draw it on a board, open that board, and write the new Lith back.
+ *
+ * The picture is never opened as a note of its own, because a board is what a double-click on
+ * an image means in this app: a canvas the picture sits on, that a person can write beside. The
+ * new Lith is saved for the same reason the PDF's is, since the launcher created the file and
+ * this is what fills it.
+ */
+function openRequestedImage(request) {
+    var base64 = request.base64;
+    var filename = request.filename || "image.png";
+    var convert = $tw.lithic && $tw.lithic.convertImageToTiddlers;
+    if (typeof base64 !== "string" || base64 === "" || typeof convert !== "function") {
+        return;
+    }
+
+    setProgress("Drawing " + filename + " on a whiteboard...");
+    Promise.resolve(convert({
+        name: filename,
+        dataUri: dataUrlOf(filename, base64)
+    })).then(function(tiddlers){
+        var board = "";
+        tiddlers.forEach(function(fields){
+            $tw.wiki.addTiddler(new $tw.Tiddler(
+                $tw.wiki.getCreationFields(),
+                $tw.wiki.getModificationFields(),
+                fields
+            ));
+            if (fields.type === BOARD_TYPE) {
+                board = fields.title;
+            }
+        });
+        clearProgress();
+        if (board) {
+            openBoard(board);
+        }
+        if ($tw.rootWidget && typeof $tw.rootWidget.dispatchEvent === "function") {
+            $tw.rootWidget.dispatchEvent({ type: "tm-save-wiki" });
+        }
+    }).catch(function(error){
+        clearProgress();
+        setProgress("Could not draw the image: " + (error && error.message ? error.message : error));
+    });
+}
+
 exports.startup = function() {
     if (typeof window === "undefined") {
         return;
@@ -214,6 +297,14 @@ exports.startup = function() {
         // reading a whole PDF, and a later mount in this window must not find it again.
         window[REQUEST_GLOBAL] = null;
         openRequestedPdf(request);
+        return;
+    }
+    var image = window[IMAGE_REQUEST];
+    if (image) {
+        // The same rule as the PDF above: taken off the window before anything else can read it,
+        // so a later mount in this window never finds a picture it did not ask for.
+        window[IMAGE_REQUEST] = null;
+        openRequestedImage(image);
         return;
     }
     var board = window[BOARD_REQUEST];

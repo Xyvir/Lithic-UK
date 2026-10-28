@@ -127,6 +127,77 @@ function generateWhiteboardData(images) {
     };
 }
 
+// The largest edge an imported image is kept at.
+//
+// A board is read at screen scale and its asset lives inside the Lith, so an eight-thousand
+// pixel photograph or an uncompressed BMP would put megabytes into a file a person then syncs
+// and keeps. The drop path takes whatever size it is handed; this states the ceiling that path
+// implies, because an image opened by association has no drop to argue with and a canvas larger
+// than the browser allows is the one way this gesture can fail outright.
+var MAX_IMAGE_EDGE = 3000;
+
+/**
+ * One image, as the tiddlers a board is made of.
+ *
+ * The board is the one a dropped image produces, camera included, because it is built by the
+ * same generator: opening a picture and dropping it are two ways to the same canvas, and a
+ * second layout rule for the same input is how the two would drift. What is added is the
+ * container the desktop app names, so a re-opened image finds its own board again, exactly as a
+ * re-opened PDF finds the pages it was made from (see `boardOf` in `pdf-open-request.js`).
+ * A promise because decoding and re-encoding take the browser's own time, not this function's.
+ */
+function convertImageDataToTiddlers(image) {
+    return new Promise(function(resolve, reject){
+        var element = new Image();
+        element.onload = function(){
+            var width = element.naturalWidth || element.width;
+            var height = element.naturalHeight || element.height;
+            if (!width || !height) {
+                reject(new Error("The image has no size to draw"));
+                return;
+            }
+            var scale = Math.min(1, MAX_IMAGE_EDGE / Math.max(width, height));
+            var canvas = document.createElement("canvas");
+            canvas.width = Math.max(1, Math.round(width * scale));
+            canvas.height = Math.max(1, Math.round(height * scale));
+            var context = canvas.getContext("2d");
+            context.drawImage(element, 0, 0, canvas.width, canvas.height);
+            // WebP for the same reason the drop path re-encodes: the asset is carried inside the
+            // Lith, and the payload measurement there was 858 KB as WebP against 3.4 MB as PNG.
+            var dataUri = canvas.toDataURL("image/webp", 0.75);
+            var baseName = String(image.name || "image").replace(/\.[^/.]+$/, "") || "image";
+            var containerTitle = $tw.wiki.generateNewTitle(baseName);
+            var boardTitle = $tw.wiki.generateNewTitle(containerTitle + "-whiteboard");
+            var payload = generateWhiteboardData([{
+                filename: baseName + ".webp",
+                dataUri: dataUri,
+                width: canvas.width,
+                height: canvas.height
+            }]);
+            resolve([
+                {
+                    title: containerTitle,
+                    "stream-list": $tw.utils.stringifyList([boardTitle]),
+                    "stream-type": "default",
+                    text: ""
+                },
+                {
+                    title: boardTitle,
+                    parent: containerTitle,
+                    text: JSON.stringify(payload),
+                    type: "application/tldr",
+                    "stream-type": "default",
+                    "whiteboard-height": canvas.height > canvas.width ? "1056px" : "540px"
+                }
+            ]);
+        };
+        element.onerror = function(){
+            reject(new Error("The image could not be read"));
+        };
+        element.src = image.dataUri;
+    });
+}
+
 async function convertPdfDataToTiddlers(arrayBuffer, fileName, setProgress) {
     const pdfjsLib = require("$:/plugins/lithic/lithic-import-handler/pdf.js");
     
@@ -245,6 +316,8 @@ async function convertPdfDataToTiddlers(arrayBuffer, fileName, setProgress) {
 // produce the same tiddlers from the same code.
 $tw.lithic = $tw.lithic || {};
 $tw.lithic.convertPdfToTiddlers = convertPdfDataToTiddlers;
+// The same handoff for an image, which the desktop app also opens by association.
+$tw.lithic.convertImageToTiddlers = convertImageDataToTiddlers;
 
 exports.startup = function() {
     var alertTitle = "$:/temp/alerts/lithic-import-progress";

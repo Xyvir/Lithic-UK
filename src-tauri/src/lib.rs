@@ -102,51 +102,64 @@ fn lith_modified_times(paths: Vec<String>) -> std::collections::HashMap<String, 
 ///
 /// The launcher's half of opening a PDF: this process is the only one that can name the
 /// file, and the importer that renders its pages runs inside the mounted document rather
-/// than here, so the bytes are read here and handed to the page (`importPdfIntoNewLith` in
-/// the launcher). Nothing writes back to the source: a PDF is read once to make a new Lith, and
-/// the file it came from is not a document this app edits.
+/// than here, so the bytes are read here and handed to the page (`importIntoNewLith` in
+/// the launcher). Nothing writes back to the source: a PDF or an image is read once to make a
+/// new Lith, and the file it came from is not a document this app edits.
 #[tauri::command]
 fn read_file_base64(path: String) -> Result<String, String> {
     platform::read_document_base64(&path)
 }
 
-/// Where a PDF's pages are written, and whether that file is already there.
+/// Where a file the app renders or draws on is written, and whether that file is already there.
 ///
-/// The Lith beside the PDF: `thesis.pdf` becomes `thesis.lith` in the same folder, which is
-/// the shape an annotation app uses and the reason a PDF is never a save target. The flag is
-/// answered here because it decides the whole gesture: an existing Lith is opened as it
-/// stands, since the import is a copy of the PDF and running it again would replace whatever
-/// has been written in that copy since.
+/// The Lith beside the source file: `thesis.pdf` becomes `thesis.lith` and `photo.png` becomes
+/// `photo.lith`, in the same folder, which is the shape an annotation app uses and the reason
+/// the source is never a save target. The flag is answered here because it decides the whole
+/// gesture: an existing Lith is opened as it stands, since the import is a copy of the source
+/// and running it again would replace whatever has been written in that copy since.
 #[derive(serde::Serialize)]
-struct PdfTarget {
+struct ImportTarget {
     path: String,
     exists: bool,
 }
 
 /// The sibling rule, kept pure so it can be pinned without a file on disk.
-fn lith_sibling_of(pdf: &Path) -> Option<(PathBuf, bool)> {
-    let stem = pdf.file_stem()?;
+fn lith_sibling_of(source: &Path) -> Option<(PathBuf, bool)> {
+    let stem = source.file_stem()?;
     if stem.is_empty() {
         return None;
     }
-    let target = pdf.with_extension("lith");
-    // A path whose extension is already `lith` is not a PDF, and answering with itself
+    let target = source.with_extension("lith");
+    // A path whose extension is already `lith` is not a source file, and answering with itself
     // would point the import's save at the file it is reading.
-    if target == pdf {
+    if target == source {
         return None;
     }
     let exists = target.is_file();
     Some((target, exists))
 }
 
+/// The Lith beside a file this app imports rather than edits: a PDF's pages, or an image drawn
+/// on a board.
 #[tauri::command]
-fn pdf_lith_target(pdf: String) -> Result<PdfTarget, String> {
-    let (target, exists) = lith_sibling_of(Path::new(&pdf))
-        .ok_or_else(|| format!("{pdf} has no name to write a Lith beside"))?;
-    Ok(PdfTarget {
+fn import_lith_target(file: String) -> Result<ImportTarget, String> {
+    let (target, exists) = lith_sibling_of(Path::new(&file))
+        .ok_or_else(|| format!("{file} has no name to write a Lith beside"))?;
+    Ok(ImportTarget {
         path: target.to_string_lossy().into_owned(),
         exists,
     })
+}
+
+/// The name the committed launcher artifact calls for the same rule.
+///
+/// It keeps its own name because that artifact is rebuilt by CI: between this commit and the
+/// release that carries the launcher built from it, a PDF opened by association is still the
+/// old page asking, and a name that had been renamed would be a broken double-click for the
+/// minutes in between. Nothing new should call it.
+#[tauri::command]
+fn pdf_lith_target(pdf: String) -> Result<ImportTarget, String> {
+    import_lith_target(pdf)
 }
 
 // The dialog commands are async, and that is load-bearing: a sync command runs
@@ -3538,6 +3551,7 @@ pub fn run() {
             read_lith_path,
             lith_modified_times,
             read_file_base64,
+            import_lith_target,
             pdf_lith_target,
             open_lith_file,
             open_lith_files,
@@ -3708,6 +3722,43 @@ mod tests {
         );
         assert!(lith_sibling_of(Path::new("")).is_none());
         assert!(lith_sibling_of(Path::new("notes.lith")).is_none(), "a Lith is not a PDF to import");
+
+        let _ = fs::remove_dir_all(&folder);
+    }
+
+    /// An image is the second file this app imports rather than edits, and it lands under the
+    /// same rule: a Lith beside it with the extension replaced. Every extension the association
+    /// registers resolves to that one name, so the two spellings of JPEG and the four formats
+    /// each land in their own file rather than colliding on a shared one.
+    ///
+    /// The stem's case is carried through rather than folded, which is what a path means on
+    /// Windows and macOS (one file however it is spelled) and the only safe answer on Linux,
+    /// where `PHOTO.JPG` and `photo.jpg` are two files that a fold would merge into one Lith.
+    #[test]
+    fn an_image_import_targets_the_lith_beside_it() {
+        let folder = std::env::temp_dir().join(format!("lithic-image-sibling-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&folder);
+        fs::create_dir_all(&folder).unwrap();
+
+        for name in ["photo.png", "photo.jpeg", "photo.jpg", "photo.bmp", "photo.webp"] {
+            let (target, exists) = lith_sibling_of(&folder.join(name))
+                .unwrap_or_else(|| panic!("{name} has no name to write a Lith beside"));
+            assert_eq!(target, folder.join("photo.lith"), "{name} names the Lith beside it");
+            assert!(!exists, "nothing has been written beside {name} yet");
+        }
+        assert_eq!(
+            lith_sibling_of(&folder.join("PHOTO.JPG")).map(|(path, _)| path),
+            Some(folder.join("PHOTO.lith")),
+            "the case of the name is the file's business, not this rule's"
+        );
+        // The same name in two formats is one Lith, which is the rule rather than an accident:
+        // a PNG and a JPEG of the same picture are the same picture, and the second one opened
+        // finds the board the first one made. Said here so nobody "fixes" it into two files.
+        assert_eq!(
+            lith_sibling_of(&folder.join("photo.png")).map(|(path, _)| path),
+            lith_sibling_of(&folder.join("photo.jpeg")).map(|(path, _)| path)
+        );
+        assert!(lith_sibling_of(&folder.join("photo.lith")).is_none(), "a Lith is not an image to import");
 
         let _ = fs::remove_dir_all(&folder);
     }

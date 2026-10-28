@@ -57,10 +57,13 @@ fn mime_xml() -> String {
 /// a running app's. The rest are standard, so "Open With Lithic" works for them as soon
 /// as the entry is installed, with no default association stolen.
 ///
-/// `application/pdf` is the one type here that is not a document this app edits: the app
-/// renders its pages into a new Lith, so the association opens rather than overwrites.
+/// `application/pdf` and the image types are the ones here that are not documents this app
+/// edits: the app renders a PDF's pages and draws an image on a board, each into a new Lith, so
+/// the association opens a copy rather than overwriting the file. The image types are the four
+/// a person's camera or screenshot tool writes, `jpg` and `jpeg` being one format under the two
+/// extensions it is spelled with (`shared-mime-info` resolves both to `image/jpeg`).
 fn mime_types() -> &'static str {
-    "application/x-lith;text/markdown;text/plain;text/vnd.tiddlywiki;application/json;application/x-ipynb+json;text/html;application/pdf;"
+    "application/x-lith;text/markdown;text/plain;text/vnd.tiddlywiki;application/json;application/x-ipynb+json;text/html;application/pdf;image/png;image/jpeg;image/bmp;image/webp;"
 }
 
 /// The names a Chromium browser is installed under, most preferred first.
@@ -342,6 +345,10 @@ mod tests {
             "application/x-ipynb+json",
             "text/html",
             "application/pdf",
+            "image/png",
+            "image/jpeg",
+            "image/bmp",
+            "image/webp",
         ] {
             assert!(entry.contains(mime), "{mime} is a type this app opens and the entry has to say so");
         }

@@ -3947,49 +3947,63 @@ import { backupFileName, collectInstanceBackup, mergeBookmarks, parseInstanceBac
   }
 
   /**
-   * Whether the desktop app was asked to open a PDF rather than a wiki.
+   * The kinds of associated file this app imports rather than edits.
    *
-   * A PDF is the one associated file this app does not edit: it is rendered into a new Lith
-   * and the file it came from is only ever read, so it has to be told apart before anything
-   * reads it as a document body.
+   * A PDF is rendered into pages and an image is drawn on a board. Neither is a document body,
+   * so each has to be told apart before anything reads it as text, and the two share everything
+   * after that: a Lith is written beside the file, the bytes travel to the engine, and the board
+   * that comes back is what opens.
+   *
+   * `jpg` is the same format as `jpeg` under the extension most cameras write, and both are
+   * registered, so both have to arrive here.
    */
-  function isPdfPath(path: string): boolean {
-    return /\.pdf$/i.test(path);
+  type ImportKind = 'pdf' | 'image';
+
+  function importKindOf(path: string): ImportKind | null {
+    if (/\.pdf$/i.test(path)) return 'pdf';
+    if (/\.(png|jpe?g|bmp|webp)$/i.test(path)) return 'image';
+    return null;
   }
 
   /**
-   * The container the import names after a PDF: its file name without the extension.
+   * The container the import names after the file: its name without the extension.
    *
    * The importer derives its own titles from the file the same way (`paper.pdf` becomes a
-   * container `paper` holding `paper-text` and `paper-whiteboard`), so this is that name and
-   * not a second rule. It travels with the mount so the engine can open the board those pages
-   * are under when the PDF is the file a person opened (see `openBoardFor`).
+   * container `paper` holding `paper-text` and `paper-whiteboard`, and `photo.png` becomes
+   * `photo` holding `photo-whiteboard`), so this is that name and not a second rule. It travels
+   * with the mount so the engine can open the board under it when that file is what a person
+   * opened (see `openBoardFor`).
    */
-  function pdfContainerTitle(path: string): string {
+  function importContainerTitle(path: string): string {
     const name = path.split(/[\\/]/).pop() || '';
-    return name.replace(/\.pdf$/i, '');
+    return name.replace(/\.(?:pdf|png|jpe?g|bmp|webp)$/i, '');
   }
 
   /**
-   * Render a PDF's pages into the Lith that sits beside it.
+   * Import the file into the Lith that sits beside it: a PDF's pages, or an image on a board.
    *
-   * Nothing here renders anything: the renderer lives in the wiki, so the launcher reads the
-   * PDF's bytes, hands them to the mounted document, and the importer's own startup turns them
-   * into the pages. The target is created empty first because that is the file the import's
-   * save writes back to, which is what makes a sibling exist from the first moment. The PDF
-   * itself is only ever read.
+   * Nothing here renders anything: both converters live in the wiki, so the launcher reads the
+   * file's bytes, hands them to the mounted document, and the importer's own startup turns them
+   * into the tiddlers. The target is created empty first because that is the file the import's
+   * save writes back to, which is what makes a sibling exist from the first moment. The source
+   * file itself is only ever read.
    */
-  async function importPdfIntoNewLith(pdfPath: string, lithPath: string) {
-    const pdfName = pdfPath.split(/[\\/]/).pop() || 'document.pdf';
-    const lithName = lithPath.split(/[\\/]/).pop() || `${pdfName.replace(/\.pdf$/i, '') || 'document'}.lith`;
-    // The bytes are read before anything is written, so a PDF this process cannot read leaves
+  async function importIntoNewLith(sourcePath: string, lithPath: string, kind: ImportKind) {
+    const sourceName = sourcePath.split(/[\\/]/).pop() || (kind === 'pdf' ? 'document.pdf' : 'image.png');
+    const lithName = lithPath.split(/[\\/]/).pop() || `${importContainerTitle(sourceName) || 'document'}.lith`;
+    // The bytes are read before anything is written, so a file this process cannot read leaves
     // no half-made Lith beside it.
-    const base64 = await tauriInvoke<string>('read_file_base64', { path: pdfPath });
+    const base64 = await tauriInvoke<string>('read_file_base64', { path: sourcePath });
     await tauriInvoke('save_lith_file', { text: '', suggestedName: lithName, path: lithPath });
-    // The importer runs inside the mounted document, which cannot reach this process's bridge
+    // Each converter runs inside the mounted document, which cannot reach this process's bridge
     // any other way, so the payload travels on the window. A window property survives the
     // engine's document.open/write boot, which is the same reason the file handle is left there.
-    (window as any).__LITHIC_PDF_IMPORT__ = { filename: pdfName, base64 };
+    // The two keys are separate because the engine reads one and never the other: one gesture is
+    // a PDF or an image, and a startup that had to sniff the bytes would be guessing.
+    (window as any)[kind === 'pdf' ? '__LITHIC_PDF_IMPORT__' : '__LITHIC_IMAGE_IMPORT__'] = {
+      filename: sourceName,
+      base64
+    };
     lithText = '';
     fileName = lithName;
     filePath = lithPath;
@@ -4008,22 +4022,24 @@ import { backupFileName, collectInstanceBackup, mergeBookmarks, parseInstanceBac
     opts: { dirtyAnswer?: 'merge'; quietFail?: boolean } = {}
   ): Promise<boolean> {
     try {
-      if (isPdfPath(path)) {
-        // Before the text read below, which a PDF has no business going through: its pages
-        // are rendered into the Lith beside it instead of being mounted as a body.
-        const target = await tauriInvoke<{ path: string; exists: boolean }>('pdf_lith_target', { pdf: path });
+      const kind = importKindOf(path);
+      if (kind) {
+        // Before the text read below, which neither of these has any business going through:
+        // a PDF's pages or an image's pixels are turned into a Lith beside the file instead of
+        // being mounted as a body.
+        const target = await tauriInvoke<{ path: string; exists: boolean }>('import_lith_target', { file: path });
         if (target.exists) {
-          // This PDF has already become a Lith, so the copy opens as it stands. Re-importing
+          // This file has already become a Lith, so the copy opens as it stands. Re-importing
           // would replace whatever has been written in it since it was made.
           //
-          // The gesture was still `open the PDF` though, and what that means is the board laid
-          // over its pages rather than the layout that Lith was last saved in, so the container
-          // the import wrote travels along and the engine opens the board. Opening that same
-          // Lith on its own, from the recents list or a Mount, carries no container and leaves
-          // it exactly as it says.
-          return await mountDiskPath(target.path, pdfContainerTitle(path), opts);
+          // The gesture was still `open the PDF` or `open the image` though, and what that means
+          // is the board rather than the layout that Lith was last saved in, so the container the
+          // import wrote travels along and the engine opens the board. Opening that same Lith on
+          // its own, from the recents list or a Mount, carries no container and leaves it exactly
+          // as it says.
+          return await mountDiskPath(target.path, importContainerTitle(path), opts);
         }
-        await importPdfIntoNewLith(path, target.path);
+        await importIntoNewLith(path, target.path, kind);
         status = copy.status.mounted(fileName);
         return true;
       }

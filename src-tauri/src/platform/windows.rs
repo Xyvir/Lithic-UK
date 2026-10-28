@@ -8,6 +8,8 @@
 
 use std::path::{Path, PathBuf};
 
+use windows::Win32::UI::WindowsAndMessaging::HICON;
+
 /// Open a link in the user's default browser.
 pub fn open_in_browser(url: &str) -> Result<(), String> {
     use windows::core::{HSTRING, PCWSTR};
@@ -155,10 +157,14 @@ pub fn install_launch_entry(exe: &Path) -> Result<Option<PathBuf>, String> {
 
 /// Extensions the desktop app opens, with their Open With descriptions.
 ///
-/// `pdf` is the one type here that is not a document this app edits: the app renders its
-/// pages into a new Lith (see `read_file_base64` in `lib.rs` and the import handler's
-/// open-request startup), and the PDF itself is only ever read. It is registered the same
-/// way as the rest, which is an Open With entry rather than a default association.
+/// Two kinds sit here. Most are documents this app edits, mounted as they are. A `pdf` and the
+/// image types are not: the app renders the one into pages and draws the other on a board,
+/// making a new Lith beside the file (see `import_lith_target` in `lib.rs` and the import
+/// handler's open-request startup), and the file itself is only ever read. They are registered
+/// the same way as the rest, which is an Open With entry rather than a default association.
+///
+/// `jpg` sits beside `jpeg` because it is the same format under the extension most cameras and
+/// phones write, and a person with `photo.jpg` has no reason to know the difference.
 const ASSOCIATION_TYPES: &[(&str, &str)] = &[
     ("lith", "Lithic Wiki"),
     ("md", "Lithic Markdown"),
@@ -168,11 +174,32 @@ const ASSOCIATION_TYPES: &[(&str, &str)] = &[
     ("ipynb", "Lithic Notebook"),
     ("html", "Lithic HTML"),
     ("pdf", "Lithic PDF"),
+    ("png", "Lithic Image"),
+    ("jpg", "Lithic Image"),
+    ("jpeg", "Lithic Image"),
+    ("bmp", "Lithic Image"),
+    ("webp", "Lithic Image"),
 ];
+
+/// The types that keep Lithic's own mark rather than borrowing somebody else's.
+///
+/// `.lith` is the format this app defines, so its icon is the one Explorer should learn.
+/// `.tid` and `.json` are the two files a person is far more likely to open in an editor
+/// than in a wiki; another program's mark on them would describe the wrong job.
+const OWN_ICON: &[&str] = &["lith", "tid", "json"];
 
 /// Per-user (HKCU) Open With registration: a ProgID per extension whose
 /// open command targets the installed exe, plus an entry appended to the
-/// extension's OpenWithProgids list. Never touches default associations.
+/// extension's OpenWithProgids list. Every type is offered rather than claimed, with one
+/// exception: `.lith` is the format this app defines, so it is named as the type's own where
+/// nobody has claimed it already.
+///
+/// One thing is borrowed rather than declared: the icon. A ProgID with no `DefaultIcon`
+/// makes Explorer draw the handler executable's own mark, so every type Lithic opened wore
+/// the same L and a folder of mixed files stopped reading at a glance. The mark Windows
+/// already draws for the type is copied onto our ProgID instead (see `borrowed_mark`), which
+/// is the whole of it: the association does not move, and a photograph, a PDF or a page keeps
+/// the shape it had before Lithic was anywhere near it.
 pub fn register_file_associations(program: &Path) -> Result<(), String> {
     use winreg::enums::{HKEY_CURRENT_USER, KEY_READ, KEY_WRITE};
     use winreg::RegKey;
@@ -198,9 +225,33 @@ pub fn register_file_associations(program: &Path) -> Result<(), String> {
         cmd.set_value("", &format!("\"{}\" \"%1\"", exe_path))
             .map_err(|error| error.to_string())?;
 
+        // The mark this type wears when Lithic is what opens it. The three types this app is
+        // *about* state the app's icon outright, because the fallback for a ProgID with no icon
+        // is also the picture an extension nobody handles draws, and the two must not look
+        // alike. Every other type borrows the mark Windows already draws for it, so a
+        // photograph, a PDF or a page keeps the shape it had before Lithic was near it, copied
+        // as bytes rather than repeated as a reference (see `saved_icon`). A type with nothing
+        // to borrow keeps whatever it already has, because a reinstall on a machine where
+        // Lithic is already the default finds only Lithic's own ProgID and must not erase the
+        // mark the first install copied.
+        let mark = if OWN_ICON.contains(ext) {
+            Some(format!("\"{}\",0", exe_path))
+        } else {
+            borrowed_mark(ext)
+        };
+        if let Some(mark) = mark {
+            let (icon_key, _) = key
+                .create_subkey("DefaultIcon")
+                .map_err(|error| error.to_string())?;
+            icon_key
+                .set_value("", &mark)
+                .map_err(|error| error.to_string())?;
+        }
+
         // Append Lithic to the extension's Open With list via the
         // OpenWithProgids subkey, where each *value name* is a ProgID.
-        // Existing entries are preserved; no default association changes.
+        // Existing entries are preserved; this list says what can open the
+        // type, not what does.
         let (ext_key, _) = classes
             .create_subkey(format!(".{}", ext))
             .map_err(|error| error.to_string())?;
@@ -240,7 +291,464 @@ pub fn register_file_associations(program: &Path) -> Result<(), String> {
             .map_err(|error| error.to_string())?;
     }
 
+    // `.lith` is the extension this app defines, so it is claimed rather than merely offered.
+    // Left unclaimed, Windows files it under the `lith_auto_file` stub it invents for a type
+    // nobody owns, and that stub has no icon to draw, so the format's own mark never appears.
+    // Claiming is what makes Explorer call the file a Lithic Wiki and read the mark written
+    // above. Only claimed where the type is not already somebody else's choice, so a person
+    // who deliberately pointed `.lith` at another program keeps it.
+    let lith_is_free = current_handler("lith")
+        .as_deref()
+        .is_none_or(|progid| progid.starts_with("Lithic."));
+    if lith_is_free {
+        let (extension, _) = classes
+            .create_subkey(".lith")
+            .map_err(|error| error.to_string())?;
+        extension
+            .set_value("", &"Lithic.lith".to_string())
+            .map_err(|error| error.to_string())?;
+    }
+
+    // Explorer caches each type's icon, so a borrowed mark does not appear until the cache
+    // is flushed. Announcing the change is the documented way to ask, and saves the person
+    // from restarting Explorer to see what the install did.
+    // SAFETY: the call takes no pointers here; both items are null because the event is
+    // about the association set rather than about one file.
+    unsafe {
+        windows::Win32::UI::Shell::SHChangeNotify(
+            windows::Win32::UI::Shell::SHCNE_ASSOCCHANGED,
+            windows::Win32::UI::Shell::SHCNF_IDLIST,
+            None,
+            None,
+        );
+    }
+
     Ok(())
+}
+
+/// The icon another program already draws for an extension, ready to be repeated on ours.
+///
+/// Two answers are worth having, in this order. The handler that currently opens the type is
+/// the mark the person recognises today, and while that handler is a Windows program the icon
+/// is effectively the system's own art. Failing that, the extension's own registered ProgID is
+/// what Windows considers the type to *be* before anybody has chosen an app for it, which is
+/// where the plain `imageres.dll` pictures for `.png` and `.jpg` come from.
+///
+/// A plain reference always beats an indirect one. An indirect `@{Package?ms-resource://...}`
+/// names the Store package's *version*, so it stops resolving the day that app updates, and it
+/// is worth using only where nothing better exists.
+/// Every icon worth trying for an extension, best first: the handler's, then the extension's
+/// own, with a plain reference ahead of an indirect one.
+fn borrowed_icons(ext: &str) -> Vec<String> {
+    if OWN_ICON.contains(&ext) {
+        return Vec::new();
+    }
+    let mut icons = Vec::new();
+    if let Some(progid) = current_handler(ext).filter(|progid| borrowable_progid(progid)) {
+        icons.extend(icon_of(&progid));
+    }
+    if let Some(progid) = stock_handler(ext).filter(|progid| borrowable_progid(progid)) {
+        icons.extend(icon_of(&progid));
+    }
+    // `false` sorts before `true`, and the sort is stable, so the handler's mark still wins
+    // among those of the same shape.
+    icons.sort_by_key(|icon| icon_kind(icon) != Some(IconKind::Plain));
+    icons
+}
+
+/// The ProgID that opens an extension today, as the shell records the person's own choice.
+///
+/// `UserChoice` is signed, so it is read and never written here; it is only ever a source of
+/// an icon string for our own key.
+fn current_handler(ext: &str) -> Option<String> {
+    use winreg::enums::HKEY_CURRENT_USER;
+    use winreg::RegKey;
+    let path = format!(
+        r"Software\Microsoft\Windows\CurrentVersion\Explorer\FileExts\.{}\UserChoice",
+        ext
+    );
+    RegKey::predef(HKEY_CURRENT_USER)
+        .open_subkey(path)
+        .ok()?
+        .get_value::<String, _>("ProgId")
+        .ok()
+}
+
+/// The ProgID an extension is registered as, independent of who currently opens it.
+fn stock_handler(ext: &str) -> Option<String> {
+    use winreg::enums::HKEY_CLASSES_ROOT;
+    use winreg::RegKey;
+    RegKey::predef(HKEY_CLASSES_ROOT)
+        .open_subkey(format!(".{}", ext))
+        .ok()?
+        .get_value::<String, _>("")
+        .ok()
+}
+
+/// A ProgID's icon reference, if it has one and if it is a reference worth repeating.
+fn icon_of(progid: &str) -> Option<String> {
+    use winreg::enums::HKEY_CLASSES_ROOT;
+    use winreg::RegKey;
+    let raw = RegKey::predef(HKEY_CLASSES_ROOT)
+        .open_subkey(format!(r"{}\DefaultIcon", progid))
+        .ok()?
+        .get_value::<String, _>("")
+        .ok()?;
+    icon_kind(&raw).map(|_| raw.trim().to_string())
+}
+
+/// Whether a ProgID is one whose icon is worth copying.
+///
+/// Ours is not: copying it would write Lithic's mark back onto Lithic. `*_auto_file` is the
+/// stub Windows invents for an extension nobody has registered, and it has no icon of its own
+/// to give.
+fn borrowable_progid(progid: &str) -> bool {
+    let progid = progid.trim();
+    !progid.is_empty() && !progid.starts_with("Lithic.") && !progid.ends_with("_auto_file")
+}
+
+/// The two shapes a `DefaultIcon` value can take, as far as copying one is concerned.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum IconKind {
+    /// A file and an index into it: `C:\Windows\System32\imageres.dll,-83`.
+    Plain,
+    /// A resource inside a Store package, named with the package's version.
+    Indirect,
+}
+
+/// Whether a `DefaultIcon` value is a reference this app can repeat, and in which shape.
+///
+/// `"%1",n` is refused: it asks Explorer to draw the file being drawn, so copying it onto a
+/// different ProgID would point at the wrong thing entirely.
+fn icon_kind(raw: &str) -> Option<IconKind> {
+    let icon = raw.trim();
+    if icon.is_empty() || icon.contains("%1") {
+        return None;
+    }
+    Some(if icon.starts_with('@') {
+        IconKind::Indirect
+    } else {
+        IconKind::Plain
+    })
+}
+
+/// The mark to write onto our ProgID for a type that is not this app's own.
+///
+/// The art is Windows' own, taken as **bytes** wherever it can be. See `saved_icon` for why a
+/// repeated string is the fallback rather than the shape this is built around.
+fn borrowed_mark(ext: &str) -> Option<String> {
+    let icons = borrowed_icons(ext);
+    for source in &icons {
+        if let Some(icon) = saved_icon(ext, source) {
+            return Some(format!("\"{}\",0", icon.display()));
+        }
+    }
+    if let Some(icon) = family_art(ext) {
+        return Some(format!("\"{}\",0", icon.display()));
+    }
+    // Nothing could be copied: repeat the best reference and accept that it is only as durable
+    // as the program that wrote it.
+    icons.into_iter().next()
+}
+
+/// The picture a format borrows when its own cannot be copied at all.
+///
+/// A `.bmp` and a `.webp` are two of the four formats this app opens on a board. On a machine
+/// where Photos owns them their art lives inside that app's package as a `@{...}` reference that
+/// names the package's version, with no file path behind it to read — so the sibling that did
+/// copy, `.png`, which resolves to `imageres.dll`, lends them its picture. They are the same
+/// kind of file as far as this app is concerned, and a Windows picture that keeps drawing beats
+/// a store reference that dies with the next Photos update.
+fn family_art(ext: &str) -> Option<PathBuf> {
+    const IMAGES: &[&str] = &["png", "jpg", "jpeg", "bmp", "webp"];
+    if !IMAGES.contains(&ext) {
+        return None;
+    }
+    let donor = IMAGES
+        .iter()
+        .find(|donor| **donor != ext && borrowed_icons(donor).iter().any(|icon| icon_kind(icon) == Some(IconKind::Plain)))?;
+    let source = borrowed_icons(donor).into_iter().next()?;
+    saved_icon(donor, &source)
+}
+
+/// The borrowed mark, copied into a file this app owns.
+///
+/// A borrowed reference usually names a *build-numbered* folder: a PDF on a machine where Edge
+/// opens it resolves to `...\Microsoft\Edge\Application\156.0.4314.42\msedge.exe,11`. Repeating
+/// that string writes a mark that dies the next time Edge updates, and the type then falls back
+/// to the generic page — worse than the Lithic mark it replaced, because it describes nothing.
+/// Bytes copied once keep drawing, which is the point of borrowing Windows' own art at all: it
+/// is a copy of what the person already recognises, not a standing dependency on somebody
+/// else's installer.
+///
+/// Written once and left alone after that, so a vendor's later redesign is not inherited behind
+/// the person's back — the mark is what the machine drew when Lithic arrived.
+///
+/// `None` where the source cannot be read as bytes, which is a Store package's
+/// `@{Package?ms-resource://...}` resource: it names no file to open, so the caller repeats the
+/// string instead and accepts its fragility.
+fn saved_icon(ext: &str, source: &str) -> Option<PathBuf> {
+    let (file, index) = parse_icon_source(source)?;
+    let dir = icons_dir()?;
+    std::fs::create_dir_all(&dir).ok()?;
+    let path = dir.join(format!("{}.ico", ext));
+    if !path.is_file() {
+        std::fs::write(&path, extract_icon(&file, index)?).ok()?;
+    }
+    Some(path)
+}
+
+/// Where the copied marks live.
+///
+/// Not beside the program, because that is also the folder a person keeps their liths in: a
+/// couple of hundred kilobytes of borrowed pictures have no business in a wiki's history, let
+/// alone in every clone of it. The per-machine application folder the rest of this app already
+/// treats as its own is the place for what belongs to this install.
+fn icons_dir() -> Option<PathBuf> {
+    dirs::data_local_dir()
+        .map(|local| local.join("Lithic").join("assoc-icons"))
+        .or_else(|| super::state_dir().map(|dir| dir.join("assoc-icons")))
+}
+
+/// A `DefaultIcon` reference split into the file it names and the index into that file.
+fn parse_icon_source(source: &str) -> Option<(PathBuf, i32)> {
+    let trimmed = source.trim();
+    if trimmed.starts_with('@') {
+        return None;
+    }
+    let (file, index) = trimmed.rsplit_once(',')?;
+    let index = index.trim().parse::<i32>().ok()?;
+    let path = PathBuf::from(expand_environment(file.trim().trim_matches('"')));
+    // A relative name is one the shell resolves against its own working folder, so repeating it
+    // in our key would point somewhere else entirely.
+    if !path.is_absolute() || !path.is_file() {
+        return None;
+    }
+    Some((path, index))
+}
+
+/// `%SystemRoot%\System32\imageres.dll` as a path this process can open.
+///
+/// The registry writes some of Windows' own marks this way, and the reference is worth taking
+/// as bytes like any other: the variable is stable, but the index it points at is not promised
+/// to keep meaning the same picture across Windows builds.
+fn expand_environment(file: &str) -> String {
+    let mut expanded = String::new();
+    let mut rest = file;
+    while let Some(open) = rest.find('%') {
+        let after = &rest[open + 1..];
+        let Some(close) = after.find('%') else {
+            break;
+        };
+        match std::env::var(&after[..close]) {
+            Ok(value) => {
+                expanded.push_str(&rest[..open]);
+                expanded.push_str(&value);
+                rest = &after[close + 1..];
+            }
+            // A variable this machine does not have, or a literal pair of percent signs: the
+            // text is left exactly as it was written, so an unexpandable reference fails the
+            // path check rather than turning into somewhere else.
+            Err(_) => {
+                expanded.push_str(&rest[..=open]);
+                rest = after;
+            }
+        }
+    }
+    expanded.push_str(rest);
+    expanded
+}
+
+/// The sizes copied out of a borrowed icon.
+///
+/// The four Explorer draws: a Details row, a medium tile, the large tile Windows 11 uses, and
+/// the extra-large one. A size the artwork does not have is scaled by the shell's own extractor
+/// rather than refused, so a type is never left without a mark.
+const ICON_SIZES: &[u32] = &[16, 32, 48, 256];
+
+/// An icon file made of every size worth having, taken from one index of one file.
+fn extract_icon(file: &Path, index: i32) -> Option<Vec<u8>> {
+    let mut images = Vec::new();
+    for size in ICON_SIZES {
+        if let Some((colors, mask)) = extract_size(file, index, *size) {
+            images.push((*size, ico_image(*size, &colors, &mask)));
+        }
+    }
+    if images.is_empty() {
+        return None;
+    }
+    Some(ico_container(&images))
+}
+
+/// One size of one icon, as the colour pixels and the 1-bit shape mask behind them.
+fn extract_size(file: &Path, index: i32, size: u32) -> Option<(Vec<u8>, Vec<u8>)> {
+    use windows::Win32::UI::WindowsAndMessaging::{
+        DestroyIcon, PrivateExtractIconsW, HICON,
+    };
+
+    // The binding takes a fixed `MAX_PATH` buffer rather than a pointer, so the name is copied
+    // into one with the terminator the call expects.
+    let mut name = [0u16; 260];
+    let written: Vec<u16> = file
+        .to_string_lossy()
+        .encode_utf16()
+        .take(name.len() - 1)
+        .collect();
+    name[..written.len()].copy_from_slice(&written);
+
+    let edge = size as i32;
+    let mut icon = HICON::default();
+    // SAFETY: the name outlives the call, and the one out-slice is a local the function writes
+    // only when it reports having found an icon.
+    let found = unsafe {
+        PrivateExtractIconsW(
+            &name,
+            index,
+            edge,
+            edge,
+            Some(std::slice::from_mut(&mut icon)),
+            None,
+            1,
+        )
+    };
+    if found == 0 || icon.is_invalid() {
+        return None;
+    }
+    let pixels = icon_pixels(icon, size);
+    // SAFETY: the handle came from the extractor above and is not used again.
+    unsafe {
+        let _ = DestroyIcon(icon);
+    }
+    pixels
+}
+
+/// The colour pixels and shape mask of a live icon, laid out for an icon file.
+///
+/// A 32-bit DIB from an icon that predates the alpha channel is entirely transparent, and a
+/// fully transparent mark is not what anybody wants on a photograph. The mask is where those
+/// icons keep their shape, so it is what the alpha is rebuilt from when every pixel says zero —
+/// the same rule the shell itself applies.
+fn icon_pixels(icon: HICON, size: u32) -> Option<(Vec<u8>, Vec<u8>)> {
+    use windows::Win32::Graphics::Gdi::{
+        CreateCompatibleDC, DeleteDC, DeleteObject, GetDIBits, BITMAPINFO, BITMAPINFOHEADER, BI_RGB,
+        DIB_RGB_COLORS, HGDIOBJ,
+    };
+    use windows::Win32::UI::WindowsAndMessaging::{GetIconInfo, ICONINFO};
+
+    let mut info = ICONINFO::default();
+    // SAFETY: `icon` is live for the whole of this function, and `info` is a local.
+    unsafe { GetIconInfo(icon, &mut info) }.ok()?;
+
+    let edge = size as usize;
+    let colour_stride = edge * 4;
+    // One bit per pixel, rounded up to whole four-byte rows, which is how the format pads a
+    // mask.
+    let mask_stride = edge.div_ceil(32) * 4;
+    let mut colors = vec![0u8; colour_stride * edge];
+    let mut mask = vec![0u8; mask_stride * edge];
+
+    let mut header = BITMAPINFO::default();
+    header.bmiHeader.biSize = std::mem::size_of::<BITMAPINFOHEADER>() as u32;
+    header.bmiHeader.biWidth = size as i32;
+    header.bmiHeader.biHeight = size as i32;
+    header.bmiHeader.biPlanes = 1;
+    header.bmiHeader.biBitCount = 32;
+    header.bmiHeader.biCompression = BI_RGB.0;
+
+    // SAFETY: both bitmaps belong to the icon, the device context is a throwaway, and every
+    // buffer handed over is sized for the strides the header asks for. The bitmaps are deleted
+    // here because `GetIconInfo` hands over copies rather than references to the icon's own.
+    let (painted, shaped) = unsafe {
+        let context = CreateCompatibleDC(None);
+        let painted = GetDIBits(
+            context,
+            info.hbmColor,
+            0,
+            size,
+            Some(colors.as_mut_ptr() as *mut _),
+            &mut header,
+            DIB_RGB_COLORS,
+        );
+        let shaped = if info.hbmMask.is_invalid() {
+            0
+        } else {
+            header.bmiHeader.biBitCount = 1;
+            header.bmiHeader.biHeight = size as i32;
+            GetDIBits(
+                context,
+                info.hbmMask,
+                0,
+                size,
+                Some(mask.as_mut_ptr() as *mut _),
+                &mut header,
+                DIB_RGB_COLORS,
+            )
+        };
+        let _ = DeleteDC(context);
+        let _ = DeleteObject(HGDIOBJ(info.hbmColor.0));
+        if !info.hbmMask.is_invalid() {
+            let _ = DeleteObject(HGDIOBJ(info.hbmMask.0));
+        }
+        (painted, shaped)
+    };
+    if painted == 0 {
+        return None;
+    }
+    if shaped > 0 && colors.chunks_exact(4).all(|pixel| pixel[3] == 0) {
+        for y in 0..edge {
+            for x in 0..edge {
+                let set = mask[y * mask_stride + x / 8] & (0x80 >> (x % 8)) != 0;
+                colors[y * colour_stride + x * 4 + 3] = if set { 0 } else { 255 };
+            }
+        }
+    }
+    mask.truncate(mask_stride * edge);
+    Some((colors, mask))
+}
+
+/// One image of an icon file: a `BITMAPINFOHEADER` whose height covers the colours and the mask
+/// that follows them, both bottom-up as the format requires.
+fn ico_image(size: u32, colors: &[u8], mask: &[u8]) -> Vec<u8> {
+    let mut image = Vec::with_capacity(40 + colors.len() + mask.len());
+    image.extend_from_slice(&40u32.to_le_bytes());
+    image.extend_from_slice(&(size as i32).to_le_bytes());
+    image.extend_from_slice(&((size as i32) * 2).to_le_bytes());
+    image.extend_from_slice(&1u16.to_le_bytes());
+    image.extend_from_slice(&32u16.to_le_bytes());
+    image.extend_from_slice(&0u32.to_le_bytes());
+    image.extend_from_slice(&((colors.len() + mask.len()) as u32).to_le_bytes());
+    image.extend_from_slice(&[0u8; 16]);
+    image.extend_from_slice(colors);
+    image.extend_from_slice(mask);
+    image
+}
+
+/// The icon file itself: a directory of images, then the images.
+fn ico_container(images: &[(u32, Vec<u8>)]) -> Vec<u8> {
+    let mut out = Vec::new();
+    out.extend_from_slice(&0u16.to_le_bytes());
+    out.extend_from_slice(&1u16.to_le_bytes());
+    out.extend_from_slice(&(images.len() as u16).to_le_bytes());
+    // Each directory entry is sixteen bytes and the images start after the last of them, so the
+    // offsets are known before the images are laid out.
+    let mut offset = 6 + images.len() * 16;
+    for (size, image) in images {
+        // 256 is written as zero, which is the format's way of saying a byte cannot hold it.
+        let edge = if *size >= 256 { 0 } else { *size as u8 };
+        out.push(edge);
+        out.push(edge);
+        out.push(0);
+        out.push(0);
+        out.extend_from_slice(&1u16.to_le_bytes());
+        out.extend_from_slice(&32u16.to_le_bytes());
+        out.extend_from_slice(&(image.len() as u32).to_le_bytes());
+        out.extend_from_slice(&(offset as u32).to_le_bytes());
+        offset += image.len();
+    }
+    for (_, image) in images {
+        out.extend_from_slice(image);
+    }
+    out
 }
 
 /// A copied `.exe` needs no permission bits, so there is nothing to do here.
@@ -275,5 +783,148 @@ mod tests {
             PathBuf::from(r"C:\Program Files\Microsoft\Edge\Application\msedge.exe")
         );
         assert!(candidates[3].ends_with(r"msedge.exe"), "the executable is what gets started");
+    }
+
+    /// The three types that keep Lithic's mark do so before any registry is read, so this is a
+    /// cheap assertion that the exclusion is real.
+    #[test]
+    fn the_formats_this_app_is_about_keep_their_own_mark() {
+        for ext in ["lith", "tid", "json"] {
+            assert!(borrowed_icons(ext).is_empty(), ".{} must keep the Lithic icon", ext);
+        }
+    }
+
+    /// Every excluded extension is one this app registers, so an exclusion cannot outlive the
+    /// type it was written for.
+    #[test]
+    fn every_excluded_extension_is_registered() {
+        for ext in OWN_ICON {
+            assert!(
+                ASSOCIATION_TYPES.iter().any(|(registered, _)| registered == ext),
+                ".{} is excluded from borrowing but is not registered",
+                ext
+            );
+        }
+    }
+
+    /// A photograph's own icon is a file and an index, which keeps meaning the same thing on
+    /// every Windows build. A Store package's is a versioned resource, which does not.
+    #[test]
+    fn a_plain_reference_is_recognised_apart_from_a_packaged_one() {
+        assert_eq!(
+            icon_kind(r"C:\Windows\System32\imageres.dll,-83"),
+            Some(IconKind::Plain)
+        );
+        assert_eq!(
+            icon_kind(r#""C:\Program Files\Y\resources.dll",-101"#),
+            Some(IconKind::Plain)
+        );
+        assert_eq!(
+            icon_kind("@{Microsoft.Windows.Photos_2026?ms-resource://Photos/Assets/icon.png}"),
+            Some(IconKind::Indirect)
+        );
+        assert_eq!(icon_kind(r#""%1",1"#), None, "that draws the file, not an icon");
+        assert_eq!(icon_kind("   "), None);
+    }
+
+    /// Ours would write Lithic's mark back onto Lithic, and Windows' stub for an unregistered
+    /// extension has nothing to give.
+    #[test]
+    fn only_another_programs_progid_is_borrowed() {
+        assert!(borrowable_progid("pngfile"));
+        assert!(borrowable_progid("MSEdgeHTM"));
+        assert!(!borrowable_progid("Lithic.png"));
+        assert!(!borrowable_progid("lith_auto_file"));
+        assert!(!borrowable_progid("  "));
+    }
+
+    /// A reference is a file and an index, in any of the shapes the registry writes them: with
+    /// quotes, without, and with a resource id where the index would be.
+    #[test]
+    fn a_reference_is_split_into_the_file_and_its_index() {
+        let exe = std::env::current_exe().expect("the test binary exists");
+        let shown = exe.display();
+        assert_eq!(
+            parse_icon_source(&format!("\"{}\",-83", shown)),
+            Some((exe.clone(), -83))
+        );
+        assert_eq!(
+            parse_icon_source(&format!("{},11", shown)),
+            Some((exe.clone(), 11))
+        );
+    }
+
+    /// A reference written with a variable is resolved before it is read, and one naming a
+    /// variable this machine does not have is left exactly as it was written.
+    #[test]
+    fn a_reference_naming_a_folder_is_resolved_before_it_is_read() {
+        let root = std::env::var("SystemRoot").expect("every Windows has one");
+        assert_eq!(
+            expand_environment(r"%SystemRoot%\System32\imageres.dll"),
+            format!(r"{}\System32\imageres.dll", root)
+        );
+        assert_eq!(
+            expand_environment(r"C:\Windows\no-variables.dll"),
+            r"C:\Windows\no-variables.dll"
+        );
+        assert_eq!(
+            expand_environment(r"%NOT_A_REAL_VARIABLE_1234%\x.dll"),
+            r"%NOT_A_REAL_VARIABLE_1234%\x.dll"
+        );
+        assert_eq!(expand_environment("100%% sure"), "100%% sure");
+    }
+
+    /// Three shapes cannot be copied as bytes: a Store package's resource, a reference to the
+    /// file being drawn, and one the shell would resolve against its own folder.
+    #[test]
+    fn a_reference_with_no_file_behind_it_is_refused() {
+        assert_eq!(parse_icon_source("@{Photos?ms-resource://Photos/Assets/icon.png}"), None);
+        assert_eq!(parse_icon_source("\"%1\",1"), None, "that draws the file, not an icon");
+        assert_eq!(parse_icon_source("imageres.dll,-83"), None, "a bare name is not a path");
+        assert_eq!(
+            parse_icon_source(r"C:\nope\missing.dll,0"),
+            None,
+            "a file that is not there cannot be read"
+        );
+    }
+
+    /// An icon file is a directory followed by its images, and every offset has to land on the
+    /// image it belongs to.
+    #[test]
+    fn an_icon_keeps_its_directory_in_step_with_its_images() {
+        let first = vec![0u8; 8];
+        let second = vec![1u8; 12];
+        let file = ico_container(&[(16, first), (256, second)]);
+        assert_eq!(&file[0..6], &[0, 0, 1, 0, 2, 0], "one icon holding two images");
+        assert_eq!(file[6], 16, "the first image is 16 across");
+        assert_eq!(file[6 + 16], 0, "256 is written as zero, which the format defines");
+        let offset = |entry: usize| {
+            let at = 6 + entry * 16 + 12;
+            u32::from_le_bytes([file[at], file[at + 1], file[at + 2], file[at + 3]]) as usize
+        };
+        assert_eq!(offset(0), 6 + 2 * 16, "the first image starts after the directory");
+        assert_eq!(offset(1), 6 + 2 * 16 + 8, "the second follows the first");
+        assert_eq!(file.len(), 6 + 2 * 16 + 20);
+    }
+
+    /// An image is described by a header whose height counts the mask as a second copy of the
+    /// rows, which is what makes the colours and the mask one image rather than two.
+    #[test]
+    fn an_icon_image_describes_itself_and_its_mask() {
+        let colors = vec![7u8; 48 * 48 * 4];
+        let mask = vec![0u8; 48 * 6];
+        let image = ico_image(48, &colors, &mask);
+        assert_eq!(u32::from_le_bytes(image[0..4].try_into().unwrap()), 40);
+        assert_eq!(i32::from_le_bytes(image[4..8].try_into().unwrap()), 48);
+        assert_eq!(i32::from_le_bytes(image[8..12].try_into().unwrap()), 96);
+        assert_eq!(u16::from_le_bytes(image[14..16].try_into().unwrap()), 32);
+        assert_eq!(
+            u32::from_le_bytes(image[20..24].try_into().unwrap()) as usize,
+            colors.len() + mask.len()
+        );
+        assert_eq!(image.len(), 40 + colors.len() + mask.len());
+        let painted = 40 + colors.len();
+        assert_eq!(&image[40..painted], &colors[..], "the colours come first");
+        assert_eq!(&image[painted..], &mask[..], "and the shape mask follows them");
     }
 }
