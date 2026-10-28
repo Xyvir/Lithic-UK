@@ -437,6 +437,20 @@ const en = {
     },
 
     /**
+     * The plain reset's warning, which is the one control left on a shape with no rebuild: the
+     * list costs nothing to forget, so what it names is the copies a reset deletes below those
+     * rows. The action reuses `foot.reset`, because it is the control that opened the dialog.
+     */
+    reset: {
+      title: 'Reset takes the copies this device holds',
+      body: (count: number) =>
+        `${count} ${count === 1 ? 'lith has' : 'liths have'} a cached copy or history here, ` +
+        `so resetting deletes ${count === 1 ? 'it' : 'them'}.`,
+      unsavedWarning: (count: number) =>
+        `${count} of them have unsaved edits, which only the full backup keeps.`
+    },
+
+    /**
      * The fallback's own guardrail. Everywhere else a row points at a file that outlives the
      * list; here the row *is* the document, so clearing the list takes the only copy there is.
      * Reset is therefore gated: a download per row, or one full backup, and then it unlocks.
@@ -1198,6 +1212,15 @@ const es: Copy = {
       fullBackupNote: 'Incluye todos los Liths recientes y los marcadores, no solo los de la lista.'
     },
 
+    reset: {
+      title: 'Restablecer borra las copias de este dispositivo',
+      body: (count: number) =>
+        `${count} ${count === 1 ? 'lith tiene' : 'liths tienen'} una copia guardada o historial aquí, ` +
+        `así que restablecer ${count === 1 ? 'la borra' : 'las borra'}.`,
+      unsavedWarning: (count: number) =>
+        `${count} de ellos tienen ediciones sin guardar, que solo conserva la copia completa.`
+    },
+
     instanceBackup: {
       closeAria: 'Cerrar el diálogo de copia y reinicio',
       title: 'Copia y reinicio',
@@ -1871,6 +1894,15 @@ const fr: Copy = {
       fullBackupNote: 'Couvre tous les Liths récents ici et les marque-pages, pas seulement ceux de la liste.'
     },
 
+    reset: {
+      title: 'Réinitialiser supprime les copies de cet appareil',
+      body: (count: number) =>
+        `${count} ${count === 1 ? 'lith a' : 'liths ont'} une copie en cache ou un historique ici, ` +
+        `donc réinitialiser ${count === 1 ? 'la supprime' : 'les supprime'}.`,
+      unsavedWarning: (count: number) =>
+        `${count} d’entre eux ont des modifications non enregistrées, que seule la sauvegarde complète conserve.`
+    },
+
     instanceBackup: {
       closeAria: 'Fermer le dialogue de sauvegarde et réinitialisation',
       title: 'Sauvegarder et réinitialiser',
@@ -2539,6 +2571,15 @@ const de: Copy = {
       fullBackup: 'Vollständige Sicherung herunterladen',
       fullBackupTitle: 'Alle neuen Liths, ihr Verlauf und die Lesezeichen, in einer Datei',
       fullBackupNote: 'Umfasst alle neuen Liths hier und die Lesezeichen, nicht nur die in der Liste.'
+    },
+
+    reset: {
+      title: 'Zurücksetzen löscht die Kopien auf diesem Gerät',
+      body: (count: number) =>
+        `${count} ${count === 1 ? 'Lith hat' : 'Liths haben'} hier eine Kopie im Cache oder einen Verlauf, ` +
+        'deshalb löscht das Zurücksetzen sie.',
+      unsavedWarning: (count: number) =>
+        `${count} davon haben ungespeicherte Änderungen, die nur die vollständige Sicherung behält.`
     },
 
     instanceBackup: {

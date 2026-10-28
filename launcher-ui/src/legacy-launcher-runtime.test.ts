@@ -334,6 +334,7 @@ test('every injected bootstrap script parses for every launch shape', () => {
   assertInjectedScriptsParse(buildEngineHtml(ENGINE_STUB, { name: 'x.ipynb', text: '' }, [], {}, { scratchMode: 'ipynb' }), 'scratch ipynb');
   assertInjectedScriptsParse(buildEngineHtml(ENGINE_STUB, { name: 'x.html', text: '' }, [], {}, { isHtmlMode: true }), 'html monolith');
   assertInjectedScriptsParse(buildEngineHtml(ENGINE_STUB, { name: 'x.lith', text: '' }, [], {}, { browserOnly: true }), 'browser storage only');
+  assertInjectedScriptsParse(buildEngineHtml(ENGINE_STUB, { name: 'x_pdf.lith', text: '', unwritten: true }), 'a target the first save creates');
   assertInjectedScriptsParse(
     buildEngineHtml(ENGINE_STUB, { name: 'x.html', text: '' }, [], {}, { isHtmlMode: true, browserOnly: true }),
     'monolith in browser storage only'
@@ -819,6 +820,72 @@ test('the engine mount records the save target rather than the document', async 
   const pointer = store.get('lithic-active-file') ?? '';
   assert.deepEqual(JSON.parse(pointer || 'null'), { name: 'huge.lith', path: 'C:/docs/huge.lith' });
   assert.ok(pointer.length < 1024, `the entry is a pointer and not a document: ${pointer.length} bytes`);
+});
+
+// A Lith the app opens a PDF into is not on disk when it opens: reading a PDF is a view, and the
+// file arrives when the person saves, at the name the launcher already named. The mount says so
+// once, in the record both halves read, and this pins both halves: the boot writes the flag into
+// the pointer, and the injected saver reads it to tell a target to overwrite from one to create.
+test('an unwritten mount records its target as one its first save creates', async () => {
+  const html = buildEngineHtml(ENGINE_STUB, { name: 'paper_pdf.lith', text: '', unwritten: true });
+  assert.ok(
+    html.includes('target.__lithicTauriUnwritten__ = true;'),
+    'the handle says the file is not there yet'
+  );
+  assert.match(
+    html,
+    /tauriInvoke\('save_lith_file', \{ path: tauriPath, text: text, suggestedName: fileHandle\.name \}\)/,
+    'so the write creates it, which write_text_path refuses to do for a path that is not a file'
+  );
+  assert.match(
+    html,
+    /if \(!unwrittenTarget && !armDirtyWatcher\(\)\)/,
+    'and no capture is watched, because there is no document to recover into'
+  );
+  assert.match(html, /\.unwritten === true/, 'the flag is read from the mount\'s own pointer');
+
+  const store = new Map<string, string>();
+  const globals = globalThis as any;
+  const saved = {
+    window: globals.window,
+    localStorage: globals.localStorage,
+    sessionStorage: globals.sessionStorage,
+    fetch: globals.fetch,
+    document: globals.document
+  };
+  globals.window = { location: { href: 'file:///src/launcher.html' } };
+  globals.localStorage = {
+    getItem: (key: string) => (key === 'cachedOnlineCoreEngine' ? ENGINE_STUB : null),
+    setItem: () => {}
+  };
+  globals.sessionStorage = {
+    setItem: (key: string, value: string) => store.set(key, value),
+    getItem: (key: string) => store.get(key) ?? null,
+    removeItem: (key: string) => store.delete(key)
+  };
+  globals.fetch = async () => { throw new Error('network unavailable'); };
+  globals.document = { open() {}, write() {}, close() {} };
+  try {
+    await bootLegacyWiki({ name: 'paper_pdf.lith', path: 'C:/docs/paper_pdf.lith', text: '', unwritten: true });
+    assert.deepEqual(
+      JSON.parse(store.get('lithic-active-file') ?? 'null'),
+      { name: 'paper_pdf.lith', path: 'C:/docs/paper_pdf.lith', unwritten: true },
+      'an unwritten mount carries the flag its saver reads'
+    );
+
+    await bootLegacyWiki({ name: 'notes.lith', path: 'C:/docs/notes.lith', text: '' });
+    assert.deepEqual(
+      JSON.parse(store.get('lithic-active-file') ?? 'null'),
+      { name: 'notes.lith', path: 'C:/docs/notes.lith' },
+      'a file that is already there carries no flag, so a later save overwrites rather than decides'
+    );
+  } finally {
+    if (saved.window !== undefined) globals.window = saved.window; else delete globals.window;
+    if (saved.localStorage !== undefined) globals.localStorage = saved.localStorage; else delete globals.localStorage;
+    if (saved.sessionStorage !== undefined) globals.sessionStorage = saved.sessionStorage; else delete globals.sessionStorage;
+    if (saved.fetch !== undefined) globals.fetch = saved.fetch; else delete globals.fetch;
+    if (saved.document !== undefined) globals.document = saved.document; else delete globals.document;
+  }
 });
 
 // A PDF's own open asks the engine for the board its pages are under, and the ask travels on the

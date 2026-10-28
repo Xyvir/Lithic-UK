@@ -1282,6 +1282,36 @@ const DIALOG_STATES = [
     }
   },
   {
+    // What the plain reset asks, and the shape where nothing is missing: every row still points
+    // at its file. What a reset deletes is the copied wiki this device holds below a row, its
+    // version history and any unsaved capture, and this list has no rebuild control to grow them
+    // back, so the row is named with a download beside it before the list goes.
+    slug: 'reset-warning',
+    modal: 'reset-title',
+    mode: 'tauri',
+    seed: {
+      recents: [diskRow('notes.lith')],
+      caches: { 'search_cache_notes.lith': cache([{ title: 'A', text: 'note text' }]) },
+      meta: { 'search_cache_meta_notes.lith': history() }
+    },
+    drive: async (page) => {
+      await page.waitForSelector('.reset-cache');
+      await page.click('.reset-cache');
+      await page.waitForSelector('.reset-modal');
+      await settle(page, 300);
+    },
+    clip: '.reset-modal',
+    expect: '.reset-modal .modal-action.danger',
+    verify: async (page) => {
+      // The claim a picture cannot make: the row it lists is the one holding the copy, and the
+      // way to keep that copy is on it.
+      if ((await page.query('.reset-modal .recent-icon-button')).count !== 1) {
+        throw new Error('the reset warning lists a row with no download beside it');
+      }
+      await assertFullBackupMark(page, '.reset-modal');
+    }
+  },
+  {
     // Edits the launcher captured and never saw saved, asked about before the Lith mounts.
     slug: 'unsaved-edits',
     modal: 'dirty-title',

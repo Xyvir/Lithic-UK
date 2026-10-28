@@ -54,7 +54,7 @@
   import { matchMarkup, showsForQuery, titleMatches, titleMarkup } from './name-match';
   import { cachedStamp, modifiedTitle } from './last-modified';
   import { topHits, type InstanceCacheRead, type InstanceReads } from './instance-search';
-  import { computeBackupCoverage, folderOf, hasBackedUpRepo, orphanedEntries, reindexFolders, syncedDirFor, type CoverageRow, type RebuildOrphan } from './backup-coverage';
+  import { computeBackupCoverage, folderOf, hasBackedUpRepo, orphanedEntries, reindexFolders, resetCasualties, syncedDirFor, type CoverageRow, type RebuildOrphan } from './backup-coverage';
 import { backupFileName, collectInstanceBackup, mergeBookmarks, parseInstanceBackup, planBackupImport, restoreInstanceBackup, serializeInstanceBackup, type InstanceBackup } from './instance-backup';
   import { parseDeviceCode, parseDevicePoll, pollDelayMs, formatUserCode, generateRepoName, partitionRepos } from './github-device';
   import { copyText } from './clipboard';
@@ -2738,6 +2738,16 @@ import { backupFileName, collectInstanceBackup, mergeBookmarks, parseInstanceBac
    * history/download button, so a real file can be written before proceeding.
    */
   let rebuildOrphans: RebuildOrphan[] = [];
+  /**
+   * What a plain `Reset Recents` would take with the list, held while the person decides.
+   *
+   * Not the rebuild list above: nothing here is missing. The files are exactly where the rows
+   * say they are, and what goes is the copy this device took of each one, its version history
+   * and any unsaved capture, which a reset deletes in the same pass as the list. The panel has
+   * no rebuild control in this shape, so this is the last moment any of them can be written
+   * out; a row with none of the three is only a list entry and is not listed here.
+   */
+  let resetAtRisk: RebuildOrphan[] = [];
   let rebuildOrphanResolver: ((proceed: boolean) => void) | null = null;
 
   /**
@@ -3423,13 +3433,27 @@ import { backupFileName, collectInstanceBackup, mergeBookmarks, parseInstanceBac
     // question either way (see publishBoardRequest), so a request cannot outlive its mount.
     openBoardFor?: string,
     /**
-     * An answer this mount already carries to the unsaved-edit gate, from a caller that has
-     * asked its own question about the same capture (the history trail's own Recover). Only
-     * merge can arrive this way: discarding and deciding later are answers a person gives, so
-     * they never come from a button whose whole claim is that it recovers the edits.
+     * The facts a mount carries that are not its own content, gathered rather than added as more
+     * positional arguments: four of the ten mounts pass the first and one the second.
      */
-    dirtyAnswer?: 'merge'
+    mount: {
+      /**
+       * An answer this mount already carries to the unsaved-edit gate, from a caller that has
+       * asked its own question about the same capture (the history trail's own Recover). Only
+       * merge can arrive this way: discarding and deciding later are answers a person gives, so
+       * they never come from a button whose whole claim is that it recovers the edits.
+       */
+      dirtyAnswer?: 'merge';
+      /**
+       * True when `path` names where a save will go and nothing is written there yet: the Lith
+       * beside a PDF or an image, which is created by the first save rather than by the open
+       * (see `importIntoNewLith`). Nothing is remembered and no capture is watched, because
+       * there is no file and no document yet, only a view of one.
+       */
+      unwritten?: boolean;
+    } = {}
   ) {
+    const { dirtyAnswer, unwritten = false } = mount;
     mountError = '';
     // A complete wiki page rather than a Lithic document: served as-is, with
     // its own tiddler store and its own save behavior.
@@ -3464,7 +3488,10 @@ import { backupFileName, collectInstanceBackup, mergeBookmarks, parseInstanceBac
         }
       }
     }
-    await remember({ name: safeName, path, text: contents, handle });
+    // A mount whose file is still to be written has nothing to remember: the list holds Liths
+    // that exist, and a row for one that does not cannot be opened or backed up. Its row is
+    // written by the save that creates the file, which is the writer that knows there is one.
+    if (!unwritten) await remember({ name: safeName, path, text: contents, handle });
     // Drift compares the file against the tiddler chain, and only a .lith file
     // holds a tiddler store to compare (a scratch document is flat text and a
     // monolith is a page) so the SYNC marker stays lith-only. Unsaved-edit
@@ -3477,8 +3504,11 @@ import { backupFileName, collectInstanceBackup, mergeBookmarks, parseInstanceBac
     // have changed (the cached copy *is* the document) so the comparison is
     // the cache against itself, and answering it there marks a full SYNC
     // snapshot on mounts that changed nothing.
-    const driftedFromHead = !isHtmlMonolith && !isScratch && !indexDbOnly && await isWikiDriftedFromHead(safeName, contents);
-    if (tracksUnsavedEdits(name)) {
+    const driftedFromHead = !isHtmlMonolith && !isScratch && !indexDbOnly && !unwritten && await isWikiDriftedFromHead(safeName, contents);
+    // Nothing on disk to be behind or to have a capture against. A viewer's target that lags a
+    // cached copy was deleted rather than saved, and asking to recover edits into it would offer
+    // the pages the import just read back as changes a person made.
+    if (!unwritten && tracksUnsavedEdits(name)) {
       if ((await prepareDirtyRecovery(safeName, dirtyAnswer)) === 'later') {
         busy = false;
         status = copy.status.editsKept;
@@ -3511,7 +3541,7 @@ import { backupFileName, collectInstanceBackup, mergeBookmarks, parseInstanceBac
       armShareWatch();
       return;
     }
-    const handoff = { name: safeName, path, text: contents };
+    const handoff = { name: safeName, path, text: contents, ...(unwritten ? { unwritten: true } : {}) };
     // The legacy `?mount` handoff, offered to the session store rather than forced on it: this
     // line used to put the whole document into a key with a few megabytes to spend, which is what
     // made a 10 MB Lith fail its own mount with `QuotaExceededError`. See writeHandoff.
@@ -3866,7 +3896,7 @@ import { backupFileName, collectInstanceBackup, mergeBookmarks, parseInstanceBac
         const name = getEntryName(recent);
         const cached = isHtmlMonolithName(name) ? '' : await getSearchCacheText(name);
         const text = cached || (recent as any).text || '';
-        await mountWiki(text, name, undefined, undefined, [], null, undefined, opts.dirtyAnswer);
+        await mountWiki(text, name, undefined, undefined, [], null, undefined, { dirtyAnswer: opts.dirtyAnswer });
         status = copy.status.mounted(name);
         return true;
       }
@@ -3897,7 +3927,7 @@ import { backupFileName, collectInstanceBackup, mergeBookmarks, parseInstanceBac
         }
         const file = await handle.getFile();
         const text = await file.text();
-        await mountWiki(text, file.name, recentDiskPath(recent) ?? undefined, handle, [], null, undefined, opts.dirtyAnswer);
+        await mountWiki(text, file.name, recentDiskPath(recent) ?? undefined, handle, [], null, undefined, { dirtyAnswer: opts.dirtyAnswer });
         status = copy.status.mounted(file.name);
         return true;
       }
@@ -3906,7 +3936,7 @@ import { backupFileName, collectInstanceBackup, mergeBookmarks, parseInstanceBac
         fileName = (recent as any).name || 'untitled.lith';
         filePath = recentDiskPath(recent) ?? undefined;
         status = copy.status.mounted(fileName);
-        await mountWiki(lithText, fileName, filePath, undefined, [], null, undefined, opts.dirtyAnswer);
+        await mountWiki(lithText, fileName, filePath, undefined, [], null, undefined, { dirtyAnswer: opts.dirtyAnswer });
         return true;
       } else if (recentDiskPath(recent) && mode === 'tauri') {
         // Tauri recents opened through the save dialog carry only a disk
@@ -3984,17 +4014,19 @@ import { backupFileName, collectInstanceBackup, mergeBookmarks, parseInstanceBac
    *
    * Nothing here renders anything: both converters live in the wiki, so the launcher reads the
    * file's bytes, hands them to the mounted document, and the importer's own startup turns them
-   * into the tiddlers. The target is created empty first because that is the file the import's
-   * save writes back to, which is what makes a sibling exist from the first moment. The source
-   * file itself is only ever read.
+   * into the tiddlers. The source file itself is only ever read.
+   *
+   * The sibling is not written and not listed: reading a PDF through this app is a view of that
+   * PDF, and a file on the desktop for every look is clutter nobody asked for. The path is where
+   * a save will go, so the file the first save creates is the one `import_lith_target` would have
+   * answered with on the next open, and the row arrives with it (see `mount.unwritten` below).
    */
   async function importIntoNewLith(sourcePath: string, lithPath: string, kind: ImportKind) {
     const sourceName = sourcePath.split(/[\\/]/).pop() || (kind === 'pdf' ? 'document.pdf' : 'image.png');
     const lithName = lithPath.split(/[\\/]/).pop() || `${importContainerTitle(sourceName) || 'document'}.lith`;
-    // The bytes are read before anything is written, so a file this process cannot read leaves
-    // no half-made Lith beside it.
+    // The bytes are read before anything is mounted, so a file this process cannot read opens no
+    // document at all rather than one holding a failed import.
     const base64 = await tauriInvoke<string>('read_file_base64', { path: sourcePath });
-    await tauriInvoke('save_lith_file', { text: '', suggestedName: lithName, path: lithPath });
     // Each converter runs inside the mounted document, which cannot reach this process's bridge
     // any other way, so the payload travels on the window. A window property survives the
     // engine's document.open/write boot, which is the same reason the file handle is left there.
@@ -4007,7 +4039,7 @@ import { backupFileName, collectInstanceBackup, mergeBookmarks, parseInstanceBac
     lithText = '';
     fileName = lithName;
     filePath = lithPath;
-    await mountWiki('', lithName, lithPath);
+    await mountWiki('', lithName, lithPath, undefined, [], null, undefined, { unwritten: true });
   }
 
   /**
@@ -4054,7 +4086,7 @@ import { backupFileName, collectInstanceBackup, mergeBookmarks, parseInstanceBac
       lithText = result.text;
       fileName = result.name;
       filePath = result.path;
-      await mountWiki(result.text, result.name, result.path, undefined, [], null, openBoardFor, opts.dirtyAnswer);
+      await mountWiki(result.text, result.name, result.path, undefined, [], null, openBoardFor, { dirtyAnswer: opts.dirtyAnswer });
       status = copy.status.mounted(result.name);
       return true;
     } catch (error) {
@@ -5145,6 +5177,53 @@ import { backupFileName, collectInstanceBackup, mergeBookmarks, parseInstanceBac
     rebuildOrphans.map((orphan) => orphanDownloads[orphan.name] ?? 'idle')
   );
 
+  /**
+   * The reset warning's rows, carrying the same pill the rebuild warning's do: both dialogs
+   * write their copies out through `downloadCachedSnapshot`, so one state map serves them and
+   * a download started in either place reports itself in the same words.
+   */
+  $: resetRiskRows = resetAtRisk.map((row) => ({
+    row,
+    pill: orphanPill(orphanDownloads[row.name] ?? 'idle')
+  }));
+
+  $: resetRiskNote = orphanDownloadNote(resetAtRisk.map((row) => orphanDownloads[row.name] ?? 'idle'));
+
+  /** Every name this device holds a cached copy, a capture or a version history for. */
+  function heldCopies(): string[] {
+    return [
+      ...Object.keys(cachedEntries),
+      ...Object.keys(dirtyEntries),
+      ...Object.keys(historyAvailable).filter((name) => historyAvailable[name])
+    ];
+  }
+
+  /**
+   * `Reset Recents`, asked first where there is something to ask about.
+   *
+   * The list on its own is not worth a question: every row points at a file that outlives it.
+   * What a reset also deletes is the copy, the history and the unsaved capture held below each
+   * row, and this shape has no rebuild control to grow them back, so the rows that hold any of
+   * them are named with a download each before the list goes. Nothing held means nothing to
+   * ask, and that reset clears as it always did.
+   */
+  function requestReset(): void {
+    const atRisk = resetCasualties(recentRows() as CoverageRow[], heldCopies());
+    if (atRisk.length === 0) {
+      void clearRecent();
+      return;
+    }
+    orphanDownloads = {};
+    resetAtRisk = atRisk;
+  }
+
+  /** The reset the warning lists, once the person has had their say. */
+  function confirmReset(): void {
+    resetAtRisk = [];
+    orphanDownloads = {};
+    void clearRecent();
+  }
+
   // --- The instance backup: everything this store holds, out and back in ---------
 
   /** Whether the fallback's gated Backup and Reset dialog is on screen. */
@@ -5212,7 +5291,7 @@ import { backupFileName, collectInstanceBackup, mergeBookmarks, parseInstanceBac
    * `source` decides which of two sentences confirms it, because the gated dialog has already
    * explained what the file is for and the other two dialogs have not.
    */
-  async function downloadInstanceBackup(source: 'manage' | 'gate' | 'rebuild'): Promise<void> {
+  async function downloadInstanceBackup(source: 'manage' | 'gate' | 'rebuild' | 'reset'): Promise<void> {
     if (backupBusy) return;
     backupBusy = true;
     backupStatus = '';
@@ -6784,7 +6863,7 @@ import { backupFileName, collectInstanceBackup, mergeBookmarks, parseInstanceBac
       {#if showRebuildControl}
         <button class="reset-cache" disabled={placeholder || rebuildBusy} on:click={rebuildRecents} title={isSelfHost() ? copy.foot.rebuildServerTitle : copy.foot.rebuildDiskTitle}>{rebuildBusy ? copy.foot.reindexing : copy.foot.rebuild}</button>
       {:else}
-        <button class="reset-cache" disabled={placeholder} on:click={clearRecent} title={copy.foot.resetTitle}>{copy.foot.reset}</button>
+        <button class="reset-cache" disabled={placeholder} on:click={requestReset} title={copy.foot.resetTitle}>{copy.foot.reset}</button>
       {/if}
     {/if}
   {/snippet}
@@ -7723,6 +7802,53 @@ import { backupFileName, collectInstanceBackup, mergeBookmarks, parseInstanceBac
                rows it drops keep nothing (not the cached copy, not the history) and a
                download from this dialog is the only way to write one of them out first. -->
           <button class="modal-action danger" on:click={() => resolveRebuildOrphans(true)}>{copy.dialogs.rebuild.proceed}</button>
+        </div>
+      </div>
+    </div>
+  {/if}
+  <!--
+    What a plain `Reset Recents` asks before it goes, in the shape the rebuild warning above
+    already uses, because it is the same loss by another route: a reset deletes every cached
+    copy, version history and unsaved capture with the list, and in this mode there is no
+    rebuild to grow them back. The rows are the ones that hold something, a download stands
+    beside each copy, one full backup covers them all (captures and history included), and
+    Cancel leaves everything as it was. It is a yes/no confirmation, so it keeps its Cancel
+    instead of a corner ×.
+  -->
+  {#if resetAtRisk.length > 0}
+    <div class="modal-overlay" role="presentation">
+      <div class="launcher-modal orphan-modal reset-modal" role="dialog" aria-modal="true" aria-labelledby="reset-title">
+        <h2 id="reset-title">{copy.dialogs.reset.title}</h2>
+        <p>{copy.dialogs.reset.body(resetAtRisk.length)}</p>
+        {#if resetAtRisk.some((row) => dirtyEntries[row.name])}
+          <p class="orphan-warning" role="alert">
+            {copy.dialogs.reset.unsavedWarning(resetAtRisk.filter((row) => dirtyEntries[row.name]).length)}
+          </p>
+        {/if}
+        <ul class="orphan-list">
+          {#each resetRiskRows as row (row.row.name)}
+            <li class="orphan-row">
+              <span class="orphan-name" title={row.row.path ?? copy.dialogs.rebuild.noFile}>{row.row.name}</span>
+              {#if !row.row.path}<span class="orphan-tag">{copy.dialogs.rebuild.cachedOnly}</span>{/if}
+              {#if dirtyEntries[row.row.name]}<span class="orphan-tag dirty" title={copy.dialogs.rebuild.unsavedCaptured(new Date(dirtyEntries[row.row.name]).toLocaleString(LOCALE_TAG))}>{copy.dialogs.rebuild.unsavedTag}</span>{/if}
+              {#if cachedEntries[row.row.name]}
+                <button class="recent-icon-button" type="button" aria-label={copy.row.downloadAria(row.row.name)} title={copy.row.downloadTitle} on:click={() => downloadCachedSnapshot(row.row.name)}>
+                  <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 4v11"></path><path d="m7.5 10.5 4.5 4.5 4.5-4.5"></path><path d="M5 19h14"></path></svg>
+                </button>
+                {#if row.pill}<span class="orphan-pill {row.pill.tone}" role="status" title={row.pill.title}>{row.pill.label}</span>{/if}
+              {/if}
+            </li>
+          {/each}
+        </ul>
+        {#if resetRiskNote}<p class="orphan-progress" role="status">{resetRiskNote}</p>{/if}
+        <div class="instance-backup-full">
+          <button class="modal-action secondary full-backup-button" disabled={backupBusy} on:click={() => downloadInstanceBackup('reset')} title={copy.dialogs.rebuild.fullBackupTitle}>{@render fullBackupIcon()}{backupBusy ? '…' : copy.dialogs.rebuild.fullBackup}</button>
+        </div>
+        <p class="git-sync-note">{copy.dialogs.rebuild.fullBackupNote}</p>
+        {#if backupStatus}<p class="status-line" role="status">{backupStatus}</p>{/if}
+        <div class="modal-actions">
+          <button class="modal-action secondary" on:click={() => (resetAtRisk = [])}>{copy.common.cancel}</button>
+          <button class="modal-action danger" on:click={confirmReset}>{copy.foot.reset}</button>
         </div>
       </div>
     </div>

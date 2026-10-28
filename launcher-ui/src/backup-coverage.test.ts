@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { folderOf, computeBackupCoverage, hasBackedUpRepo, folderTargets, reindexFolders, orphanedEntries, syncedDirFor } from './backup-coverage.ts';
+import { folderOf, computeBackupCoverage, hasBackedUpRepo, folderTargets, reindexFolders, orphanedEntries, resetCasualties, syncedDirFor } from './backup-coverage.ts';
 
 test('folderOf keeps the separator and tolerates either OS', () => {
   assert.equal(folderOf('C:\\Users\\me\\Documents\\Lithic\\work.lith'), 'C:\\Users\\me\\Documents\\Lithic\\');
@@ -141,6 +141,45 @@ test('a cached copy whose file is back is not an orphan, and a row is listed onc
       new Set(['back.lith'])
     ),
     []
+  );
+});
+
+test('a plain reset names the rows whose copies it would delete', () => {
+  const rows = [
+    { name: 'copied.lith', path: '/data/copied.lith' },
+    { name: 'captured.lith', path: '/data/captured.lith' },
+    // A file this device has never read: a reset takes only the list row, and the file is
+    // where it always was, so there is nothing to warn about.
+    { name: 'untouched.lith', path: '/data/untouched.lith' },
+    { name: 'web.lith', path: null }
+  ];
+  assert.deepEqual(
+    resetCasualties(rows, ['copied.lith', 'captured.lith', 'web.lith']),
+    [
+      { name: 'copied.lith', path: '/data/copied.lith' },
+      { name: 'captured.lith', path: '/data/captured.lith' },
+      { name: 'web.lith', path: null }
+    ]
+  );
+});
+
+test('a reset also names a copy no row lists any more', () => {
+  assert.deepEqual(
+    resetCasualties([{ name: 'here.lith', path: '/data/here.lith' }], ['here.lith', 'deleted-long-ago.lith']),
+    [
+      { name: 'here.lith', path: '/data/here.lith' },
+      { name: 'deleted-long-ago.lith', path: null }
+    ]
+  );
+});
+
+test('a reset with nothing held asks nothing, and one name is listed once', () => {
+  assert.deepEqual(resetCasualties([{ name: 'plain.lith', path: '/data/plain.lith' }], []), []);
+  // The held set is built from three stores (copies, captures, history), so one wiki can
+  // arrive more than once, in two spellings, and is still one row to download.
+  assert.deepEqual(
+    resetCasualties([{ name: 'Gone.lith', path: '/data/gone.lith' }], ['gone.lith', 'GONE.LITH', 'gone.lith']),
+    [{ name: 'Gone.lith', path: '/data/gone.lith' }]
   );
 });
 

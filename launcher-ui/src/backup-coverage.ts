@@ -146,6 +146,49 @@ export function orphanedEntries(
 }
 
 /**
+ * Everything a plain reset would take with it, rather than only the list.
+ *
+ * Resetting the recents clears the list and, in the same pass, every cached copy, version
+ * history and unsaved capture this device holds (`clearAllRecentFiles`). Where a rebuild is
+ * offered that costs nothing, because the list and its caches come straight back from the
+ * files. Where it is not, the plain reset is the only control the panel has, and it is the
+ * last moment a copy this device took can be written out; so the rows it would take are
+ * named before it runs: a row whose file is fine but whose copy is here, and a copy whose
+ * row has already gone. A row with nothing held for it is only a list entry, and a reset
+ * takes nothing from it.
+ *
+ * `held` is every name this device has a cached copy, a version history or an unsaved
+ * capture for, and it is compared without case, like its sibling above.
+ */
+export function resetCasualties(
+  rows: readonly CoverageRow[],
+  held: Iterable<string>
+): RebuildOrphan[] {
+  // Materialized once: the same set is read for the keys and again for the copies no row holds.
+  const names = [...held];
+  const keys = new Set<string>();
+  for (const name of names) keys.add(name.toLowerCase());
+  const casualties: RebuildOrphan[] = [];
+  const seen = new Set<string>();
+  for (const row of rows) {
+    const key = row.name.toLowerCase();
+    if (seen.has(key) || !keys.has(key)) continue;
+    seen.add(key);
+    casualties.push({ name: row.name, path: row.path });
+  }
+  // A copy nothing lists any more is still a copy a reset deletes, and it has no row to have
+  // been warned about: it is named from the held set, which is why that set is kept in its own
+  // spelling rather than only as keys.
+  for (const name of names) {
+    const key = name.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    casualties.push({ name, path: null });
+  }
+  return casualties;
+}
+
+/**
  * Folders a rebuild should list: every backed-up repository root, plus the
  * folder of every known row. The roots come first so what it discovers starts
  * where the backup does. Each is listed flat. A rebuild top-ups the list with

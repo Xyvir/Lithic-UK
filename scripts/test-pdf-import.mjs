@@ -126,8 +126,8 @@ function createPdfContext({ pages = [{}] } = {}) {
     $tw: {
       Tiddler,
       wiki,
-      // A save is how the new Lith lands on disk, so the test watches for the dispatch the
-      // importer makes after it has finished rendering, and records the state it was taken of.
+      // Opening a PDF writes nothing (the save the person presses is what makes the sibling), so
+      // the test watches for a dispatch that must not come, and records the view it was taken of.
       rootWidget: {
         dispatchEvent: (event) => {
           saves.push(event && event.type);
@@ -255,7 +255,7 @@ test('PDF import embeds a compressed raster image in its whiteboard page', async
   assert.equal(tiddlers.has(BOARD_STATE), false, 'and names no board, because no board is full screen');
 });
 
-test('a PDF the desktop app opens becomes a new Lith beside it, saved and full screen', async () => {
+test('a PDF the desktop app opens becomes a new Lith beside it, full screen and unwritten', async () => {
   const { context, tiddlers, saves, saveStates } = loadPdfOpenRequest();
 
   context.exports.startup();
@@ -275,8 +275,8 @@ test('a PDF the desktop app opens becomes a new Lith beside it, saved and full s
   );
   assert.deepEqual(
     saves,
-    ['tm-save-wiki'],
-    'the new Lith is written to disk rather than left unsaved, so the copy exists as soon as it opens'
+    [],
+    'nothing is written: reading a PDF is a view, and the sibling is created by the save a person presses'
   );
   // The board opens full screen: the same four tiddlers `$:/lithic/buttons/FullscreenWhiteboard`
   // sets, so a double-click lands where the button lands rather than on a tiddler in the river.
@@ -297,8 +297,8 @@ test('a PDF the desktop app opens becomes a new Lith beside it, saved and full s
   );
   assert.deepEqual(
     saveStates,
-    [{ layout: FULLSCREEN_LAYOUT, board: 'imported-doc-whiteboard' }],
-    'the save is taken while the board is full screen, which is the view the import sets before writing'
+    [],
+    'and no view was recorded for a save, because there was none to take one of'
   );
   assert.ok(tiddlers.get('imported-doc'), 'the container tiddler still exists beside the board');
   const whiteboard = tiddlers.get('imported-doc-whiteboard');
@@ -352,9 +352,9 @@ test('a PDF whose Lith already exists opens on the board its pages are under', (
   );
 });
 
-// A Lith with no board in it: an import interrupted between the file being made and the pages
-// landing, which the launcher's create-then-fill order makes possible. There is nothing to open, so
-// the file is left as it stands rather than being given the plugin's blank template to draw.
+// A Lith with no board in it: an import interrupted before its board landed, or a save pressed
+// while the converter was still working. There is nothing to open, so the file is left as it
+// stands rather than being given the plugin's blank template to draw.
 test('an ask for a board the Lith does not hold leaves it as it stands', () => {
   const { context, tiddlers, saves } = loadPdfOpenRequest({
     handoff: { __LITHIC_OPEN_BOARD__: { container: 'half-imported' } },

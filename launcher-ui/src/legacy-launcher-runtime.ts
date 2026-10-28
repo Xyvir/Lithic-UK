@@ -40,6 +40,13 @@ export type LauncherHandoff = {
   name: string;
   path?: string;
   text: string;
+  /**
+   * `path` names where a save will go, and nothing is written there yet: the Lith beside a PDF or
+   * an image, whose open is a view of that file rather than a document (see `importIntoNewLith`
+   * in App.svelte). The saver creates the file on the first save, and the mount records no row
+   * and captures no edits until then.
+   */
+  unwritten?: boolean;
   /** Pre-parsed tiddlers to inject (used when the payload was already parsed by the UI). */
   payloadTiddlers?: Array<Record<string, string>>;
 };
@@ -532,7 +539,12 @@ ${BASE_DOCUMENT_FILTER_READER}
         driftedFromHead = false;
         // A real save supersedes every buffered draft tiddler.
         dirtyBuffer = {};
-        return idbKeyval.del('dirty_state_' + fileName);
+        return idbKeyval.del('dirty_state_' + fileName).then(function() {
+          // The first save is what turns a mount with no file into a document, and a document is
+          // what the capture watcher exists for (see unwrittenTarget above). Re-arming on every
+          // save costs nothing: a watcher that is already armed answers without doing anything.
+          armDirtyWatcher();
+        });
       }).catch(function(err) {
         console.error('Failed to update search cache in IndexedDB:', err);
       });
@@ -621,7 +633,7 @@ ${BASE_DOCUMENT_FILTER_READER}
     dirtyBuffer = {};
     if (dirtyTimer) { clearTimeout(dirtyTimer); dirtyTimer = null; }
 
-    if (!armDirtyWatcher()) {
+    if (!unwrittenTarget && !armDirtyWatcher()) {
       var armAttempts = 0;
       var armPoll = setInterval(function() {
         armAttempts += 1;
@@ -666,6 +678,14 @@ ${BASE_DOCUMENT_FILTER_READER}
     var handle = root.__LITHIC_FILE_HANDLE__ || undefined;
     var pending;
 
+    // Whether this mount's file is still to be written, as the pointer the launcher wrote says.
+    // Read from the same record resolveStoredHandle takes its target from, so the fact lives in
+    // one place rather than being baked in as a second literal beside it (see the unwritten
+    // mount fact in mountWiki).
+    var unwrittenTarget = (function() {
+      try { return (JSON.parse(sessionStorage.getItem('lithic-active-file') || 'null') || {}).unwritten === true; } catch (e) { return false; }
+    })();
+
     // Tauri v1's WebView2 lacks the File System Access API, so in-place saves
     // go through the Rust commands instead: write_text_path overwrites an
     // existing file, save_lith_file shows the native dialog for new ones.
@@ -683,6 +703,11 @@ ${BASE_DOCUMENT_FILTER_READER}
     // Pseudo-writable mirroring FileSystemWritableFileStream for the Tauri
     // bridge: write() performs the Rust write, close() is a no-op, so both
     // save branches (lith and scratch) share one code shape.
+    //
+    // A handle marked unwritten is a save target that has never been written: the Lith beside a
+    // PDF or an image, whose open is a view rather than a document (importIntoNewLith in the
+    // launcher). Nothing is there to overwrite yet, and write_text_path refuses a path that is
+    // not a file, so this one is written by the save command, which is also what creates it.
     root.__LITHIC_WRITE_FILE__ = function(fileHandle) {
       var tauriPath = fileHandle && fileHandle.__lithicTauriPath__;
       var shimPath = fileHandle && fileHandle.__lithicShimPath__;
@@ -695,13 +720,20 @@ ${BASE_DOCUMENT_FILTER_READER}
         };
       }
       if (!tauriInvoke || !tauriPath) return Promise.reject(new Error('No writable target'));
+      var unwritten = fileHandle && fileHandle.__lithicTauriUnwritten__ === true;
       return {
-        write: function(text) { return tauriInvoke('write_text_path', { path: tauriPath, text: text }); },
+        write: function(text) {
+          return unwritten
+            ? tauriInvoke('save_lith_file', { path: tauriPath, text: text, suggestedName: fileHandle.name })
+            : tauriInvoke('write_text_path', { path: tauriPath, text: text });
+        },
         close: function() { return Promise.resolve(); }
       };
     };
-    function tauriHandle(name, tauriPath) {
-      return { name: name, __lithicTauriPath__: tauriPath };
+    function tauriHandle(name, tauriPath, unwritten) {
+      var target = { name: name, __lithicTauriPath__: tauriPath };
+      if (unwritten) target.__lithicTauriUnwritten__ = true;
+      return target;
     }
 
     // The shim's wire, resolved for itself the same way the app's invoke is, and for the
@@ -750,9 +782,11 @@ ${BASE_DOCUMENT_FILTER_READER}
         var fileName = handoff && handoff.name;
         if (!fileName) return Promise.resolve(null);
         // Tauri: the handoff carries the absolute disk path of the opened
-        // file; save in place through the invoke bridge.
+        // file; save in place through the invoke bridge. A path that is not
+        // written yet is created by that first save rather than refused for
+        // not being a file (see the unwritten mount fact in mountWiki).
         if (tauriInvoke && handoff.path) {
-          handle = tauriHandle(fileName, handoff.path);
+          handle = tauriHandle(fileName, handoff.path, handoff.unwritten === true);
           root.__LITHIC_FILE_HANDLE__ = handle;
           return Promise.resolve(handle);
         }
@@ -1478,7 +1512,14 @@ export async function bootLegacyWiki(
   // the body, which is what the monolith branch below has always recorded. This used to be handed
   // the whole handoff (body and all) so it threw on the line after the launcher's own, on the
   // same mount, for the same reason (see writeHandoff).
-  setActiveFile({ name: handoff.name, path: handoff.path });
+  // The `unwritten` flag rides the pointer rather than being baked into the saver as another
+  // literal: both halves of the mount read this one record, one for the target and one for
+  // whether the target exists yet.
+  setActiveFile({
+    name: handoff.name,
+    path: handoff.path,
+    ...(handoff.unwritten ? { unwritten: true } : {})
+  });
   // Boot the engine into the current document so the launcher URL stays in
   // the address bar. A plain refresh / "return to launcher" lands back on
   // the launcher UI. This mirrors the legacy launcher.html boot path, which
@@ -1584,7 +1625,7 @@ function publishBoardRequest(container?: string): void {
  * Never the body. The saver resolves its write target from these two fields, and the body is what
  * the store cannot hold (see `writeHandoff`).
  */
-function setActiveFile(pointer: { name?: string; path?: string }): void {
+function setActiveFile(pointer: { name?: string; path?: string; unwritten?: boolean }): void {
   storeInSession(ACTIVE_FILE_KEY, pointer);
 }
 

@@ -14,8 +14,11 @@ Lith that does.
 The launcher cannot render a PDF, because the renderer lives in this wiki, so it reads the
 file's bytes, hands them over on the window, and mounts the new Lith. This module takes that
 payload and calls the same converter a dropped PDF goes through, then shows the whiteboard
-full screen, then leaves the Lith saved. A drop and a double-click therefore produce the
-same tiddlers from the same code.
+full screen. A drop and a double-click therefore produce the same tiddlers from the same code.
+
+Nothing is saved here. Opening a PDF to read it is a view, and a Lith that appeared beside
+every file that was looked at is the clutter this avoids: the save the person presses is what
+creates the sibling, at the name the launcher already named it (see `importIntoNewLith`).
 
 The other shape is a PDF that has already become a Lith, which the launcher opens as it
 stands: importing again would replace everything written in that copy since it was made.
@@ -183,12 +186,11 @@ function base64ToArrayBuffer(base64) {
 }
 
 /**
- * The PDF itself: convert it, open the board it produced, and write the new Lith back.
+ * The PDF itself: convert it and open the board it produced.
  *
- * The copy on disk is the point of the gesture, so the new Lith is saved rather than left
- * for the user to save: the launcher created the file beside the PDF and this is what fills
- * it. A save is also what the wiki would do for any other open document, and it goes to the
- * file the launcher named, never back to the PDF.
+ * The tiddlers live in the mounted document and nowhere else, which is the point: the gesture
+ * is opening a PDF, and a file left on disk for every look is clutter. The first save writes
+ * them to the sibling the launcher named, and never back to the PDF.
  */
 function openRequestedPdf(request) {
     var base64 = request.base64;
@@ -219,9 +221,6 @@ function openRequestedPdf(request) {
             // stream node's handle land there.
             openBoard(whiteboard);
         }
-        if ($tw.rootWidget && typeof $tw.rootWidget.dispatchEvent === "function") {
-            $tw.rootWidget.dispatchEvent({ type: "tm-save-wiki" });
-        }
     }).catch(function(error){
         clearProgress();
         setProgress("Could not open the PDF: " + (error && error.message ? error.message : error));
@@ -243,12 +242,12 @@ function openRequestedBoard(board) {
 }
 
 /**
- * The image itself: draw it on a board, open that board, and write the new Lith back.
+ * The image itself: draw it on a board, and open that board.
  *
  * The picture is never opened as a note of its own, because a board is what a double-click on
- * an image means in this app: a canvas the picture sits on, that a person can write beside. The
- * new Lith is saved for the same reason the PDF's is, since the launcher created the file and
- * this is what fills it.
+ * an image means in this app: a canvas the picture sits on, that a person can write beside. It
+ * is left unsaved for the same reason the PDF's pages are: looking at a picture is not a
+ * reason to write a file, and the save is.
  */
 function openRequestedImage(request) {
     var base64 = request.base64;
@@ -277,9 +276,6 @@ function openRequestedImage(request) {
         clearProgress();
         if (board) {
             openBoard(board);
-        }
-        if ($tw.rootWidget && typeof $tw.rootWidget.dispatchEvent === "function") {
-            $tw.rootWidget.dispatchEvent({ type: "tm-save-wiki" });
         }
     }).catch(function(error){
         clearProgress();
