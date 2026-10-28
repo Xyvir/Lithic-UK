@@ -1420,9 +1420,16 @@ a.modal-action { text-decoration: none; text-align: center; color: var(--lithic-
  * row, which is inside the panel and needs no room made for it. The band was
  * therefore 76px of nothing under the last row of an instance's list. The emptiest
  * on a phone, where the list has the least to spare.
+ *
+ * In the band's own range, the room is reserved for a corner that has something in
+ * it, so `footer-controls` asks the same two questions the footer does: whether the
+ * project link is drawn, and whether an install offer is. Neither is a fact about the
+ * width, and the desktop app draws the first of them never, so a window answered
+ * "nothing to offer" on the second was keeping 76px clear under an empty corner and
+ * ending its list a band short of the window.
  */
 @media (min-width: 601px) and (max-width: 899px) {
-  .container { padding-bottom: 76px; }
+  .container.footer-controls { padding-bottom: 76px; }
 }
 
 @media (max-width: 950px) {

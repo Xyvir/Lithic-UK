@@ -707,6 +707,18 @@ import { backupFileName, collectInstanceBackup, mergeBookmarks, parseInstanceBac
       : null;
 
   /**
+   * Whether either of the window's bottom corners holds a control.
+   *
+   * The stylesheet reserves a bottom band under the panel on a window between 601px and 899px,
+   * where a corner control sits over the launcher column instead of beside it (see that query
+   * in styles.css). The reservation is room made for something that is there, so it follows the
+   * two conditions the footer renders on rather than the mode: a desktop window draws no project
+   * link, and a window whose install question answered "nothing to offer" draws no button, and
+   * with both absent the band was 76px of nothing under the last row of the list.
+   */
+  $: footerControlsShown = (mode === 'webapp' && !browserOnly) || Boolean(installOffer && !recentPanelShown);
+
+  /**
    * Whether the window is the width at which the install offer leaves the window's corner for
    * the panel's foot row. The number is the stylesheet's own, the `@media (max-width: 600px)`
    * block that moves the offer into that row, mirrored because the button's word changes with
@@ -6790,7 +6802,7 @@ import { backupFileName, collectInstanceBackup, mergeBookmarks, parseInstanceBac
 
 <svelte:head><title>{copy.app.title}</title></svelte:head>
 
-<main class="container" class:panelled={recentPanelShown} data-mode={mode} data-shim-backend={shimBackendUp}>
+<main class="container" class:panelled={recentPanelShown} class:footer-controls={footerControlsShown} data-mode={mode} data-shim-backend={shimBackendUp}>
   <!--
     The full-export mark, drawn in front of its label wherever the whole-instance export is
     offered: the Instance Management dialog, the rebuild confirmation and the fallback's gated
