@@ -270,6 +270,27 @@ function checkReleaseTrigger() {
   if (!/Release build-/.test(landingRun) || !/\/release\//.test(landingRun)) {
     return `${file}: \`landing\` no longer recognises release commits (\`Release build-\` and \`.../release/\`) — a release landing on main would start another release`;
   }
+
+  // And only one of those reviews is ever live, which is the other half of reviewing a session's
+  // worth of work: a person who makes several legs pushes several times before reading any of
+  // them, each push opens its own pull request, and approving the newest one still leaves the
+  // earlier builds listed as waiting on them. So the newest retires its siblings. What is
+  // checked is that the step still exists, still finds the class by the branch this workflow
+  // stages every release on, and still excludes the branch it has just opened.
+  // `open-pr` rather than `build`: this is the job that opens the review and therefore the one
+  // that can retire the ones before it, which is also what gives it the branch name to exclude.
+  const reviewSteps = (doc.jobs && doc.jobs['open-pr'] && doc.jobs['open-pr'].steps) || [];
+  const retire = reviewSteps.find((step) => /gh pr close/.test(shell(step)));
+  if (!retire) {
+    return `${file}: nothing closes a superseded release review — every earlier pull request in a session stays open, asking to be read`;
+  }
+  const retireRun = shell(retire);
+  if (!/gh pr list/.test(retireRun) || !/release\//.test(retireRun)) {
+    return `${file}: the step that closes superseded reviews no longer lists them by their \`release/\` branch — it would find nothing to close`;
+  }
+  if (!/BRANCH/.test(retireRun)) {
+    return `${file}: the step that closes superseded reviews does not exclude the branch under review — it would close the pull request it just opened`;
+  }
   return null;
 }
 

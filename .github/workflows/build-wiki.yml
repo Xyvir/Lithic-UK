@@ -735,3 +735,53 @@ jobs:
             exit 1
           fi
           echo "$MESSAGE"
+
+      # ONE LIVE REVIEW, ALWAYS THE NEWEST. A session that makes several legs of the same work
+      # pushes several times before anybody reads the first review, and each push opens one of
+      # these. Only the last one carries the bytes that will ship, and the earlier ones are not
+      # alternatives to it: merging the newest is what publishes, so a list still showing older
+      # releases as waiting on a person is a list that has to be read twice to be trusted.
+      #
+      # They are CLOSED, never merged. Closing publishes nothing, because no tag and no release
+      # exist until a merge (publish-release.yml fires on the merged bytes), so there is nothing
+      # to undo, and the branch a closed review was built from is left where it is rather than
+      # deleted, which keeps "not merged yet" and "gone" different states.
+      #
+      # It runs AFTER the pull request above, on purpose: closing the earlier ones first would
+      # mean a create that then failed left no review at all to look at, where this order can
+      # only ever end with one live review or with the run's own error annotation.
+      - name: Retire the superseded reviews
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          BRANCH: ${{ needs.build.outputs.branch }}
+          STAMP: ${{ needs.build.outputs.stamp }}
+        run: |
+          # The class is the head branch, because this workflow is the only thing that opens
+          # these and it stages every release on `release/<stamp>`. The branch under review is
+          # excluded by name: it was opened one step above and is the one to keep. A listing
+          # that fails is an error rather than no siblings, since the two would otherwise look
+          # identical from the log and only one of them means the reviews were retired.
+          ERROR=$(mktemp)
+          if ! LISTING=$(gh pr list --state open --base main --limit 100 --json number,headRefName 2>"$ERROR"); then
+            echo "::error::could not list the open reviews: $(tr '\n' ' ' < "$ERROR" | cut -c1-300)"
+            exit 1
+          fi
+          SIBLINGS=$(printf '%s' "$LISTING" |
+            node -e 'let raw="";process.stdin.on("data",(chunk)=>raw+=chunk).on("end",()=>{for(const pr of JSON.parse(raw || "[]")) if(String(pr.headRefName || "").startsWith("release/") && pr.headRefName !== process.env.BRANCH) console.log(pr.number);})')
+          if [ -z "$SIBLINGS" ]; then
+            echo "no earlier release review is open"
+            exit 0
+          fi
+          # One failure must not abandon the rest: every sibling still open is a review that
+          # asks to be read, so they are all attempted and the failures are reported together.
+          UNCLOSED=''
+          while IFS= read -r NUMBER; do
+            [ -n "$NUMBER" ] || continue
+            echo "closing the superseded review #$NUMBER, whose successor is build-$STAMP"
+            gh pr close "$NUMBER" --comment "Superseded by build-$STAMP, which carries the newest review." ||
+              UNCLOSED="$UNCLOSED #$NUMBER"
+          done <<< "$SIBLINGS"
+          if [ -n "$UNCLOSED" ]; then
+            echo "::error::could not close the superseded reviews:$UNCLOSED"
+            exit 1
+          fi
