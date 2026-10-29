@@ -11,6 +11,7 @@
  */
 import { copy } from './copy.ts';
 import { documentMimetype, documentPickerTypes, inputAcceptTypes, normalizeDocumentName } from './document-format.ts';
+import { resolveMode, servedByApp } from './mode.ts';
 import { basename, hasShimBackend, shimPick, shimRead, shimWrite } from './shim-files.ts';
 
 export interface PickedLith {
@@ -110,27 +111,77 @@ export function tauriListen<T>(event: string, handler: (payload: T) => void): ((
 
 export type SaveOutcome = 'saved' | 'started' | 'cancelled';
 
-interface FilePickerHandle {
-  createWritable: () => Promise<{ write: (text: string) => Promise<void>; close: () => Promise<void> }>;
+/**
+ * Whether the app is treating this document as its own.
+ *
+ * The question is about the document, not about the API. With `withGlobalTauri` the global is
+ * injected into every document the window loads, so a bookmarked instance's own launcher holds
+ * one too, and its origin is not inside the capability that answers a command: an invoke sent
+ * from there can only be refused. A page that is not the app's own therefore reaches the
+ * browser instead (see `saveTextVerifiably` and `createFileBridge`).
+ *
+ * Two things make a document the app's own, and `resolveMode` already knows both of them: the
+ * address the app serves itself from (`servedByApp`, which is `tauri://localhost` or
+ * `https://tauri.localhost`), and a page that was told it is the app with `?mode=tauri`, which
+ * is how the smoke harness stands the app up over `file://`.
+ */
+function appServedThisPage(): boolean {
+  const location = (globalThis as { location?: Location }).location;
+  if (!location) return false;
+  try {
+    return servedByApp(location) || resolveMode(location) === 'tauri';
+  } catch {
+    // A location this cannot read is not the app's own.
+    return false;
+  }
+}
+
+/**
+ * Write text where the platform puts a download, and report false for the two answers that
+ * mean "ask where instead".
+ *
+ * The two are a platform with no Downloads folder this app can see (a phone's storage is
+ * app-private, and its picker hands over a grant rather than a folder) and a build that does
+ * not carry the command yet. Both leave the caller to fall back to the save dialog, which is
+ * where these buttons started. A write that was attempted and failed also lands here, and the
+ * dialog that follows reports its own failure, so an unreadable Downloads folder costs a
+ * second press rather than a sentence about a folder the person cannot fix.
+ */
+async function downloadThroughApp(api: TauriApi, fileName: string, text: string): Promise<boolean> {
+  try {
+    const result = (await api.invoke('save_lith_download', { text, suggestedName: fileName })) as
+      | { path?: string }
+      | null;
+    return Boolean(result?.path);
+  } catch {
+    return false;
+  }
 }
 
 /**
  * Save text to a file, reporting whether the platform could confirm the write.
  *
- * The distinction is the whole point: the desktop app writes through Rust and
- * the Chromium file picker resolves after `close()`, so both prove the bytes
- * landed. The legacy `<a download>` fallback cannot (the browser never reports
- * whether a download finished) so it reports `started`, and callers must not
- * present that as a file that exists.
+ * The distinction is the whole point: the desktop app writes through Rust, so a returned path
+ * proves the bytes landed. A download a browser starts cannot be confirmed, because the browser
+ * never reports whether one finished, so it reports `started` and callers must not present that
+ * as a file that exists.
  *
  * `documents` is the process's own answer (`Capabilities::local_files`), passed in by the caller
  * because this function is also reached from the app's own page: an app whose own process cannot
  * hold a document has no write to confirm, and the browser's download is the only copy that can
  * leave at all.
+ *
+ * The app's own route is taken only for a page the app served. Everywhere else, an instance's
+ * own launcher included, this ends at the browser's download, which is a copy that needs no
+ * permission from this machine beyond the browser's own.
  */
 export async function saveTextVerifiably(fileName: string, text: string, documents = true): Promise<SaveOutcome> {
-  const api = documents ? tauriApi() : null;
+  const api = documents && appServedThisPage() ? tauriApi() : null;
   if (api) {
+    // A download first, with no dialog in the way. These are the launcher's export buttons, so
+    // the copy is one somebody asked to keep rather than a new document to find a home for, and
+    // the platform's Downloads folder is where a browser the same page runs in would put it.
+    if (await downloadThroughApp(api, fileName, text)) return 'saved';
     try {
       // The native dialog *and* the write happen in Rust, so a returned path is
       // evidence the file is on disk.
@@ -146,7 +197,7 @@ export async function saveTextVerifiably(fileName: string, text: string, documen
 
   // On a shim the desktop's own chooser names the path and the shim writes it, so the write
   // is confirmed exactly as the app's is. A chooser the desktop does not have (`no-picker`)
-  // or a wire that did not answer falls through to the browser's picker below, which is the
+  // or a wire that did not answer falls through to the browser's download below, which is the
   // same rung the shim itself falls back to.
   if (hasShimBackend()) {
     const picked = await shimPick('save', { suggestedName: fileName });
@@ -158,26 +209,12 @@ export async function saveTextVerifiably(fileName: string, text: string, documen
     }
   }
 
-  const picker = (globalThis as { showSaveFilePicker?: (options: unknown) => Promise<unknown> })
-    .showSaveFilePicker;
-  if (typeof picker === 'function') {
-    try {
-      const handle = (await picker({
-        suggestedName: fileName,
-        types: documentPickerTypes()
-      })) as FilePickerHandle;
-      const writable = await handle.createWritable();
-      await writable.write(text);
-      await writable.close();
-      return 'saved';
-    } catch (error) {
-      if (error && typeof error === 'object' && (error as { name?: string }).name === 'AbortError') {
-        return 'cancelled';
-      }
-      // Any other picker failure falls through to the legacy path.
-    }
-  }
-
+  // The browser's own download, with no save dialog in front of it: `showSaveFilePicker` used to
+  // be asked first because it resolves after `close()` and so could prove the bytes landed, and
+  // the cost was a dialog on every export. A copy somebody asked to keep is not a decision about
+  // where to put it, and a browser that wants to ask is asked once in its own settings instead.
+  // The trade is deliberate: this returns `started` everywhere a browser answers, which is the
+  // sentence the copy already has for a download nobody can confirm.
   const blob = new Blob([text], { type: documentMimetype() });
   const url = URL.createObjectURL(blob);
   const anchor = document.createElement('a');
@@ -451,7 +488,11 @@ function shimBridge(): FileBridge {
 }
 
 export function createFileBridge(documents = true): FileBridge {
-  const invoke = documents ? tauriApi()?.invoke : undefined;
+  // The app's own bridge only for a page that is the app's own, for the reason
+  // `appServedThisPage` gives: an instance's launcher runs in this same window with the same
+  // injected global, and a pick or a read sent from it is refused by the capability that answers
+  // commands. Without this, the Mount control on that page did nothing at all.
+  const invoke = documents && appServedThisPage() ? tauriApi()?.invoke : undefined;
   // A process that cannot hold a document of its own uses the browser's bridge even inside an
   // app, for the reason `Capabilities::local_files` records: its Rust commands would have nothing
   // to write to, so opening goes through the browser's own file input and a download through its

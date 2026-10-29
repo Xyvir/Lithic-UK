@@ -272,6 +272,31 @@ async fn save_lith_file(
     })
 }
 
+/// Write a copy where the platform puts a download, with no dialog in the way.
+///
+/// The launcher's export buttons used to open `save_lith_file`'s dialog, which turned a copy
+/// somebody asked to keep into a question about where to put it. A download is not that
+/// question: the same page in a browser writes to its Downloads folder and asks nothing, and this
+/// is what makes the app behave that way. The file is created beside whatever is already there
+/// under a numbered name rather than over it (`platform::download_document`).
+///
+/// An error is one of two things, and the launcher tells them apart by retrying the dialog: a
+/// platform with no Downloads folder this app may write to (a phone's storage is app-private),
+/// or a folder that refused the write. The dialog is a fine answer to both.
+#[tauri::command]
+async fn save_lith_download(
+    app: tauri::AppHandle,
+    text: String,
+    suggested_name: String,
+) -> Result<SavedLithFile, String> {
+    let target = platform::download_document(&suggested_name, &text)?;
+    let document = target.to_string_lossy().into_owned();
+    Ok(SavedLithFile {
+        name: platform::document_name(&app, &document),
+        path: document,
+    })
+}
+
 /// Write arbitrary text to an absolute path (fancy-editor in-place saves for
 /// the scratch file types: .md/.txt/.tid/.json/.ipynb). Only existing paths may be
 /// overwritten — new files go through save_lith_file's dialog.
@@ -3590,6 +3615,7 @@ pub fn run() {
             open_lith_file,
             open_lith_files,
             save_lith_file,
+            save_lith_download,
             write_text_path,
             copy_lith_to_synced_dir,
             launcher_stage,

@@ -13,6 +13,7 @@
 //! Compiled on every platform like its two neighbours, so the local gate sees it.
 
 use std::fs;
+use std::io::Write;
 use std::path::{Path, PathBuf};
 
 use tauri::AppHandle;
@@ -108,10 +109,132 @@ pub fn write(document: &str, text: &str) -> Result<(), String> {
     fs::write(document, text).map_err(|error| error.to_string())
 }
 
+/// The folder this desktop puts downloads in.
+///
+/// The same answer on all three desktops, because it is the platform's own user folder rather
+/// than a convention of ours: `dirs` reads it from the shell's known folders on Windows and
+/// macOS and from `XDG_DOWNLOAD_DIR`, falling back to `~/Downloads`, on Linux. Taken only where
+/// it is a real folder, so a machine with a redirected or absent one answers nothing rather than
+/// a path a write would fail on. Android never reaches this: see `mod.rs`.
+pub fn download_dir() -> Option<PathBuf> {
+    dirs::download_dir().filter(|dir| dir.is_dir())
+}
+
+/// Write `text` as a new file in `folder`, under `suggested_name` or the next free number of it.
+///
+/// It answers the path it took, so the caller has the one fact a confirmed save is made of.
+///
+/// `create_new` rather than a check followed by a write: the name is claimed and the file made
+/// in one step, so two downloads of the same name in the same moment take two names instead of
+/// one quietly replacing the other. That matters because this folder is where a person keeps
+/// copies, and the second copy of a backup is a second copy.
+///
+/// The numbering is a browser's (`notes.lith`, then `notes (1).lith`), because it is the one
+/// convention a person reading their Downloads folder already knows. The bound is not a limit
+/// anybody reaches: a folder holding a thousand candidates is a folder answering that every name
+/// is taken, and an error says that better than a name nobody would read.
+pub fn create_download(folder: &Path, suggested_name: &str, text: &str) -> Result<PathBuf, String> {
+    let base = download_base_name(suggested_name);
+    for number in 0..1000 {
+        let candidate = folder.join(numbered_download_name(&base, number));
+        match fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&candidate)
+        {
+            Ok(mut file) => {
+                file.write_all(text.as_bytes()).map_err(|error| error.to_string())?;
+                return Ok(candidate);
+            }
+            Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => continue,
+            Err(error) => return Err(error.to_string()),
+        }
+    }
+    Err(format!(
+        "{} already holds every name this download could take",
+        folder.display()
+    ))
+}
+
+/// The name a download is proposed under, reduced to its last component.
+///
+/// A page names the file it wants and never chooses a folder, so a name carrying a path is a
+/// name that must not be allowed to write outside the one folder this exists for. An empty name
+/// is a name this will not invent a folder from, and it gets the one word a download can always
+/// be called.
+fn download_base_name(suggested_name: &str) -> String {
+    Path::new(suggested_name)
+        .file_name()
+        .map(|name| name.to_string_lossy().into_owned())
+        .filter(|name| !name.trim().is_empty())
+        .unwrap_or_else(|| "download.lith".to_string())
+}
+
+/// `base` for the first copy, then the same name with the number a second copy takes.
+fn numbered_download_name(base: &str, number: usize) -> String {
+    if number == 0 {
+        return base.to_string();
+    }
+    let path = Path::new(base);
+    match path.extension() {
+        Some(extension) => format!(
+            "{} ({number}).{}",
+            path.file_stem().unwrap_or_default().to_string_lossy(),
+            extension.to_string_lossy()
+        ),
+        None => format!("{} ({number})", path.file_stem().unwrap_or_default().to_string_lossy()),
+    }
+}
+
 /// The name a row shows for a document: its last path component.
 pub fn name(document: &str) -> String {
     Path::new(document)
         .file_name()
         .map(|name| name.to_string_lossy().into_owned())
         .unwrap_or_else(|| document.to_string())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The numbering a person reading their Downloads folder already expects, which is the one
+    /// thing here worth pinning: a second backup under the same name must not replace the first.
+    #[test]
+    fn a_second_download_is_numbered_rather_than_replaced() {
+        assert_eq!(numbered_download_name("notes.lith", 0), "notes.lith");
+        assert_eq!(numbered_download_name("notes.lith", 1), "notes (1).lith");
+        assert_eq!(numbered_download_name("notes.lith", 12), "notes (12).lith");
+        // A name with no extension keeps all of itself, and only the number is new.
+        assert_eq!(numbered_download_name("notes", 3), "notes (3)");
+    }
+
+    /// A page names a file and never a folder: a name carrying a path must not reach outside the
+    /// one folder this writes into, and an empty one must not become a file called `""`.
+    #[test]
+    fn a_download_name_is_a_name_and_not_a_path() {
+        assert_eq!(download_base_name("notes.lith"), "notes.lith");
+        assert_eq!(download_base_name("../../etc/passwd"), "passwd");
+        assert_eq!(download_base_name("C:\\Users\\u\\notes.lith"), "notes.lith");
+        assert_eq!(download_base_name(""), "download.lith");
+        assert_eq!(download_base_name("   "), "download.lith");
+    }
+
+    /// The write itself: the first copy takes the name it was given, the second one beside it
+    /// takes the next number, and neither is the other's bytes.
+    #[test]
+    fn two_downloads_of_one_name_are_two_files() {
+        let folder = std::env::temp_dir().join(format!("lithic-download-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&folder);
+        fs::create_dir_all(&folder).unwrap();
+
+        let first = create_download(&folder, "backup.lith", "one").unwrap();
+        let second = create_download(&folder, "backup.lith", "two").unwrap();
+        assert_eq!(first.file_name().unwrap(), "backup.lith");
+        assert_eq!(second.file_name().unwrap(), "backup (1).lith");
+        assert_eq!(fs::read_to_string(&first).unwrap(), "one");
+        assert_eq!(fs::read_to_string(&second).unwrap(), "two");
+
+        let _ = fs::remove_dir_all(&folder);
+    }
 }

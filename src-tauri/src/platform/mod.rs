@@ -293,6 +293,29 @@ pub fn document_name(app: &tauri::AppHandle, document: &str) -> String {
     }
 }
 
+/// Write `text` where this platform puts a download, answering the path it took.
+///
+/// One row rather than two, because the folder is the platform's question and everything after
+/// it is the same everywhere it exists: a name is chosen beside what is already there and the
+/// file is created (`documents::create_download`). What `download_dir` answers decides the rest,
+/// and on Android it answers nothing: a phone's storage is app-private, so a file written into it
+/// is a file the person cannot find, and the picker's grant is the only route there. That case is
+/// an error rather than a silent nothing, which is what sends the launcher back to its dialog.
+pub fn download_document(suggested_name: &str, text: &str) -> Result<PathBuf, String> {
+    match download_dir() {
+        Some(folder) => documents::create_download(&folder, suggested_name, text),
+        None => Err("This platform has no Downloads folder to write to".to_string()),
+    }
+}
+
+/// The folder this platform puts downloads in, or nothing where the app may not write there.
+pub fn download_dir() -> Option<PathBuf> {
+    match current() {
+        Os::Android | Os::Other => None,
+        _ => documents::download_dir(),
+    }
+}
+
 /// The board this app was asked to open, if it was asked, and only once.
 ///
 /// Android alone has an answer, and it is not a capability the page can read from
