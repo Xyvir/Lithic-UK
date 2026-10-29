@@ -69,7 +69,18 @@ var BLOCK_TAGS = {
     tfoot: true, th: true, thead: true, tr: true, ul: true
 };
 
-var decoder = new TextDecoder("utf-8");
+// The decoder is made on first use rather than at load, because this module is
+// also read by the Node build, which evaluates a plugin inside a bare sandbox
+// where `TextDecoder` does not exist. Only opening a book needs it, and a book
+// is only ever opened in a browser.
+var decoder = null;
+
+function textDecoder() {
+    if (!decoder) {
+        decoder = new TextDecoder("utf-8");
+    }
+    return decoder;
+}
 
 // --- The archive -------------------------------------------------------------
 //
@@ -112,7 +123,7 @@ function readEntries(bytes) {
         var nameLength = view.getUint16(offset + 28, true);
         var extraLength = view.getUint16(offset + 30, true);
         var commentLength = view.getUint16(offset + 32, true);
-        var name = decoder.decode(bytes.subarray(offset + 46, offset + 46 + nameLength));
+        var name = textDecoder().decode(bytes.subarray(offset + 46, offset + 46 + nameLength));
         entries[name] = {
             method: view.getUint16(offset + 10, true),
             compressedSize: view.getUint32(offset + 20, true),
@@ -212,7 +223,7 @@ function readText(bytes, entries, name) {
         return Promise.resolve(null);
     }
     return entryBytes(bytes, entry).then(function(data){
-        return decoder.decode(data);
+        return textDecoder().decode(data);
     });
 }
 
@@ -439,7 +450,7 @@ function headingOf(doc) {
 // picture is handed over in whichever of the two its type calls for.
 function imageBody(data, type) {
     if (type === "image/svg+xml") {
-        return Promise.resolve(decoder.decode(data));
+        return Promise.resolve(textDecoder().decode(data));
     }
     return new Promise(function(resolve, reject){
         var reader = new FileReader();
