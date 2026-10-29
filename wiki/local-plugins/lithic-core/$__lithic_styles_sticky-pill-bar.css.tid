@@ -1,0 +1,26 @@
+title: $:/lithic/styles/sticky-pill-bar.css
+tags: $:/tags/Stylesheet
+type: text/css
+
+/* ── Sticky pill bar (mobile) ── */
+
+/* Nothing to hold: no backlink pills and no prev/next pills */
+.lithic-pill-bar:not(:has(.footer li)) {
+  display: none;
+}
+
+/* The band is marked sticky by the tiddler that draws it, so the Lithic
+   Settings toggle is settled at render time rather than here. */
+@media (max-width: 960px) {
+  .lithic-pill-bar-sticky {
+    position: sticky;
+    /* Clears the notebook theme's fixed bottom bar, which is the 52px
+       topbar-height metric with its padding inside that box. */
+    bottom: 52px;
+    z-index: 10;
+    /* Matches the frame it scrolls over, so only the seam marks the band. */
+    background: var(--lithic-c-surface);
+    border-top: 1px solid var(--lithic-c-line-alpha-12);
+    padding: 6px 0;
+  }
+}
