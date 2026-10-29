@@ -17,10 +17,12 @@
  *      (`src-tauri/android/MainActivity.kt` carries the reasoning and the fix).
  *
  *   3. Nothing in the manifest claims the `lithic://` scheme, so a board's sign-in window cannot
- *      hand its page to this app and every phone falls through to the browser instead, and nothing
- *      claims the share sheet either, so no other app can share a link or a paragraph into it. Both
- *      filters are added to the activity that hosts the webview; see `DEEP_LINK_FILTER` and
- *      `SHARE_FILTER`.
+ *      hand its page to this app and every phone falls through to the browser instead; nothing
+ *      claims the share sheet either, so no other app can share a link or a paragraph into it;
+ *      and nothing claims a single file type, so a file manager's "Open with Lithic" is never
+ *      offered and a document another app hands over can never arrive. All four filters are
+ *      added to the activity that hosts the webview; see `DEEP_LINK_FILTER`, `SHARE_FILTER`,
+ *      `documentFilters` and `addActivityFilters`.
  *
  * `init` rewrites this tree on every run, so the patch cannot be an edit of the generated files:
  * it is this script, run after `init` and before the build, in the release workflow and in the
@@ -50,7 +52,8 @@ function layout(root) {
     generated: join(root, 'src-tauri', 'gen', 'android'),
     icons: join(root, 'src-tauri', 'icons', 'android'),
     activity: join(root, 'src-tauri', 'android', 'MainActivity.kt'),
-    bridge: join(root, 'src-tauri', 'android', 'LithicBridge.kt')
+    bridge: join(root, 'src-tauri', 'android', 'LithicBridge.kt'),
+    associations: join(root, 'src-tauri', 'src', 'platform', 'associations.json')
   };
 }
 
@@ -120,46 +123,128 @@ const SHARE_FILTER = [
 ];
 
 /**
- * The two filters this patch adds, each with the evidence it is already there and the sentence a
- * manifest with nothing to attach it to fails with.
+ * The filters that put this app in a file manager's "Open with" list, from the shared table.
  *
- * Both are found by what they claim rather than by a marker comment, so a manifest that already has
- * one of them (a future `init` that ships one, or a second run of this script) is recognised rather
- * than rewritten, and neither can be added twice.
+ * Android has no extension association at all: it offers an app for a file's *MIME type*, which is
+ * the vocabulary a desktop's registry and a freedesktop entry are both a spelling of. So the table
+ * in `src-tauri/src/platform/associations.json` (the one the Windows and Linux registrations read,
+ * see `src-tauri/src/platform/associations.rs`) is the source here too, and a type added there is
+ * offered on the phone with no second edit.
+ *
+ * Two filters, because a phone can name a file either way and they fail in opposite directions.
+ *
+ *   * The MIME filter is the reliable half: a provider that knows a `.txt` says `text/plain`, and
+ *     the intent carries that type. It is what covers the standard types.
+ *   * The extension filter is for the one type nobody knows. No phone ships a definition of
+ *     `application/x-lith`, so a `.lith` off a file manager arrives as `application/octet-stream`
+ *     (or as nothing), and a MIME filter for it would never match. `pathPattern` is matched
+ *     against the URI's path, which for the storage provider behind every phone's own Files app
+ *     is the real path (`primary:Download/book.lith`), so this is what finds a Lith. A cloud
+ *     provider with an opaque document id has no extension in its path and is not covered, which
+ *     is a limit of the platform rather than of this filter: the type cannot save it either.
+ *
+ * Every row is claimed, including the `imported` ones (`pdf`, an `epub`, the images), and the two
+ * kinds differ only in what opens. A document this app edits opens where it says. A file it
+ * converts opens in a new Lith with no file behind it, named the way its sibling would have been,
+ * because a `content://` reference has no folder beside it for the import to be written into: the
+ * launcher hands the file's bytes to the engine, and the first save is the platform's own save
+ * picker, so the person chooses the home a desktop sibling rule would have chosen silently. That
+ * is why the phone can offer a type it cannot convert beside the source, and it is deliberately
+ * not the share's shape, where notes wait in the pending panel for a destination.
+ *
+ * One more absence worth stating: `CATEGORY_BROWSABLE` is not claimed here either. These filters
+ * are for content another app hands over, and a browser has no business routing an address to
+ * them.
  */
-const ACTIVITY_FILTERS = [
-  {
-    name: 'hand-off filter',
-    lines: DEEP_LINK_FILTER,
-    present: /android:scheme\s*=\s*"lithic"/,
-    complaint: 'nothing can claim the lithic scheme'
-  },
-  {
-    name: 'share filter',
-    lines: SHARE_FILTER,
-    present: /android\.intent\.action\.SEND/,
-    complaint: 'nothing can be shared into this app'
+function documentFilters(table) {
+  const offered = table.types;
+  if (offered.length === 0) {
+    fail('associations.json has no type this app can open on a phone');
   }
-];
+  if (!offered.some((type) => type.ext === 'lith')) {
+    fail('associations.json has no .lith row, so nothing would claim this app\'s own format');
+  }
+  const mimes = [...new Set(offered.map((type) => type.mime))];
+  const byType = [
+    '<intent-filter>',
+    '  <action android:name="android.intent.action.VIEW" />',
+    '  <category android:name="android.intent.category.DEFAULT" />',
+    ...mimes.map((mime) => `  <data android:mimeType="${mime}" />`),
+    '</intent-filter>'
+  ];
+  // One data element per scheme and extension, because a data element is an AND and the filters
+  // themselves are the OR: `content` and `file` are the two schemes a file manager hands over.
+  const byExtension = [
+    '<intent-filter>',
+    '  <action android:name="android.intent.action.VIEW" />',
+    '  <category android:name="android.intent.category.DEFAULT" />',
+    ...['content', 'file'].flatMap((scheme) =>
+      offered.map(
+        (type) => `  <data android:scheme="${scheme}" android:pathPattern=".*\\.${type.ext}" />`
+      )
+    ),
+    '</intent-filter>'
+  ];
+  return [
+    {
+      name: 'document type filter',
+      lines: byType,
+      present: /android:mimeType\s*=\s*"application\/x-lith"/,
+      complaint: 'nothing can open a document handed over by another app'
+    },
+    {
+      name: 'document extension filter',
+      lines: byExtension,
+      present: /android:pathPattern\s*=\s*"\.\*\\\.lith"/,
+      complaint: 'nothing can open a .lith handed over by another app'
+    }
+  ];
+}
 
 /**
- * Add the hand-off filter and the share filter to the activity that owns the webview, once each.
+ * Every filter this patch adds, each with the evidence it is already there and the sentence a
+ * manifest with nothing to attach it to fails with.
+ *
+ * All of them are found by what they claim rather than by a marker comment, so a manifest that
+ * already has one (a future `init` that ships one, or a second run of this script) is recognised
+ * rather than rewritten, and none can be added twice.
+ */
+function activityFilters(table) {
+  return [
+    {
+      name: 'hand-off filter',
+      lines: DEEP_LINK_FILTER,
+      present: /android:scheme\s*=\s*"lithic"/,
+      complaint: 'nothing can claim the lithic scheme'
+    },
+    {
+      name: 'share filter',
+      lines: SHARE_FILTER,
+      present: /android\.intent\.action\.SEND/,
+      complaint: 'nothing can be shared into this app'
+    },
+    ...documentFilters(table)
+  ];
+}
+
+/**
+ * Add every filter to the activity that owns the webview, once each.
  *
  * The manifest is the template's and the template is rewritten on every `init`, so the edit is
  * made here and read back: a manifest that already claims what a filter claims is left alone, and
  * one with no activity to attach the missing filters to is a failure rather than an APK that
- * silently cannot be reached or shared into.
+ * silently cannot be reached, shared into, or handed a file.
  *
- * Both are appended together in one write, because they go in the same place and a second pass over
- * the activity block would have to find it again after the first one moved it.
+ * All of them are appended together in one write, because they go in the same place and a second
+ * pass over the activity block would have to find it again after the first one moved it.
  *
- * Answers which of them it wrote.
+ * Answers which of them it wrote, by name.
  */
-function addActivityFilters(manifestPath) {
+function addActivityFilters(manifestPath, filters) {
   if (!existsSync(manifestPath)) fail(`no AndroidManifest.xml at ${manifestPath}`);
   const before = readFileSync(manifestPath, 'utf8');
-  const missing = ACTIVITY_FILTERS.filter((filter) => !filter.present.test(before));
-  if (missing.length === 0) return { deepLink: false, share: false };
+  const missing = filters.filter((filter) => !filter.present.test(before));
+  if (missing.length === 0) return [];
   // The activity block, found by the class it hosts rather than by a line number: the template's
   // attributes vary between Tauri versions and the class it launches does not.
   const block = /<activity\b[\s\S]*?MainActivity[\s\S]*?<\/activity>/.exec(before);
@@ -175,10 +260,10 @@ function addActivityFilters(manifestPath) {
   const start = before.indexOf(block[0]);
   writeFileSync(manifestPath, before.slice(0, start) + patched + before.slice(start + block[0].length));
   const after = readFileSync(manifestPath, 'utf8');
-  for (const filter of ACTIVITY_FILTERS) {
+  for (const filter of filters) {
     if (!filter.present.test(after)) fail(`the ${filter.name} did not survive the write to ${manifestPath}`);
   }
-  return { deepLink: missing.includes(ACTIVITY_FILTERS[0]), share: missing.includes(ACTIVITY_FILTERS[1]) };
+  return missing.map((filter) => filter.name);
 }
 
 /** The `package x.y` line of a Kotlin file, or null when it declares none. */
@@ -242,6 +327,23 @@ export function patchAndroid(root = REPO) {
   if (!existsSync(paths.bridge)) {
     fail(`no tracked document bridge at ${paths.bridge}.`);
   }
+  if (!existsSync(paths.associations)) {
+    fail(`no association table at ${paths.associations}, so there are no file types to claim.`);
+  }
+  // The table is the source of truth for what this app opens, shared with the Windows and Linux
+  // registrations (`src-tauri/src/platform/associations.rs`). Read and checked rather than
+  // assumed: a row the manifest needs and the table no longer has is an APK that quietly stops
+  // offering a type.
+  const table = JSON.parse(readFileSync(paths.associations, 'utf8'));
+  if (!Array.isArray(table.types)) {
+    fail(`${paths.associations} has no \`types\` array`);
+  }
+  for (const type of table.types) {
+    if (!type.ext || !type.mime) {
+      fail(`${paths.associations} has a row with no extension or no mime type: ${JSON.stringify(type)}`);
+    }
+  }
+  const filters = activityFilters(table);
 
   // Line endings are folded before any text comparison in this file, because the tracked files
   // are CRLF and a template's may be LF: the comparison is about content, and a "change" that is
@@ -344,12 +446,13 @@ export function patchAndroid(root = REPO) {
     }
   }
 
-  // 4. The two intents the app answers. A board's sign-in window reaches it through the scheme the
-  // first filter claims, and any other app reaches it through the share sheet the second claims.
-  // What receives either does nothing with it until the page asks (see `MainActivity`,
-  // `LithicBridge.takeDeepLink` and `LithicBridge.takeSharedText`).
+  // 4. The intents the app answers. A board's sign-in window reaches it through the scheme the
+  // first filter claims, any other app reaches it through the share sheet the second claims, and
+  // a file manager reaches it through the two document filters, which are generated from the
+  // association table above. What receives any of them does nothing with it until the page asks
+  // (see `MainActivity`, `LithicBridge.takeDeepLink`, `takeSharedText` and `takeOpenDocument`).
   const manifest = join(mainDir(activityFile), 'AndroidManifest.xml');
-  const { deepLink, share } = addActivityFilters(manifest);
+  const written = addActivityFilters(manifest, filters);
 
   // 5. Release signing config. Ensure release build type uses the debug signing config
   // (cycling debug keystore) so release builds produced without `--debug` are signed.
@@ -364,8 +467,7 @@ export function patchAndroid(root = REPO) {
     replaced,
     bridge: relative(root, bridgeFile),
     bridgeReplaced,
-    deepLink,
-    share,
+    written,
     releaseSigning
   };
 }
@@ -458,6 +560,12 @@ function selfTest() {
     write(join(base, 'src-tauri/gen/android/app/src/main/java/com/lithic/app/MainActivity.kt'), templateActivity);
     write(join(base, 'src-tauri/android/MainActivity.kt'), readFileSync(join(REPO, 'src-tauri/android/MainActivity.kt'), 'utf8'));
     write(join(base, 'src-tauri/android/LithicBridge.kt'), readFileSync(join(REPO, 'src-tauri/android/LithicBridge.kt'), 'utf8'));
+    // The association table is read off the project the way the two Kotlin files are, so a test
+    // can replace it and ask what the manifest does with a table that changed.
+    write(
+      join(base, 'src-tauri/src/platform/associations.json'),
+      readFileSync(join(REPO, 'src-tauri/src/platform/associations.json'), 'utf8')
+    );
   };
   const write = (path, text) => {
     mkdirSync(dirname(path), { recursive: true });
@@ -496,23 +604,58 @@ function selfTest() {
   const patchedManifest = readFileSync(manifestPath, 'utf8');
   check(
     'claims the lithic scheme inside the activity that hosts the page',
-    first.deepLink === true &&
+    first.written.includes('hand-off filter') &&
       patchedManifest.includes('<data android:scheme="lithic" />') &&
       patchedManifest.indexOf('android:scheme="lithic"') < patchedManifest.indexOf('</activity>'),
-    first.deepLink ? '' : 'the filter was not written'
+    first.written.includes('hand-off filter') ? '' : 'the filter was not written'
   );
   // The share sheet, which is what puts the app beside every other share target on the phone. The
   // mime type is the whole claim, and it has to be inside the activity so the extras arrive there.
   check(
     'claims the share sheet inside the same activity',
-    first.share === true &&
+    first.written.includes('share filter') &&
       patchedManifest.includes('<action android:name="android.intent.action.SEND" />') &&
       patchedManifest.includes('<data android:mimeType="text/plain" />') &&
       patchedManifest.indexOf('android.intent.action.SEND') < patchedManifest.indexOf('</activity>'),
-    first.share ? '' : 'the share filter was not written'
+    first.written.includes('share filter') ? '' : 'the share filter was not written'
+  );
+
+  // The document types, which are the association table reaching the phone. The claim is the type
+  // rather than the extension, because that is the only vocabulary Android offers, and the whole
+  // filter has to sit inside the activity so the reference arrives there.
+  check(
+    'claims the association table\'s types inside the same activity',
+    first.written.includes('document type filter') &&
+      patchedManifest.includes('<data android:mimeType="application/x-lith" />') &&
+      patchedManifest.includes('<data android:mimeType="text/markdown" />') &&
+      patchedManifest.includes('<data android:mimeType="text/html" />') &&
+      patchedManifest.lastIndexOf('android:mimeType=') < patchedManifest.indexOf('</activity>'),
+    first.written.includes('document type filter') ? '' : 'the type filter was not written'
+  );
+  // The types this app converts rather than edits are claimed too, because a handed one opens in
+  // a new Lith named after it rather than being refused: the phone has no folder beside the source
+  // to write the sibling into, which is a fact about the save rather than about the offer.
+  check(
+    'claims the imported types as well, since a handed file opens in a Lith of its own',
+    patchedManifest.includes('<data android:mimeType="application/pdf" />') &&
+      patchedManifest.includes('<data android:mimeType="application/epub+zip" />') &&
+      patchedManifest.includes('<data android:mimeType="image/png" />') &&
+      patchedManifest.includes('<data android:mimeType="image/jpeg" />') &&
+      patchedManifest.includes('<data android:scheme="content" android:pathPattern=".*\\.pdf" />')
+  );
+  // The extension half, which is the only way a provider that knows nothing about `.lith` can
+  // offer the app: the path of the URI is what it has, and the storage provider's path is the
+  // real one.
+  check(
+    'claims the extensions by path for both schemes a file manager hands over',
+    first.written.includes('document extension filter') &&
+      patchedManifest.includes('<data android:scheme="content" android:pathPattern=".*\\.lith" />') &&
+      patchedManifest.includes('<data android:scheme="file" android:pathPattern=".*\\.lith" />') &&
+      patchedManifest.lastIndexOf('android:pathPattern=') < patchedManifest.indexOf('</activity>'),
+    first.written.includes('document extension filter') ? '' : 'the extension filter was not written'
   );
   check(
-    'leaves the shared filter Browsable-free, which belongs to addresses and not to content',
+    'keeps every new filter Browsable-free, which belongs to addresses and not to content',
     (patchedManifest.match(/BROWSABLE/g) ?? []).length === 1
   );
   check(
@@ -533,13 +676,18 @@ function selfTest() {
   check('is idempotent for the activity', second.replaced === false);
   check(
     'is idempotent for the hand-off filter',
-    second.deepLink === false &&
+    !second.written.includes('hand-off filter') &&
       (readFileSync(manifestPath, 'utf8').match(/android:scheme="lithic"/g) ?? []).length === 1
   );
   check(
     'is idempotent for the share filter',
-    second.share === false &&
+    !second.written.includes('share filter') &&
       (readFileSync(manifestPath, 'utf8').match(/android.intent.action.SEND/g) ?? []).length === 1
+  );
+  check(
+    'is idempotent for the two document filters',
+    second.written.length === 0 &&
+      (readFileSync(manifestPath, 'utf8').match(/android:mimeType="application\/x-lith"/g) ?? []).length === 1
   );
   check('is idempotent for the round definition', second.roundIcon === false);
   check('is idempotent for the bridge', second.bridgeReplaced === false);
@@ -558,9 +706,51 @@ function selfTest() {
   const halfWritten = readFileSync(join(base, 'src-tauri/gen/android/app/src/main/AndroidManifest.xml'), 'utf8');
   check(
     'adds only the filter a manifest is missing',
-    half.deepLink === false &&
-      half.share === true &&
+    !half.written.includes('hand-off filter') &&
+      half.written.includes('share filter') &&
+      half.written.includes('document type filter') &&
       (halfWritten.match(/android:scheme="lithic"/g) ?? []).length === 1
+  );
+
+  // Half-claimed the other way round, for the document filters: a manifest that already offers the
+  // types must still gain the extension filter, because the two fail in opposite directions.
+  seed();
+  const typesOnly = readFileSync(join(base, 'src-tauri/gen/android/app/src/main/AndroidManifest.xml'), 'utf8').replace(
+    '</activity>',
+    '  <intent-filter>\n        <action android:name="android.intent.action.VIEW" />\n        <data android:mimeType="application/x-lith" />\n      </intent-filter>\n    </activity>'
+  );
+  write(join(base, 'src-tauri/gen/android/app/src/main/AndroidManifest.xml'), typesOnly);
+  const typed = patchAndroid(base);
+  check(
+    'adds the extension filter to a manifest that already offers the types',
+    !typed.written.includes('document type filter') &&
+      typed.written.includes('document extension filter') &&
+      (readFileSync(join(base, 'src-tauri/gen/android/app/src/main/AndroidManifest.xml'), 'utf8').match(
+        /android:mimeType="application\/x-lith"/g
+      ) ?? []).length === 1
+  );
+
+  // A table with no Lith in it would build an APK that cannot open this app's own format, which
+  // is the one row the manifest cannot be generated without. The complaint has to name the file.
+  seed();
+  write(
+    join(base, 'src-tauri/src/platform/associations.json'),
+    JSON.stringify({ types: [{ ext: 'txt', label: 'Lithic Text', mime: 'text/plain' }] })
+  );
+  const noLith = throws(() => patchAndroid(base));
+  check(
+    'refuses a table with no .lith row',
+    noLith !== null && noLith.includes('no .lith row'),
+    noLith ?? ''
+  );
+
+  seed();
+  rmSync(join(base, 'src-tauri/src/platform/associations.json'), { force: true });
+  const noTable = throws(() => patchAndroid(base));
+  check(
+    'refuses a project with no association table',
+    noTable !== null && noTable.includes('no association table'),
+    noTable ?? ''
   );
 
   // The layout this patch must not assume: a project whose packages and source set differ from
@@ -658,8 +848,7 @@ function main() {
         `activity ${done.replaced ? 'replaced' : 'already current'}, ` +
         `bridge ${done.bridgeReplaced ? 'installed' : 'already current'}` +
         (done.roundIcon ? ', round adaptive icon written' : '') +
-        (done.deepLink ? ', hand-off filter claimed' : '') +
-        (done.share ? ', share filter claimed' : '')
+        (done.written.length > 0 ? `, filters claimed: ${done.written.join(', ')}` : ', every filter already claimed')
     );
     return 0;
   } catch (error) {

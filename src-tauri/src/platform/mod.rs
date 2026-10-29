@@ -31,6 +31,7 @@
 // module's Kotlin half, and registering it is the one call that cannot be routed by platform
 // name (it exists everywhere, and owns nothing off Android).
 pub mod android;
+mod associations;
 mod documents;
 mod linux;
 mod macos;
@@ -164,7 +165,16 @@ pub struct Capabilities {
     /// instance can be kept as an app of its own. Stated as a flag so the page asks rather
     /// than tests for a platform, like every other row of this table.
     pub instance_auth: bool,
-    /// Opening a `.lith` from the file manager can reach this app.
+    /// A file the platform's own "Open with" list can hand this app can reach it.
+    ///
+    /// True on Windows, Linux and Android, and each answers it differently on purpose: the
+    /// desktop app registers the types itself (`windows.rs` writes a ProgID per extension,
+    /// `linux.rs` writes one entry whose `MimeType=` line is the list), while a phone cannot
+    /// register anything at run time: its associations are intent filters in the manifest, and
+    /// those are generated from the same table by `scripts/patch-android.mjs` at build time. What
+    /// arrives afterwards is the difference worth knowing: the desktop is started with the file
+    /// as an argument (`get_startup_file`), and the phone is handed an intent
+    /// (`take_open_document`).
     pub file_associations: bool,
     /// The folder a file was installed into can be opened in the platform's own file
     /// manager, with that file selected where the platform can do so.
@@ -198,7 +208,7 @@ pub fn capabilities() -> Capabilities {
         os: os_name(),
         install: install_supported(os, package_managed()),
         launch_entry: launch_entry_kind(os),
-        file_associations: cfg!(any(windows, target_os = "linux")),
+        file_associations: cfg!(any(windows, target_os = "linux", target_os = "android")),
         reveal: cfg!(any(windows, target_os = "linux", target_os = "macos")),
         // The one flag here read from a dependency rather than from the platform name: what
         // it reports is whether libgit2 is in this build, and on every target but Android
@@ -278,9 +288,9 @@ pub fn write_document(app: &tauri::AppHandle, document: &str, text: &str) -> Res
 /// `content://` reference whose reader returns a string (`android::read`), and the PDF
 /// association this serves is a desktop gesture to begin with. Every desktop goes through
 /// `documents`, which reads the bytes and encodes them for the IPC bridge.
-pub fn read_document_base64(document: &str) -> Result<String, String> {
+pub fn read_document_base64(app: &tauri::AppHandle, document: &str) -> Result<String, String> {
     match current() {
-        Os::Android => Err("this platform cannot read a document's bytes".to_string()),
+        Os::Android => android::read_base64(app, document),
         _ => documents::read_base64(document),
     }
 }
@@ -367,6 +377,24 @@ pub fn take_shared_text(app: &tauri::AppHandle) -> Option<SharedText> {
         _ => None,
     }
 }
+
+/// A document another app asked this one to open, if one did, and only once.
+///
+/// The phone's own route in for a file, and it is not a command-line argument: a file manager
+/// that is asked to open a `.lith` sends an `ACTION_VIEW` intent carrying a `content://`
+/// reference, which `MainActivity` keeps and `android.rs` hands over here. Reading it consumes
+/// it, so a reload of the launcher is not handed the same document twice.
+///
+/// Every desktop answers `None`, and the reason is not an absence of the feature: there the OS
+/// starts the app with the file as its argument, which `get_startup_file` answers before the
+/// page has finished booting. This is that question in the one shape the platform asks it.
+pub fn take_open_document(app: &tauri::AppHandle) -> Option<String> {
+    match current() {
+        Os::Android => android::take_open_document(app),
+        _ => None,
+    }
+}
+
 
 /// Whether a pick on this platform answers with a reference rather than a path.
 ///

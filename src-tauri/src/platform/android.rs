@@ -196,6 +196,41 @@ pub fn take_deep_link(app: &AppHandle) -> Option<String> {
     }
 }
 
+/// A document another app asked this one to open, if one did, and only once.
+///
+/// The phone's own answer to "Open with", and the one route into this app that is neither a
+/// command-line argument nor a pick: a file manager that opens a `.lith` sends an `ACTION_VIEW`
+/// intent carrying a `content://` reference, which a page in a webview cannot read for itself.
+/// `MainActivity` keeps it and `LithicBridge.takeOpenDocument` hands it over, and reading it
+/// consumes it, so the launcher is not handed the same document again by a reload.
+///
+/// The same three nothings as `take_deep_link` answer `None`: a build with no bridge, an app
+/// nobody handed a file to, and a hand-off already taken. On every other platform the file is
+/// an argument rather than an intent (`get_startup_file`), so there is nothing here to answer.
+pub fn take_open_document(app: &AppHandle) -> Option<String> {
+    #[cfg(target_os = "android")]
+    {
+        #[derive(serde::Deserialize)]
+        struct Answer {
+            #[serde(default)]
+            reference: Option<String>,
+        }
+        // A bridge that cannot be reached is the same answer as no document: the page has
+        // nothing to open either way, and saying so twice would only be a sentence nobody can
+        // act on.
+        let answer: Answer = bridge(app)
+            .ok()?
+            .run_mobile_plugin("takeOpenDocument", serde_json::json!({}))
+            .ok()?;
+        answer.reference.filter(|reference| !reference.is_empty())
+    }
+    #[cfg(not(target_os = "android"))]
+    {
+        let _ = app;
+        None
+    }
+}
+
 /// What another app shared with this one, if anything did, and only once.
 ///
 /// The phone's share sheet is KOTLIN's: the content arrives as an `ACTION_SEND` intent's extras,
@@ -277,6 +312,31 @@ pub fn write(app: &AppHandle, document: &str, text: &str) -> Result<(), String> 
     {
         let _ = (app, document, text);
         Err(phone_only("Writing a referenced document"))
+    }
+}
+
+/// A document's bytes, base64-encoded, read through the platform's own resolver.
+///
+/// The half of "open this PDF" that a phone could not answer before: the bytes are read here,
+/// because the importer that renders a PDF's pages runs inside the mounted document, and nothing
+/// writes back to the source. A `content://` reference cannot be handed to `std::fs`, so this is
+/// the same plugin call `read` makes, and the encoding is the launcher's own wire format rather
+/// than a second one invented here.
+pub fn read_base64(app: &AppHandle, document: &str) -> Result<String, String> {
+    #[cfg(target_os = "android")]
+    {
+        use base64::Engine;
+        use tauri_plugin_fs::FsExt;
+        let bytes = app
+            .fs()
+            .read(reference(document.to_string()))
+            .map_err(|error| error.to_string())?;
+        Ok(base64::engine::general_purpose::STANDARD.encode(bytes))
+    }
+    #[cfg(not(target_os = "android"))]
+    {
+        let _ = (app, document);
+        Err(phone_only("Reading a reference's bytes"))
     }
 }
 

@@ -24,9 +24,10 @@ import app.tauri.plugin.Plugin
  * the platform to persist it (`takePersistableUriPermission`) is what makes the reference the
  * launcher stores in a recents row still writable after the app is restarted.
  *
- * The third command is not a dialog at all: `takeSharedText` hands over what `MainActivity` kept
- * from a share another app made, because an intent's extras are not something a page in a webview
- * can read for itself.
+ * The other two commands are not dialogs at all: `takeSharedText` hands over what `MainActivity`
+ * kept from a share another app made, and `takeOpenDocument` the document another app asked this
+ * one to open, because an intent and its extras are not something a page in a webview can read
+ * for itself.
  *
  * The document's bytes are not read here. A `content://` reference is read and written through
  * Tauri's filesystem plugin, which turns it into a file descriptor with the ContentResolver, so
@@ -136,6 +137,31 @@ class LithicBridge(private val activity: Activity) : Plugin(activity) {
     } catch (ex: Exception) {
       Logger.error(ex.message ?: "Failed to read the share")
       invoke.reject(ex.message ?: "Failed to read the share")
+    }
+  }
+
+  /**
+   * The document another app asked this app to open, once.
+   *
+   * A file manager's "Open with Lithic" reaches the app as an `ACTION_VIEW` intent carrying a
+   * `content://` reference (see `MainActivity.rememberDocument`), which the manifest's generated
+   * filters are what put the app in the "Open with" list for. This is the page asking for it, and
+   * asking consumes it: a reload of the launcher must not open the same document a second time.
+   *
+   * An app nobody handed a file to answers with no field at all, which is the shape a dismissal
+   * takes everywhere else on this wire.
+   */
+  @Command
+  fun takeOpenDocument(invoke: Invoke) {
+    val answer = JSObject()
+    try {
+      val reference = MainActivity.pendingDocument
+      MainActivity.pendingDocument = null
+      if (reference != null) answer.put("reference", reference)
+      invoke.resolve(answer)
+    } catch (ex: Exception) {
+      Logger.error(ex.message ?: "Failed to read the document hand-off")
+      invoke.reject(ex.message ?: "Failed to read the document hand-off")
     }
   }
 

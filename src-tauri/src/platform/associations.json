@@ -1,0 +1,18 @@
+{
+  "types": [
+    { "ext": "lith", "label": "Lithic Wiki", "mime": "application/x-lith", "own_icon": true },
+    { "ext": "md", "label": "Lithic Markdown", "mime": "text/markdown" },
+    { "ext": "txt", "label": "Lithic Text", "mime": "text/plain" },
+    { "ext": "tid", "label": "Lithic Tiddler", "mime": "text/vnd.tiddlywiki", "own_icon": true },
+    { "ext": "json", "label": "Lithic JSON", "mime": "application/json", "own_icon": true },
+    { "ext": "ipynb", "label": "Lithic Notebook", "mime": "application/x-ipynb+json" },
+    { "ext": "html", "label": "Lithic HTML", "mime": "text/html" },
+    { "ext": "pdf", "label": "Lithic PDF", "mime": "application/pdf", "imported": true },
+    { "ext": "epub", "label": "Lithic Book", "mime": "application/epub+zip", "imported": true },
+    { "ext": "png", "label": "Lithic Image", "mime": "image/png", "imported": true },
+    { "ext": "jpg", "label": "Lithic Image", "mime": "image/jpeg", "imported": true },
+    { "ext": "jpeg", "label": "Lithic Image", "mime": "image/jpeg", "imported": true },
+    { "ext": "bmp", "label": "Lithic Image", "mime": "image/bmp", "imported": true },
+    { "ext": "webp", "label": "Lithic Image", "mime": "image/webp", "imported": true }
+  ]
+}

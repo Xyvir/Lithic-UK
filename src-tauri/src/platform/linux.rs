@@ -29,6 +29,8 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
+use super::associations;
+
 /// The `shared-mime-info` file for this project's own type, under `$XDG_DATA_HOME/mime/packages`.
 const MIME_FILE: &str = "lithic.xml";
 
@@ -47,24 +49,6 @@ fn mime_xml() -> String {
          \x20 </mime-type>\n\
          </mime-info>\n",
     )
-}
-
-/// The file types this app edits, as the MIME types a Linux desktop understands.
-///
-/// The same set as the Windows registration, spelled the Linux way. `application/x-lith`
-/// is this project's own type: a desktop only offers Lithic for it once a
-/// `shared-mime-info` package knows the type, which is a distribution's job rather than
-/// a running app's. The rest are standard, so "Open With Lithic" works for them as soon
-/// as the entry is installed, with no default association stolen.
-///
-/// `application/pdf`, `application/epub+zip` and the image types are the ones here that are not
-/// documents this app edits: the app renders a PDF's pages, splits a book into chapters and draws
-/// an image on a board, each into a new Lith, so the association opens a copy rather than
-/// overwriting the file. The image types are the four a person's camera or screenshot tool writes,
-/// `jpg` and `jpeg` being one format under the two extensions it is spelled with
-/// (`shared-mime-info` resolves both to `image/jpeg`).
-fn mime_types() -> &'static str {
-    "application/x-lith;text/markdown;text/plain;text/vnd.tiddlywiki;application/json;application/x-ipynb+json;text/html;application/pdf;application/epub+zip;image/png;image/jpeg;image/bmp;image/webp;"
 }
 
 /// The names a Chromium browser is installed under, most preferred first.
@@ -296,7 +280,12 @@ fn desktop_entry(program: &Path, icon: Option<&str>) -> String {
     }
     entry.push_str("Terminal=false\n");
     entry.push_str("Categories=Office;Utility;\n");
-    entry.push_str(&format!("MimeType={}\n", mime_types()));
+    // The one line that is this platform's whole file-association registration, read off the
+    // shared table (`associations.rs`): `application/x-lith` is this project's own type, which
+    // no distribution ships and `register_file_associations` below defines; the rest are
+    // standard, so "Open With Lithic" works for them as soon as this entry is installed, with
+    // no default association stolen.
+    entry.push_str(&format!("MimeType={}\n", associations::mime_types()));
     entry
 }
 
@@ -357,6 +346,24 @@ mod tests {
         // `%F` rather than `%U`: these are files off a file manager, and the app reads a
         // path from its own arguments.
         assert!(entry.contains(" %F\n"), "the entry passes file paths, not URLs");
+    }
+
+    /// The `MimeType=` line is the shared table (`associations.rs`) spelled once, in the table's
+    /// own order: a type added there reaches a Linux desktop with no second edit, and this
+    /// assertion is what makes adding or reordering one a visible decision rather than a silent
+    /// difference between two lists that used to be written by hand.
+    #[test]
+    fn the_entry_declares_exactly_the_types_in_the_shared_table() {
+        assert_eq!(
+            associations::mime_types(),
+            "application/x-lith;text/markdown;text/plain;text/vnd.tiddlywiki;application/json;\
+             application/x-ipynb+json;text/html;application/pdf;application/epub+zip;image/png;\
+             image/jpeg;image/bmp;image/webp;"
+        );
+        // And it is what the entry carries, rather than a list this test and the entry each
+        // know separately.
+        assert!(desktop_entry(Path::new("/apps/Lithic"), None)
+            .contains(&format!("MimeType={}\n", associations::mime_types())));
     }
 
     /// The MIME definition is what makes a `.lith` resolve to this app's own type.

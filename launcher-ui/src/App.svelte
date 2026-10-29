@@ -3563,8 +3563,8 @@ import { backupFileName, collectInstanceBackup, mergeBookmarks, parseInstanceBac
       stageBeat?.stage('wiki', safeName);
       await bootLegacyHtml(contents, safeName, path, indexDbOnly, shimToken);
       // The mount replaced this document, and `document.open` took its listeners with it: the
-      // share ask is armed again on the document that is now showing.
-      armShareWatch();
+      // handed-content ask is armed again on the document that is now showing.
+      armHandedWatch();
       return;
     }
     const handoff = { name: safeName, path, text: contents, ...(unwritten ? { unwritten: true } : {}) };
@@ -3590,9 +3590,9 @@ import { backupFileName, collectInstanceBackup, mergeBookmarks, parseInstanceBac
       __EPHEMERAL_MODE__: mode === 'self-host' ? 'self-host' : 'paper-light',
       __LITHIC_LAUNCHER_MODE__: mode
     }, { driftedFromHead, scratchMode, remote, browserOnly: indexDbOnly, shimToken, openBoardFor });
-    // Same as the monolith branch above: the engine booted in place, so the share ask is armed
-    // again on the document it wrote.
-    armShareWatch();
+    // Same as the monolith branch above: the engine booted in place, so the handed-content ask is
+    // armed again on the document it wrote.
+    armHandedWatch();
     pendingImports = [];
     skippedImports = [];
     intentionalImports = [];
@@ -3877,24 +3877,128 @@ import { backupFileName, collectInstanceBackup, mergeBookmarks, parseInstanceBac
   }
 
   /**
-   * Ask for a share whenever this page is shown.
+   * Open a document another app asked this one to open.
    *
-   * Its own handler rather than a line in `onVisibilityChange`, because it is the one listener
-   * that has to outlive a mount. A share brings the app forward instead of starting it, so there
-   * is no boot to hang this on, and the ask has to be armed on the document that is showing.
-   * Measured in Chromium: a listener registered on the document is gone once the engine has taken
-   * it (the same Document object comes back with an empty body, so it is the document that was
-   * emptied and not a new one), and a listener registered afterwards is reached by the next event.
-   * Without this second arming, a Lith that has just taken the window would never read a share.
-   * Arming the same function twice is safe either way, because `addEventListener` ignores it.
+   * This is the phone's version of a double-click: a file manager's "Open with Lithic" hands the
+   * app an intent carrying a `content://` reference instead of starting it with a path, and the
+   * activity keeps it until this page asks (`take_open_document`). The answer is consumed when
+   * read, so a reload is not handed the same document twice.
+   *
+   * One rule, and it is the difference between opening a file and losing one: a handed document
+   * only replaces the launcher screen. Where the engine has taken the window there is a Lith
+   * open, and a second document has no business mounting over it, so the request is left unread
+   * and waits for the launcher to be the page again. The test is the same one the share path uses
+   * to tell the two apart, because it is the same question: `$tw` is in this window exactly when
+   * a Lith is. `busy` is asked for the same reason: a document consumed while a mount is in
+   * flight would be dropped by `openTauriPath`, so it is left for the next ask instead.
+   *
+   * The mount is `openTauriPath`, which is the route a desktop's own association already takes,
+   * so a `.lith` opened this way is the same mount a double-click produces. It also reads the
+   * file through the app's bridge, which is the only thing that can open a phone's reference.
+   *
+   * A file this app converts is the one deliberate asymmetry with a share. A share is notes
+   * waiting for a destination, so it queues in the panel; opening a PDF, a book or a picture is
+   * somebody saying "read this", so it opens, in a new Lith named after the file. What it cannot
+   * have here is the sibling a desktop writes, since a `content://` reference has no folder this
+   * app may write into, so the new Lith has no file behind it and its first save asks where to go
+   * (`save_lith_file` with no path is the platform's own save picker). That is the same choice the
+   * sibling would have made silently, moved to the one moment the person is thinking about it.
+   *
+   * The name is asked of the platform rather than parsed out of the reference, because a granted
+   * URI's last component is a document id and not `statement.pdf`. The kind is read off that name,
+   * which is the same test a desktop association's path goes through.
    */
-  function armShareWatch(): void {
-    document.addEventListener('visibilitychange', onShareVisible);
+  async function openHandedDocument(): Promise<void> {
+    if (mode !== 'tauri' || busy) return;
+    if ((window as any).$tw) return;
+    let reference: string | null = null;
+    try {
+      reference = await tauriInvoke<string | null>('take_open_document');
+    } catch {
+      // A build from before the phone could be handed a file answers nothing.
+      return;
+    }
+    if (!reference) return;
+    let sourceName = '';
+    try {
+      sourceName = await tauriInvoke<string>('document_name', { path: reference });
+    } catch {
+      // A provider that will not name its own document leaves the kind unknown, and an unknown
+      // kind is opened as a document, which is what every file this app edits does.
+      sourceName = '';
+    }
+    const kind = importKindOf(sourceName);
+    if (!kind) {
+      await openTauriPath(reference);
+      return;
+    }
+    try {
+      await importIntoBlankLith(reference, sourceName || IMPORT_FALLBACK_NAME[kind], kind);
+    } catch (error) {
+      reportHeld(copy.status.openFailed(error instanceof Error ? error.message : String(error)));
+    }
   }
 
-  function onShareVisible(): void {
+  /**
+   * The Lith a file becomes when it is imported, named the way its sibling would have been.
+   *
+   * `<stem>_<extension>.lith`, which is `lith_sibling_of` in `lib.rs` spelled here: the extension
+   * stays in the name because the sibling of a PDF and the sibling of a picture are different
+   * documents, so a folder holding `foobar.pdf` beside `foobar.png` must not hand the second file
+   * the first file's board. The extension is carried through as the file writes it rather than
+   * folded, and a name with no extension is named for itself rather than trailing an underscore.
+   *
+   * The one difference is that no folder is involved: on a phone there is no beside to put it in,
+   * which is why this returns a name and not a path.
+   */
+  function importLithName(sourceName: string): string {
+    const name = sourceName.trim() || 'document';
+    const dot = name.lastIndexOf('.');
+    if (dot <= 0 || dot === name.length - 1) return `${name}.lith`;
+    return `${name.slice(0, dot)}_${name.slice(dot + 1)}.lith`;
+  }
+
+  /**
+   * Import a file another app handed over into a new Lith with no file behind it yet.
+   *
+   * The same handoff `importIntoNewLith` makes, minus the sibling: the bytes are read through the
+   * app's bridge (the only thing that can read a phone's reference), left on the window for the
+   * engine's own importer, and the blank Lith is mounted over the launcher so the pages, chapters
+   * or board arrive in a document the person is looking at. Nothing is written anywhere, so the
+   * first save is what chooses a home.
+   */
+  async function importIntoBlankLith(source: string, sourceName: string, kind: ImportKind) {
+    const base64 = await tauriInvoke<string>('read_file_base64', { path: source });
+    (window as any)[IMPORT_REQUEST[kind]] = { filename: sourceName, base64 };
+    const name = importLithName(sourceName);
+    lithText = '';
+    fileName = name;
+    filePath = undefined;
+    await mountWiki('', name);
+    status = copy.status.mounted(name);
+  }
+
+  /**
+   * Ask for whatever another app handed this one, whenever this page is shown.
+   *
+   * Its own handler rather than a line in `onVisibilityChange`, because it is the one listener
+   * that has to outlive a mount. A share or an opened file brings the app forward instead of
+   * starting it, so there is no boot to hang this on, and the ask has to be armed on the document
+   * that is showing. Measured in Chromium: a listener registered on the document is gone once the
+   * engine has taken it (the same Document object comes back with an empty body, so it is the
+   * document that was emptied and not a new one), and a listener registered afterwards is reached
+   * by the next event. Without this second arming, a Lith that has just taken the window would
+   * never read either. Arming the same function twice is safe, because `addEventListener` ignores
+   * it.
+   */
+  function armHandedWatch(): void {
+    document.addEventListener('visibilitychange', onHandedVisible);
+  }
+
+  function onHandedVisible(): void {
     if (document.hidden) return;
     void openHandedShare();
+    void openHandedDocument();
   }
 
   async function openRecent(
@@ -5954,6 +6058,9 @@ import { backupFileName, collectInstanceBackup, mergeBookmarks, parseInstanceBac
     // Content another app shared into this one is queued for a Lith to be chosen, so this page is
     // not only the way in here: it is where the share waits until its home is decided.
     void openHandedShare();
+    // A file another app asked this one to open is the phone's own "Open with", and it waits for
+    // this page for the reason a share does: the window has to be the launcher to open one.
+    void openHandedDocument();
     // The wire's liveness, asked once and never awaited by anything: no render waits on
     // it, and a backend that does not answer leaves the flag false rather than an error.
     if (shimToken) {
@@ -6041,11 +6148,11 @@ import { backupFileName, collectInstanceBackup, mergeBookmarks, parseInstanceBac
       void runGitSyncHeartbeat();
       // A tap in the board's sign-in window brings this app forward rather than starting it, so
       // the intent is read again each time the page is shown. The share's own ask is armed
-      // separately, because it is the one that has to survive a mount (`armShareWatch`).
+      // separately, because it is the ones that have to survive a mount (`armHandedWatch`).
       void openHandedBoard();
     };
     document.addEventListener('visibilitychange', onVisibilityChange);
-    armShareWatch();
+    armHandedWatch();
     // Proactive quota relief, deliberately not run in the index-db-only
     // fallback: it deletes the oldest-modified caches, and there the oldest
     // cache is somebody's only copy of a Lith. The same all-clear this mode
@@ -6181,7 +6288,7 @@ import { backupFileName, collectInstanceBackup, mergeBookmarks, parseInstanceBac
       stopGitSyncProgressTimer();
       window.removeEventListener('lithic-git-sync-saved', onGitSyncSaved);
       document.removeEventListener('visibilitychange', onVisibilityChange);
-      document.removeEventListener('visibilitychange', onShareVisible);
+      document.removeEventListener('visibilitychange', onHandedVisible);
       gitPollAborted = true;
     };
   });

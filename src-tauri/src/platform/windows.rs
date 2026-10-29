@@ -10,6 +10,8 @@ use std::path::{Path, PathBuf};
 
 use windows::Win32::UI::WindowsAndMessaging::HICON;
 
+use super::associations;
+
 /// Open a link in the user's default browser.
 pub fn open_in_browser(url: &str) -> Result<(), String> {
     use windows::core::{HSTRING, PCWSTR};
@@ -155,41 +157,6 @@ pub fn install_launch_entry(exe: &Path) -> Result<Option<PathBuf>, String> {
     Ok(Some(link))
 }
 
-/// Extensions the desktop app opens, with their Open With descriptions.
-///
-/// Two kinds sit here. Most are documents this app edits, mounted as they are. A `pdf`, an
-/// `epub` and the image types are not: the app renders a PDF into pages, splits a book into
-/// chapters and draws an image on a board, making a new Lith beside the file (see
-/// `import_lith_target` in `lib.rs` and the import handler's open-request startup), and the file
-/// itself is only ever read. They are registered the same way as the rest, which is an Open With
-/// entry rather than a default association.
-///
-/// `jpg` sits beside `jpeg` because it is the same format under the extension most cameras and
-/// phones write, and a person with `photo.jpg` has no reason to know the difference.
-const ASSOCIATION_TYPES: &[(&str, &str)] = &[
-    ("lith", "Lithic Wiki"),
-    ("md", "Lithic Markdown"),
-    ("txt", "Lithic Text"),
-    ("tid", "Lithic Tiddler"),
-    ("json", "Lithic JSON"),
-    ("ipynb", "Lithic Notebook"),
-    ("html", "Lithic HTML"),
-    ("pdf", "Lithic PDF"),
-    ("epub", "Lithic Book"),
-    ("png", "Lithic Image"),
-    ("jpg", "Lithic Image"),
-    ("jpeg", "Lithic Image"),
-    ("bmp", "Lithic Image"),
-    ("webp", "Lithic Image"),
-];
-
-/// The types that keep Lithic's own mark rather than borrowing somebody else's.
-///
-/// `.lith` is the format this app defines, so its icon is the one Explorer should learn.
-/// `.tid` and `.json` are the two files a person is far more likely to open in an editor
-/// than in a wiki; another program's mark on them would describe the wrong job.
-const OWN_ICON: &[&str] = &["lith", "tid", "json"];
-
 /// Per-user (HKCU) Open With registration: a ProgID per extension whose
 /// open command targets the installed exe, plus an entry appended to the
 /// extension's OpenWithProgids list. Every type is offered rather than claimed, with one
@@ -214,7 +181,9 @@ pub fn register_file_associations(program: &Path) -> Result<(), String> {
         .open_subkey_with_flags("Software\\Classes", KEY_READ | KEY_WRITE)
         .map_err(|error| error.to_string())?;
 
-    for (ext, description) in ASSOCIATION_TYPES {
+    for association in associations::all() {
+        let ext = association.ext.as_str();
+        let description = association.label.as_str();
         let progid = format!("Lithic.{}", ext);
         let (key, _) = classes
             .create_subkey(&progid)
@@ -236,7 +205,7 @@ pub fn register_file_associations(program: &Path) -> Result<(), String> {
         // to borrow keeps whatever it already has, because a reinstall on a machine where
         // Lithic is already the default finds only Lithic's own ProgID and must not erase the
         // mark the first install copied.
-        let mark = if OWN_ICON.contains(ext) {
+        let mark = if association.own_icon {
             Some(format!("\"{}\",0", exe_path))
         } else {
             borrowed_mark(ext)
@@ -287,9 +256,9 @@ pub fn register_file_associations(program: &Path) -> Result<(), String> {
     let (supported, _) = app
         .create_subkey("SupportedTypes")
         .map_err(|error| error.to_string())?;
-    for (ext, _) in ASSOCIATION_TYPES {
+    for association in associations::all() {
         supported
-            .set_value(format!(".{}", ext), &String::new())
+            .set_value(format!(".{}", association.ext), &String::new())
             .map_err(|error| error.to_string())?;
     }
 
@@ -342,7 +311,7 @@ pub fn register_file_associations(program: &Path) -> Result<(), String> {
 /// Every icon worth trying for an extension, best first: the handler's, then the extension's
 /// own, with a plain reference ahead of an indirect one.
 fn borrowed_icons(ext: &str) -> Vec<String> {
-    if OWN_ICON.contains(&ext) {
+    if associations::own_icon(ext) {
         return Vec::new();
     }
     let mut icons = Vec::new();
@@ -796,15 +765,22 @@ mod tests {
         }
     }
 
-    /// Every excluded extension is one this app registers, so an exclusion cannot outlive the
-    /// type it was written for.
+    /// The mark the app keeps is asked of the shared table, so a type cannot be excluded from
+    /// borrowing without being registered: the two used to be a table and a separate list here,
+    /// and a format could be added to one of them and forgotten in the other.
     #[test]
-    fn every_excluded_extension_is_registered() {
-        for ext in OWN_ICON {
+    fn the_mark_is_decided_by_the_registration_itself() {
+        for association in associations::all() {
+            assert_eq!(
+                associations::own_icon(&association.ext),
+                association.own_icon,
+                ".{} disagrees with the table about its mark",
+                association.ext
+            );
             assert!(
-                ASSOCIATION_TYPES.iter().any(|(registered, _)| registered == ext),
-                ".{} is excluded from borrowing but is not registered",
-                ext
+                association.ext.is_empty() || !association.mime.is_empty(),
+                ".{} is registered without a type",
+                association.ext
             );
         }
     }

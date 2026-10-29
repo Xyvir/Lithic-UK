@@ -110,8 +110,19 @@ fn lith_modified_times(paths: Vec<String>) -> std::collections::HashMap<String, 
 /// the launcher). Nothing writes back to the source: a PDF or an image is read once to make a
 /// new Lith, and the file it came from is not a document this app edits.
 #[tauri::command]
-fn read_file_base64(path: String) -> Result<String, String> {
-    platform::read_document_base64(&path)
+fn read_file_base64(app: tauri::AppHandle, path: String) -> Result<String, String> {
+    platform::read_document_base64(&app, &path)
+}
+
+/// The name a document goes by, for a row that has to show one.
+///
+/// The launcher's pending panel is what asks: a file another app handed over is a row named after
+/// itself before it is opened, and on a phone the granted `content://` reference that names it has
+/// no readable last component, so the display name comes from the provider through the platform's
+/// own resolver (`platform::document_name`).
+#[tauri::command]
+fn document_name(app: tauri::AppHandle, path: String) -> String {
+    platform::document_name(&app, &path)
 }
 
 /// Where a file the app renders or draws on is written, and whether that file is already there.
@@ -462,6 +473,19 @@ fn take_deep_link(app: tauri::AppHandle) -> Option<String> {
 #[tauri::command]
 fn take_shared_text(app: tauri::AppHandle) -> Option<platform::SharedText> {
     platform::take_shared_text(&app)
+}
+
+/// A file another app asked this one to open, if one did, and only once.
+///
+/// The phone's answer to "Open with": a file manager hands the app an intent carrying a
+/// `content://` reference, the activity keeps it, and `platform::take_open_document` reads it
+/// here. The page asks at boot and again whenever it is shown, because opening a file for a
+/// running app brings it forward rather than starting it, and the answer is consumed so a reload
+/// does not open the same document twice. Every desktop answers `None`: there the OS starts the
+/// app with the file as its argument, which `get_startup_file` already answers.
+#[tauri::command]
+fn take_open_document(app: tauri::AppHandle) -> Option<String> {
+    platform::take_open_document(&app)
 }
 
 /// This window, as the other Lithic windows on this machine see it.
@@ -3610,6 +3634,7 @@ pub fn run() {
             read_lith_path,
             lith_modified_times,
             read_file_base64,
+            document_name,
             import_lith_target,
             pdf_lith_target,
             open_lith_file,
@@ -3627,6 +3652,7 @@ pub fn run() {
             platform_capabilities,
             take_deep_link,
             take_shared_text,
+            take_open_document,
             flash_in_browser,
             install_offer_status,
             set_install_dismissed,
