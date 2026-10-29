@@ -1,0 +1,7 @@
+caption: //Relink// Library
+url: https://flibbles.github.io/tw5-relink/library/index.html
+title: $:/config/flibbles/relink/PluginLibrary
+
+The //Relink// library contains //Relink// as well as its supplemental plugins. It is maintained by Flibbles. See the [[github page|https://github.com/flibbles/tw5-relink]] for more information.
+
+This copy is deliberately untagged. Relink tags its own copy `$:/tags/PluginLibrary`, which adds a Relink tab to ''Get more plugins''; leaving the tag off here gives Lithic one library list instead of one per installed plugin.

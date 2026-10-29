@@ -43,7 +43,7 @@ test('a save excludes what the launcher itself injects', () => {
   const filter = getLithicUserFilter();
   assert.match(filter, /-\[prefix\[~\]\]/, 'launcher override tiddlers are marked with a leading ~');
   assert.match(filter, /-\[prefix\[\$:\/plugins\/lithic\/ephemeral\/\]\]/, 'the Ephemeral integration is not user content');
-  assert.match(filter, /-\[\[\$:\/config\/OfficialPluginLibrary\]\]/, 'the bootstrap sets this flag itself');
+  assert.match(filter, /-\[\[\$:\/config\/OfficialPluginLibrary\]\]/, 'a stale plugin-library override from an older bootstrap must not round-trip');
 });
 
 // View state, not content: the layout a Lith was last looked at in must not travel in the file.
