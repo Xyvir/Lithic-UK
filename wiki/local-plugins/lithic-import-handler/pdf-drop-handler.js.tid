@@ -14,6 +14,11 @@ exports.platforms = ["browser"];
 exports.after = ["startup"];
 exports.synchronous = true;
 
+// A book is unpacked by its own module: the archive reader and the package
+// document are a different job from rendering a page, and keeping them apart is
+// what lets one be changed without the other.
+var convertEpubToTiddlers = require("$:/plugins/lithic/lithic-import-handler/epub.js").convertEpubToTiddlers;
+
 function generateUUID() {
     if (typeof crypto !== "undefined" && crypto.randomUUID) {
         return crypto.randomUUID();
@@ -538,8 +543,9 @@ exports.startup = function() {
         const pdfFiles = Array.from(files).filter(f => f.type === "application/pdf" || f.name.toLowerCase().endsWith(".pdf"));
         const imageFiles = Array.from(files).filter(f => f.type.startsWith("image/"));
         const notebookFiles = Array.from(files).filter(f => f.type === "application/x-ipynb+json" || f.name.toLowerCase().endsWith(".ipynb"));
-        if (pdfFiles.length > 0 || imageFiles.length > 0 || notebookFiles.length > 0) {
-            // We found PDFs or images, so intercept this event completely
+        const epubFiles = Array.from(files).filter(f => f.type === "application/epub+zip" || f.name.toLowerCase().endsWith(".epub"));
+        if (pdfFiles.length > 0 || imageFiles.length > 0 || notebookFiles.length > 0 || epubFiles.length > 0) {
+            // We found a file this handler converts, so intercept this event completely
             event.preventDefault();
             event.stopPropagation();
             event.stopImmediatePropagation();
@@ -580,6 +586,21 @@ exports.startup = function() {
                             createdTitles.push(fields.title);
                         }
                     }
+                }
+
+                for (const file of epubFiles) {
+                    setProgress("Importing " + file.name + " as a book...");
+                    const arrayBuffer = await file.arrayBuffer();
+                    const book = await convertEpubToTiddlers(arrayBuffer, file.name, setProgress);
+                    for (const fields of book.tiddlers) {
+                        $tw.wiki.addTiddler(new $tw.Tiddler(
+                            $tw.wiki.getCreationFields(),
+                            $tw.wiki.getModificationFields(),
+                            fields
+                        ));
+                    }
+                    // A book is entered at its first chapter; the rest is a step away.
+                    createdTitles.push(book.entry);
                 }
 
                 for (const file of imageFiles) {
@@ -661,7 +682,7 @@ exports.startup = function() {
                 }));
 
                 // Handle other (non-PDF/image/notebook) files that were part of the same selection
-                const otherFiles = Array.from(files).filter(f => !pdfFiles.includes(f) && !imageFiles.includes(f) && !notebookFiles.includes(f));
+                const otherFiles = Array.from(files).filter(f => !pdfFiles.includes(f) && !imageFiles.includes(f) && !notebookFiles.includes(f) && !epubFiles.includes(f));
                 if (otherFiles.length > 0) {
                     $tw.utils.each(otherFiles, function(file) {
                         $tw.utils.deserializeTiddlers(file.type, file, {}, function(tiddlers) {

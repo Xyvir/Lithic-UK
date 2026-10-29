@@ -1,0 +1,635 @@
+title: $:/plugins/lithic/lithic-import-handler/epub.js
+type: application/javascript
+module-type: library
+
+/* Turns an EPUB into the nodestream a book becomes.
+
+   Every spine document is one chapter, and its text is split into one node per
+   block, titled `<CODE>_p001`. The code is taken from the file's own name, so
+   two books in one wiki never share a numbered node and nothing leaves the wiki
+   to work out what a book is called.
+
+   Two kinds of travel are laid down, because a book is read in two ways. Each
+   chapter carries `prev` and `next`, and the first is tagged Dogear, which is
+   what this wiki reads a reading position from: one page at a time, without the
+   whole book in the story river. Each chapter is also tagged Favorite, so the
+   sidebar lists them directly, which is the way back to a chapter later on.
+*/
+(function(){
+"use strict";
+
+/*jslint node: false, browser: true */
+/*global $tw: false, require: false */
+
+// How many capital letters of a file's name become the code its nodes carry.
+// The capitals are the book's own initials (`Improve Your Social Skills` is
+// `IYSS`), and five is enough to tell two books apart without the code growing
+// longer than the words it introduces.
+var CODE_LENGTH = 5;
+
+// The image types this wiki can draw, with the names it knows them by. A book
+// says `image/jpeg`, and TiddlyWiki's own table of content types spells that
+// `image/jpg`, so the usual spelling is translated rather than imported as a
+// tiddler nothing will render.
+var IMAGE_TYPES = {
+    "image/jpeg": "image/jpg",
+    "image/jpg": "image/jpg",
+    "image/png": "image/png",
+    "image/gif": "image/gif",
+    "image/webp": "image/webp",
+    "image/avif": "image/avif",
+    "image/heic": "image/heic",
+    "image/heif": "image/heif",
+    "image/svg+xml": "image/svg+xml",
+    "image/vnd.microsoft.icon": "image/vnd.microsoft.icon",
+    "image/x-icon": "image/x-icon"
+};
+
+var IMAGE_EXTENSIONS = {
+    png: "image/png",
+    jpg: "image/jpg",
+    jpeg: "image/jpg",
+    gif: "image/gif",
+    webp: "image/webp",
+    avif: "image/avif",
+    heic: "image/heic",
+    heif: "image/heif",
+    svg: "image/svg+xml",
+    ico: "image/x-icon"
+};
+
+// The tags whose boundaries end a block of text. A paragraph, a list item and a
+// heading each become one node; anything else is the words inside them.
+var BLOCK_TAGS = {
+    address: true, article: true, aside: true, blockquote: true, body: true,
+    caption: true, dd: true, div: true, dl: true, dt: true, figcaption: true,
+    figure: true, footer: true, h1: true, h2: true, h3: true, h4: true, h5: true,
+    h6: true, header: true, hr: true, li: true, main: true, nav: true, ol: true,
+    p: true, pre: true, section: true, table: true, tbody: true, td: true,
+    tfoot: true, th: true, thead: true, tr: true, ul: true
+};
+
+var decoder = new TextDecoder("utf-8");
+
+// --- The archive -------------------------------------------------------------
+//
+// An EPUB is a zip holding XHTML and pictures, so the first thing needed is a
+// reader for a zip. There is no archive library to reach for: this wiki is one
+// file that works offline, and a plugin may not fetch one. The browser has
+// owned the other half since 2022, `DecompressionStream("deflate-raw")` being
+// exactly how a zip entry is packed, so what follows reads the archive's index
+// and lets the browser inflate. Stored entries are already their own bytes, and
+// those two methods are the whole of what a book uses.
+
+var METHOD_STORED = 0;
+var METHOD_DEFLATE = 8;
+
+function findDirectoryEnd(bytes) {
+    // The end-of-central-directory record sits after the entries, so it is
+    // found by reading backwards. A trailing comment may push it as far as 64 KB.
+    var lowest = Math.max(0, bytes.length - 0x10000 - 22);
+    for (var i = bytes.length - 22; i >= lowest; i--) {
+        if (bytes[i] === 0x50 && bytes[i + 1] === 0x4b && bytes[i + 2] === 0x05 && bytes[i + 3] === 0x06) {
+            return i;
+        }
+    }
+    return -1;
+}
+
+function readEntries(bytes) {
+    var end = findDirectoryEnd(bytes);
+    if (end < 0) {
+        return null;
+    }
+    var view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+    var count = view.getUint16(end + 10, true);
+    var offset = view.getUint32(end + 16, true);
+    var entries = {};
+    for (var i = 0; i < count; i++) {
+        if (offset + 46 > bytes.length || view.getUint32(offset, true) !== 0x02014b50) {
+            break;
+        }
+        var nameLength = view.getUint16(offset + 28, true);
+        var extraLength = view.getUint16(offset + 30, true);
+        var commentLength = view.getUint16(offset + 32, true);
+        var name = decoder.decode(bytes.subarray(offset + 46, offset + 46 + nameLength));
+        entries[name] = {
+            method: view.getUint16(offset + 10, true),
+            compressedSize: view.getUint32(offset + 20, true),
+            offset: view.getUint32(offset + 42, true)
+        };
+        offset += 46 + nameLength + extraLength + commentLength;
+    }
+    return entries;
+}
+
+function inflate(data) {
+    if (typeof DecompressionStream !== "function") {
+        return Promise.reject(new Error("This browser cannot unpack an EPUB"));
+    }
+    var stream = new Blob([data]).stream().pipeThrough(new DecompressionStream("deflate-raw"));
+    return new Response(stream).arrayBuffer().then(function(buffer){
+        return new Uint8Array(buffer);
+    });
+}
+
+function entryBytes(bytes, entry) {
+    var view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+    if (view.getUint32(entry.offset, true) !== 0x04034b50) {
+        return Promise.reject(new Error("The EPUB is damaged"));
+    }
+    var nameLength = view.getUint16(entry.offset + 26, true);
+    var extraLength = view.getUint16(entry.offset + 28, true);
+    var start = entry.offset + 30 + nameLength + extraLength;
+    var data = bytes.subarray(start, start + entry.compressedSize);
+    if (entry.method === METHOD_STORED) {
+        return Promise.resolve(data);
+    }
+    if (entry.method !== METHOD_DEFLATE) {
+        return Promise.reject(new Error("The EPUB uses a compression this wiki cannot read"));
+    }
+    return inflate(data);
+}
+
+// --- Paths -------------------------------------------------------------------
+//
+// Everything in a book is addressed from the file that names it, so an address
+// is resolved against its base and the `..` walked out of it. An address is
+// percent-encoded and an archive entry is not, which is why both ends of a
+// lookup are decoded before they are compared.
+
+function cleanPath(path) {
+    var parts = String(path || "").split("/");
+    var out = [];
+    for (var i = 0; i < parts.length; i++) {
+        if (parts[i] === "..") {
+            out.pop();
+        } else if (parts[i] && parts[i] !== ".") {
+            out.push(parts[i]);
+        }
+    }
+    return out.join("/");
+}
+
+function decode(name) {
+    try {
+        return decodeURIComponent(name);
+    } catch (error) {
+        return name;
+    }
+}
+
+function resolveHref(base, href) {
+    var target = decode(String(href || "").replace(/[?#].*$/, ""));
+    if (!target) {
+        return "";
+    }
+    if (target.charAt(0) === "/") {
+        return cleanPath(target);
+    }
+    return cleanPath(String(base || "").replace(/[^\/]*$/, "") + target);
+}
+
+function findEntry(entries, name) {
+    if (!name) {
+        return null;
+    }
+    if (entries[name]) {
+        return entries[name];
+    }
+    var wanted = decode(name).toLowerCase();
+    for (var key in entries) {
+        if (key.toLowerCase() === wanted || decode(key).toLowerCase() === wanted) {
+            return entries[key];
+        }
+    }
+    return null;
+}
+
+function readText(bytes, entries, name) {
+    var entry = findEntry(entries, name);
+    if (!entry) {
+        return Promise.resolve(null);
+    }
+    return entryBytes(bytes, entry).then(function(data){
+        return decoder.decode(data);
+    });
+}
+
+// --- Markup ------------------------------------------------------------------
+
+function parseXml(text) {
+    // A package document and a table of contents are real XML, and parsing them
+    // as XML is what makes `<item/>` a closed element rather than one that
+    // swallows its brothers. A file that will not parse is read the forgiving
+    // way instead of being given up on.
+    var doc = new DOMParser().parseFromString(text, "application/xml");
+    if (doc.getElementsByTagName("parsererror").length > 0) {
+        doc = new DOMParser().parseFromString(text, "text/html");
+    }
+    return doc;
+}
+
+function elements(doc, name) {
+    var found = [];
+    if (!doc) {
+        return found;
+    }
+    var all = doc.getElementsByTagName("*");
+    for (var i = 0; i < all.length; i++) {
+        if ((all[i].localName || all[i].tagName) === name) {
+            found.push(all[i]);
+        }
+    }
+    return found;
+}
+
+function childElement(node, name) {
+    if (!node) {
+        return null;
+    }
+    for (var child = node.firstElementChild; child; child = child.nextElementSibling) {
+        if ((child.localName || child.tagName) === name) {
+            return child;
+        }
+    }
+    return null;
+}
+
+function textOf(node) {
+    if (!node) {
+        return "";
+    }
+    return String(node.textContent || "").replace(/\s+/g, " ").trim();
+}
+
+// --- The package -------------------------------------------------------------
+//
+// `META-INF/container.xml` names the package document; the package document
+// names every file in the book, the order they are read in (the spine), and
+// where a reader's table of contents is. The table of contents is what gives a
+// chapter its name, because it is the only place a book says what it calls its
+// own chapters; a file that is not listed there is named after its first
+// heading instead.
+
+function readNav(text, navHref, isNcx) {
+    var doc = parseXml(text);
+    var labels = {};
+    if (isNcx) {
+        var points = elements(doc, "navPoint");
+        for (var i = 0; i < points.length; i++) {
+            var label = textOf(childElement(childElement(points[i], "navLabel"), "text"));
+            var content = childElement(points[i], "content");
+            var target = resolveHref(navHref, content ? content.getAttribute("src") : "");
+            if (target && label && !labels[target]) {
+                labels[target] = label;
+            }
+        }
+        return labels;
+    }
+    var anchors = elements(doc, "a");
+    for (var j = 0; j < anchors.length; j++) {
+        var href = resolveHref(navHref, anchors[j].getAttribute("href"));
+        var anchorLabel = textOf(anchors[j]);
+        if (href && anchorLabel && !labels[href]) {
+            labels[href] = anchorLabel;
+        }
+    }
+    return labels;
+}
+
+async function readPackage(bytes, entries) {
+    var opfName = "";
+    var containerText = await readText(bytes, entries, "META-INF/container.xml");
+    if (containerText) {
+        var rootfile = elements(parseXml(containerText), "rootfile")[0];
+        opfName = rootfile ? rootfile.getAttribute("full-path") : "";
+    }
+    if (!opfName) {
+        for (var name in entries) {
+            if (/\.opf$/i.test(name)) {
+                opfName = name;
+                break;
+            }
+        }
+    }
+    if (!opfName) {
+        throw new Error("The EPUB has no package document");
+    }
+    var opfText = await readText(bytes, entries, opfName);
+    if (!opfText) {
+        throw new Error("The EPUB package could not be read");
+    }
+    var opf = parseXml(opfText);
+    var manifest = {};
+    var types = {};
+    var nav = null;
+    var items = elements(opf, "item");
+    for (var i = 0; i < items.length; i++) {
+        var itemHref = resolveHref(opfName, items[i].getAttribute("href"));
+        var mediaType = items[i].getAttribute("media-type") || "";
+        manifest[items[i].getAttribute("id")] = { href: itemHref, type: mediaType };
+        types[itemHref] = mediaType;
+        if (/(^|\s)nav(\s|$)/.test(items[i].getAttribute("properties") || "")) {
+            nav = { href: itemHref, type: mediaType };
+        }
+    }
+    var spineElement = elements(opf, "spine")[0];
+    var tocId = spineElement ? spineElement.getAttribute("toc") : "";
+    var ncx = tocId ? manifest[tocId] : null;
+    var spine = [];
+    var refs = elements(opf, "itemref");
+    for (var r = 0; r < refs.length; r++) {
+        var referenced = manifest[refs[r].getAttribute("idref")];
+        if (referenced && referenced.href) {
+            spine.push(referenced);
+        }
+    }
+    var labels = {};
+    if (nav) {
+        var navText = await readText(bytes, entries, nav.href);
+        if (navText) {
+            labels = readNav(navText, nav.href, /ncx/i.test(nav.type) || /\.ncx$/i.test(nav.href));
+        }
+    }
+    if (Object.keys(labels).length === 0 && ncx && ncx.href) {
+        var ncxText = await readText(bytes, entries, ncx.href);
+        if (ncxText) {
+            labels = readNav(ncxText, ncx.href, true);
+        }
+    }
+    return { spine: spine, types: types, labels: labels };
+}
+
+// --- Reading the page --------------------------------------------------------
+//
+// A page is read as a flat run of blocks, with each picture left as its own
+// step in that run so it lands where the book put it. A block is what a person
+// sees as one paragraph, which is why a `<br>` ends one: the line the book drew
+// is the line the node follows.
+
+function readBlocks(doc, pageHref) {
+    var blocks = [];
+    var buffer = "";
+    function flush() {
+        var text = buffer.replace(/\s+/g, " ").trim().replace(/^[-*+]\s+/, "").trim();
+        if (text) {
+            blocks.push({ text: text });
+        }
+        buffer = "";
+    }
+    function visit(node) {
+        for (var child = node.firstChild; child; child = child.nextSibling) {
+            if (child.nodeType === 3) {
+                buffer += child.nodeValue;
+                continue;
+            }
+            if (child.nodeType !== 1) {
+                continue;
+            }
+            var tag = String(child.tagName || "").toLowerCase();
+            if (tag === "script" || tag === "style" || tag === "head") {
+                continue;
+            }
+            if (tag === "img" || tag === "image") {
+                var src = child.getAttribute("src") || child.getAttribute("xlink:href") || child.getAttribute("href");
+                if (src) {
+                    flush();
+                    blocks.push({ image: resolveHref(pageHref, src) });
+                }
+                continue;
+            }
+            if (tag === "br") {
+                flush();
+                continue;
+            }
+            if (BLOCK_TAGS[tag]) {
+                flush();
+                visit(child);
+                flush();
+            } else {
+                visit(child);
+            }
+        }
+    }
+    visit(doc.body || doc.documentElement);
+    flush();
+    return blocks;
+}
+
+// The heading a page gives itself. The document's own `<title>` is deliberately
+// not consulted: a converter writes a placeholder there ("Unknown", "Untitled")
+// on a page that has no heading, and a chapter is better named for where it sits
+// in the book than for a word that says nothing about it.
+function headingOf(doc) {
+    var headings = doc.querySelectorAll("h1, h2, h3, h4, h5, h6");
+    for (var i = 0; i < headings.length; i++) {
+        var text = textOf(headings[i]);
+        if (text) {
+            return text;
+        }
+    }
+    return "";
+}
+
+// --- Pictures and titles -----------------------------------------------------
+
+// TiddlyWiki draws an image tiddler by rebuilding it from its own type: a
+// picture is stored as base64, and an SVG is stored as its own markup. So a
+// picture is handed over in whichever of the two its type calls for.
+function imageBody(data, type) {
+    if (type === "image/svg+xml") {
+        return Promise.resolve(decoder.decode(data));
+    }
+    return new Promise(function(resolve, reject){
+        var reader = new FileReader();
+        reader.onload = function(){
+            resolve(String(reader.result).replace(/^data:[^,]*,/, ""));
+        };
+        reader.onerror = function(){
+            reject(new Error("A picture in the book could not be read"));
+        };
+        reader.readAsDataURL(new Blob([data], { type: type }));
+    });
+}
+
+function imageType(mediaType, href) {
+    var declared = IMAGE_TYPES[String(mediaType || "").toLowerCase()];
+    if (declared) {
+        return declared;
+    }
+    var extension = (String(href).match(/\.([a-z0-9]+)$/i) || [])[1];
+    return extension ? (IMAGE_EXTENSIONS[extension.toLowerCase()] || "") : "";
+}
+
+async function readImage(bytes, entries, href, types) {
+    var entry = findEntry(entries, href);
+    if (!entry) {
+        return null;
+    }
+    var type = imageType(types[href], href);
+    if (!type) {
+        return null;
+    }
+    var data = await entryBytes(bytes, entry);
+    if (!data.length) {
+        return null;
+    }
+    return { type: type, text: await imageBody(data, type) };
+}
+
+// The code every node of a book carries, taken from the name of the file it
+// came from: the book's own initials, so `Improve Your Social Skills.epub`
+// lands on `IYSS`.
+//
+// A file name carries more than a title, though, and everything after the title
+// (an author, a year, a catalogue number) is somebody else's initials. So the
+// name is read only up to its first character that is neither a letter, a digit
+// nor a space, which is where a person puts a title down and picks up the rest
+// of the details: `Improve Your Social Skills -- Daniel Wendler` is read as
+// `Improve Your Social Skills`. That cut is only taken when it holds initials,
+// because a name joined with underscores or hyphens (`harry_potter.epub`) has
+// its title spread across the whole name and would otherwise be read as
+// `harry` alone.
+//
+// A name written entirely in lower case (`the_great_gatsby.epub`) has no
+// capitals to read, so its words give them instead: one letter from each word,
+// in order, up to the code's length. `the_great_gatsby` is `TGG` and
+// `a_tale_of_two_cities` is `ATOTC`, which is the code either book would have
+// had if it were written with capitals, so the way a file is cased cannot change
+// what the book is filed under. Short words are counted like any other here,
+// because a title's "of" and "and" are still its own words.
+//
+// One word is not initials, so a name that is a single word (`notes.epub`) is
+// read as a word and gives `NOTES`. So is a name whose only word begins with a
+// number (`1984 - Orwell.epub`), which gives `1984` rather than `1O`: a digit
+// is not a letter to take, and the year is what the book is known by.
+function shortcode(fileName) {
+    var stem = String(fileName || "").replace(/\.[^.\/\\]+$/, "");
+    var title = stem.split(/[^A-Za-z0-9\s]/)[0];
+    var initials = title.replace(/[^A-Z]/g, "");
+    if (initials.length >= 2) {
+        return initials.substring(0, CODE_LENGTH);
+    }
+    initials = stem.replace(/[^A-Z]/g, "");
+    if (initials.length >= 2) {
+        return initials.substring(0, CODE_LENGTH);
+    }
+    var words = stem.split(/[^A-Za-z0-9]+/);
+    var collected = "";
+    for (var i = 0; i < words.length && collected.length < CODE_LENGTH; i++) {
+        if (/^[a-z]/i.test(words[i])) {
+            collected += words[i].charAt(0).toUpperCase();
+        }
+    }
+    if (collected.length >= 2) {
+        return collected;
+    }
+    return (words[0] || stem).replace(/[^a-z0-9]/gi, "").substring(0, CODE_LENGTH).toUpperCase() || "BOOK";
+}
+
+function pad(number) {
+    return String(number).padStart(3, "0");
+}
+
+// A title that is free in the wiki and free in this book. `generateNewTitle`
+// knows only what has already been added, and a book is built before any of it
+// is, so the chapters of one import have to be kept apart from each other here.
+function uniqueTitle(base, taken) {
+    var title = $tw.wiki.generateNewTitle(base);
+    var counter = 1;
+    while (taken[title] || $tw.wiki.tiddlerExists(title)) {
+        title = base + " " + (counter++);
+    }
+    taken[title] = true;
+    return title;
+}
+
+async function convertEpubToTiddlers(arrayBuffer, fileName, setProgress) {
+    var note = typeof setProgress === "function" ? setProgress : function() {};
+    var bytes = new Uint8Array(arrayBuffer);
+    var entries = readEntries(bytes);
+    if (!entries) {
+        throw new Error("Not an EPUB");
+    }
+    note("Reading " + fileName + "...");
+    var book = await readPackage(bytes, entries);
+    var code = shortcode(fileName);
+    var taken = {};
+    var tiddlers = [];
+    var chapters = [];
+    var paragraphCount = 0;
+    var imageCount = 0;
+    for (var index = 0; index < book.spine.length; index++) {
+        var item = book.spine[index];
+        note("Importing " + fileName + ": page " + (index + 1) + "/" + book.spine.length + "...");
+        var markup = await readText(bytes, entries, item.href);
+        if (!markup) {
+            continue;
+        }
+        var doc = new DOMParser().parseFromString(markup, "text/html");
+        var blocks = readBlocks(doc, item.href);
+        if (blocks.length === 0) {
+            continue;
+        }
+        var label = book.labels[item.href] || headingOf(doc) || ("Page_" + pad(index + 1));
+        var chapterTitle = uniqueTitle(code + "_" + label.replace(/\s+/g, "_"), taken);
+        var children = [];
+        for (var b = 0; b < blocks.length; b++) {
+            if (blocks[b].text) {
+                var nodeTitle = uniqueTitle(code + "_p" + pad(++paragraphCount), taken);
+                tiddlers.push({
+                    title: nodeTitle,
+                    parent: chapterTitle,
+                    "stream-type": "default",
+                    text: blocks[b].text
+                });
+                children.push(nodeTitle);
+            } else {
+                var picture = await readImage(bytes, entries, blocks[b].image, book.types);
+                if (picture) {
+                    var imageTitle = uniqueTitle(code + "_img" + pad(++imageCount), taken);
+                    tiddlers.push({
+                        title: imageTitle,
+                        parent: chapterTitle,
+                        type: picture.type,
+                        "stream-type": "default",
+                        text: picture.text
+                    });
+                    children.push(imageTitle);
+                }
+            }
+        }
+        chapters.push({ title: chapterTitle, children: children });
+    }
+    if (chapters.length === 0) {
+        throw new Error("The EPUB has no readable text");
+    }
+    for (var c = 0; c < chapters.length; c++) {
+        var fields = {
+            title: chapters[c].title,
+            "stream-type": "default",
+            "stream-list": $tw.utils.stringifyList(chapters[c].children),
+            tags: c === 0 ? "Dogear Favorite" : "Favorite",
+            text: ""
+        };
+        // A chapter names the one either side of it, which is what the reading
+        // position follows: Dogear moves along these and the story river never
+        // has to hold more than one chapter of the book.
+        if (c > 0) {
+            fields.prev = chapters[c - 1].title;
+        }
+        if (c < chapters.length - 1) {
+            fields.next = chapters[c + 1].title;
+        }
+        tiddlers.push(fields);
+    }
+    // The first chapter is what an import reports and what the reader is given:
+    // it is where the book starts, and every other chapter is one step away.
+    return { tiddlers: tiddlers, entry: chapters[0].title };
+}
+
+exports.convertEpubToTiddlers = convertEpubToTiddlers;
+exports.shortcode = shortcode;
+
+})();
