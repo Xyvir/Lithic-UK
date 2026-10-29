@@ -2279,6 +2279,18 @@ body.drag-over::after {
 .orphan-pill { padding: 1px 7px; border-radius: 999px; font-size: 0.7rem; white-space: nowrap; }
 .orphan-pill.saved { background: var(--lithic-ok-wash-22); color: var(--lithic-ok-pale); }
 .orphan-pill.unverified { background: var(--lithic-amber-wash-16); color: var(--lithic-amber-soft); }
+/*
+ * The mark takes the download's place rather than sitting beside it. Beside it, the mark was a new
+ * sibling at the trailing edge of a row whose flexible column is the name or the stamp, so the
+ * button slid out from under the pointer that had just pressed it, by the mark's whole width.
+ *
+ * Replacing it is the only arrangement where nothing has to give way at the moment of the press:
+ * there is no control left to move, and the row's own text absorbs the difference in width. The
+ * button is not needed twice in a row either. A second copy is one dialog away, because the marks
+ * are cleared when the dialog opens (see `openHistoryModal` and `openInstanceBackup`), so leaving
+ * and coming back puts every button where it was.
+ */
+.orphan-pill { flex: none; }
 /* "2 of 5 saved". The line that says when Proceed is safe. */
 .orphan-progress { margin: 10px 0 0; color: var(--lithic-ok-pale); font-size: 0.8rem; text-align: center; }
 /* The whole-instance export, and the mark that says one has been taken. */

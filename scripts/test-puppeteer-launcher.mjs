@@ -2112,7 +2112,7 @@ try {
   assert.equal(docsLink.smaller, true, 'The link is drawn smaller than the action above it');
   assert.equal(docsLink.belowAction, true, 'and sits on a line of its own below that action rather than in its row');
   assert.ok(
-    true,
+    Math.abs(docsLink.textEdges.right - docsLink.textEdges.rowRight) <= 1,
     `lined up with the right edge of the row it answers, which is the dialog's bottom right: ${JSON.stringify(docsLink.textEdges)}`
   );
   assert.ok(

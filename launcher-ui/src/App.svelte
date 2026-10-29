@@ -5393,10 +5393,17 @@ import { backupFileName, collectInstanceBackup, mergeBookmarks, parseInstanceBac
    */
   $: backupCopy = backupResettable ? copy.dialogs.instanceBackup : copy.dialogs.instanceBackup.backupOnly;
 
-  /** Open the dialog. */
+  /**
+   * Open the dialog.
+   *
+   * The marks go with the previous visit: a row whose download was taken wears that mark instead
+   * of its button, and coming back here is how a person takes a second copy, so the buttons have
+   * to be there when the dialog opens.
+   */
   function openInstanceBackup(): void {
     backupStatus = '';
     backupDownload = 'idle';
+    orphanDownloads = {};
     showInstanceBackup = true;
   }
 
@@ -7835,8 +7842,11 @@ import { backupFileName, collectInstanceBackup, mergeBookmarks, parseInstanceBac
           its business rather than as part of the icon choice above.
         -->
         <div class="modal-actions management-actions">
+          {#if backupPill}
+          <span class="orphan-pill {backupPill.tone}" role="status" title={backupPill.title}>{backupPill.label}</span>
+          {:else}
           <button class="modal-action secondary full-backup-button" disabled={backupBusy} on:click={downloadInstanceBackup} title={copy.dialogs.icon.backupTitle}>{@render fullBackupIcon()}{backupBusy ? '…' : copy.dialogs.icon.backup}</button>
-          {#if backupPill}<span class="orphan-pill {backupPill.tone}" role="status" title={backupPill.title}>{backupPill.label}</span>{/if}
+          {/if}
           <!--
             The appliance offer, drawn only where pressing it can reach a board: a Chromium
             tab has Web Serial, and the desktop app has a browser it can hand the page to.
@@ -7892,10 +7902,12 @@ import { backupFileName, collectInstanceBackup, mergeBookmarks, parseInstanceBac
               {#if !row.orphan.path}<span class="orphan-tag">{copy.dialogs.rebuild.cachedOnly}</span>{/if}
               {#if dirtyEntries[row.orphan.name]}<span class="orphan-tag dirty" title={copy.dialogs.rebuild.unsavedCaptured(new Date(dirtyEntries[row.orphan.name]).toLocaleString(LOCALE_TAG))}>{copy.dialogs.rebuild.unsavedTag}</span>{/if}
               {#if cachedEntries[row.orphan.name]}
+                {#if row.pill}<span class="orphan-pill {row.pill.tone}" role="status" title={row.pill.title}>{row.pill.label}</span>
+                {:else}
                 <button class="recent-icon-button" type="button" aria-label={copy.row.downloadAria(row.orphan.name)} title={copy.row.downloadTitle} on:click={() => downloadCachedSnapshot(row.orphan.name)}>
                   <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 4v11"></path><path d="m7.5 10.5 4.5 4.5 4.5-4.5"></path><path d="M5 19h14"></path></svg>
                 </button>
-                {#if row.pill}<span class="orphan-pill {row.pill.tone}" role="status" title={row.pill.title}>{row.pill.label}</span>{/if}
+                {/if}
               {/if}
               {#if historyAvailable[row.orphan.name]}
               <button class="recent-icon-button cache-history-button" type="button" aria-label={copy.row.historyAria(row.orphan.name)} title={copy.row.olderVersions} on:click={() => openHistoryModal(row.orphan.name)}>
@@ -7912,8 +7924,11 @@ import { backupFileName, collectInstanceBackup, mergeBookmarks, parseInstanceBac
           recents that were never in the list below; the note under it says so.
         -->
         <div class="instance-backup-full">
+          {#if backupPill}
+          <span class="orphan-pill {backupPill.tone}" role="status" title={backupPill.title}>{backupPill.label}</span>
+          {:else}
           <button class="modal-action secondary full-backup-button" disabled={backupBusy} on:click={downloadInstanceBackup} title={copy.dialogs.rebuild.fullBackupTitle}>{@render fullBackupIcon()}{backupBusy ? '…' : copy.dialogs.rebuild.fullBackup}</button>
-          {#if backupPill}<span class="orphan-pill {backupPill.tone}" role="status" title={backupPill.title}>{backupPill.label}</span>{/if}
+          {/if}
         </div>
         <p class="git-sync-note">{copy.dialogs.rebuild.fullBackupNote}</p>
         {#if backupStatus}<p class="status-line" role="status">{backupStatus}</p>{/if}
@@ -7953,18 +7968,23 @@ import { backupFileName, collectInstanceBackup, mergeBookmarks, parseInstanceBac
               {#if !row.row.path}<span class="orphan-tag">{copy.dialogs.rebuild.cachedOnly}</span>{/if}
               {#if dirtyEntries[row.row.name]}<span class="orphan-tag dirty" title={copy.dialogs.rebuild.unsavedCaptured(new Date(dirtyEntries[row.row.name]).toLocaleString(LOCALE_TAG))}>{copy.dialogs.rebuild.unsavedTag}</span>{/if}
               {#if cachedEntries[row.row.name]}
+                {#if row.pill}<span class="orphan-pill {row.pill.tone}" role="status" title={row.pill.title}>{row.pill.label}</span>
+                {:else}
                 <button class="recent-icon-button" type="button" aria-label={copy.row.downloadAria(row.row.name)} title={copy.row.downloadTitle} on:click={() => downloadCachedSnapshot(row.row.name)}>
                   <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 4v11"></path><path d="m7.5 10.5 4.5 4.5 4.5-4.5"></path><path d="M5 19h14"></path></svg>
                 </button>
-                {#if row.pill}<span class="orphan-pill {row.pill.tone}" role="status" title={row.pill.title}>{row.pill.label}</span>{/if}
+                {/if}
               {/if}
             </li>
           {/each}
         </ul>
         {#if resetRiskNote}<p class="orphan-progress" role="status">{resetRiskNote}</p>{/if}
         <div class="instance-backup-full">
+          {#if backupPill}
+          <span class="orphan-pill {backupPill.tone}" role="status" title={backupPill.title}>{backupPill.label}</span>
+          {:else}
           <button class="modal-action secondary full-backup-button" disabled={backupBusy} on:click={downloadInstanceBackup} title={copy.dialogs.rebuild.fullBackupTitle}>{@render fullBackupIcon()}{backupBusy ? '…' : copy.dialogs.rebuild.fullBackup}</button>
-          {#if backupPill}<span class="orphan-pill {backupPill.tone}" role="status" title={backupPill.title}>{backupPill.label}</span>{/if}
+          {/if}
         </div>
         <p class="git-sync-note">{copy.dialogs.rebuild.fullBackupNote}</p>
         {#if backupStatus}<p class="status-line" role="status">{backupStatus}</p>{/if}
@@ -7998,16 +8018,21 @@ import { backupFileName, collectInstanceBackup, mergeBookmarks, parseInstanceBac
           {#each backupRows as row (row.name)}
             <li class="orphan-row">
               <span class="orphan-name" title={row.name}>{row.name}</span>
+              {#if row.pill}<span class="orphan-pill {row.pill.tone}" role="status" title={row.pill.title}>{row.pill.label}</span>
+              {:else}
               <button class="recent-icon-button" type="button" aria-label={copy.row.downloadAria(row.name)} title={copy.row.downloadTitle} on:click={() => downloadCachedSnapshot(row.name, row.text)}>
                 <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 4v11"></path><path d="m7.5 10.5 4.5 4.5 4.5-4.5"></path><path d="M5 19h14"></path></svg>
               </button>
-              {#if row.pill}<span class="orphan-pill {row.pill.tone}" role="status" title={row.pill.title}>{row.pill.label}</span>{/if}
+              {/if}
             </li>
           {/each}
         </ul>
         <div class="instance-backup-full">
+          {#if backupPill}
+          <span class="orphan-pill {backupPill.tone}" role="status" title={backupPill.title}>{backupPill.label}</span>
+          {:else}
           <button class="modal-action secondary full-backup-button" disabled={backupBusy} on:click={downloadInstanceBackup} title={copy.dialogs.instanceBackup.fullBackupTitle}>{@render fullBackupIcon()}{backupBusy ? '…' : copy.dialogs.instanceBackup.fullBackup}</button>
-          {#if backupPill}<span class="orphan-pill {backupPill.tone}" role="status" title={backupPill.title}>{backupPill.label}</span>{/if}
+          {/if}
         </div>
         {#if backupStatus}<p class="status-line" role="status">{backupStatus}</p>{/if}
         {#if backupResettable}
@@ -8120,10 +8145,12 @@ import { backupFileName, collectInstanceBackup, mergeBookmarks, parseInstanceBac
                       <span class="history-inline-note">{copy.dialogs.history.inlineNote}</span>
                       <svg class="history-capture-chevron" viewBox="0 0 14 8" aria-hidden="true"><path d="M1.5 1.5 7 6.5l5.5-5"></path></svg>
                     </button>
+                    {#if entry.pill}<span class="orphan-pill {entry.pill.tone}" role="status" title={entry.pill.title}>{entry.pill.label}</span>
+                    {:else}
                     <button class="recent-icon-button history-download-button" type="button" aria-label={copy.dialogs.history.downloadCaptureAria(entry.lastModified)} title={copy.dialogs.history.downloadCaptureTitle} disabled={historyCaptureSaving} on:click={saveHistoryCapture}>
                       <svg class="history-download-icon" viewBox="56 108 33 36" aria-hidden="true"><path class="history-icon-shape" d="m 73.595508,109.76746 c -7.198235,0 -13.103617,5.58342 -13.647229,12.64471 h -0.0072 V 138.2696 H 58.61606 l 2.32389,4.02559 2.324405,-4.02559 h -1.323433 v -15.85123 c 0.530186,-5.97937 5.534806,-10.65103 11.654586,-10.65103 6.474618,0 11.703161,5.22855 11.703161,11.70316 0,6.47462 -5.228543,11.70161 -11.703161,11.70161 -2.644513,0 -5.080809,-0.87232 -7.037814,-2.34508 v 2.39572 c 2.058162,1.23707 4.46633,1.94924 7.037814,1.94924 7.555498,0 13.703556,-6.14599 13.703556,-13.70149 0,-7.5555 -6.148058,-13.70304 -13.703556,-13.70304 z m -2.108915,7.49825 v 8.05016 h 7.125663 v -1.59836 h -5.527311 v -6.4518 z"></path></svg>
                     </button>
-                    {#if entry.pill}<span class="orphan-pill {entry.pill.tone}" role="status" title={entry.pill.title}>{entry.pill.label}</span>{/if}
+                    {/if}
                   </div>
                   {#if historyCaptureOpen}
                     <div class="history-capture-body" id="history-capture-body">
@@ -8153,10 +8180,12 @@ import { backupFileName, collectInstanceBackup, mergeBookmarks, parseInstanceBac
                   {#if entry.isBase && entry.external}<span class="history-badge sync" title={copy.dialogs.history.badgeSyncTitle}>{copy.dialogs.history.badgeSync}</span>{:else if entry.isBase}<span class="history-badge" title={copy.dialogs.history.badgeFullTitle}>{copy.dialogs.history.badgeFull}</span>{:else}<span class="history-badge delta" title={copy.dialogs.history.badgeStepTitle}>{copy.dialogs.history.badgeStep}</span>{/if}
                   <span class="history-time">{entry.lastModified}</span>
                   <span class="history-size">{formatCacheSize(entry.sizeBytes)}</span>
+                  {#if entry.pill}<span class="orphan-pill {entry.pill.tone}" role="status" title={entry.pill.title}>{entry.pill.label}</span>
+                  {:else}
                   <button class="recent-icon-button history-download-button" type="button" aria-label={copy.dialogs.history.downloadAria(entry.lastModified)} title={copy.row.downloadTitle} on:click={() => downloadHistoryVersion(entry.id)}>
                     <svg class="history-download-icon" viewBox="56 108 33 36" aria-hidden="true"><path class="history-icon-shape" d="m 73.595508,109.76746 c -7.198235,0 -13.103617,5.58342 -13.647229,12.64471 h -0.0072 V 138.2696 H 58.61606 l 2.32389,4.02559 2.324405,-4.02559 h -1.323433 v -15.85123 c 0.530186,-5.97937 5.534806,-10.65103 11.654586,-10.65103 6.474618,0 11.703161,5.22855 11.703161,11.70316 0,6.47462 -5.228543,11.70161 -11.703161,11.70161 -2.644513,0 -5.080809,-0.87232 -7.037814,-2.34508 v 2.39572 c 2.058162,1.23707 4.46633,1.94924 7.037814,1.94924 7.555498,0 13.703556,-6.14599 13.703556,-13.70149 0,-7.5555 -6.148058,-13.70304 -13.703556,-13.70304 z m -2.108915,7.49825 v 8.05016 h 7.125663 v -1.59836 h -5.527311 v -6.4518 z"></path></svg>
                   </button>
-                  {#if entry.pill}<span class="orphan-pill {entry.pill.tone}" role="status" title={entry.pill.title}>{entry.pill.label}</span>{/if}
+                  {/if}
                 {/if}
               </li>
             {/each}

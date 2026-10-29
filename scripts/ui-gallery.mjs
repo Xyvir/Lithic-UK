@@ -2631,10 +2631,10 @@ const SHEETS = [
       },
       {
         // The mount-free download, driven rather than described: the row's own trailing icon
-        // writes the edits out as a `.lith` and the dialog then says what the platform
-        // confirmed. What this deck can stage is the unconfirmed hand-off, because the app's
-        // own save dialog is not here to name a path, and that is the sentence the browser
-        // download earns anyway.
+        // writes the edits out as a `.lith` and the row then carries the mark every download
+        // here wears. What this deck can stage is the unconfirmed hand-off, because the app's
+        // own save is not here to prove a write, and that is the mark the browser download
+        // earns anyway.
         name: '638-capture-saved',
         view: 'wide',
         modal: 'history-title',
@@ -2658,11 +2658,88 @@ const SHEETS = [
           await page.click('.cache-history-button.modified');
           await page.waitForSelector('.history-entry.inline');
           await page.click('.history-entry.inline .history-download-button');
-          await page.waitForSelector('.history-capture-notice');
+          await page.waitForSelector('.history-entry.inline .orphan-pill');
           await settle(page, 300);
         },
         clip: '.history-modal',
-        expect: '.history-capture-notice'
+        expect: '.history-entry.inline .orphan-pill'
+      },
+      {
+        // A version row's download, which is the press that reported nothing at all on an
+        // instance page inside the app: it wrote to the header's status line, and the dialog
+        // covers it. The mark now lands on the row the button belongs to, in the same pill the
+        // warning dialogs have always used, and the browser's unconfirmed answer is the honest
+        // one here for the reason 638 gives.
+        name: '639-version-saved',
+        view: 'wide',
+        modal: 'history-title',
+        mode: 'tauri',
+        seed: {
+          recents: [handleRow('notes.lith')],
+          caches: {
+            'search_cache_notes.lith': cache([{ title: 'A', text: 'note text' }]),
+            // The body the version row hands over. A chain of deltas would have to be seeded
+            // link by link to materialize, and one anchored full copy is the same press.
+            'search_cache_base_notes.lith_v1': {
+              id: 'v1',
+              text: JSON.stringify([{ title: 'A', text: 'note text' }])
+            }
+          },
+          meta: {
+            'search_cache_meta_notes.lith': {
+              headId: 'v1',
+              versions: [{ id: 'v1', ts: SAVED_AT, sizeBytes: 41_820, isBase: true }]
+            },
+            'dirty_state_notes.lith': {
+              ts: SAVED_AT + 2 * 60 * 60 * 1000,
+              tiddlers: [{ title: 'Reading list', text: 'unsaved' }]
+            }
+          }
+        },
+        drive: async (page) => {
+          await page.click('.cache-history-button.modified');
+          await page.waitForSelector('.history-entry:not(.inline)');
+          // Where the button is before the press, so the verify below can hold it there: a mark
+          // that lands beside a control is a mark that shoves it out from under the pointer.
+          const before = await page.evaluate(() => {
+            const box = document.querySelector('.history-entry:not(.inline) .history-download-button').getBoundingClientRect();
+            return { left: Math.round(box.left), right: Math.round(box.right) };
+          });
+          await page.click('.history-entry:not(.inline) .history-download-button');
+          await page.waitForSelector('.history-entry:not(.inline) .orphan-pill');
+          await page.evaluate((box) => {
+            window.__downloadButtonBefore = box;
+          }, before);
+          await settle(page, 300);
+        },
+        clip: '.history-modal',
+        expect: '.history-entry:not(.inline) .orphan-pill',
+        // The mark takes the button's place, so there is no control left to move: what has to
+        // hold is that it ends where the button ended, at the row's trailing edge, and that the
+        // button itself is gone rather than pushed aside.
+        verify: async (page) => {
+          const measured = await page.evaluate(() => {
+            const mark = document.querySelector('.history-entry:not(.inline) .orphan-pill');
+            const box = mark.getBoundingClientRect();
+            return {
+              before: window.__downloadButtonBefore ?? null,
+              role: mark.getAttribute('role'),
+              left: Math.round(box.left),
+              right: Math.round(box.right),
+              buttonStillThere: document.querySelector('.history-entry:not(.inline) .history-download-button') !== null
+            };
+          });
+          if (measured.before === null) throw new Error('the pane did not measure the button before the press');
+          if (measured.buttonStillThere) {
+            throw new Error('the mark was drawn beside the download button rather than replacing it');
+          }
+          if (Math.abs(measured.right - measured.before.right) > 1) {
+            throw new Error(
+              `the mark ended at ${measured.right} where the button ended at ${measured.before.right}, so something moved`
+            );
+          }
+          if (measured.role !== 'status') throw new Error('the mark is drawn without announcing itself');
+        }
       },
       {
         // The mark on a browser-only row opens this same dialog, and this is where a
