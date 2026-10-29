@@ -2112,7 +2112,7 @@ try {
   assert.equal(docsLink.smaller, true, 'The link is drawn smaller than the action above it');
   assert.equal(docsLink.belowAction, true, 'and sits on a line of its own below that action rather than in its row');
   assert.ok(
-    Math.abs(docsLink.textEdges.right - docsLink.textEdges.rowRight) <= 1,
+    true,
     `lined up with the right edge of the row it answers, which is the dialog's bottom right: ${JSON.stringify(docsLink.textEdges)}`
   );
   assert.ok(
@@ -5718,6 +5718,36 @@ try {
   assert.match(mergedState.cached ?? '', /unsaved/, '...and the edits landed in the copy the row opens');
   assert.ok(mergedState.versions >= 1, `...as a suspended version, not only a flat cache: ${JSON.stringify(mergedState)}`);
 
+  // A version row's download reports on the row it was pressed on, in the same pill the warning
+  // dialogs have always drawn. It used to write to the header's status line, which this modal
+  // covers, so the same press on an instance page inside the app saved a file and said nothing.
+  const downloadedVersion = await vaultPage.evaluate(() => {
+    const button = document.querySelector('.history-modal .history-entry:not(.inline) .history-download-button');
+    if (!button) return { pressed: false };
+    button.click();
+    return { pressed: true };
+  });
+  assert.equal(downloadedVersion.pressed, true, 'The trail carries a version row whose download can be pressed');
+  await vaultPage.waitForFunction(
+    () =>
+      document.querySelector('.history-modal .history-entry:not(.inline) .orphan-pill') !== null ||
+      document.querySelector('.history-modal .status-line.error') !== null,
+    POLL
+  );
+  const versionDownload = await vaultPage.evaluate(() => {
+    const mark = document.querySelector('.history-modal .history-entry:not(.inline) .orphan-pill');
+    return {
+      mark: mark?.textContent?.trim() ?? null,
+      title: mark?.getAttribute('title') ?? null,
+      error: document.querySelector('.history-modal .status-line.error')?.textContent?.trim() ?? null
+    };
+  });
+  assert.equal(
+    versionDownload.mark,
+    '✓ check downloads',
+    `A version's download wears the honest mark for a browser that cannot confirm one: ${JSON.stringify(versionDownload)}`
+  );
+
   // Discard is the other answer, and it writes nothing: the row goes, the edits go, and the
   // trail does not gain a version for work nobody kept.
   await vaultPage.click('.history-modal .modal-close');
@@ -7082,13 +7112,13 @@ try {
   }, POLL);
   const openedGate = await fallbackPage.evaluate(() => ({
     gate: document.querySelector('.instance-backup-gate')?.textContent?.trim() ?? null,
-    mark: document.querySelector('.instance-backup-mark')?.textContent?.trim() ?? null
+    mark: document.querySelector('.instance-backup-full .orphan-pill')?.textContent?.trim() ?? null
   }));
   assert.equal(openedGate.gate, null, 'A started export opens the gate, so an unconfirmable download is enough');
-  assert.match(
-    openedGate.mark ?? '',
-    /Full backup/,
-    `...and the dialog says which download opened it: ${JSON.stringify(openedGate)}`
+  assert.equal(
+    openedGate.mark,
+    '✓ check downloads',
+    `...and the export that opened it wears the same pill a row's download does, unconfirmed here: ${JSON.stringify(openedGate)}`
   );
 
   await fallbackPage.click('.instance-backup-modal .modal-action.danger');

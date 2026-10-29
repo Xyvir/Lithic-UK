@@ -422,6 +422,9 @@ $tw.lithic = $tw.lithic || {};
 $tw.lithic.convertPdfToTiddlers = convertPdfDataToTiddlers;
 // The same handoff for an image, which the desktop app also opens by association.
 $tw.lithic.convertImageToTiddlers = convertImageDataToTiddlers;
+// And for a book, which it opens the same way: the launcher cannot unzip an EPUB either, so the
+// bytes travel and the converter above does the work in this wiki.
+$tw.lithic.convertEpubToTiddlers = convertEpubToTiddlers;
 
 exports.startup = function() {
     var alertTitle = "$:/temp/alerts/lithic-import-progress";

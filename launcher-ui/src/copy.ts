@@ -409,8 +409,6 @@ const en = {
       docsTitle: 'Opens the Lithic repository',
       backup: 'Download Full Backup',
       backupTitle: 'Every recent Lith, its history and the bookmarks, in one file',
-      backupSaved: 'Backup saved.',
-      backupStarted: 'Check your Downloads folder for the backup.',
       backupFailed: (detail: string) => `The backup could not be written (${detail}).`
     },
 
@@ -465,7 +463,6 @@ const en = {
           : `Download the last ${remaining}, or take the full backup, to unlock Reset.`,
       fullBackup: 'Download Full Backup',
       fullBackupTitle: 'Every recent Lith, its history and the bookmarks, in one file',
-      fullBackupTaken: '✓ Full backup downloaded.',
       reset: 'Reset Recents',
       resetLockedTitle: 'Download every Lith, or take the full backup, first',
       /**
@@ -521,9 +518,6 @@ const en = {
        */
       downloadCaptureTitle: 'Download the unsaved edits',
       downloadCaptureAria: (when: string) => `Download the unsaved edits from ${when}`,
-      savedCopy: (edits: number) => `Saved a copy of ${edits} edit${edits === 1 ? '' : 's'}.`,
-      /** The browser's download, which cannot confirm the bytes landed. Says so. */
-      startedCopy: (edits: number) => `Download started for ${edits} edit${edits === 1 ? '' : 's'}.`,
       /**
        * Writing the capture on top of the document without opening it: the workflow this exists
        * for is a stale capture on a Lith whose file is fine, where opening the whole wiki to
@@ -825,9 +819,6 @@ const en = {
     recovering: (edits: number, name: string) =>
       `Recovering ${edits} unsaved edit${edits === 1 ? '' : 's'} for ${name}`,
     editsKept: 'Unsaved edits kept for later',
-    recovered: (name: string) => `Recovered ${name}`,
-    savedFile: (name: string) => `Saved ${name}`,
-    downloadingFile: (name: string) => `Downloading ${name}`,
     downloadFailed: (detail: string) => `Download failed: ${detail}`,
     noCachedCopy: (name: string) => `No cached copy of ${name} to download`,
     reindexing: 'Re-indexing recent liths…',
@@ -1186,8 +1177,6 @@ const es: Copy = {
       docsTitle: 'Abre el repositorio de Lithic',
       backup: 'Descargar copia completa',
       backupTitle: 'Todos los Liths recientes, su historial y los marcadores, en un archivo',
-      backupSaved: 'Copia guardada.',
-      backupStarted: 'Busca la copia en tu carpeta de descargas.',
       backupFailed: (detail: string) => `No se pudo escribir la copia (${detail}).`
     },
 
@@ -1231,7 +1220,6 @@ const es: Copy = {
           : `Descarga los ${remaining} últimos, o la copia completa, para activar Reiniciar.`,
       fullBackup: 'Descargar copia completa',
       fullBackupTitle: 'Todos los Liths recientes, su historial y los marcadores, en un archivo',
-      fullBackupTaken: '✓ Copia completa descargada.',
       reset: 'Reiniciar recientes',
       resetLockedTitle: 'Descarga cada Lith, o la copia completa, primero',
       backupOnly: {
@@ -1264,8 +1252,6 @@ const es: Copy = {
       inlineNote: 'Aún sin guardar',
       downloadCaptureTitle: 'Descargar las ediciones sin guardar',
       downloadCaptureAria: (when: string) => `Descargar las ediciones sin guardar del ${when}`,
-      savedCopy: (edits: number) => `Copia guardada de ${edits} ${edits === 1 ? 'edición' : 'ediciones'}.`,
-      startedCopy: (edits: number) => `Descarga iniciada de ${edits} ${edits === 1 ? 'edición' : 'ediciones'}.`,
       merge: 'Fusionar',
       merged: (edits: number) => `Se fusionaron ${edits} ${edits === 1 ? 'edición' : 'ediciones'} en este Lith.`,
       mergedIntoCopy: (edits: number) =>
@@ -1515,9 +1501,6 @@ const es: Copy = {
     recovering: (edits: number, name: string) =>
       `Recuperando ${edits} ${edits === 1 ? 'edición' : 'ediciones'} sin guardar de ${name}`,
     editsKept: 'Ediciones sin guardar para más tarde',
-    recovered: (name: string) => `${name} recuperado`,
-    savedFile: (name: string) => `${name} guardado`,
-    downloadingFile: (name: string) => `Descargando ${name}`,
     downloadFailed: (detail: string) => `Falló la descarga: ${detail}`,
     noCachedCopy: (name: string) => `No hay copia guardada de ${name} para descargar`,
     reindexing: 'Reindexando los liths recientes…',
@@ -1868,8 +1851,6 @@ const fr: Copy = {
       docsTitle: 'Ouvre le dépôt Lithic',
       backup: 'Télécharger la sauvegarde complète',
       backupTitle: 'Tous les Liths récents, leur historique et les marque-pages, en un fichier',
-      backupSaved: 'Sauvegarde enregistrée.',
-      backupStarted: 'Cherchez la sauvegarde dans vos téléchargements.',
       backupFailed: (detail: string) => `Impossible d’écrire la sauvegarde (${detail}).`
     },
 
@@ -1913,7 +1894,6 @@ const fr: Copy = {
           : `Téléchargez les ${remaining} derniers, ou la sauvegarde complète, pour déverrouiller Réinitialiser.`,
       fullBackup: 'Télécharger la sauvegarde complète',
       fullBackupTitle: 'Tous les Liths récents, leur historique et les marque-pages, en un fichier',
-      fullBackupTaken: '✓ Sauvegarde complète téléchargée.',
       reset: 'Réinitialiser les récents',
       resetLockedTitle: 'Téléchargez chaque Lith, ou la sauvegarde complète, d’abord',
       backupOnly: {
@@ -1946,8 +1926,6 @@ const fr: Copy = {
       inlineNote: 'Pas encore enregistré',
       downloadCaptureTitle: 'Télécharger les modifications non enregistrées',
       downloadCaptureAria: (when: string) => `Télécharger les modifications non enregistrées du ${when}`,
-      savedCopy: (edits: number) => `Copie enregistrée de ${edits} ${edits === 1 ? 'modification' : 'modifications'}.`,
-      startedCopy: (edits: number) => `Téléchargement lancé de ${edits} ${edits === 1 ? 'modification' : 'modifications'}.`,
       merge: 'Fusionner',
       merged: (edits: number) => `Fusion de ${edits} ${edits === 1 ? 'modification' : 'modifications'} dans ce Lith.`,
       mergedIntoCopy: (edits: number) =>
@@ -2197,9 +2175,6 @@ const fr: Copy = {
     recovering: (edits: number, name: string) =>
       `Récupération de ${edits} ${edits === 1 ? 'modification' : 'modifications'} non enregistrée${edits === 1 ? '' : 's'} pour ${name}`,
     editsKept: 'Modifications non enregistrées gardées pour plus tard',
-    recovered: (name: string) => `${name} récupéré`,
-    savedFile: (name: string) => `${name} enregistré`,
-    downloadingFile: (name: string) => `Téléchargement de ${name}`,
     downloadFailed: (detail: string) => `Échec du téléchargement : ${detail}`,
     noCachedCopy: (name: string) => `Aucune copie en cache de ${name} à télécharger`,
     reindexing: 'Réindexation des liths récents…',
@@ -2547,8 +2522,6 @@ const de: Copy = {
       docsTitle: 'Öffnet das Lithic-Repository',
       backup: 'Vollständige Sicherung herunterladen',
       backupTitle: 'Alle neuen Liths, ihr Verlauf und die Lesezeichen, in einer Datei',
-      backupSaved: 'Sicherung gespeichert.',
-      backupStarted: 'Suchen Sie die Sicherung im Download-Ordner.',
       backupFailed: (detail: string) => `Die Sicherung konnte nicht geschrieben werden (${detail}).`
     },
 
@@ -2592,7 +2565,6 @@ const de: Copy = {
           : `Laden Sie die letzten ${remaining} herunter, oder die vollständige Sicherung, um Leeren freizugeben.`,
       fullBackup: 'Vollständige Sicherung herunterladen',
       fullBackupTitle: 'Alle neuen Liths, ihr Verlauf und die Lesezeichen, in einer Datei',
-      fullBackupTaken: '✓ Vollständige Sicherung heruntergeladen.',
       reset: 'Zuletzt verwendete zurücksetzen',
       resetLockedTitle: 'Erst jeden Lith oder die vollständige Sicherung herunterladen',
       backupOnly: {
@@ -2625,8 +2597,6 @@ const de: Copy = {
       inlineNote: 'Noch nicht gespeichert',
       downloadCaptureTitle: 'Ungespeicherte Änderungen herunterladen',
       downloadCaptureAria: (when: string) => `Ungespeicherte Änderungen vom ${when} herunterladen`,
-      savedCopy: (edits: number) => `Kopie mit ${edits} ${edits === 1 ? 'Änderung' : 'Änderungen'} gespeichert.`,
-      startedCopy: (edits: number) => `Download von ${edits} ${edits === 1 ? 'Änderung' : 'Änderungen'} gestartet.`,
       merge: 'Zusammenführen',
       merged: (edits: number) => `Änderungen in diesen Lith zusammengeführt (${edits}).`,
       mergedIntoCopy: (edits: number) => `Änderungen in die Kopie dieses Browsers zusammengeführt (${edits}).`,
@@ -2875,9 +2845,6 @@ const de: Copy = {
     recovering: (edits: number, name: string) =>
       `Rufe ${edits} ${edits === 1 ? 'ungespeicherte Änderung' : 'ungespeicherte Änderungen'} für ${name} wieder her`,
     editsKept: 'Ungespeicherte Änderungen für später behalten',
-    recovered: (name: string) => `${name} wiederhergestellt`,
-    savedFile: (name: string) => `${name} gespeichert`,
-    downloadingFile: (name: string) => `${name} wird heruntergeladen`,
     downloadFailed: (detail: string) => `Download fehlgeschlagen: ${detail}`,
     noCachedCopy: (name: string) => `Keine zwischengespeicherte Kopie von ${name} zum Herunterladen`,
     reindexing: 'Zuletzt verwendete Liths werden neu indexiert…',

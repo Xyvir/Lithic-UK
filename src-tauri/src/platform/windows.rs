@@ -157,11 +157,12 @@ pub fn install_launch_entry(exe: &Path) -> Result<Option<PathBuf>, String> {
 
 /// Extensions the desktop app opens, with their Open With descriptions.
 ///
-/// Two kinds sit here. Most are documents this app edits, mounted as they are. A `pdf` and the
-/// image types are not: the app renders the one into pages and draws the other on a board,
-/// making a new Lith beside the file (see `import_lith_target` in `lib.rs` and the import
-/// handler's open-request startup), and the file itself is only ever read. They are registered
-/// the same way as the rest, which is an Open With entry rather than a default association.
+/// Two kinds sit here. Most are documents this app edits, mounted as they are. A `pdf`, an
+/// `epub` and the image types are not: the app renders a PDF into pages, splits a book into
+/// chapters and draws an image on a board, making a new Lith beside the file (see
+/// `import_lith_target` in `lib.rs` and the import handler's open-request startup), and the file
+/// itself is only ever read. They are registered the same way as the rest, which is an Open With
+/// entry rather than a default association.
 ///
 /// `jpg` sits beside `jpeg` because it is the same format under the extension most cameras and
 /// phones write, and a person with `photo.jpg` has no reason to know the difference.
@@ -174,6 +175,7 @@ const ASSOCIATION_TYPES: &[(&str, &str)] = &[
     ("ipynb", "Lithic Notebook"),
     ("html", "Lithic HTML"),
     ("pdf", "Lithic PDF"),
+    ("epub", "Lithic Book"),
     ("png", "Lithic Image"),
     ("jpg", "Lithic Image"),
     ("jpeg", "Lithic Image"),

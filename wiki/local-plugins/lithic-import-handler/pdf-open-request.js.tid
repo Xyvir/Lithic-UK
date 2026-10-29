@@ -31,6 +31,11 @@ An image is the same gesture with a different converter. The launcher reads the 
 bytes and hands them over on the window; this module draws them on a board and opens it, so a
 double-click on a photograph is the same outcome as a double-click on a PDF: a canvas to write
 on, laid over the thing you opened rather than beside it in the river.
+
+A book is that gesture with the chapters as the answer. The launcher hands over the EPUB's
+bytes, this module splits it into a chapter per spine document and opens the first one, and the
+chapters are Favorites in reading order so the sidebar is how a person reads on. The river holds
+one chapter rather than a whole book, which is the same reason a PDF opens as a board.
 \*/
 (function(){
 
@@ -67,6 +72,11 @@ var BOARD_TYPE = "application/tldr";
 // The launcher's half of the second handoff: an image rather than a PDF. One gesture is one of
 // the two and never both, so each is read only when the other is absent.
 var IMAGE_REQUEST = "__LITHIC_IMAGE_IMPORT__";
+
+// The third handoff, and the same shape: an EPUB rather than a PDF. It is a book rather than a
+// page, so what opens is its first chapter, and the whole book is the chapter list rather than
+// one river.
+var EPUB_REQUEST = "__LITHIC_EPUB_IMPORT__";
 
 // What each registered extension is, as the type a data URL has to declare for the browser's own
 // decoder to read the bytes. `jpg` and `jpeg` are one format under the two spellings it has.
@@ -283,6 +293,47 @@ function openRequestedImage(request) {
     });
 }
 
+/**
+ * The book itself: convert it, and open the chapter it is entered at.
+ *
+ * A book is entered at its first chapter, so that is what the story river holds. The chapters are
+ * also Favorites in reading order, so the sidebar is how a person moves through the book; putting
+ * all of it in the river at once would load a whole book into one page.
+ *
+ * Nothing is saved here, for the same reason a PDF's pages are not: opening a book to read it is
+ * a view of that file, and the save the person presses is what writes the Lith beside it.
+ */
+function openRequestedBook(request) {
+    var base64 = request.base64;
+    var filename = request.filename || "book.epub";
+    var convert = $tw.lithic && $tw.lithic.convertEpubToTiddlers;
+    if (typeof base64 !== "string" || base64 === "" || typeof convert !== "function") {
+        return;
+    }
+
+    setProgress("Importing " + filename + " as a book...");
+    Promise.resolve(convert(base64ToArrayBuffer(base64), filename, setProgress)).then(function(book){
+        var entry = book.entry;
+        book.tiddlers.forEach(function(fields){
+            $tw.wiki.addTiddler(new $tw.Tiddler(
+                $tw.wiki.getCreationFields(),
+                $tw.wiki.getModificationFields(),
+                fields
+            ));
+        });
+        clearProgress();
+        if (entry) {
+            $tw.wiki.addTiddler(new $tw.Tiddler({
+                title: "$:/StoryList",
+                list: $tw.utils.stringifyList([entry])
+            }));
+        }
+    }).catch(function(error){
+        clearProgress();
+        setProgress("Could not open the book: " + (error && error.message ? error.message : error));
+    });
+}
+
 exports.startup = function() {
     if (typeof window === "undefined") {
         return;
@@ -301,6 +352,14 @@ exports.startup = function() {
         // so a later mount in this window never finds a picture it did not ask for.
         window[IMAGE_REQUEST] = null;
         openRequestedImage(image);
+        return;
+    }
+    var book = window[EPUB_REQUEST];
+    if (book) {
+        // Taken off the window for the same reason the two above are: a whole book is not
+        // something a later mount in this window should find and import again.
+        window[EPUB_REQUEST] = null;
+        openRequestedBook(book);
         return;
     }
     var board = window[BOARD_REQUEST];

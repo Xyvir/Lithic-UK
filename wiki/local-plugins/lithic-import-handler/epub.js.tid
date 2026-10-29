@@ -14,6 +14,10 @@ module-type: library
    what this wiki reads a reading position from: one page at a time, without the
    whole book in the story river. Each chapter is also tagged Favorite, so the
    sidebar lists them directly, which is the way back to a chapter later on.
+
+   That list is ordered by the Favorite tag tiddler's own list rather than by
+   title, so the chapters are written into it in document order: the sidebar
+   reads like the book, not like a shelf filed A-Z.
 */
 (function(){
 "use strict";
@@ -26,6 +30,11 @@ module-type: library
 // `IYSS`), and five is enough to tell two books apart without the code growing
 // longer than the words it introduces.
 var CODE_LENGTH = 5;
+
+// The tag the sidebar lists from. It is also the tiddler whose own list holds
+// that order, because `tagging[]` sorts by it and appends whatever it does not
+// name.
+var FAVORITE_TAG = "Favorite";
 
 // The image types this wiki can draw, with the names it knows them by. A book
 // says `image/jpeg`, and TiddlyWiki's own table of content types spells that
@@ -556,6 +565,30 @@ function uniqueTitle(base, taken) {
     return title;
 }
 
+// The Favorite tag tiddler, whose list is the order the sidebar draws. Without
+// one the tag falls back to titles, which for a book means A-Z: the order a
+// shelf is filed in, not the order a book is read in. So the chapters are
+// written into that list in document order, after whatever is already favorite,
+// which is the order somebody dragged it into.
+function favoriteOrder(chapters) {
+    var tagTiddler = $tw.wiki.getTiddler(FAVORITE_TAG);
+    // Copied rather than built fresh, so a caption or any other field somebody
+    // put on the tag is not dropped by writing its order.
+    var fields = Object.assign({}, tagTiddler ? tagTiddler.fields : {});
+    fields.title = FAVORITE_TAG;
+    // A tiddler hands its list back as the array it holds, which is read-only,
+    // so it is copied rather than appended to: the wiki's own field is not this
+    // function's to change, and pushing onto it throws.
+    var order = ($tw.utils.parseStringArray(fields.list) || []).slice();
+    for (var i = 0; i < chapters.length; i++) {
+        if (order.indexOf(chapters[i].title) === -1) {
+            order.push(chapters[i].title);
+        }
+    }
+    fields.list = $tw.utils.stringifyList(order);
+    return fields;
+}
+
 async function convertEpubToTiddlers(arrayBuffer, fileName, setProgress) {
     var note = typeof setProgress === "function" ? setProgress : function() {};
     var bytes = new Uint8Array(arrayBuffer);
@@ -621,7 +654,7 @@ async function convertEpubToTiddlers(arrayBuffer, fileName, setProgress) {
             title: chapters[c].title,
             "stream-type": "default",
             "stream-list": $tw.utils.stringifyList(chapters[c].children),
-            tags: c === 0 ? "Dogear Favorite" : "Favorite",
+            tags: c === 0 ? "Dogear " + FAVORITE_TAG : FAVORITE_TAG,
             text: ""
         };
         // A chapter names the one either side of it, which is what the reading
@@ -635,6 +668,9 @@ async function convertEpubToTiddlers(arrayBuffer, fileName, setProgress) {
         }
         tiddlers.push(fields);
     }
+    // The sidebar draws the book in this order rather than alphabetically, and
+    // the import carries the tag tiddler that says so.
+    tiddlers.push(favoriteOrder(chapters));
     // The first chapter is what an import reports and what the reader is given:
     // it is where the book starts, and every other chapter is one step away.
     return { tiddlers: tiddlers, entry: chapters[0].title };

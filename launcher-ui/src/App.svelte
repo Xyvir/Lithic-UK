@@ -7,6 +7,7 @@
   import {
     createFileBridge,
     PickerUnavailableError,
+    type SaveOutcome,
     saveTextVerifiably,
     tauriInvoke,
     tauriListen
@@ -2706,13 +2707,26 @@ import { backupFileName, collectInstanceBackup, mergeBookmarks, parseInstanceBac
    * re-read on every press.
    */
   let historyDirty: DirtyStateRecord | null = null;
+  /** The capture row's own key: the one row in the trail that is not a version, so it has no id. */
+  const CAPTURE_ROW_ID = 'inline';
   let historyCaptureOpen = false;
   let historyCaptureSaving = false;
   /**
-   * What the row says after a save lands. The header's status line is behind this modal, so a
+   * What this dialog says after a merge lands. The header's status line is behind the modal, so a
    * sentence about what the dialog just wrote has to be drawn in the dialog.
    */
-  let historyCaptureNotice = '';
+  let historyNotice = '';
+  /**
+   * What each row's download reports, in the pill the warning dialogs have always drawn beside a
+   * row's download button (`orphanPill`). These rows reported in the header's status line
+   * instead, which this dialog covers: on an instance page inside the app a download wrote the
+   * file and said nothing at all. Keyed by the row's own id, so a row's mark stays on its row.
+   */
+  let historyDownloads: Record<string, OrphanDownloadState> = {};
+
+  function setHistoryDownload(id: string, state: OrphanDownloadState): void {
+    historyDownloads = { ...historyDownloads, [id]: state };
+  }
   // Per-wiki version-history availability keys the history affordance:
   // wikis with no recorded versions (never saved, scratch-before-save)
   // hide the button instead of opening an empty modal.
@@ -3991,21 +4005,44 @@ import { backupFileName, collectInstanceBackup, mergeBookmarks, parseInstanceBac
   /**
    * The kinds of associated file this app imports rather than edits.
    *
-   * A PDF is rendered into pages and an image is drawn on a board. Neither is a document body,
-   * so each has to be told apart before anything reads it as text, and the two share everything
-   * after that: a Lith is written beside the file, the bytes travel to the engine, and the board
-   * that comes back is what opens.
+   * A PDF is rendered into pages, an EPUB is split into a chapter per spine document, and an
+   * image is drawn on a board. None is a document body, so each has to be told apart before
+   * anything reads it as text, and the three share everything after that: a Lith is written
+   * beside the file, the bytes travel to the engine, and the importer's own converter does the
+   * work there, so a double-click and a drop produce the same tiddlers.
    *
    * `jpg` is the same format as `jpeg` under the extension most cameras write, and both are
    * registered, so both have to arrive here.
    */
-  type ImportKind = 'pdf' | 'image';
+  type ImportKind = 'pdf' | 'epub' | 'image';
 
   function importKindOf(path: string): ImportKind | null {
     if (/\.pdf$/i.test(path)) return 'pdf';
+    if (/\.epub$/i.test(path)) return 'epub';
     if (/\.(png|jpe?g|bmp|webp)$/i.test(path)) return 'image';
     return null;
   }
+
+  /**
+   * The window property each converter is handed on, one per kind.
+   *
+   * A window property rather than a tiddler, because the payload is a whole file and the store is
+   * not a place to carry one, and a separate key per kind because the engine reads one and never
+   * the others: one gesture is one file, and a startup that had to sniff the bytes would be
+   * guessing (see `pdf-open-request.js`, which takes each of these).
+   */
+  const IMPORT_REQUEST: Record<ImportKind, string> = {
+    pdf: '__LITHIC_PDF_IMPORT__',
+    epub: '__LITHIC_EPUB_IMPORT__',
+    image: '__LITHIC_IMAGE_IMPORT__'
+  };
+
+  /** The name each kind falls back to when a path carries none of its own. */
+  const IMPORT_FALLBACK_NAME: Record<ImportKind, string> = {
+    pdf: 'document.pdf',
+    epub: 'book.epub',
+    image: 'image.png'
+  };
 
   /**
    * The container the import names after the file: its name without the extension.
@@ -4022,29 +4059,26 @@ import { backupFileName, collectInstanceBackup, mergeBookmarks, parseInstanceBac
   }
 
   /**
-   * Import the file into the Lith that sits beside it: a PDF's pages, or an image on a board.
+   * Import the file into the Lith that sits beside it: a PDF's pages, a book's chapters, or an
+   * image on a board.
    *
-   * Nothing here renders anything: both converters live in the wiki, so the launcher reads the
-   * file's bytes, hands them to the mounted document, and the importer's own startup turns them
-   * into the tiddlers. The source file itself is only ever read.
+   * Nothing here renders anything: the three converters live in the wiki, so the launcher reads
+   * the file's bytes, hands them to the mounted document, and the importer's own startup turns
+   * them into the tiddlers. The source file itself is only ever read.
    *
-   * The sibling is not written and not listed: reading a PDF through this app is a view of that
-   * PDF, and a file on the desktop for every look is clutter nobody asked for. The path is where
-   * a save will go, so the file the first save creates is the one `import_lith_target` would have
-   * answered with on the next open, and the row arrives with it (see `mount.unwritten` below).
+   * The sibling is not written and not listed: reading a PDF or a book through this app is a view
+   * of that file, and a file on the desktop for every look is clutter nobody asked for. The path
+   * is where a save will go, so the file the first save creates is the one `import_lith_target`
+   * would have answered with on the next open, and the row arrives with it (see `mount.unwritten`
+   * below).
    */
   async function importIntoNewLith(sourcePath: string, lithPath: string, kind: ImportKind) {
-    const sourceName = sourcePath.split(/[\\/]/).pop() || (kind === 'pdf' ? 'document.pdf' : 'image.png');
+    const sourceName = sourcePath.split(/[\\/]/).pop() || IMPORT_FALLBACK_NAME[kind];
     const lithName = lithPath.split(/[\\/]/).pop() || `${importContainerTitle(sourceName) || 'document'}.lith`;
     // The bytes are read before anything is mounted, so a file this process cannot read opens no
     // document at all rather than one holding a failed import.
     const base64 = await tauriInvoke<string>('read_file_base64', { path: sourcePath });
-    // Each converter runs inside the mounted document, which cannot reach this process's bridge
-    // any other way, so the payload travels on the window. A window property survives the
-    // engine's document.open/write boot, which is the same reason the file handle is left there.
-    // The two keys are separate because the engine reads one and never the other: one gesture is
-    // a PDF or an image, and a startup that had to sniff the bytes would be guessing.
-    (window as any)[kind === 'pdf' ? '__LITHIC_PDF_IMPORT__' : '__LITHIC_IMAGE_IMPORT__'] = {
+    (window as any)[IMPORT_REQUEST[kind]] = {
       filename: sourceName,
       base64
     };
@@ -4068,9 +4102,9 @@ import { backupFileName, collectInstanceBackup, mergeBookmarks, parseInstanceBac
     try {
       const kind = importKindOf(path);
       if (kind) {
-        // Before the text read below, which neither of these has any business going through:
-        // a PDF's pages or an image's pixels are turned into a Lith beside the file instead of
-        // being mounted as a body.
+        // Before the text read below, which none of these has any business going through: a
+        // PDF's pages, a book's chapters or an image's pixels are turned into a Lith beside the
+        // file instead of being mounted as a body.
         const target = await tauriInvoke<{ path: string; exists: boolean }>('import_lith_target', { file: path });
         if (target.exists) {
           // This file has already become a Lith, so the copy opens as it stands. Re-importing
@@ -4080,8 +4114,9 @@ import { backupFileName, collectInstanceBackup, mergeBookmarks, parseInstanceBac
           // is the board rather than the layout that Lith was last saved in, so the container the
           // import wrote travels along and the engine opens the board. Opening that same Lith on
           // its own, from the recents list or a Mount, carries no container and leaves it exactly
-          // as it says.
-          return await mountDiskPath(target.path, importContainerTitle(path), opts);
+          // as it says. A book has no container to force open: its sibling is the whole book, so
+          // `open the EPUB` means the Lith as it says, at whatever chapter it was left on.
+          return await mountDiskPath(target.path, kind === 'epub' ? undefined : importContainerTitle(path), opts);
         }
         await importIntoNewLith(path, target.path, kind);
         status = copy.status.mounted(fileName);
@@ -4152,6 +4187,32 @@ import { backupFileName, collectInstanceBackup, mergeBookmarks, parseInstanceBac
     skippedImports = result.refused;
   }
 
+  /**
+   * Start a Lith from a book dropped on the launcher.
+   *
+   * A book dropped here has no sibling to become: the launcher is the page before any document,
+   * so the drop starts one, named the way the Lith beside a file is named. The chapters are made
+   * by the importer inside the mounted document rather than here, so the bytes are read, encoded
+   * and left on the window for the engine's startup to take, which is what a double-clicked book
+   * does too (see `pdf-open-request.js`).
+   */
+  async function openDroppedBook(file: File) {
+    const bytes = new Uint8Array(await file.arrayBuffer());
+    // A chunk at a time rather than one character per byte: a book runs to megabytes, and 32 KB
+    // is under the argument count every browser accepts.
+    let binary = '';
+    for (let index = 0; index < bytes.length; index += 0x8000) {
+      binary += String.fromCharCode(...bytes.subarray(index, index + 0x8000));
+    }
+    (window as any)[IMPORT_REQUEST.epub] = { filename: file.name, base64: btoa(binary) };
+    const name = `${file.name.replace(/\.epub$/i, '')}_epub.lith`;
+    lithText = '';
+    fileName = name;
+    filePath = undefined;
+    await mountWiki('', name);
+    status = copy.status.mounted(name);
+  }
+
   async function handleDrop(event: DragEvent) {
     const droppedText = event.dataTransfer?.getData('URL') || event.dataTransfer?.getData('text/plain') || '';
     if (droppedText && isPayloadShareUrl(droppedText)) {
@@ -4178,6 +4239,7 @@ import { backupFileName, collectInstanceBackup, mergeBookmarks, parseInstanceBac
     // three files expects to see three. Reading `files[0]` made the rest arrive nowhere.
     const queued: PendingTiddler[] = [];
     let wiki: File | null = null;
+    let book: File | null = null;
     let unreadable = false;
     for (const file of Array.from(files)) {
       const lowerName = file.name.toLowerCase();
@@ -4202,6 +4264,9 @@ import { backupFileName, collectInstanceBackup, mergeBookmarks, parseInstanceBac
       } else if (/\.(?:html?|htm)$/.test(lowerName) && !wiki) {
         // One page opens at a time, so the first wiki in a drop is the one that opens.
         wiki = file;
+      } else if (lowerName.endsWith('.epub') && !book) {
+        // One book at a time, for the same reason: a mount holds one document.
+        book = file;
       }
     }
     if (queued.length > 0) {
@@ -4215,6 +4280,14 @@ import { backupFileName, collectInstanceBackup, mergeBookmarks, parseInstanceBac
       // those tiddlers merged rather than leaving them queued behind a replaced page.
       try {
         await mountWiki(await wiki.text(), wiki.name);
+      } catch (error) {
+        mountError = error instanceof Error ? error.message : String(error);
+      }
+    } else if (book) {
+      // A book dropped beside a page is not opened: the page is the document, and the second
+      // mount would replace it.
+      try {
+        await openDroppedBook(book);
       } catch (error) {
         mountError = error instanceof Error ? error.message : String(error);
       }
@@ -4527,6 +4600,7 @@ import { backupFileName, collectInstanceBackup, mergeBookmarks, parseInstanceBac
     emojiChoice = brandEmoji;
     emojiStatus = '';
     backupStatus = '';
+    backupDownload = 'idle';
     flashProblem = '';
     showEmojiPicker = true;
   }
@@ -4545,6 +4619,7 @@ import { backupFileName, collectInstanceBackup, mergeBookmarks, parseInstanceBac
   function closeInstanceManagement(): void {
     showEmojiPicker = false;
     backupStatus = '';
+    backupDownload = 'idle';
   }
 
   /** Preview on click: the header and tab update before anything is saved. */
@@ -4811,10 +4886,14 @@ import { backupFileName, collectInstanceBackup, mergeBookmarks, parseInstanceBac
    * out of a capped list.
    */
   type HistoryRow = HistoryEntry & { inline?: boolean };
+  // Each row's download mark, resolved here so the markup stays a plain loop, the way the
+  // warning dialogs' rows resolve theirs.
   $: historyRows = (historyUnsavedTs
-    ? [{ id: 'inline', ts: historyUnsavedTs, sizeBytes: 0, lastModified: utcStamp(historyUnsavedTs), inline: true } as HistoryRow]
+    ? [{ id: CAPTURE_ROW_ID, ts: historyUnsavedTs, sizeBytes: 0, lastModified: utcStamp(historyUnsavedTs), inline: true } as HistoryRow]
     : ([] as HistoryRow[])
-  ).concat(historyEntries);
+  )
+    .concat(historyEntries)
+    .map((row) => ({ ...row, pill: orphanPill(historyDownloads[row.id] ?? 'idle') }));
   /** The row this dialog is about, when the list still has it. */
   $: historyRow = showHistoryModal ? recentFiles.find((item) => getEntryName(item) === historyName) ?? null : null;
   /**
@@ -4858,7 +4937,8 @@ import { backupFileName, collectInstanceBackup, mergeBookmarks, parseInstanceBac
     historyDirty = null;
     historyCaptureOpen = false;
     historyCaptureSaving = false;
-    historyCaptureNotice = '';
+    historyNotice = '';
+    historyDownloads = {};
     historyBrowserOnly = browserOnly;
     historyError = '';
     showHistoryModal = true;
@@ -4888,7 +4968,8 @@ import { backupFileName, collectInstanceBackup, mergeBookmarks, parseInstanceBac
     historyDirty = null;
     historyCaptureOpen = false;
     historyCaptureSaving = false;
-    historyCaptureNotice = '';
+    historyNotice = '';
+    historyDownloads = {};
   }
 
   /**
@@ -4902,22 +4983,33 @@ import { backupFileName, collectInstanceBackup, mergeBookmarks, parseInstanceBac
    * write actually landed.
    */
   async function downloadHistoryVersion(id: string) {
+    // The mark is the report, on the row whose button was pressed: it says the copy is being
+    // written, then what came of it.
+    setHistoryDownload(id, 'saving');
     try {
       const version = await downloadWikiVersion(historyName, id);
       if (!version) {
+        setHistoryDownload(id, 'idle');
         historyError = copy.status.noHistoryVersion;
         return;
       }
       const lith = version.text.trim().startsWith('[') ? serializeJsonToLith(version.text) : version.text;
+      let outcome: SaveOutcome = 'started';
       if (documents) {
-        const outcome = await saveTextVerifiably(version.fileName, lith, documents);
-        // The user backed out of the save dialog: no file, no notice, and no error.
-        if (outcome === 'cancelled') return;
+        outcome = await saveTextVerifiably(version.fileName, lith, documents);
+        // The user backed out of the save dialog: no file, no mark, and no error.
+        if (outcome === 'cancelled') {
+          setHistoryDownload(id, 'idle');
+          return;
+        }
       } else {
         saveBlobAs(version.fileName, version.text);
       }
-      status = copy.status.recovered(version.fileName);
+      // Only the app's own write earns the green check: no browser reports whether a download
+      // finished, and an instance page inside the app is exactly that shape.
+      setHistoryDownload(id, outcome === 'saved' ? 'saved' : 'unverified');
     } catch (error) {
+      setHistoryDownload(id, 'failed');
       historyError = error instanceof Error ? error.message : String(error);
     }
   }
@@ -4945,26 +5037,28 @@ import { backupFileName, collectInstanceBackup, mergeBookmarks, parseInstanceBac
       return;
     }
     historyCaptureSaving = true;
-    historyCaptureNotice = '';
+    setHistoryDownload(CAPTURE_ROW_ID, 'saving');
+    historyNotice = '';
     historyError = '';
     try {
       const fileName = unsavedFileName(historyName, record.ts);
       const json = JSON.stringify(record.tiddlers);
       if (documents) {
         const outcome = await saveTextVerifiably(fileName, serializeJsonToLith(json), documents);
-        // The user backed out of the save dialog: no file, no notice, and no error.
-        if (outcome === 'cancelled') return;
-        // `started` is the platform's unconfirmed download. It says what happened rather
-        // than borrowing the sentence a confirmed write earns, for the reason
-        // `saveTextVerifiably` documents: the browser never reports whether it finished.
-        historyCaptureNotice = outcome === 'saved'
-          ? copy.dialogs.history.savedCopy(record.tiddlers.length)
-          : copy.dialogs.history.startedCopy(record.tiddlers.length);
+        // The user backed out of the save dialog: no file, no mark, and no error.
+        if (outcome === 'cancelled') {
+          setHistoryDownload(CAPTURE_ROW_ID, 'idle');
+          return;
+        }
+        // The same two states a version row reports, for the reason `downloadHistoryVersion`
+        // gives: only the app's own write can prove the bytes landed.
+        setHistoryDownload(CAPTURE_ROW_ID, outcome === 'saved' ? 'saved' : 'unverified');
       } else {
         saveBlobAs(fileName, json);
-        historyCaptureNotice = copy.dialogs.history.startedCopy(record.tiddlers.length);
+        setHistoryDownload(CAPTURE_ROW_ID, 'unverified');
       }
     } catch (error) {
+      setHistoryDownload(CAPTURE_ROW_ID, 'failed');
       historyError = error instanceof Error ? error.message : String(error);
     } finally {
       historyCaptureSaving = false;
@@ -5058,7 +5152,7 @@ import { backupFileName, collectInstanceBackup, mergeBookmarks, parseInstanceBac
       return;
     }
     historyCaptureSaving = true;
-    historyCaptureNotice = '';
+    historyNotice = '';
     historyError = '';
     try {
       const target = historyHasFile(historyRow) ? await openHistoryDocument(name) : null;
@@ -5082,7 +5176,7 @@ import { backupFileName, collectInstanceBackup, mergeBookmarks, parseInstanceBac
       historyCaptureOpen = false;
       historyEntries = await listWikiVersions(name);
       void refreshDirtyBadges();
-      historyCaptureNotice = target
+      historyNotice = target
         ? copy.dialogs.history.merged(merged.applied)
         : copy.dialogs.history.mergedIntoCopy(merged.applied);
     } catch (error) {
@@ -5104,7 +5198,7 @@ import { backupFileName, collectInstanceBackup, mergeBookmarks, parseInstanceBac
     await clearDirtyState(historyName);
     historyDirty = null;
     historyCaptureOpen = false;
-    historyCaptureNotice = '';
+    historyNotice = '';
     historyError = '';
     void refreshDirtyBadges();
   }
@@ -5164,8 +5258,9 @@ import { backupFileName, collectInstanceBackup, mergeBookmarks, parseInstanceBac
         setOrphanDownload(name, 'idle');
         return;
       }
+      // The pill is the report. Every press this reaches is inside a dialog, and the header's
+      // status line is behind it, so a sentence there would be no confirmation at all.
       setOrphanDownload(name, outcome === 'saved' ? 'saved' : 'unverified');
-      status = outcome === 'saved' ? copy.status.savedFile(fileName) : copy.status.downloadingFile(fileName);
     } catch (error) {
       setOrphanDownload(name, 'failed');
       mountError = copy.status.downloadFailed(error instanceof Error ? error.message : String(error));
@@ -5241,8 +5336,15 @@ import { backupFileName, collectInstanceBackup, mergeBookmarks, parseInstanceBac
   /** Whether the fallback's gated Backup and Reset dialog is on screen. */
   let showInstanceBackup = false;
   let backupBusy = false;
-  /** What the last export said, on whichever dialog offered it. */
+  /** Why the last export failed, on whichever dialog offered it. */
   let backupStatus = '';
+  /**
+   * What the whole-instance export reports, beside the button that was pressed, in the same pill
+   * the rows use. `backupStatus` keeps the failures, because a mark says a copy failed while the
+   * sentence says why.
+   */
+  let backupDownload: OrphanDownloadState = 'idle';
+  $: backupPill = orphanPill(backupDownload);
   /** Whether the whole instance has been written out this session, which opens the gate. */
   let fullBackupTaken = false;
   /** Names a dropped backup could not land, because this device already holds them. */
@@ -5294,34 +5396,38 @@ import { backupFileName, collectInstanceBackup, mergeBookmarks, parseInstanceBac
   /** Open the dialog. */
   function openInstanceBackup(): void {
     backupStatus = '';
+    backupDownload = 'idle';
     showInstanceBackup = true;
   }
 
   /**
    * Write the whole store out as one file.
    *
-   * `source` decides which of two sentences confirms it, because the gated dialog has already
-   * explained what the file is for and the other two dialogs have not.
+   * One answer for all four dialogs that offer it, which is why this takes no `source`: the mark
+   * beside the button says what came of the press, and the dialog around it already explains what
+   * the file is for.
    */
-  async function downloadInstanceBackup(source: 'manage' | 'gate' | 'rebuild' | 'reset'): Promise<void> {
+  async function downloadInstanceBackup(): Promise<void> {
     if (backupBusy) return;
     backupBusy = true;
     backupStatus = '';
+    backupDownload = 'saving';
     try {
       // The bookmark list is handed in rather than read: it lives in localStorage, which is the
       // page's store, and the module that builds the document reads only the wiki store.
       const backup = await collectInstanceBackup(idb, { mode, origin: window.location.origin }, Date.now(), bookmarks);
       const outcome = await saveTextVerifiably(backupFileName(), serializeInstanceBackup(backup), documents);
       // The user backed out of the save dialog, which is not a backup: the gate stays shut.
-      if (outcome === 'cancelled') return;
+      if (outcome === 'cancelled') {
+        backupDownload = 'idle';
+        return;
+      }
       fullBackupTaken = true;
-      backupStatus =
-        outcome === 'saved'
-          ? source === 'gate'
-            ? copy.dialogs.instanceBackup.fullBackupTaken
-            : copy.dialogs.icon.backupSaved
-          : copy.dialogs.icon.backupStarted;
+      // The gate counts an unconfirmed download as a download, which is what the browser's own
+      // answer is: `saved` is only ever the app's write.
+      backupDownload = outcome === 'saved' ? 'saved' : 'unverified';
     } catch (error) {
+      backupDownload = 'failed';
       backupStatus = copy.dialogs.icon.backupFailed(error instanceof Error ? error.message : String(error));
     } finally {
       backupBusy = false;
@@ -5336,6 +5442,7 @@ import { backupFileName, collectInstanceBackup, mergeBookmarks, parseInstanceBac
     orphanDownloads = {};
     fullBackupTaken = false;
     backupStatus = '';
+    backupDownload = 'idle';
   }
 
   /**
@@ -7728,7 +7835,8 @@ import { backupFileName, collectInstanceBackup, mergeBookmarks, parseInstanceBac
           its business rather than as part of the icon choice above.
         -->
         <div class="modal-actions management-actions">
-          <button class="modal-action secondary full-backup-button" disabled={backupBusy} on:click={() => downloadInstanceBackup('manage')} title={copy.dialogs.icon.backupTitle}>{@render fullBackupIcon()}{backupBusy ? '…' : copy.dialogs.icon.backup}</button>
+          <button class="modal-action secondary full-backup-button" disabled={backupBusy} on:click={downloadInstanceBackup} title={copy.dialogs.icon.backupTitle}>{@render fullBackupIcon()}{backupBusy ? '…' : copy.dialogs.icon.backup}</button>
+          {#if backupPill}<span class="orphan-pill {backupPill.tone}" role="status" title={backupPill.title}>{backupPill.label}</span>{/if}
           <!--
             The appliance offer, drawn only where pressing it can reach a board: a Chromium
             tab has Web Serial, and the desktop app has a browser it can hand the page to.
@@ -7804,7 +7912,8 @@ import { backupFileName, collectInstanceBackup, mergeBookmarks, parseInstanceBac
           recents that were never in the list below; the note under it says so.
         -->
         <div class="instance-backup-full">
-          <button class="modal-action secondary full-backup-button" disabled={backupBusy} on:click={() => downloadInstanceBackup('rebuild')} title={copy.dialogs.rebuild.fullBackupTitle}>{@render fullBackupIcon()}{backupBusy ? '…' : copy.dialogs.rebuild.fullBackup}</button>
+          <button class="modal-action secondary full-backup-button" disabled={backupBusy} on:click={downloadInstanceBackup} title={copy.dialogs.rebuild.fullBackupTitle}>{@render fullBackupIcon()}{backupBusy ? '…' : copy.dialogs.rebuild.fullBackup}</button>
+          {#if backupPill}<span class="orphan-pill {backupPill.tone}" role="status" title={backupPill.title}>{backupPill.label}</span>{/if}
         </div>
         <p class="git-sync-note">{copy.dialogs.rebuild.fullBackupNote}</p>
         {#if backupStatus}<p class="status-line" role="status">{backupStatus}</p>{/if}
@@ -7854,7 +7963,8 @@ import { backupFileName, collectInstanceBackup, mergeBookmarks, parseInstanceBac
         </ul>
         {#if resetRiskNote}<p class="orphan-progress" role="status">{resetRiskNote}</p>{/if}
         <div class="instance-backup-full">
-          <button class="modal-action secondary full-backup-button" disabled={backupBusy} on:click={() => downloadInstanceBackup('reset')} title={copy.dialogs.rebuild.fullBackupTitle}>{@render fullBackupIcon()}{backupBusy ? '…' : copy.dialogs.rebuild.fullBackup}</button>
+          <button class="modal-action secondary full-backup-button" disabled={backupBusy} on:click={downloadInstanceBackup} title={copy.dialogs.rebuild.fullBackupTitle}>{@render fullBackupIcon()}{backupBusy ? '…' : copy.dialogs.rebuild.fullBackup}</button>
+          {#if backupPill}<span class="orphan-pill {backupPill.tone}" role="status" title={backupPill.title}>{backupPill.label}</span>{/if}
         </div>
         <p class="git-sync-note">{copy.dialogs.rebuild.fullBackupNote}</p>
         {#if backupStatus}<p class="status-line" role="status">{backupStatus}</p>{/if}
@@ -7896,8 +8006,8 @@ import { backupFileName, collectInstanceBackup, mergeBookmarks, parseInstanceBac
           {/each}
         </ul>
         <div class="instance-backup-full">
-          <button class="modal-action secondary full-backup-button" disabled={backupBusy} on:click={() => downloadInstanceBackup('gate')} title={copy.dialogs.instanceBackup.fullBackupTitle}>{@render fullBackupIcon()}{backupBusy ? '…' : copy.dialogs.instanceBackup.fullBackup}</button>
-          {#if fullBackupTaken}<span class="instance-backup-mark" role="status">{copy.dialogs.instanceBackup.fullBackupTaken}</span>{/if}
+          <button class="modal-action secondary full-backup-button" disabled={backupBusy} on:click={downloadInstanceBackup} title={copy.dialogs.instanceBackup.fullBackupTitle}>{@render fullBackupIcon()}{backupBusy ? '…' : copy.dialogs.instanceBackup.fullBackup}</button>
+          {#if backupPill}<span class="orphan-pill {backupPill.tone}" role="status" title={backupPill.title}>{backupPill.label}</span>{/if}
         </div>
         {#if backupStatus}<p class="status-line" role="status">{backupStatus}</p>{/if}
         {#if backupResettable}
@@ -8013,6 +8123,7 @@ import { backupFileName, collectInstanceBackup, mergeBookmarks, parseInstanceBac
                     <button class="recent-icon-button history-download-button" type="button" aria-label={copy.dialogs.history.downloadCaptureAria(entry.lastModified)} title={copy.dialogs.history.downloadCaptureTitle} disabled={historyCaptureSaving} on:click={saveHistoryCapture}>
                       <svg class="history-download-icon" viewBox="56 108 33 36" aria-hidden="true"><path class="history-icon-shape" d="m 73.595508,109.76746 c -7.198235,0 -13.103617,5.58342 -13.647229,12.64471 h -0.0072 V 138.2696 H 58.61606 l 2.32389,4.02559 2.324405,-4.02559 h -1.323433 v -15.85123 c 0.530186,-5.97937 5.534806,-10.65103 11.654586,-10.65103 6.474618,0 11.703161,5.22855 11.703161,11.70316 0,6.47462 -5.228543,11.70161 -11.703161,11.70161 -2.644513,0 -5.080809,-0.87232 -7.037814,-2.34508 v 2.39572 c 2.058162,1.23707 4.46633,1.94924 7.037814,1.94924 7.555498,0 13.703556,-6.14599 13.703556,-13.70149 0,-7.5555 -6.148058,-13.70304 -13.703556,-13.70304 z m -2.108915,7.49825 v 8.05016 h 7.125663 v -1.59836 h -5.527311 v -6.4518 z"></path></svg>
                     </button>
+                    {#if entry.pill}<span class="orphan-pill {entry.pill.tone}" role="status" title={entry.pill.title}>{entry.pill.label}</span>{/if}
                   </div>
                   {#if historyCaptureOpen}
                     <div class="history-capture-body" id="history-capture-body">
@@ -8045,17 +8156,19 @@ import { backupFileName, collectInstanceBackup, mergeBookmarks, parseInstanceBac
                   <button class="recent-icon-button history-download-button" type="button" aria-label={copy.dialogs.history.downloadAria(entry.lastModified)} title={copy.row.downloadTitle} on:click={() => downloadHistoryVersion(entry.id)}>
                     <svg class="history-download-icon" viewBox="56 108 33 36" aria-hidden="true"><path class="history-icon-shape" d="m 73.595508,109.76746 c -7.198235,0 -13.103617,5.58342 -13.647229,12.64471 h -0.0072 V 138.2696 H 58.61606 l 2.32389,4.02559 2.324405,-4.02559 h -1.323433 v -15.85123 c 0.530186,-5.97937 5.534806,-10.65103 11.654586,-10.65103 6.474618,0 11.703161,5.22855 11.703161,11.70316 0,6.47462 -5.228543,11.70161 -11.703161,11.70161 -2.644513,0 -5.080809,-0.87232 -7.037814,-2.34508 v 2.39572 c 2.058162,1.23707 4.46633,1.94924 7.037814,1.94924 7.555498,0 13.703556,-6.14599 13.703556,-13.70149 0,-7.5555 -6.148058,-13.70304 -13.703556,-13.70304 z m -2.108915,7.49825 v 8.05016 h 7.125663 v -1.59836 h -5.527311 v -6.4518 z"></path></svg>
                   </button>
+                  {#if entry.pill}<span class="orphan-pill {entry.pill.tone}" role="status" title={entry.pill.title}>{entry.pill.label}</span>{/if}
                 {/if}
               </li>
             {/each}
           </ul>
           {#if historyError}<p class="status-line error" role="alert">{historyError}</p>{/if}
           <!--
-            What the last merge or download said, at the dialog's own level rather than inside
-            the disclosure: a merge that worked retires the very row the notice would have been
+            What the last merge said, at the dialog's own level rather than inside the
+            disclosure: a merge that worked retires the very row the notice would have been
             drawn in, and a sentence hidden by the thing it describes is no confirmation at all.
+            A download needs no sentence here: it leaves a mark on its own row.
           -->
-          {#if historyCaptureNotice}<p class="history-capture-notice" role="status">{historyCaptureNotice}</p>{/if}
+          {#if historyNotice}<p class="history-capture-notice" role="status">{historyNotice}</p>{/if}
           <!--
             Only when something here can be downloaded. The line tells a reader what to do
             with a version they take; beside a trail whose only row is the unsaved capture
