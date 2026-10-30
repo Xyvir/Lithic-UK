@@ -9,6 +9,14 @@ module-type: library
    two books in one wiki never share a numbered node and nothing leaves the wiki
    to work out what a book is called.
 
+   A chapter is named the way the book names it: `Chapter 1: Foundations`, with
+   its spaces left as spaces, because that name is what a person reads in the
+   sidebar and in a link. Numbered nodes keep the code in front of them, which
+   is what stops two books' page one being one tiddler, but a chapter that has a
+   name of its own does not need it to be read. The code is not lost, though: it
+   is a tag on every chapter, so a book's chapters are `[tag[IYSS]]` however they
+   are titled, and two books can never be confused by what they are called.
+
    Two kinds of travel are laid down, because a book is read in two ways. Each
    chapter carries `prev` and `next`, and the first is tagged Dogear, which is
    what this wiki reads a reading position from: one page at a time, without the
@@ -35,6 +43,10 @@ var CODE_LENGTH = 5;
 // that order, because `tagging[]` sorts by it and appends whatever it does not
 // name.
 var FAVORITE_TAG = "Favorite";
+
+// The tag that says where a person is in a book. The first chapter carries it,
+// and from there a reader moves along the chapters' `prev` and `next`.
+var DOGEAR_TAG = "Dogear";
 
 // The image types this wiki can draw, with the names it knows them by. A book
 // says `image/jpeg`, and TiddlyWiki's own table of content types spells that
@@ -498,9 +510,9 @@ async function readImage(bytes, entries, href, types) {
     return { type: type, text: await imageBody(data, type) };
 }
 
-// The code every node of a book carries, taken from the name of the file it
-// came from: the book's own initials, so `Improve Your Social Skills.epub`
-// lands on `IYSS`.
+// The code a book is filed under, taken from the name of the file it came from:
+// the book's own initials, so `Improve Your Social Skills.epub` lands on `IYSS`.
+// It prefixes the numbered nodes and it is a tag on every chapter.
 //
 // A file name carries more than a title, though, and everything after the title
 // (an author, a year, a catalogue number) is somebody else's initials. So the
@@ -552,6 +564,14 @@ function pad(number) {
     return String(number).padStart(3, "0");
 }
 
+// What a chapter is called: the book's own words for it, on one line. Two runs
+// of spaces are one run, because a title is drawn as text and a line break or a
+// double space would only make two names look like one; leading and trailing
+// spaces are dropped for the same reason.
+function chapterName(label) {
+    return String(label || "").replace(/\s+/g, " ").trim();
+}
+
 // A title that is free in the wiki and free in this book. `generateNewTitle`
 // knows only what has already been added, and a book is built before any of it
 // is, so the chapters of one import have to be kept apart from each other here.
@@ -563,6 +583,18 @@ function uniqueTitle(base, taken) {
     }
     taken[title] = true;
     return title;
+}
+
+// The tags a chapter carries: the code it is filed under, which is how one
+// book's chapters are found as a set; the tag the sidebar lists; and Dogear on
+// the first, which is where a reader enters the book. The code comes first so a
+// chapter's own book is the tag a person sees first.
+function chapterTags(code, index) {
+    var tags = [code, FAVORITE_TAG];
+    if (index === 0) {
+        tags.push(DOGEAR_TAG);
+    }
+    return $tw.utils.stringifyList(tags);
 }
 
 // The Favorite tag tiddler, whose list is the order the sidebar draws. Without
@@ -616,8 +648,14 @@ async function convertEpubToTiddlers(arrayBuffer, fileName, setProgress) {
         if (blocks.length === 0) {
             continue;
         }
-        var label = book.labels[item.href] || headingOf(doc) || ("Page_" + pad(index + 1));
-        var chapterTitle = uniqueTitle(code + "_" + label.replace(/\s+/g, "_"), taken);
+        // The book's own name for the page, from its table of contents or its
+        // first heading. A page it does not name is named by its place, which is
+        // the one name that has to carry the code: `Page 003` belongs to no book
+        // in particular, so two of them in one wiki would be one tiddler.
+        var label = chapterName(book.labels[item.href] || headingOf(doc));
+        var chapterTitle = label
+            ? uniqueTitle(label, taken)
+            : uniqueTitle(code + "_Page_" + pad(index + 1), taken);
         var children = [];
         for (var b = 0; b < blocks.length; b++) {
             if (blocks[b].text) {
@@ -654,7 +692,7 @@ async function convertEpubToTiddlers(arrayBuffer, fileName, setProgress) {
             title: chapters[c].title,
             "stream-type": "default",
             "stream-list": $tw.utils.stringifyList(chapters[c].children),
-            tags: c === 0 ? "Dogear " + FAVORITE_TAG : FAVORITE_TAG,
+            tags: chapterTags(code, c),
             text: ""
         };
         // A chapter names the one either side of it, which is what the reading
