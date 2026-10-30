@@ -58,3 +58,5 @@ Comparisons reflect each app's public documentation at the time of writing. Chec
 The full documentation starts at [docs/contents.md](docs/contents.md). It covers where your data lives, backups and restores, each platform, instances, plugins, and how the launcher handles language.
 
 Self-hosting instructions are in [self-host.md](self-host.md).
+
+<a href="https://www.adhdproducts.directory/" rel="sponsored nofollow" data-directory-listing="bcabee00-72c7-452c-adba-a60f849f460a">ADHD Product Directory</a>
