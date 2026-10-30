@@ -5,7 +5,6 @@
 - [ ] Create self-destroying /anchor option based on <<stamp>> macro, maybe even super-ceding stamp?
 	-I'm making this too complicated, just create a new tiddler and use slashcommands to fill in a re-usable todo template. (This is literlaly it's use case) Maybe I should make a workflow to save convert existing content as a new slashcommands though.
 
-- [ ] Create/Integrate EPUB Serialization based on current to_lithic logic (but have user provide shortcode instead of AI-generated one); add it to the renamed `lithic-import-handler` plugin (formerly lithic-pdf-to-whiteboard).
 - [ ] make links and transclusions in uni-editor edit-mode clickable and hover-able (appear plugin)
 - [ ] Add hotzone for sidebar to autoopen/closen on mouseover?
     (this is mostly for when exporting static HTML sites)
@@ -51,7 +50,7 @@
 - [ ] When multiple images are drag-and-dropped simultaneously, serialize them into a single multi-page whiteboard (like PDF import) instead of individual whiteboard objects.
 
 - [ ] Test preserving existing 'rendered height' on unieditor when editing existing nodes/blocks. (IE images which are generally much taller than their sourcecode) Having the viewport jump around in response to editing text can be jarring. (which is the default behavior in logseq but is worth reviewing.)
-- [ ] Simple mobile Camera OCR import as text capture feature?
+- ~~Simple mobile Camera OCR import as text capture feature?~~ (Decided against: too heavy for a capture path the journal already covers, and a bundled OCR model would add megabytes to a single-file wiki.)
 
 - [ ] Revisit iframe-based web app embedding plugins (Treevis, Falstaad, etc.) Tiddlytools Webtools)
 
@@ -70,7 +69,7 @@
 - [ ] Add a whiteboard button that transcludes a parent's stream-list nodes as paginated stickynotes on a whiteboard. (Pre-presentation creation)
     - Highest level nodes are pages and their children are individual stickynotes on that page.
 
-- [ ] Create "Official" Lithic plugin store for Lithic-specific plugins/extensions.
+- [ ] Port these extensions into the Lithic plugin library:
     - [ ] circuitJS
     - [ ] "Lithic Native" Treevis / Chesstree implementation
     - [ ] text-based adventure game plugin
@@ -84,7 +83,6 @@
 - [ ] "Zen mode" / focus mode: leverage vanilla TW edit experience as a long-form fullscreen writing mode.
     - Hide sidebar, center content. Could be a simple CSS toggle or a dedicated layout.
 
-- [ ] Automate lithic-light build process (including TW Uglifier) and merge in esp32-launcher repo into this one.
 - [ ] Add agents.md to back-end server if anyone wants to clone the github sync in their own LLM-IDE.
 - [ ] Greatly improve existing intro.lith to capture ALL current features and workflows.
 - [ ] Create "Lithic for Teams" backend version based on Multi-Wiki Server.
@@ -92,7 +90,7 @@
 - Tauri App Ideas:
     - [x] Add 'run code' button next to copy code (webapp/Tauri use paper-light; self-host uses its private same-origin API; Ephemeral.exe remains an invisible manual clipboard sidecar)
     - [x] Allow file associations for *.txt; *.py, *.md etc so it can act as a lightweight text editor for local files. (shipped for *.lith *.md *.txt *.html *.json *.tid *.ipynb)
-    - [ ] Iroh P2P Sync
+    - ~~Iroh P2P Sync~~ (Decided against: too heavy. A second transport beside GitHub and self-host would mean a second set of conflicts, versions and recovery rules to get right.)
     - [ ] Per-Lith encryption, extended from the desktop app's local encrypted credential saving (noted 2026-09-22, not started).
         - The vault already derives one key from one user-known secret with Argon2id and seals its entries with XChaCha20-Poly1305 behind an envelope that carries its own KDF parameters; the same shape could seal a whole `.lith`, and nothing in it depends on the platform. `src-tauri/src/credentials.rs` is the working pattern, and the secret would never leave the machine.
         - Worth deciding before building: there is deliberately no recovery from a lost secret, which is fine for a convenience vault and much heavier for a user's notes; the app is the thing that can run a KDF against a challenge, so what could the wiki trust when a `.lith` is opened by something that is not the app (the webapp, a self-host instance, a shared file); and whether the derived key should wrap a per-file key, so changing the secret re-wraps one small key instead of re-encrypting every Lith.
@@ -102,11 +100,6 @@
 - [ ] "zoomin" doesn't play nice with Dynaview; so we need to update the storyriver viewfilter to fallback to 'normal' when using "zoomin"
 - [ ] create some static "preview blocks" when lithic public share links are used elsewhere (discord, github, etc.) so the link has some visual cues and doesn't just show up as a ugly broken block.
 ---
-
-## Done
-
-
-
 
 ## launcher.html modularization Project
 - [x] Allow specifying 'modes' via http parameters so the launcher monolith html can be forced into specific modes to make unit tests easier; (all unit tests can be performed in 1 test environment this way, but with multiple test profiles/users)
@@ -122,15 +115,7 @@
     - [x] archive original launcher.html and begin using new modularized build process moving forward.
         - (legacy launcher archived at `assets/legacy-launcher.html`; `scripts/extract-launcher-fragments.mjs` and `scripts/inject-launcher-plugins.js` now read/write the archive)
 - [x] Move "install app" button on mobile UI only to be next to the 'clear cache' button.
-- [ ] Add git history rollback UI/widget to online sync modal. (this should theoretically work for the local git instance even if not synced to github)
 - [x] Make sure the custom.ico is actually saved to GitHub so restoring the GitHub will restore your disambiguation / icon
-
-### Next legs (agreed order, 2026-09-17)
-
-1. **Ephemeral coderunner pass** (queued final tauri leg, small): paperlite/tauri injected coderunner tiddler should probe a local ephemeral.exe tray service first and fall back to the paperlite public swarm; in BOTH coderunner modes, codeblocks with language `txt` or no declared language get no run-code button.
-2. **Self-host/WebDAV milestone** (biggest remaining parity gap): port legacy `runtime.webdav` fragment into the Svelte launcher — remote file listing, locks, sync modal, emoji picker.
-3. **Build cutover** — done 2026-09-18: legacy `src/launcher.html` archived to `assets/legacy-launcher.html`, the Svelte build now emits `src/launcher.html`, and `build-wiki.yml` rebuilds + commits it with each prod release. `deploy/Dockerfile`, `build-server.yml`, `autoupdate.sh`, `index.html` and `manifest.json` all pick it up unchanged because the *name* stayed `launcher.html`.
-    - Follow-up: the launcher's plugin list (`DEFAULT_PLUGINS` in `launcher-ui/src/legacy-saver.ts`) is no longer synced from the generated wiki config by `scripts/inject-launcher-plugins.js` (which now maintains only the archive). Needs a drift check or codegen so a newly added wiki plugin cannot silently go missing from new blank wikis.
 
 ### Launcher parity (Svelte `launcher.html` vs legacy `launcher.html`) — webapp/local mode
 
@@ -144,7 +129,7 @@ Tracked per-fragment in `launcher-ui/src/legacy-fragments.ts`; statuses are asse
 - [x] Ephemeral code-runner integration injected on every local mount (`ephemeral-integration.ts`, byte-identical to legacy)
 - [x] HTML monolith mounting (`.html`/`.htm` opened directly as a complete wiki page)
 - [x] PWA head (manifest/favicon/theme-color) + `/offline-service-worker.js` registration + `__EPHEMERAL_MODE__` global
-- [x] WebDAV / self-host mode (`runtime.webdav`, remote file listing, locks, GitHub sync modal, emoji picker) — deferred, next milestone
+- [x] WebDAV / self-host mode (`runtime.webdav`, remote file listing, locks, GitHub sync modal, emoji picker) — shipped: the listing, locks and heartbeat are in `launcher-ui/src/webdav.ts`, the emoji picker in `instance-icon.ts`, and the modal carries the rest
 - [x] Tauri mode — shipped: file bridges + native dialogs, scratch editor (.md/.txt/.tid/.json/.ipynb round-trip), install button w/ file associations + dismissible offer, portable recents.txt sidecar, GitHub device-flow sync w/ status-reactive icon, per-wiki version-history button hiding, Save-As defaulting to the install folder
 - [x] `document.bootstrap` original-path rewrite — deployment glue, still extracted
 
@@ -205,3 +190,29 @@ Tracked per-fragment in `launcher-ui/src/legacy-fragments.ts`; statuses are asse
        (Do twice to toggle ascending/descending)
 
 - [X] "Favorites" sidebar area vertical linespacing is not the same in tweak vs use mode, need to align these so the favorites don't visually shift on tweak mode toggle.
+
+---
+
+## Done
+
+- [x] Create/Integrate EPUB Serialization based on current to_lithic logic (but have user provide shortcode instead of AI-generated one); add it to the renamed `lithic-import-handler` plugin (formerly lithic-pdf-to-whiteboard).
+    - (Done 2026-10-29: `epub.js` makes one chapter per spine document and one node per block, filed under a code taken from the file's own name rather than one an AI invented. A book also opens by association and by drop, on desktop and on the phone.)
+
+- [x] Create "Official" Lithic plugin store for Lithic-specific plugins/extensions.
+    - (Done 2026-10-22 to 2026-10-29: `npm run build:library` writes `library/` on every prod build, lithic.uk/library serves it, `plugin-store-carrier-wiki.html` can be dragged into any wiki, and the wiki ships the store tab ahead of the official one. The library lists only Lithic's own plugins, so the six extensions that were listed with this entry are still unbuilt and now sit in the open list.)
+
+- [x] Automate lithic-light build process (including TW Uglifier) and merge in esp32-launcher repo into this one.
+    - (Done 2026-09-22 and 2026-10-22: `scripts/build-light.mjs` renders `variants/lithic-light.html` through the uglifier with a 4 MB drift guard, and the ESP32 project (`esp32/`) and its built images (`esp32-firmware/`) now live in this repo with their own workflow.)
+
+- [x] Add git history rollback UI/widget to online sync modal. (this should theoretically work for the local git instance even if not synced to github)
+    - (Done 2026-10-11 to 2026-10-20: the sync modal's history trail lists the backup's commits and each row carries a revert glyph. A revert appends a commit rather than rewriting one, so it works for the app's own folder, a self-host instance and a shim, whether or not the folder is on GitHub.)
+
+### Next legs (agreed order, 2026-09-17)
+
+1. **Ephemeral coderunner pass** (queued final tauri leg, small): paperlite/tauri injected coderunner tiddler should probe a local ephemeral.exe tray service first and fall back to the paperlite public swarm; in BOTH coderunner modes, codeblocks with language `txt` or no declared language get no run-code button.
+    - (Done 2026-10-07: the runner is `$:/plugins/xyvir/ephemeral-runner`; the tray probe was removed 2026-09-18, and the codeblock override offers no run button for `txt`, `text`, `plaintext`, `plain` or an undeclared language, on the public swarm and on a self-host instance.)
+2. **Self-host/WebDAV milestone** (biggest remaining parity gap): port legacy `runtime.webdav` fragment into the Svelte launcher — remote file listing, locks, sync modal, emoji picker.
+    - (Done: `launcher-ui/src/webdav.ts` gives the Svelte launcher the remote listing, the locks with their heartbeat, upload and delete, and `instance-icon.ts` the emoji picker; the sync modal and its history trail carry the rest.)
+3. **Build cutover** — done 2026-09-18: legacy `src/launcher.html` archived to `assets/legacy-launcher.html`, the Svelte build now emits `src/launcher.html`, and `build-wiki.yml` rebuilds + commits it with each prod release. `deploy/Dockerfile`, `build-server.yml`, `autoupdate.sh`, `index.html` and `manifest.json` all pick it up unchanged because the *name* stayed `launcher.html`.
+    - Follow-up: the launcher's plugin list (`DEFAULT_PLUGINS` in `launcher-ui/src/legacy-saver.ts`) is no longer synced from the generated wiki config by `scripts/inject-launcher-plugins.js` (which now maintains only the archive). Needs a drift check or codegen so a newly added wiki plugin cannot silently go missing from new blank wikis.
+        - (Closed 2026-10-07: `scripts/generate-default-plugins.mjs` generates the list into the build, and `legacy-saver.test.ts` fails when a plugin the engine ships is missing from it. `DEFAULT_PLUGINS` stays as the committed fallback.)
