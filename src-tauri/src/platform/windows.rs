@@ -7,8 +7,11 @@
 //! compiled on Windows, and everything else in `platform` is compiled everywhere.
 
 use std::path::{Path, PathBuf};
+use std::time::{Duration, Instant};
 
-use windows::Win32::UI::WindowsAndMessaging::HICON;
+use windows::core::BOOL;
+use windows::Win32::Foundation::{HWND, LPARAM};
+use windows::Win32::UI::WindowsAndMessaging::{EnumWindows, ASFW_ANY, HICON};
 
 use super::associations;
 
@@ -71,17 +74,202 @@ fn browser_candidates(roots: &[PathBuf]) -> Vec<PathBuf> {
         .collect()
 }
 
-/// Reveal a file in Explorer, with the file itself selected.
+/// Reveal a file in Explorer, with the file itself selected, and in front of everything.
 ///
 /// `explorer /select,<path>` is the one platform here that can do the selecting half,
 /// which is what `reveal` in the capability table means.
+///
+/// The shell cannot do the second half on its own, and the reason is structural: the window
+/// belongs to the Explorer process that is already running, that process holds neither the
+/// foreground nor the last input event, so Windows refuses its activation and a new window
+/// arrives behind with a taskbar flash. Two things put it in front instead.
+/// `AllowSetForegroundWindow` passes the right this app holds, having just been clicked in,
+/// to that process, so Explorer's own activation call succeeds; `raise_folder_window` waits
+/// for the window and raises it from here as the backstop, which is what covers a folder
+/// Explorer reuses rather than opens anew. Both are best effort: an install is not a failed
+/// install because a window stayed behind.
 pub fn reveal(path: &Path) -> Result<(), String> {
+    use windows::Win32::UI::WindowsAndMessaging::AllowSetForegroundWindow;
+
+    let folder = path.parent().map(|parent| parent.to_path_buf());
+    // SAFETY: the call takes no pointers, and `ASFW_ANY` names the permission rather than a
+    // process, so there is nothing to outlive it.
+    unsafe {
+        let _ = AllowSetForegroundWindow(ASFW_ANY);
+    }
     std::process::Command::new("explorer")
         .arg("/select,")
         .arg(path)
         .spawn()
-        .map(|_| ())
-        .map_err(|error| error.to_string())
+        .map_err(|error| error.to_string())?;
+    if let Some(folder) = folder {
+        // Behind the answer rather than in front of it: the install has already succeeded,
+        // and a window that takes a moment to appear is not worth a delayed report of it.
+        std::thread::spawn(move || raise_folder_window(&folder));
+    }
+    Ok(())
+}
+
+/// How long the raise waits for a window to exist at all.
+///
+/// The shell answers in milliseconds on a healthy machine, so this is a ceiling rather than
+/// an expectation, and it is short because the person is waiting in front of it.
+const RAISE_PATIENCE: Duration = Duration::from_millis(2000);
+
+/// The pause between looks, which is a clock tick's worth of patience and no more.
+const RAISE_INTERVAL: Duration = Duration::from_millis(60);
+
+/// How long a reused window waits behind a window that did not exist before.
+///
+/// A new window is unambiguous, because it was not there when the shell was asked. A reused
+/// one is only recognised by the name Explorer puts on it, so it is accepted once a new
+/// window has had its chance, and never in preference to one.
+const REUSE_GRACE: Duration = Duration::from_millis(400);
+
+/// The Explorer window showing a folder, held in front of everything else.
+///
+/// Two shapes are asked for in turn. A window the reveal just created is the one that was not
+/// there before it was asked for, and once `REUSE_GRACE` has passed, a window whose title is
+/// the folder's own name, which is how Explorer labels a folder it already had open and merely
+/// selected the file in.
+///
+/// Gives up quietly after `RAISE_PATIENCE`. By then the system has been asked twice, once
+/// through the grant and once through `SetForegroundWindow`, and somebody who moved on to
+/// another program in the meantime told Windows what they wanted instead.
+fn raise_folder_window(folder: &Path) {
+    let started = Instant::now();
+    let before = folder_windows();
+    loop {
+        let now = folder_windows();
+        let opening = now.iter().find(|window| !before.contains(window));
+        let reused = (started.elapsed() >= REUSE_GRACE)
+            .then(|| now.iter().find(|window| names_folder(**window, folder)))
+            .flatten();
+        if let Some(window) = opening.or(reused) {
+            raise(*window);
+            return;
+        }
+        if started.elapsed() >= RAISE_PATIENCE {
+            return;
+        }
+        std::thread::sleep(RAISE_INTERVAL);
+    }
+}
+
+/// Ask Windows for the foreground for one window, once.
+///
+/// `SW_RESTORE` is used only for a minimised window, because it also returns a maximised one
+/// to its former size, and a window resized by an install that finished quietly is a worse
+/// surprise than a window that stayed where it was.
+///
+/// The request can still be refused, because it is made from a thread that holds neither the
+/// foreground nor the last input event by the time the window exists. Attaching to the
+/// foreground thread's input queue for the length of one call is the documented way to become
+/// part of the process that does hold it, and it is detached again immediately so this thread
+/// shares nothing with anything afterwards.
+fn raise(window: HWND) {
+    use windows::Win32::System::Threading::{AttachThreadInput, GetCurrentThreadId};
+    use windows::Win32::UI::WindowsAndMessaging::{
+        BringWindowToTop, GetForegroundWindow, GetWindowThreadProcessId, IsIconic,
+        SetForegroundWindow, ShowWindow, SW_RESTORE,
+    };
+
+    // SAFETY: `window` is a live top-level window taken from the enumeration above, and the
+    // attach is detached on every path that makes it.
+    unsafe {
+        if GetForegroundWindow() == window {
+            return;
+        }
+        if IsIconic(window).as_bool() {
+            let _ = ShowWindow(window, SW_RESTORE);
+        }
+        if SetForegroundWindow(window).as_bool() {
+            return;
+        }
+        let foreground = GetForegroundWindow();
+        if foreground.is_invalid() {
+            return;
+        }
+        let foreground_thread = GetWindowThreadProcessId(foreground, None);
+        let this_thread = GetCurrentThreadId();
+        if foreground_thread == 0 || foreground_thread == this_thread {
+            return;
+        }
+        if AttachThreadInput(this_thread, foreground_thread, true).as_bool() {
+            let _ = BringWindowToTop(window);
+            let _ = SetForegroundWindow(window);
+            let _ = AttachThreadInput(this_thread, foreground_thread, false);
+        }
+    }
+}
+
+/// Every top-level Explorer folder window, in the order the shell keeps them.
+fn folder_windows() -> Vec<HWND> {
+    let mut found: Vec<HWND> = Vec::new();
+    // SAFETY: the callback only pushes handles into `found`, which outlives the call.
+    unsafe {
+        let _ = EnumWindows(
+            Some(collect_folder_window),
+            LPARAM(&mut found as *mut Vec<HWND> as isize),
+        );
+    }
+    found
+}
+
+/// The window callback of `folder_windows`, taking each top-level window that is a folder.
+///
+/// `ExploreWClass` is the pre-Windows 7 spelling of the same window, and it is listed because
+/// the reveal is not the place to notice that a machine is old.
+unsafe extern "system" fn collect_folder_window(window: HWND, found: LPARAM) -> BOOL {
+    let class = class_name(window);
+    if class == "CabinetWClass" || class == "ExploreWClass" {
+        // SAFETY: `folder_windows` hands over a pointer to a vector that outlives this call.
+        let found = unsafe { &mut *(found.0 as *mut Vec<HWND>) };
+        found.push(window);
+    }
+    true.into()
+}
+
+/// A window's class name, empty where the window cannot say.
+fn class_name(window: HWND) -> String {
+    use windows::Win32::UI::WindowsAndMessaging::GetClassNameW;
+
+    let mut buffer = [0u16; 64];
+    // SAFETY: the buffer is a local sized for the call, which writes at most its length.
+    let length = unsafe { GetClassNameW(window, &mut buffer) };
+    String::from_utf16_lossy(&buffer[..length.max(0) as usize])
+}
+
+/// A window's title, empty where the window cannot say.
+fn window_title(window: HWND) -> String {
+    use windows::Win32::UI::WindowsAndMessaging::GetWindowTextW;
+
+    let mut buffer = [0u16; 512];
+    // SAFETY: the buffer is a local sized for the call, which writes at most its length.
+    let length = unsafe { GetWindowTextW(window, &mut buffer) };
+    String::from_utf16_lossy(&buffer[..length.max(0) as usize])
+}
+
+/// Whether a window is the one Explorer draws for a folder, judged by its title.
+fn names_folder(window: HWND, folder: &Path) -> bool {
+    is_folder_title(&window_title(window), folder)
+}
+
+/// Whether Explorer's label for a folder is the folder's own name.
+///
+/// Explorer titles a folder window with the folder's name and nothing else, so the comparison
+/// is the whole of the test. It folds case and ignores surrounding space because the shell
+/// draws the name it was given rather than the name that was typed, and a name it is showing
+/// unreachable is a name it cannot match. Nothing more is read from the window, because
+/// reading the folder a window is showing means asking the shell for it, which is a round trip
+/// through COM to answer a question this already answers for every window a person could have
+/// open on that folder.
+fn is_folder_title(title: &str, folder: &Path) -> bool {
+    let Some(name) = folder.file_name().and_then(|name| name.to_str()) else {
+        return false;
+    };
+    let shown = title.trim();
+    !shown.is_empty() && shown.to_lowercase() == name.trim().to_lowercase()
 }
 
 /// Write a Windows shell link.
@@ -904,5 +1092,23 @@ mod tests {
         let painted = 40 + colors.len();
         assert_eq!(&image[40..painted], &colors[..], "the colours come first");
         assert_eq!(&image[painted..], &mask[..], "and the shape mask follows them");
+    }
+
+    /// The title Explorer puts on a folder window is the folder's last name, in whatever case
+    /// the folder itself was created with, so the comparison folds case and trims.
+    #[test]
+    fn a_folder_window_is_recognised_by_the_name_explorer_shows() {
+        let folder = Path::new(r"C:\Users\u\Documents\Lithic");
+        assert!(is_folder_title("Lithic", folder));
+        assert!(is_folder_title("  lithic ", folder));
+        assert!(
+            !is_folder_title("Lithic-old", folder),
+            "a folder whose name merely starts the same is a different folder"
+        );
+        assert!(!is_folder_title("", folder), "a window with no title names nothing");
+        assert!(
+            !is_folder_title("Lithic", Path::new(r"C:\")),
+            "a drive has no last name to match"
+        );
     }
 }
