@@ -40,6 +40,7 @@ COPY offline-service-worker.js /app/public/offline-service-worker.js
 COPY intro.html               /app/public/intro.html
 COPY intro.lith               /app/public/intro.lith
 COPY 404.html                 /app/public/404.html
+COPY readme.html              /app/public/readme.html
 COPY src/mstile-150x150.png   /app/public/src/mstile-150x150.png
 COPY src/app-icon.png         /app/public/src/app-icon.png
 
