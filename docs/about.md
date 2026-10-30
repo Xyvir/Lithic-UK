@@ -8,6 +8,8 @@ Lithic is a personal knowledge management system built on [TiddlyWiki](https://t
 * **You own your data.** Each wiki is a `.lith` file on a disk you choose, or on a server you run. There is no required account and no required cloud. See [storage modes](storage-modes.md) for what each platform keeps and where.
 * **Portable.** The launcher is one file that works offline, from a USB stick, over `file://`, or on a machine that has never been online.
 * **A `.lith` is many notes in one text file.** Think of it as several Markdown files joined together into one, with each note keeping its own title and tags.
+* **Wide, not tall.** A `.lith` will not hold several gigabytes the way a database can, and that is the point. Keep notes wide: many small, focused topics, not one ball of everything. Smaller notes are easier for AI to read, easier to publish one piece at a time, and easier to cut out when they are no longer needed.
+* **Portable and maintainable.** The app runs from a USB stick, and a `.lith` is easy to move, diff and version, compared with a folder of notes that scatters across many files.
 * **Built for AI to read.** The `.lith` format was designed as something an AI can ingest directly. The Copy Story River button in the toolbar copies your current notes as one block, ready to paste into a chat-based AI interface. Lithic has no direct AI integration and will not add one.
 
 ## How Lithic Was Built
