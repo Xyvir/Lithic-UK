@@ -2257,6 +2257,63 @@ body.drag-over::after {
 }
 .dirty-tiddler-list .dirty-more { color: var(--lithic-ink-faint); list-style: none; margin-left: -14px; }
 /*
+ * The recovery prompt's list, which is a stack of disclosures rather than the bulleted titles
+ * the history capture draws, so every rule below is scoped to the dialog: the two lists are
+ * the same facts read for different reasons. A row is one captured edit, and its head is the
+ * whole first line, so a title is a target rather than a label. One open at a time, set by
+ * the dialog's own state.
+ */
+.dirty-modal .dirty-tiddler-list {
+  margin: 12px 0 0; padding: 4px 6px; list-style: none;
+  border: 1px solid var(--lithic-surface-control); border-radius: 7px;
+  background: var(--lithic-surface-card);
+  max-height: 38vh; overflow-y: auto;
+}
+.dirty-modal .dirty-tiddler-row + .dirty-tiddler-row { border-top: 1px solid var(--lithic-line-faint); }
+.dirty-modal .dirty-tiddler-head {
+  display: flex; align-items: center; gap: 8px; width: 100%;
+  padding: 7px 6px; border: 0; border-radius: 6px; background: none;
+  color: var(--lithic-ink); font: inherit; font-size: 0.85em; text-align: left; cursor: pointer;
+}
+.dirty-modal .dirty-tiddler-head:hover { background: var(--lithic-sheen-wash-7); }
+.dirty-modal .dirty-tiddler-head:focus-visible { outline: 2px solid var(--lithic-accent); outline-offset: -2px; }
+/* The title is the row's one flexible cell, so a long one ellipsizes instead of wrapping the
+   chevron onto a line of its own. */
+.dirty-modal .dirty-tiddler-title {
+  flex: 1 1 auto; min-width: 0;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+/* A capture with no body: the title alone, at the same padding as a head, with no chevron
+   promising something to open. */
+.dirty-modal .dirty-tiddler-plain {
+  display: block; padding: 7px 6px; color: var(--lithic-ink-soft); font-size: 0.85em;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.dirty-modal .dirty-tiddler-chevron {
+  flex: none; width: 12px; height: 7px;
+  fill: none; stroke: var(--lithic-ink-muted); stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round;
+  transition: transform 120ms ease;
+}
+.dirty-modal .dirty-tiddler-row.open .dirty-tiddler-chevron { transform: rotate(180deg); }
+/*
+ * The body is raw text rather than a render of it: the question is whether the data is worth
+ * keeping, and that is read off what was captured. Capped at roughly twenty lines, because
+ * that is as much of a note as one glance judges, and past it the body scrolls inside itself
+ * so the rows below it and the three answers stay where they were. A long line wraps instead
+ * of running out of the box.
+ */
+.dirty-modal .dirty-tiddler-body {
+  margin: 0 6px 8px; padding: 8px 10px;
+  border: 1px solid var(--lithic-line-faint); border-radius: 6px;
+  background: var(--lithic-surface-panel);
+  max-height: min(22rem, 40vh); overflow-y: auto;
+}
+.dirty-modal .dirty-tiddler-body pre {
+  margin: 0; color: var(--lithic-ink-soft);
+  font: 0.78em/1.45 ui-monospace, monospace;
+  white-space: pre-wrap; overflow-wrap: anywhere;
+}
+/*
  * Rebuild confirmation: the rows it is about to drop because their file has
  * gone missing. Each keeps the list's history/download button, so a real file
  * can be written before proceeding instead of after noticing it is gone.

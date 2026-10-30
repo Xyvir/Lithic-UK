@@ -2755,6 +2755,11 @@ import { backupFileName, collectInstanceBackup, mergeBookmarks, parseInstanceBac
   type DirtyInfo = { name: string; ts: number; tiddlers: Array<Record<string, string>> };
   let showDirtyModal = false;
   let dirtyInfo: DirtyInfo | null = null;
+  /**
+   * Which captured body is open, by title. One at a time: two bodies open at once would push
+   * the three answers below them out of the dialog, and the question is what the dialog is.
+   */
+  let dirtyOpenTitle: string | null = null;
   let dirtyResolver: ((decision: 'merge' | 'discard' | 'later') => void) | null = null;
   let dirtyEntries: Record<string, number> = {};
 
@@ -3395,6 +3400,9 @@ import { backupFileName, collectInstanceBackup, mergeBookmarks, parseInstanceBac
 
   function promptDirtyRecovery(name: string, record: { ts: number; tiddlers: Array<Record<string, string>> }): Promise<'merge' | 'discard' | 'later'> {
     dirtyInfo = { name, ts: record.ts, tiddlers: record.tiddlers };
+    // A fresh question starts folded, so an answer left open on the last one cannot arrive
+    // already showing somebody else's title.
+    dirtyOpenTitle = null;
     showDirtyModal = true;
     return new Promise((resolve) => {
       dirtyResolver = resolve;
@@ -3432,8 +3440,14 @@ import { backupFileName, collectInstanceBackup, mergeBookmarks, parseInstanceBac
     const resolver = dirtyResolver;
     dirtyResolver = null;
     dirtyInfo = null;
+    dirtyOpenTitle = null;
     resolver?.(decision);
     void refreshDirtyBadges();
+  }
+
+  /** One body at a time, and the row that is already open folds when its own head is pressed. */
+  function toggleDirtyTiddler(title: string) {
+    dirtyOpenTitle = dirtyOpenTitle === title ? null : title;
   }
 
   async function refreshDirtyBadges() {
@@ -8262,11 +8276,13 @@ import { backupFileName, collectInstanceBackup, mergeBookmarks, parseInstanceBac
                   {#if historyCaptureOpen}
                     <div class="history-capture-body" id="history-capture-body">
                       {#if historyDirty && historyDirty.tiddlers.length > 0}
-                        <!-- The same list the recovery prompt draws, so the edits on offer are the
-                           edits either window would recover: a title apiece, capped, and a count
-                           for the rest rather than a scrollbar nobody reads. No sentence above
-                           it: the row's own stamp is the moment, `Not saved yet` is the state,
-                           and a line repeating either would be the third account of one fact. -->
+                        <!-- The edits on offer here are the edits the recovery prompt would
+                           recover, and this rung draws them as titles alone: a title apiece,
+                           capped, and a count for the rest. The prompt is where a body can be
+                           opened and read, because that is the window whose whole question is
+                           whether the edits are worth keeping. No sentence above it: the
+                           row's own stamp is the moment, `Not saved yet` is the state, and a
+                           line repeating either would be the third account of one fact. -->
                         <ul class="dirty-tiddler-list">
                           {#each historyDirty.tiddlers.slice(0, 8) as tiddler (tiddler.title)}
                             <li>{tiddler.title}</li>
@@ -8322,11 +8338,40 @@ import { backupFileName, collectInstanceBackup, mergeBookmarks, parseInstanceBac
         <p>
           {copy.dialogs.dirty.body(dirtyInfo.name, dirtyInfo.tiddlers.length, new Date(dirtyInfo.ts).toLocaleString(LOCALE_TAG))}
         </p>
+        <!--
+          Every captured edit, one title apiece, and the row is its own disclosure: a title
+          says an edit happened, not whether it is worth keeping, so the body it captured
+          opens under it. One open at a time, because a second body would push the three
+          answers below out of the dialog, and each body is capped so a note of forty lines
+          scrolls inside itself rather than growing the dialog around it. A capture that
+          carries no text has nothing to show, so its row stays a title with no chevron.
+        -->
         <ul class="dirty-tiddler-list">
-          {#each dirtyInfo.tiddlers.slice(0, 8) as tiddler (tiddler.title)}
-            <li>{tiddler.title}</li>
+          {#each dirtyInfo.tiddlers as tiddler, index (tiddler.title)}
+            {@const body = typeof tiddler.text === 'string' ? tiddler.text : ''}
+            {@const open = dirtyOpenTitle === tiddler.title}
+            <li class="dirty-tiddler-row" class:open={open}>
+              {#if body.trim() === ''}
+                <span class="dirty-tiddler-plain">{tiddler.title}</span>
+              {:else}
+                <button
+                  type="button"
+                  class="dirty-tiddler-head"
+                  aria-expanded={open}
+                  aria-controls="dirty-tiddler-body-{index}"
+                  on:click={() => toggleDirtyTiddler(tiddler.title)}
+                >
+                  <span class="dirty-tiddler-title">{tiddler.title}</span>
+                  <svg class="dirty-tiddler-chevron" viewBox="0 0 14 8" aria-hidden="true"><path d="M1.5 1.5 7 6.5l5.5-5"></path></svg>
+                </button>
+              {/if}
+              {#if open}
+                <div class="dirty-tiddler-body" id="dirty-tiddler-body-{index}">
+                  <pre>{body}</pre>
+                </div>
+              {/if}
+            </li>
           {/each}
-          {#if dirtyInfo.tiddlers.length > 8}<li class="dirty-more">{copy.dialogs.dirty.more(dirtyInfo.tiddlers.length - 8)}</li>{/if}
         </ul>
         <div class="modal-actions">
           <button class="modal-action" on:click={() => resolveDirtyModal('merge')}>{copy.dialogs.dirty.recover}</button>
