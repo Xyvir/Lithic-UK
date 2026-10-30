@@ -177,9 +177,10 @@ jobs:
           echo "tag=build-$STAMP" >> "$GITHUB_OUTPUT"
           echo "Publishing build-$STAMP"
 
-      # src/lithic.html and src/launcher.html came through the review, so the download is
-      # exactly the bytes that were looked at. wiki.zip is derived rather than committed and
-      # is rebuilt here from that same tree, which is the only reason this job installs anything.
+      # src/lithic.html and src/launcher.html came through the review, so the archive carries
+      # exactly the bytes that were looked at. The wiki folder in it is derived rather than
+      # committed and is rebuilt here from that same tree, which is the only reason this job
+      # installs anything.
       - name: Check the released files are there
         run: |
           fail() { echo "::error::$1"; exit 1; }
@@ -196,8 +197,26 @@ jobs:
       - name: Flatten Plugins
         run: node scripts/flatten-plugins.js
 
-      - name: Archive Wiki Folder
-        run: zip -r wiki.zip wiki
+      # THE FOUR REFERENCE FILES ARE ONE ASSET, NOT FOUR (2026-10-30). None of them is a
+      # distribution: the wiki folder and its manifest are what a maintainer opens to see what
+      # a build actually produced, and the two HTML files are the bytes the app and the server
+      # embed. Attached separately they made a download page carry four things to choose
+      # between that nobody chooses between, on a page whose whole job is choosing a download.
+      # So they are staged into one folder and zipped, and the wrapper folder means unzipping
+      # drops one directory rather than four items into somebody's Downloads.
+      - name: Assemble the build archive
+        id: bundle
+        run: |
+          NAME="build-artifacts_${{ steps.stamp.outputs.date }}"
+          rm -rf "$NAME"
+          mkdir -p "$NAME"
+          cp src/lithic.html src/launcher.html "$NAME/"
+          cp -r wiki "$NAME/wiki"
+          # -q because this is tens of thousands of paths and the listing is unreadable;
+          # the size line below is the one a person actually reads.
+          zip -qr "${NAME}.zip" "$NAME"
+          ls -la "${NAME}.zip"
+          echo "path=${NAME}.zip" >> "$GITHUB_OUTPUT"
 
       - name: Create Release
         uses: softprops/action-gh-release@v2
@@ -206,16 +225,13 @@ jobs:
           name: Build ${{ steps.stamp.outputs.date }}
           draft: false
           prerelease: false
-          # One asset per artifact. The flagship used to be attached twice, as
-          # wiki/output/lith.html and as the identical copy committed to
-          # variants/prod.html, which reads as two releases of the same file.
-          # src/lithic.html is those same bytes and already carries the name the release
-          # publishes, so the download matches the file the desktop app embeds.
-          files: |
-            src/lithic.html
-            src/launcher.html
-            wiki.zip
-            wiki/flatten-manifest.log
+          # One asset for the reference files, gathered by the step above. The flagship used
+          # to be attached twice, as wiki/output/lith.html and as the identical copy committed
+          # to variants/prod.html, which reads as two releases of the same file; src/lithic.html
+          # is that one engine and it now travels inside the archive. The desktop bundles, the
+          # APK and the server tarball are added to this release by the chained jobs below,
+          # which is why they are not listed here.
+          files: ${{ steps.bundle.outputs.path }}
 
   # The four desktop distributions, chained once the release exists so the installers are
   # added to a download page that is already there. The engine each one embeds is the
