@@ -215,7 +215,7 @@ The header's status line holds the last thing the launcher said, and a later sen
 
 **CONSEQUENCE:** the hand-written lists in `save-all.tid`, `$__config_SaverFilter.tid` and `LITHIC_BASE_FILTER` (for `uglify` and `uglify-wizard`) are not a generator gap. Do not add a generator step that writes plugin lists into tiddlers, and do not add a parity test for them as a substitute, unless the developer asks.
 
-**EXCEPTION (2026-10-22):** `scripts/generate-light-filter.mjs` writes one tracked export-filter tiddler, `wiki/local-plugins/lithic-tweaks/$__config_TiddlyTools_Filters_Lithic Light.tid`, derived from `lithic-light-tw.info`, so a prod wiki can export its own light copy. It is the developer's explicit request. Regenerate it with the script (never by hand), and let `--check` catch a stale copy.
+**REVERSED (2026-10-29):** a generated export-filter tiddler for a light copy (`$:/config/TiddlyTools/Filters/Lithic Light`) was tried on 2026-10-22 and removed. The light distribution is built from `lithic-light-tw.info` and ships with the ESP32 firmware, so a prod wiki does NOT export its own light copy, and no script, workflow step or saved filter should offer one.
 
 **QUICKVIEW:** `kookma/quickview` is a `json-plugin` in `external.yml`. It reaches the artifact through `wiki/tiddlers/`, not `tiddlywiki.info`, so it is not missing and does not need a `.info` entry.
 

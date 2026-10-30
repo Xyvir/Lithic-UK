@@ -1,4 +1,0 @@
-description: Lithic Light export (generated from lithic-light-tw.info)
-filter: [all[]] -[[$:/plugins/tiddlywiki/dynaview]] -[[$:/plugins/xyvir/lithic-patch-whiteboard]] -[[$:/plugins/xyvir/lithic-richlinks]] -[[$:/plugins/linonetwo/tw-react]] -[[$:/plugins/linonetwo/tw-whiteboard]] -[[$:/plugins/tiddlywiki/katex]] -[[$:/plugins/xyvir/lithic-import-handler]] -[[$:/plugins/xyvir/lithic-patch-mermaid]] -[[$:/plugins/byper/advanced-search]] -[[$:/plugins/xyvir/tw-jspython]] -[[$:/themes/tiddlywiki/snowwhite]]
-tags: $:/tags/Filter
-title: $:/config/TiddlyTools/Filters/Lithic Light
