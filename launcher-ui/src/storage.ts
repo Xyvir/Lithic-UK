@@ -540,6 +540,12 @@ export async function forgetWikiCache(name: string, store: CacheStore = idb): Pr
 
 export type DirtyStateRecord = { ts: number; tiddlers: Record<string, string>[] };
 
+/**
+ * A dirty record with the name it was captured under, which is the whole of what the prompt that
+ * asks about one needs: the name to say which instance, the stamp to say when, and the bodies.
+ */
+export type DirtyRecovery = DirtyStateRecord & { name: string };
+
 export const dirtyKey = (name: string) => `dirty_state_${name}`;
 
 export async function getDirtyState(name: string, store: CacheStore = idb): Promise<DirtyStateRecord | null> {

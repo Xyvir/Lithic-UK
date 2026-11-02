@@ -66,6 +66,14 @@ export interface TrailRow extends TrailCommit {
 export type TrailPill = 'auto' | 'revert' | 'other';
 
 /**
+ * What the panel is doing, as one value rather than two flags.
+ *
+ * `no-repo` is the shape that draws nothing at all, which is a fact about the instance rather than
+ * a failure, so it is told apart from `failed` where the reason is worth a line.
+ */
+export type TrailView = 'idle' | 'loading' | 'ready' | 'no-repo' | 'failed';
+
+/**
  * The messages Lithic's own writers make, each with the writer that makes it.
  *
  * They are matched as prefixes because that is how they are written: the ones that carry a

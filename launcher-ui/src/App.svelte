@@ -39,17 +39,22 @@
   } from './shim-sync';
   import { bootLegacyWiki, bootLegacyHtml, writeHandoff, type RemoteTarget } from './legacy-launcher-runtime';
   import { EMOJI_LIST, uploadInstanceIcon, clearInstanceIcon, emojiFaviconUrl, applyFavicon, bustIconCache, readInstanceEmoji, readServerEmoji, saveInstanceEmoji, clearInstanceEmoji, instanceMarkUrl } from './instance-icon';
-  import { getRecentFiles, setRecentRows, mergeRecentRow, mergeRecentLists, isAnonymousRow, clearAllRecentFiles, purgeOldestCachesIfNeeded, saveSearchCache, forgetWikiCache, cachedWikiNames, idb, getSearchCacheText, readFetchedLith, rememberFetchedLith, listWikiVersions, wikiHasHistory, downloadWikiVersion, getDirtyState, clearDirtyState, listDirtyRecoveries, isWikiDriftedFromHead, isInstallDismissed, setInstallDismissed, recentDiskPath, type DirtyStateRecord, type RecentEntry, type RecentRow } from './storage';
+  import { getRecentFiles, setRecentRows, mergeRecentRow, mergeRecentLists, isAnonymousRow, clearAllRecentFiles, purgeOldestCachesIfNeeded, saveSearchCache, forgetWikiCache, cachedWikiNames, idb, getSearchCacheText, readFetchedLith, rememberFetchedLith, listWikiVersions, wikiHasHistory, downloadWikiVersion, getDirtyState, clearDirtyState, listDirtyRecoveries, isWikiDriftedFromHead, isInstallDismissed, setInstallDismissed, recentDiskPath, type DirtyStateRecord, type DirtyRecovery, type RecentEntry, type RecentRow } from './storage';
   import { isIosDevice, rememberRowKind, resolveStorageMode, storageModeOverride, browserOnlyMarkTitle, type StorageMode } from './browser-storage';
   import { readBookmarkEntries, saveBookmark, removeBookmark, setBookmarkIcon, writeBookmarkList, refreshBookmarkIcon, verifyInstanceUrl, normalizeInstanceUrl, instanceLabel, type BookmarkEntry, type InstanceVerification } from './bookmarks';
-  import { LOGIN_CHECK_LABELS, askInstanceAboutLogin, loginVerdict, loginVerdictFromError, typedLoginCheck, type LoginCheckState, type LoginVerdict } from './login-check';
+  import { LOGIN_CHECK_LABELS, loginVerdict, loginVerdictFromError, type LoginCheckState, type LoginVerdict } from './login-check';
   import { copyDropNote, forgetInstanceCopy } from './instance-copy';
   import { offlineMode, looksUnreachable } from './offline-mode';
+  import { alignNewLithLabel, positionCachePreview, trackListScroll } from './launcher-geometry';
   import { createStageBeat, type InstallPreflight, type StageBeat } from './launcher-stage';
   import PinEntry from './PinEntry.svelte';
+  import FlashDialog from './FlashDialog.svelte';
+  import DirtyRecoveryDialog from './DirtyRecoveryDialog.svelte';
+  import TrailPanel from './TrailPanel.svelte';
+  import CredentialOfferDialog from './CredentialOfferDialog.svelte';
   import { deleteRemoteFile, fetchRemoteFiles, fetchRemoteWiki, fetchRemoteWikiMeta, probeAppliance, probePatchApi, createLockHeartbeat, readRemoteLock, uploadRemoteFile, webdavUrl, resolveSessionId, lithUploadName, type WebdavFile } from './webdav';
   import { normalizeLithName } from './legacy-saver';
-  import { esp32PasswordOk, esp32Percent, esp32StageLine, flashLithicAppliance, serialFlashSupported } from './esp32-flash';
+  import { serialFlashSupported } from './esp32-flash';
   import { documentStem, runsInWebView, typedDocumentName } from './document-format';
   import { searchCachedWikis } from './cache-search';
   import { matchMarkup, showsForQuery, titleMatches, titleMarkup } from './name-match';
@@ -62,7 +67,7 @@ import { backupFileName, collectInstanceBackup, mergeBookmarks, parseInstanceBac
   import { syncIndicator, shouldHeartbeat, healthFailure, verifiedAge, SYNC_PULSE_MS, type SyncIndicator, type HealthState } from './git-sync-health';
   import { gapCount, versionGap } from './history-gap';
   import { unsavedFileName, utcStamp } from './wiki-history';
-  import { TRAIL_LIMIT, parseTrailCommits, trailGapLabel, trailRows as trailRowList, type TrailCommit, type TrailPill, type TrailRow } from './instance-trail';
+  import { TRAIL_LIMIT, parseTrailCommits, type TrailCommit, type TrailRow, type TrailView } from './instance-trail';
   import { createServerRepo, disconnectServerSync, fetchServerSyncHistory, fetchServerSyncStatus, listServerRepos, pollServerDeviceToken, requestServerDeviceCode, revertServerSync, serverSyncIndicator, setupServerSync, type ServerSyncStatus } from './server-git-sync';
   import { serializeJsonToLith, parseLithToJSON } from './lithic-format';
   import { mergeCaptureIntoDocument } from './dirty-merge';
@@ -357,14 +362,12 @@ import { backupFileName, collectInstanceBackup, mergeBookmarks, parseInstanceBac
    * firmware branch, and the password is written into the flash beside them.
    */
   let flashShow = false;
-  let flashBusy = false;
-  let flashLine = '';
+  /**
+   * The failure the manager row shows when a browser will not start. The dialog's own failure band
+   * is bound to this same variable: one band, two writers, and the dialog covers the row while it
+   * is open.
+   */
   let flashProblem = '';
-  let flashPercent = 0;
-  let flashPassword = '';
-  /** Whether the flash may start, which is the one thing the field decides. */
-  let flashPasswordOk = false;
-  $: flashPasswordOk = esp32PasswordOk(flashPassword);
   /** The handoff in flight, so the row cannot be pressed twice while a browser starts. */
   let flashBrowserBusy = false;
   /**
@@ -1558,9 +1561,6 @@ import { backupFileName, collectInstanceBackup, mergeBookmarks, parseInstanceBac
   // top of where the branch is, so the trail grows by one row and the move is itself undone by
   // reverting to the commit it replaced.
 
-  /** What the trail in hand is: a read in flight, rows, or one of the two ways of having none. */
-  type TrailView = 'idle' | 'loading' | 'ready' | 'no-repo' | 'failed';
-
   /**
    * One shape for the three backends' answers, so the state machine below is written once.
    *
@@ -1591,28 +1591,6 @@ import { backupFileName, collectInstanceBackup, mergeBookmarks, parseInstanceBac
   let trailNote = '';
   /** Which repository the rows in hand came from, so a reopen does not re-read it. */
   let trailSource = '';
-
-  /**
-   * A row's pill: what the commit was, in one of three words.
-   *
-   * The tones are the version trail's own badge tones, so the two lists are not learnt twice:
-   * green for a save Lithic made on its own, the accent blue for a deliberate go-back, and the
-   * quiet grey for a commit nothing here recognises. Each title carries the explanation and then
-   * the commit's own message, which is the fact a pill cannot state and the row no longer prints.
-   */
-  function trailBadge(kind: TrailPill, message: string) {
-    const trail = copy.dialogs.gitSync.trail;
-    const raw = message.trim();
-    if (kind === 'auto') return { label: trail.pillAuto, tone: 'sync', title: trail.pillAutoTitle(raw).trim() };
-    if (kind === 'revert') return { label: trail.pillRevert, tone: '', title: trail.pillRevertTitle(raw).trim() };
-    return { label: trail.pillOther, tone: 'delta', title: trail.pillOtherTitle(raw).trim() };
-  }
-
-  /**
-   * The rows the list draws: each commit stamped, its distance from the row above, and the pill
-   * its own message earns it.
-   */
-  $: trailRows = trailRowList(trailCommits).map((row) => ({ ...row, badge: trailBadge(row.pill, row.summary) }));
 
   /**
    * Whether there is a screen to draw a trail on.
@@ -2752,14 +2730,8 @@ import { backupFileName, collectInstanceBackup, mergeBookmarks, parseInstanceBac
     const availability = await wikiHasHistory(names);
     historyAvailable = { ...historyAvailable, ...availability };
   }
-  type DirtyInfo = { name: string; ts: number; tiddlers: Array<Record<string, string>> };
   let showDirtyModal = false;
-  let dirtyInfo: DirtyInfo | null = null;
-  /**
-   * Which captured body is open, by title. One at a time: two bodies open at once would push
-   * the three answers below them out of the dialog, and the question is what the dialog is.
-   */
-  let dirtyOpenTitle: string | null = null;
+  let dirtyInfo: DirtyRecovery | null = null;
   let dirtyResolver: ((decision: 'merge' | 'discard' | 'later') => void) | null = null;
   let dirtyEntries: Record<string, number> = {};
 
@@ -2817,149 +2789,6 @@ import { backupFileName, collectInstanceBackup, mergeBookmarks, parseInstanceBac
     confirmationResolver = null;
     confirmation = null;
     resolve?.(ok);
-  }
-
-  function positionCachePreview(node: HTMLElement) {
-    let frame = 0;
-    const list = node.closest('.recent-list');
-
-    const update = () => {
-      frame = 0;
-      if (window.matchMedia('(max-width: 950px)').matches) {
-        node.style.display = 'none';
-        return;
-      }
-
-      const row = node.closest('.recent-row');
-      const listRect = list?.getBoundingClientRect();
-      const rowRect = row?.getBoundingClientRect();
-      if (!rowRect || !listRect || rowRect.bottom < listRect.top || rowRect.top > listRect.bottom) {
-        node.style.opacity = '0';
-        return;
-      }
-
-      const containerRect = document.querySelector('.container')?.getBoundingClientRect();
-      if (!containerRect) return;
-      node.style.display = 'block';
-      node.style.maxWidth = `${Math.min(430, Math.max(120, window.innerWidth - containerRect.right - 20))}px`;
-      node.style.left = `${containerRect.right + 10}px`;
-      node.style.top = `${rowRect.top + rowRect.height / 2}px`;
-      node.style.transform = 'translateY(-50%)';
-      node.style.opacity = '1';
-    };
-
-    const schedule = () => {
-      if (!frame) frame = requestAnimationFrame(update);
-    };
-
-    schedule();
-    window.addEventListener('resize', schedule);
-    list?.addEventListener('scroll', schedule, { passive: true });
-    return {
-      destroy() {
-        if (frame) cancelAnimationFrame(frame);
-        window.removeEventListener('resize', schedule);
-        list?.removeEventListener('scroll', schedule);
-      }
-    };
-  }
-
-  /**
-   * Draw the recent list's scrollbar only while the list is being scrolled.
-   *
-   * A scrollbar is a fact about the list, not about the row being read: at rest the panel's
-   * rows already carry the gap and the reserved gutter a thumb needs, so what the thumb
-   * adds is four dark pixels of furniture on the one panel that is nearly all list, and on
-   * a phone, where the window is barely wider than the column, the gutter is the only thing
-   * in the panel's right padding at all.
-   *
-   * `.scrolling` is the whole mechanism (see the stylesheet) because a native scrollbar
-   * cannot be animated: Blink paints a scrollbar from its un-animated style, so a transition
-   * or an animation on the thumb is measured to do nothing at all, and the thumb can only
-   * cut between hidden and drawn. A class toggle costs the same frame either way.
-   *
-   * Written as a class rather than reactive state because a scroll burst fires on every
-   * frame of the gesture and nothing else on the page reads this: state would schedule a
-   * render per frame to change one attribute the user is not looking at, and the linger is a
-   * timer, which is not something a template can hold.
-   *
-   * The linger is the other half of the idea. Hiding the thumb as soon as the last scroll
-   * event lands would blink it off between two wheel notches (a flick of a trackpad lands
-   * events tens of milliseconds apart) so the class outlives the gesture by long enough
-   * that a burst reads as one continuous scroll.
-   */
-  function trackListScroll(node: HTMLElement) {
-    let linger: ReturnType<typeof setTimeout> | null = null;
-    const onScroll = () => {
-      node.classList.add('scrolling');
-      if (linger) clearTimeout(linger);
-      linger = setTimeout(() => node.classList.remove('scrolling'), 700);
-    };
-    node.addEventListener('scroll', onScroll, { passive: true });
-    return {
-      destroy() {
-        if (linger) clearTimeout(linger);
-        node.removeEventListener('scroll', onScroll);
-      }
-    };
-  }
-
-  /**
-   * Align the new-document label, and the reset control under the card, with the centered
-   * mount label in the landscape layout.
-   *
-   * The measurement is published on the page's container rather than on the button it was
-   * taken from, because two controls in two subtrees read it: the label inside New Blank
-   * Lith, and the reset control in the panel's foot, which is a sibling of the action card
-   * rather than a child of it. The number is the distance from the card's own content edge
-   * to the type the two of them are matching, so each turns it into the padding its own box
-   * needs (see the landscape block in the stylesheet).
-   *
-   * The property outlives the button it was measured against. When the inline title field
-   * takes that button's row the field is the same full width, so the mount label does not
-   * move and the reset control below stays where it was while a title is typed.
-   */
-  function alignNewLithLabel(node: HTMLButtonElement) {
-    const card = node.parentElement;
-    const page = node.closest<HTMLElement>('main.container');
-    let frame = 0;
-    const update = () => {
-      frame = 0;
-      if (!window.matchMedia('(orientation: landscape) and (max-height: 560px) and (max-width: 950px)').matches) {
-        page?.style.removeProperty('--mount-label-offset');
-        return;
-      }
-      const mount = card?.querySelector<HTMLButtonElement>('.mount-button');
-      const label = mount?.querySelector<HTMLElement>('.mount-label');
-      if (!mount || !label) return;
-      const newRect = node.getBoundingClientRect();
-      const mountRect = mount.getBoundingClientRect();
-      const labelRect = label.getBoundingClientRect();
-      if (!newRect.width || !mountRect.width || !labelRect.width) return;
-      const style = getComputedStyle(node);
-      const inset =
-        (Number.parseFloat(style.borderLeftWidth) || 0) + (Number.parseFloat(style.paddingLeft) || 0);
-      page?.style.setProperty('--mount-label-offset', `${Math.max(0, labelRect.left - newRect.left - inset)}px`);
-    };
-    const schedule = () => {
-      if (!frame) frame = requestAnimationFrame(update);
-    };
-    const observer = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(schedule);
-    observer?.observe(node);
-    if (card) observer?.observe(card);
-    const mount = card?.querySelector('.mount-button');
-    if (mount) observer?.observe(mount);
-    const label = mount?.querySelector('.mount-label');
-    if (label) observer?.observe(label);
-    window.addEventListener('resize', schedule);
-    schedule();
-    return {
-      destroy() {
-        if (frame) cancelAnimationFrame(frame);
-        observer?.disconnect();
-        window.removeEventListener('resize', schedule);
-      }
-    };
   }
 
   function getEntryName(entry: RecentEntry | { name?: string; handle?: any }): string {
@@ -3400,9 +3229,6 @@ import { backupFileName, collectInstanceBackup, mergeBookmarks, parseInstanceBac
 
   function promptDirtyRecovery(name: string, record: { ts: number; tiddlers: Array<Record<string, string>> }): Promise<'merge' | 'discard' | 'later'> {
     dirtyInfo = { name, ts: record.ts, tiddlers: record.tiddlers };
-    // A fresh question starts folded, so an answer left open on the last one cannot arrive
-    // already showing somebody else's title.
-    dirtyOpenTitle = null;
     showDirtyModal = true;
     return new Promise((resolve) => {
       dirtyResolver = resolve;
@@ -3440,14 +3266,8 @@ import { backupFileName, collectInstanceBackup, mergeBookmarks, parseInstanceBac
     const resolver = dirtyResolver;
     dirtyResolver = null;
     dirtyInfo = null;
-    dirtyOpenTitle = null;
     resolver?.(decision);
     void refreshDirtyBadges();
-  }
-
-  /** One body at a time, and the row that is already open folds when its own head is pressed. */
-  function toggleDirtyTiddler(title: string) {
-    dirtyOpenTitle = dirtyOpenTitle === title ? null : title;
   }
 
   async function refreshDirtyBadges() {
@@ -6329,18 +6149,6 @@ import { backupFileName, collectInstanceBackup, mergeBookmarks, parseInstanceBac
   // measures a weak one and says so, rather than quietly accepting it.
   type VaultStatus = { exists: boolean; granted: boolean; count: number; path: string };
   type VaultEntry = { origin: string; user: string };
-  /**
-   * A candidate PIN's verdict: the word it reads as, the band that colours it, and the
-   * sentence Rust wrote behind the word.
-   *
-   * The band is a class name as well as a word, so the colour cannot disagree with the
-   * arithmetic behind it. `refused` is the one case Rust does not band, because the
-   * only refusal possible here is the shape the boxes already enforce. The word is that
-   * band capitalized: Rust bands the shape and composes the sentence, so the only thing
-   * left to spell here is the word the sentence already opens with.
-   */
-  type SecretVerdict = { label: string; text: string; band: string };
-
   let showVaultModal = false;
   let vaultStatus: VaultStatus | null = null;
   let vaultEntries: VaultEntry[] = [];
@@ -6359,7 +6167,6 @@ import { backupFileName, collectInstanceBackup, mergeBookmarks, parseInstanceBac
    * reveal, so neither costs a row of its own.
    */
   let pinReveal = false;
-  let passwordReveal = false;
   /** Bumped when a PIN is refused, so the boxes empty and take the caret again. */
   let vaultPinReset = 0;
   let vaultError = '';
@@ -6443,28 +6250,6 @@ import { backupFileName, collectInstanceBackup, mergeBookmarks, parseInstanceBac
    * only ever be written for an instance the user was already pointing at.
    */
   let credentialOffer: { origin: string; address: string; kind: 'prompt' | 'row'; query: string } | null = null;
-  let offerPin = '';
-  let offerPinConfirm = '';
-  let offerUser = '';
-  let offerPassword = '';
-  let offerError = '';
-  /** The candidate PIN's band and sentence, or null while nothing complete is typed. */
-  let offerWarning: SecretVerdict | null = null;
-  let offerBusy = false;
-  /** Bumped when a PIN is refused, so the boxes empty and take the caret again. */
-  let offerPinReset = 0;
-  /** Bumped when the PIN is complete, to move the caret on to its confirmation. */
-  let offerPinConfirmFocus = 0;
-  /**
-   * What this dialog's fields last answered when they were put to the instance.
-   * Null while they are still being typed into, or hold something other than a
-   * complete login. See `typedLoginCheck` for when it is asked and when it is
-   * cleared. Both buttons of the dialog read it, which is why it is asked for a
-   * typed login rather than for a save.
-   */
-  let offerCheckVerdict: LoginVerdict | null = null;
-  const offerLoginCheck = typedLoginCheck((verdict) => (offerCheckVerdict = verdict));
-  $: offerLoginCheck(credentialOffer?.origin ?? '', offerUser, offerPassword);
 
   /** The exact address a saved login is kept under, for the origin field's hints. */
   function vaultOriginOf(url: string): string {
@@ -6562,7 +6347,6 @@ import { backupFileName, collectInstanceBackup, mergeBookmarks, parseInstanceBac
     vaultNotice = '';
     vaultSecret = '';
     pinReveal = false;
-    passwordReveal = false;
     // Last time's verdicts were about last time; nothing is carried over.
     vaultChecks = {};
     // Every visit starts closed, because nothing is ever left open between them.
@@ -6821,191 +6605,7 @@ import { backupFileName, collectInstanceBackup, mergeBookmarks, parseInstanceBac
    */
   function openCredentialOffer(origin: string, address: string, kind: 'prompt' | 'row', query = '') {
     credentialOffer = { origin, address, kind, query };
-    offerPin = '';
-    offerPinConfirm = '';
-    offerUser = '';
-    offerPassword = '';
-    offerError = '';
-    offerWarning = null;
     pinReveal = false;
-    passwordReveal = false;
-    offerPinReset += 1;
-  }
-
-  function closeCredentialOffer() {
-    credentialOffer = null;
-    offerPin = '';
-    offerPinConfirm = '';
-    offerPassword = '';
-    offerError = '';
-    offerWarning = null;
-  }
-
-  /** A PIN's band and sentence, measured by Rust so the rule has one home. */
-  async function secretVerdict(secret: string): Promise<SecretVerdict | null> {
-    if (!secret) return null;
-    try {
-      const verdict = await tauriInvoke<{
-        ok: boolean;
-        problem?: string | null;
-        warning?: string | null;
-        band?: string | null;
-      }>('check_credentials_secret', { secret });
-      if (!verdict.ok) {
-        // A refusal is not a band: it is said in the same colour every time, because
-        // the only thing it can be is the shape the boxes already enforce.
-        return verdict.problem
-          ? { label: verdict.problem, text: verdict.problem, band: 'refused' }
-          : null;
-      }
-      if (!verdict.warning) return null;
-      const band = verdict.band ?? 'average';
-      return { label: band.charAt(0).toUpperCase() + band.slice(1), text: verdict.warning, band };
-    } catch (error) {
-      return {
-        label: error instanceof Error ? error.message : String(error),
-        text: error instanceof Error ? error.message : String(error),
-        band: 'refused'
-      };
-    }
-  }
-
-  /**
-   * The PIN is complete: say whether it is weak, and move on to its confirmation.
-   *
-   * Only while creating. With a vault already on disk there is nothing to choose.
-   * the PIN is either this vault's or it is not, and `Save` is where that is decided,
-   * so checking it here would only be a second derivation of the same key.
-   */
-  async function offerPinComplete(pin: string) {
-    if (!vaultCreateMode) return;
-    offerPinConfirmFocus += 1;
-    offerWarning = await secretVerdict(pin);
-  }
-
-  /**
-   * Save this instance's login and open it, in one unlock.
-   *
-   * One command rather than unlock-then-save-then-lend: the PIN is derived once, and
-   * the vault that the derivation opens is dropped on the way out with nothing left
-   * open behind it. The answer is the same one-origin, expiring grant any other
-   * instance open leaves.
-   */
-  async function saveOfferedCredential() {
-    const target = credentialOffer;
-    if (!target || offerBusy) return;
-    offerBusy = true;
-    offerError = '';
-    try {
-      // A verdict is always about the text in the boxes right now (any change to
-      // them clears it) so one that has already arrived costs nothing to use. If
-      // none has, the answer is still on its way, and this is the moment it would
-      // decide something: the gap between typing and clicking is exactly where a
-      // password the instance will refuse would otherwise get through.
-      const verdict = offerCheckVerdict && offerCheckVerdict.state !== 'busy'
-        ? offerCheckVerdict
-        : await askInstanceAboutLogin(target.origin, offerUser, offerPassword);
-      offerCheckVerdict = verdict;
-      if (verdict.state === 'refused') {
-        offerError = copy.dialogs.credential.notSaved;
-        return;
-      }
-      await tauriInvoke('save_login_for_instance', {
-        origin: target.origin,
-        secret: offerPin,
-        user: offerUser,
-        password: offerPassword,
-      });
-      offerPin = '';
-      offerPinConfirm = '';
-      offerPassword = '';
-      credentialOffer = null;
-      // The row's key is drawn from the vault file's index, which the save just
-      // rewrote: a stale set would leave it grey for a login that now exists.
-      void refreshVaultStatus();
-      void refreshVaultCoverage();
-      window.location.href = withLauncherHandoff(target.address, window.location.href, target.query);
-    } catch (error) {
-      offerError = error instanceof Error ? error.message : String(error);
-      offerPinReset += 1;
-    } finally {
-      offerBusy = false;
-    }
-  }
-
-  /**
-   * Open it with the login that was just typed, and save nothing.
-   *
-   * This is the workflow for not using the credential manager, and it is what replaced
-   * both reasons the page's own prompt used to appear: the answer is borrowed for one
-   * load rather than written down. Nothing is opened and no PIN is needed (the values
-   * came from the boxes) so it works in the first-run shape too, where the PIN boxes
-   * are empty and only the other button wants them.
-   *
-   * What is left behind is the same one-origin, expiring grant an unlock leaves, which
-   * is what lets the page answer its own 401s (`webview_auth.rs`) (including the
-   * instance's `/sync/` traffic) without a login ever being stored for it.
-   */
-  async function openOfferedLoginWithoutSaving() {
-    const target = credentialOffer;
-    if (!target || offerBusy) return;
-    offerBusy = true;
-    offerError = '';
-    try {
-      // The same question `Save Credential` asks, for the same reason: the one moment
-      // a password can be tried before it is handed over.
-      const verdict = offerCheckVerdict && offerCheckVerdict.state !== 'busy'
-        ? offerCheckVerdict
-        : await askInstanceAboutLogin(target.origin, offerUser, offerPassword);
-      offerCheckVerdict = verdict;
-      if (verdict.state === 'refused') {
-        offerError = copy.dialogs.credential.notOpened;
-        return;
-      }
-      await tauriInvoke('lend_instance_credentials', {
-        origin: target.origin,
-        user: offerUser,
-        password: offerPassword,
-      });
-      offerPassword = '';
-      credentialOffer = null;
-      // Nothing was written, so no row colour changes and no coverage needs asking
-      // again: the vault holds exactly what it held a moment ago.
-      window.location.href = withLauncherHandoff(target.address, window.location.href, target.query);
-    } catch (error) {
-      offerError = error instanceof Error ? error.message : String(error);
-    } finally {
-      offerBusy = false;
-    }
-  }
-
-  /**
-   * The offer's one action. The stages collapse into a single line because only one of
-   * them can be happening, and a failure keeps the loader's own reason after its clause.
-   */
-  async function runFlash(): Promise<void> {
-    flashBusy = true;
-    flashProblem = '';
-    flashPercent = 0;
-    flashLine = copy.esp32.downloading;
-    try {
-      await flashLithicAppliance({
-        password: flashPassword,
-        onStage: (stage) => {
-          flashLine = esp32StageLine(stage);
-        },
-        onProgress: (progress) => {
-          flashPercent = esp32Percent(progress);
-        }
-      });
-      // The password is on the board now, so the field stops holding a secret.
-      flashPassword = '';
-    } catch (error) {
-      flashProblem = copy.esp32.failed(error instanceof Error ? error.message : String(error));
-      flashLine = '';
-    } finally {
-      flashBusy = false;
-    }
   }
 
   /**
@@ -7034,13 +6634,6 @@ import { backupFileName, collectInstanceBackup, mergeBookmarks, parseInstanceBac
     // dismissal rules disagree about which one Escape ends.
     showEmojiPicker = false;
     flashShow = true;
-    flashLine = '';
-    flashPercent = 0;
-  }
-
-  function closeFlash(): void {
-    if (flashBusy) return;
-    flashShow = false;
   }
 </script>
 
@@ -7304,69 +6897,13 @@ import { backupFileName, collectInstanceBackup, mergeBookmarks, parseInstanceBac
     is undone by reverting to the commit it replaced.
   -->
   {#snippet instanceTrail()}
-    {#if trailOffered && trailView !== 'no-repo'}
-      <div class="trail-panel">
-        <p class="trail-title">{copy.dialogs.gitSync.trail.title}</p>
-        {#if trailView === 'loading'}
-          <p class="trail-note">{copy.dialogs.gitSync.trail.loading}</p>
-        {:else if trailView === 'failed'}
-          <p class="status-line error" role="alert">{trailNote}</p>
-        {:else if trailRows.length === 0}
-          <p class="trail-note">{copy.dialogs.gitSync.trail.none}</p>
-        {:else}
-          <ul class="trail-list">
-            {#each trailRows as row, index (row.hash)}
-              {#if index > 0}
-                <!--
-                  What joins two commits, exactly as the wiki trail joins two versions: the
-                  chevron points up at the newer row, and the distance beside it is that row's
-                  own sentence. Decorative, so it stays out of the accessibility tree, and the
-                  chevron is pinned to the column's centre line so the arrows read as one spine.
-                -->
-                <li class="history-link" aria-hidden="true">
-                  <svg viewBox="0 0 14 8" aria-hidden="true"><path d="M1.5 6.5 7 1.5l5.5 5"></path></svg>
-                  {#if row.gap}<span class="history-gap">{trailGapLabel(row.gap, copy.dialogs.history.later, LOCALE_TAG)}</span>{/if}
-                </li>
-              {/if}
-              <li class="history-entry">
-                <span class="trail-hash" title={row.hash}>{row.short}</span>
-                <!--
-                  What the commit was, rather than the sentence git stored with it: every
-                  message in this history was written by Lithic itself, so the row can say
-                  which kind of save it was at a glance. The sentence is still there on the
-                  pill's own tooltip, which is where a message nobody can read at a glance
-                  belongs. The words and their tones are the deck's (`trailBadge`).
-                -->
-                <span class="history-badge trail-badge {row.badge.tone}" title={row.badge.title}>{row.badge.label}</span>
-                <span class="history-time trail-time">{row.stamp}</span>
-                <!--
-                  The revert glyph, supplied as artwork rather than redrawn: the history trail's
-                  own mark turned a quarter turn, so it reads as the same family as the download
-                  icon beside the versions without being mistaken for it. It is drawn in the
-                  download icon's own coordinate box (`viewBox`, and the same `.history-download-icon`
-                  size rule) with one translate, which is what makes the two marks the same size
-                  whatever either of them is later restyled to.
-                -->
-                <button
-                  class="recent-icon-button history-download-button trail-revert"
-                  type="button"
-                  disabled={gitSyncBusy}
-                  aria-label={copy.dialogs.gitSync.trail.revertAria(row.short, row.stamp)}
-                  title={copy.dialogs.gitSync.trail.revertTitle}
-                  on:click={() => askTrailRevert(row)}
-                >
-                  <svg class="history-download-icon" viewBox="56 108 33 36" aria-hidden="true"><g transform="translate(-7.01 5.03)"><path class="history-icon-shape" d="m 80.482426,115.61206 v 8.05016 h 7.125663 v -1.59836 h -5.527311 v -6.4518 z"></path><path class="history-icon-shape" d="m 96.232885,121.64218 c 0,-7.19823 -5.58342,-13.10362 -12.64471,-13.64723 v -0.007 h -15.85743 v -1.32502 l -4.02559,2.32389 4.02559,2.32441 v -1.32343 h 15.85123 c 5.97937,0.53018 10.65103,5.5348 10.65103,11.65458 0,6.47462 -5.22855,11.70316 -11.70316,11.70316 -6.47462,0 -11.70161,-5.22854 -11.70161,-11.70316 0,-2.64451 0.87232,-5.08081 2.34508,-7.03781 h -2.39572 c -1.23707,2.05816 -1.94924,4.46633 -1.94924,7.03781 0,7.5555 6.14599,13.70356 13.70149,13.70356 7.5555,0 13.70304,-6.14806 13.70304,-13.70356 z"></path></g></svg>
-                </button>
-              </li>
-            {/each}
-          </ul>
-        {/if}
-      </div>
+    {#if trailOffered}
+      <TrailPanel view={trailView} commits={trailCommits} note={trailNote} busy={gitSyncBusy} on:revert={(event) => askTrailRevert(event.detail)} />
     {/if}
   {/snippet}
   {#if showGitSyncModal}
     <div class="modal-overlay" role="presentation" on:click={(event) => event.currentTarget === event.target && closeGitSyncModal()}>
-      <div class="launcher-modal git-sync-modal" class:has-trail={trailOffered && trailRows.length > 0} role="dialog" aria-modal="true" aria-labelledby="gitsync-title">          <button class="modal-close" aria-label={copy.dialogs.gitSync.closeAria} on:click={closeGitSyncModal}>×</button>
+      <div class="launcher-modal git-sync-modal" class:has-trail={trailOffered && trailCommits.length > 0} role="dialog" aria-modal="true" aria-labelledby="gitsync-title">          <button class="modal-close" aria-label={copy.dialogs.gitSync.closeAria} on:click={closeGitSyncModal}>×</button>
         <h2 id="gitsync-title">{copy.dialogs.gitSync.title}</h2>
         {#if gitSyncFolderEditable}
           <!--
@@ -7604,35 +7141,7 @@ import { backupFileName, collectInstanceBackup, mergeBookmarks, parseInstanceBac
       </div>
     </div>
   {/if}
-  {#if flashShow}
-    <!--
-      The one-time flash offer. A blank board is the subject, so the dialog asks for one thing:
-      the password the board will broadcast its network with, which is written into the flash
-      beside the published images. The button waits for a usable password and then stays
-      disabled for the run rather than offering a second start over the top of the first. It
-      opens only from the manager row, which is drawn only where Web Serial exists, so there
-      is no unsupported shape to draw here.
-    -->
-    <div class="modal-overlay" role="presentation" on:click={(event) => event.currentTarget === event.target && closeFlash()}>
-      <div class="launcher-modal flash-modal" role="dialog" aria-modal="true" aria-labelledby="flash-title">
-        <button class="modal-close" aria-label={copy.esp32.closeAria} disabled={flashBusy} on:click={closeFlash}>×</button>
-        <h2 id="flash-title">{copy.esp32.title}</h2>
-        <p>{copy.esp32.intro}</p>
-        <label class="flash-field">
-          <span>{copy.esp32.passwordLabel}</span>
-          <input bind:value={flashPassword} type="password" autocomplete="new-password" aria-describedby="flash-password-rule" disabled={flashBusy} />
-        </label>
-        <p class="flash-rule" id="flash-password-rule">{copy.esp32.passwordRule}</p>
-        {#if flashLine}
-          <p class="status-line" role="status">{flashLine}{#if flashBusy && flashPercent > 0}{' - '}{flashPercent}%{/if}</p>
-        {/if}
-        {#if flashProblem}<p class="status-line error" role="alert">{flashProblem}</p>{/if}
-        <div class="modal-actions">
-          <button class="modal-action" disabled={flashBusy || !flashPasswordOk} on:click={runFlash}>{copy.esp32.flash}</button>
-        </div>
-      </div>
-    </div>
-  {/if}
+  <FlashDialog bind:show={flashShow} bind:problem={flashProblem} on:close={() => (flashShow = false)} />
   {#if showBookmarks && showBookmarkModal}
     <div class="modal-overlay" role="presentation" on:click={(event) => event.currentTarget === event.target && closeBookmarkModal()}>
       <div class="launcher-modal bookmark-modal" role="dialog" aria-modal="true" aria-labelledby="bookmark-title">
@@ -7705,104 +7214,15 @@ import { backupFileName, collectInstanceBackup, mergeBookmarks, parseInstanceBac
     </div>
   {/if}
   {#if credentialOffer}
-    <!--
-      The one dialog that writes a login, and the only place a password can be typed
-      for an instance nothing is saved for: either the offer a challenging instance
-      makes while it is opened, or a bookmark row's key. Closed, it borrows the login
-      for this one load and stores nothing, which is what replaced the page's own prompt.
-      The answer is in the grant either way, so the webview never has to ask.
-    -->
-    <div class="modal-overlay" role="presentation" on:click={(event) => event.currentTarget === event.target && closeCredentialOffer()}>
-      <div class="launcher-modal vault-modal" role="dialog" aria-modal="true" aria-labelledby="credential-offer-title">
-        <button class="modal-close" aria-label={copy.dialogs.credential.closeAria} on:click={closeCredentialOffer}>×</button>
-        <h2 id="credential-offer-title">{copy.dialogs.credential.title}</h2>
-        <!--
-          One line, whichever way this dialog was reached. It used to have two: the
-          offer's said why the dialog had opened ("www.foobar.com asks for a password")
-          and the row's what the credential was tied to ("answered per exact address").
-          The first was the heading again with an address in it, and an address the user
-          just clicked is not news. The second read as a scope the user might weigh, when
-          it is only how the vault decides what to offer. What is left is the one fact
-          this dialog cannot do without: which instance the credential is for.
-        -->
-        <p class="vault-sub">{copy.dialogs.credential.forInstance(instanceLabel(credentialOffer.origin))}</p>
-        <div class="vault-pin credential-offer-pin">
-          <PinEntry
-            bind:value={offerPin}
-            bind:reveal={pinReveal}
-            revealToggle={!vaultCreateMode}
-            label={vaultCreateMode ? copy.common.choosePin : copy.common.pin}
-            disabled={offerBusy}
-            reset={offerPinReset}
-            complete={(pin) => void offerPinComplete(pin)}
-          />
-          <!--
-            The band word, at the end of the boxes' own label line: it is about the PIN
-            those boxes hold, and it is the whole of what this dialog says about it. That
-            end of that line is where the password field below puts its own Show toggle,
-            and the two are never drawn together, because this word exists only while a
-            PIN is being chosen, which is the mode that draws no toggle. The
-            arithmetic behind the word rides in the word's title, so the estimate is
-            still there to be read without a paragraph standing in the dialog. It
-            describes a complete candidate, so it goes when the boxes no longer hold one:
-            a band about a PIN that has been cleared is about nothing.
-          -->
-          {#if offerWarning && offerPin.length === 6}
-            <p class="vault-band {offerWarning.band}" role="status" title={offerWarning.text}>{offerWarning.label}</p>
-          {/if}
-        </div>
-        {#if vaultCreateMode}
-          <div class="vault-pin credential-offer-pin-confirm">
-            <PinEntry
-              bind:value={offerPinConfirm}
-              bind:reveal={pinReveal}
-              label={copy.common.repeatPin}
-              disabled={offerBusy}
-              reset={offerPinReset}
-              focusSignal={offerPinConfirmFocus}
-            />
-          </div>
-        {/if}
-        <label class="vault-field"><span>{copy.dialogs.credential.username}</span><input class="credential-offer-user" bind:value={offerUser} autocomplete="off" /></label>
-        <!-- One password box, not two: the instance is asked about what is typed here,
-             and it is the only thing that can tell a mistyped password from a correct
-             one. Two identical typos satisfy a repeat box. Its toggle sits in its label
-             row, at the right edge of it, which is the input's own width. The same place
-             the PIN's toggle lands on its boxes, because this is the field nothing
-             repeats back. It is a label of its own rather than one wrapped around the
-             field: a label cannot hold another label, and the row above the input is
-             where the toggle's place is. -->
-        <div class="vault-field">
-          <div class="pin-head">
-            <label class="pin-label" for="credential-offer-password">{copy.dialogs.credential.password}</label>
-            <label class="vault-reveal"><input type="checkbox" bind:checked={passwordReveal} /> {copy.common.show}</label>
-          </div>
-          <input id="credential-offer-password" class="credential-offer-password" type={passwordReveal ? 'text' : 'password'} bind:value={offerPassword} autocomplete="off" />
-        </div>
-        {#if offerCheckVerdict}
-          <!-- Said in the dialog rather than discovered after the handoff: this is
-               the last screen that can tell the user a password is wrong, because
-               the page it signs in to is one this app cannot speak on. -->
-          <p class="vault-check-line {offerCheckVerdict.state}" role="status" title={offerCheckVerdict.detail}>{offerCheckVerdict.detail}</p>
-        {/if}
-        {#if offerError}<p class="status-line error" role="alert">{offerError}</p>{/if}
-        <div class="modal-actions">
-          <button
-            class="modal-action credential-offer-save"
-            disabled={offerBusy || offerPin.length !== 6 || (vaultCreateMode && offerPin !== offerPinConfirm) || !offerUser || !offerPassword || offerCheckVerdict?.state === 'refused'}
-            on:click={saveOfferedCredential}
-          >{offerBusy ? copy.dialogs.credential.saving : copy.dialogs.credential.save}</button>
-          <!-- No PIN, because nothing is written: this is the whole of "not using the
-               credential manager", and it is why the page's own prompt no longer needs
-               to exist in the desktop app. -->
-          <button
-            class="modal-action secondary credential-offer-without-saving"
-            disabled={offerBusy || !offerUser || !offerPassword || offerCheckVerdict?.state === 'refused'}
-            on:click={openOfferedLoginWithoutSaving}
-          >{offerBusy ? '…' : copy.dialogs.credential.openWithoutSaving}</button>
-        </div>
-      </div>
-    </div>
+    {#key credentialOffer}
+      <CredentialOfferDialog
+        offer={credentialOffer}
+        {vaultCreateMode}
+        bind:pinReveal
+        on:close={() => (credentialOffer = null)}
+        on:saved={() => { void refreshVaultStatus(); void refreshVaultCoverage(); }}
+      />
+    {/key}
   {/if}
   {#if showVaultModal}
     <!-- Saved logins: the list, and the PIN that opens it. Three shapes rather than a
@@ -8341,61 +7761,7 @@ import { backupFileName, collectInstanceBackup, mergeBookmarks, parseInstanceBac
     </div>
   {/if}
   {#if showDirtyModal && dirtyInfo}
-    <div class="modal-overlay" role="presentation">
-      <div class="launcher-modal dirty-modal" role="dialog" aria-modal="true" aria-labelledby="dirty-title">
-        <h2 id="dirty-title">{copy.dialogs.dirty.title}</h2>
-        <p>
-          {copy.dialogs.dirty.body(dirtyInfo.name, dirtyInfo.tiddlers.length, new Date(dirtyInfo.ts).toLocaleString(LOCALE_TAG))}
-        </p>
-        <!--
-          Every captured edit, one title apiece, and the row is its own disclosure: a title
-          says an edit happened, not whether it is worth keeping, so the body it captured
-          opens under it. One open at a time, because a second body would push the three
-          answers below out of the dialog, and each body is capped so a note of forty lines
-          scrolls inside itself rather than growing the dialog around it. A capture that
-          carries no text has nothing to show, so its row stays a title with no chevron.
-        -->
-        <ul class="dirty-tiddler-list">
-          {#each dirtyInfo.tiddlers as tiddler, index (tiddler.title)}
-            {@const body = typeof tiddler.text === 'string' ? tiddler.text : ''}
-            {@const open = dirtyOpenTitle === tiddler.title}
-            <li class="dirty-tiddler-row" class:open={open}>
-              {#if body.trim() === ''}
-                <span class="dirty-tiddler-plain">{tiddler.title}</span>
-              {:else}
-                <button
-                  type="button"
-                  class="dirty-tiddler-head"
-                  aria-expanded={open}
-                  aria-controls="dirty-tiddler-body-{index}"
-                  on:click={() => toggleDirtyTiddler(tiddler.title)}
-                >
-                  <span class="dirty-tiddler-title">{tiddler.title}</span>
-                  <svg class="dirty-tiddler-chevron" viewBox="0 0 14 8" aria-hidden="true"><path d="M1.5 1.5 7 6.5l5.5-5"></path></svg>
-                </button>
-              {/if}
-              {#if open}
-                <div class="dirty-tiddler-body" id="dirty-tiddler-body-{index}">
-                  <pre>{body}</pre>
-                </div>
-              {/if}
-            </li>
-          {/each}
-        </ul>
-        <div class="modal-actions">
-          <button class="modal-action" on:click={() => resolveDirtyModal('merge')}>{copy.dialogs.dirty.recover}</button>
-          <button class="modal-action secondary" on:click={() => resolveDirtyModal('later')}>{copy.dialogs.dirty.later}</button>
-          <!--
-            The one answer here that cannot be taken back, so the one that wears the red: merging
-            folds the edits into the mount and deciding later leaves the question open, where
-            discarding clears the copy of them that exists nowhere else (see
-            `prepareDirtyRecovery`). The dialog is the three-way prompt with no × and no Cancel,
-            so the cost has to be on the button rather than on a second window behind it.
-          -->
-          <button class="modal-action danger" on:click={() => resolveDirtyModal('discard')}>{copy.dialogs.dirty.discard}</button>
-        </div>
-      </div>
-    </div>
+    <DirtyRecoveryDialog info={dirtyInfo} on:resolve={(event) => resolveDirtyModal(event.detail)} />
   {/if}
   {#if confirmation}
     <div class="modal-overlay" role="presentation">
