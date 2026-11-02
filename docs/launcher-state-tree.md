@@ -182,3 +182,10 @@ Five things fall out of drawing it, in the order they cost the most today:
    missing answer keeps old behaviour, and the page never asks an OS name. Extending that shape to
    the launcher's own three booleans would make the tree above a data structure rather than a
    reading exercise.
+
+## What it costs to lift one of these out
+
+The five findings above describe the branching. A companion note measures what each feature costs
+to move out of `App.svelte`, and it lands on the same culprits: `status` heads a list of six names
+that every cluster needs, with `isSelfHost` and `appliance` beside it. That is why no feature lifts
+cleanly and why the state design comes first. See `docs/launcher-extraction-notes.md`.
