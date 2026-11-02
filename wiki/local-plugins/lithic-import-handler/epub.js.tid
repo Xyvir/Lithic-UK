@@ -4,10 +4,19 @@ module-type: library
 
 /* Turns an EPUB into the nodestream a book becomes.
 
-   Every spine document is one chapter, and its text is split into one node per
+   A spine document is a chapter, and its text is split into one node per
    block, titled `<CODE>_p001`. The code is taken from the file's own name, so
    two books in one wiki never share a numbered node and nothing leaves the wiki
    to work out what a book is called.
+
+   Not every book gives a chapter a file of its own. A converter that turns a
+   word processor document into a book writes the whole thing as one document
+   and says where its parts are with a table of contents that points inside it.
+   So a page the table of contents points into is cut where those points land,
+   one chapter per point; and a book that is one document with no table of
+   contents at all is cut at its own headings, because they are the only
+   structure it has left. A page with neither is one chapter, which is every
+   file of an ordinary book.
 
    A chapter is named the way the book names it: `Chapter 1: Foundations`, with
    its spaces left as spaces, because that name is what a person reads in the
@@ -20,8 +29,16 @@ module-type: library
    Two kinds of travel are laid down, because a book is read in two ways. Each
    chapter carries `prev` and `next`, and the first is tagged Dogear, which is
    what this wiki reads a reading position from: one page at a time, without the
-   whole book in the story river. Each chapter is also tagged Favorite, so the
-   sidebar lists them directly, which is the way back to a chapter later on.
+   whole book in the story river. Each chapter the book gave a name to is also
+   tagged Favorite, so the sidebar lists them directly, which is the way back to
+   a chapter later on.
+
+   A chapter named by its place rather than by the book (`IYSS_Page_001`) is left
+   out of that list. It has no name of its own to show, and a bookmark with the
+   code in front of it is the importer's filing system showing in something a
+   person reads. It is still a chapter, still tagged with the code and still in
+   the chain, so the code reaches it, the book reads through it and only the
+   sidebar does without it.
 
    That list is ordered by the Favorite tag tiddler's own list rather than by
    title, so the chapters are written into it in document order: the sidebar
@@ -211,6 +228,19 @@ function decode(name) {
     }
 }
 
+// An address as its two halves: the file it names and the place inside it. A
+// table of contents points into a document (`page.html#part2`) as often as it
+// points at one, and both halves are kept, because the file is what a page is
+// read from and the place is where inside it a chapter begins.
+function resolveTarget(base, href) {
+    var raw = String(href || "");
+    var hash = raw.indexOf("#");
+    return {
+        href: resolveHref(base, raw),
+        id: hash < 0 ? "" : decode(raw.substring(hash + 1))
+    };
+}
+
 function resolveHref(base, href) {
     var target = decode(String(href || "").replace(/[?#].*$/, ""));
     if (!target) {
@@ -306,28 +336,50 @@ function textOf(node) {
 
 function readNav(text, navHref, isNcx) {
     var doc = parseXml(text);
+    // Two ways of naming what a book holds, and both are kept:
+    //
+    //   `labels` names a page after the words the book gives it;
+    //   `anchors` remembers the places a page is pointed into, in the order the
+    //   book lists them, because in a one-document book those places are where
+    //   its chapters begin.
     var labels = {};
-    if (isNcx) {
-        var points = elements(doc, "navPoint");
-        for (var i = 0; i < points.length; i++) {
-            var label = textOf(childElement(childElement(points[i], "navLabel"), "text"));
-            var content = childElement(points[i], "content");
-            var target = resolveHref(navHref, content ? content.getAttribute("src") : "");
-            if (target && label && !labels[target]) {
-                labels[target] = label;
+    var anchors = {};
+    function add(href, label) {
+        var target = resolveTarget(navHref, href);
+        if (!target.href) {
+            return;
+        }
+        // The first name a book gives a page is the one it is known by here.
+        if (label && !labels[target.href]) {
+            labels[target.href] = label;
+        }
+        if (!target.id) {
+            return;
+        }
+        var places = anchors[target.href] || (anchors[target.href] = []);
+        for (var i = 0; i < places.length; i++) {
+            // Two entries naming the same place are one place. A book often
+            // lists a part and its first section at the same address.
+            if (places[i].id === target.id) {
+                return;
             }
         }
-        return labels;
+        places.push({ id: target.id, label: label || "" });
     }
-    var anchors = elements(doc, "a");
-    for (var j = 0; j < anchors.length; j++) {
-        var href = resolveHref(navHref, anchors[j].getAttribute("href"));
-        var anchorLabel = textOf(anchors[j]);
-        if (href && anchorLabel && !labels[href]) {
-            labels[href] = anchorLabel;
+    if (isNcx) {
+        var points = elements(doc, "navPoint");
+        for (var p = 0; p < points.length; p++) {
+            var pointLabel = textOf(childElement(childElement(points[p], "navLabel"), "text"));
+            var content = childElement(points[p], "content");
+            add(content ? content.getAttribute("src") : "", pointLabel);
         }
+        return { labels: labels, anchors: anchors };
     }
-    return labels;
+    var links = elements(doc, "a");
+    for (var j = 0; j < links.length; j++) {
+        add(links[j].getAttribute("href"), textOf(links[j]));
+    }
+    return { labels: labels, anchors: anchors };
 }
 
 async function readPackage(bytes, entries) {
@@ -378,19 +430,24 @@ async function readPackage(bytes, entries) {
         }
     }
     var labels = {};
+    var anchors = {};
     if (nav) {
         var navText = await readText(bytes, entries, nav.href);
         if (navText) {
-            labels = readNav(navText, nav.href, /ncx/i.test(nav.type) || /\.ncx$/i.test(nav.href));
+            var fromNav = readNav(navText, nav.href, /ncx/i.test(nav.type) || /\.ncx$/i.test(nav.href));
+            labels = fromNav.labels;
+            anchors = fromNav.anchors;
         }
     }
     if (Object.keys(labels).length === 0 && ncx && ncx.href) {
         var ncxText = await readText(bytes, entries, ncx.href);
         if (ncxText) {
-            labels = readNav(ncxText, ncx.href, true);
+            var fromNcx = readNav(ncxText, ncx.href, true);
+            labels = fromNcx.labels;
+            anchors = fromNcx.anchors;
         }
     }
-    return { spine: spine, types: types, labels: labels };
+    return { spine: spine, types: types, labels: labels, anchors: anchors };
 }
 
 // --- Reading the page --------------------------------------------------------
@@ -399,16 +456,33 @@ async function readPackage(bytes, entries) {
 // step in that run so it lands where the book put it. A block is what a person
 // sees as one paragraph, which is why a `<br>` ends one: the line the book drew
 // is the line the node follows.
-
-function readBlocks(doc, pageHref) {
+//
+// Two marks are left on the way through, because a block is also where a chapter
+// can start: `anchor` on the block a table of contents points at, and `heading`
+// on one the page drew as a heading. Which of the two a book uses is decided
+// once the whole page has been read.
+function readBlocks(doc, pageHref, anchorLabels) {
     var blocks = [];
     var buffer = "";
+    var pendingAnchor = null;
+    var pendingHeading = false;
+    function push(block) {
+        if (pendingAnchor) {
+            block.anchor = pendingAnchor.label;
+            pendingAnchor = null;
+        }
+        if (pendingHeading) {
+            block.heading = true;
+            pendingHeading = false;
+        }
+        blocks.push(block);
+    }
     function flush() {
         var text = buffer.replace(/\s+/g, " ").trim().replace(/^[-*+]\s+/, "").trim();
-        if (text) {
-            blocks.push({ text: text });
-        }
         buffer = "";
+        if (text) {
+            push({ text: text });
+        }
     }
     function visit(node) {
         for (var child = node.firstChild; child; child = child.nextSibling) {
@@ -427,7 +501,7 @@ function readBlocks(doc, pageHref) {
                 var src = child.getAttribute("src") || child.getAttribute("xlink:href") || child.getAttribute("href");
                 if (src) {
                     flush();
-                    blocks.push({ image: resolveHref(pageHref, src) });
+                    push({ image: resolveHref(pageHref, src) });
                 }
                 continue;
             }
@@ -435,8 +509,21 @@ function readBlocks(doc, pageHref) {
                 flush();
                 continue;
             }
+            // Where the table of contents lands. The mark is carried to the next
+            // block rather than read here, because a book often marks the place
+            // with an element of its own and puts the chapter's words after it.
+            if (anchorLabels) {
+                var id = String(child.getAttribute("id") || (tag === "a" ? child.getAttribute("name") || "" : "")).toLowerCase();
+                if (id && Object.prototype.hasOwnProperty.call(anchorLabels, id) && !pendingAnchor) {
+                    flush();
+                    pendingAnchor = { label: anchorLabels[id] };
+                }
+            }
             if (BLOCK_TAGS[tag]) {
                 flush();
+                if (/^h[1-6]$/.test(tag)) {
+                    pendingHeading = true;
+                }
                 visit(child);
                 flush();
             } else {
@@ -447,6 +534,52 @@ function readBlocks(doc, pageHref) {
     visit(doc.body || doc.documentElement);
     flush();
     return blocks;
+}
+
+// The chapters one page holds.
+//
+// A page the table of contents points into more than once is cut at those
+// points, one chapter per point and each named by the words the book gave that
+// point. A page with no such points is one chapter, which is every file of an
+// ordinary book.
+//
+// A book split into files has said where its chapters are, so its headings are
+// what is inside one and are left alone. A book that is one document and has no
+// table of contents has no other structure to offer, so its own headings are
+// taken as its chapters: that is the last thing tried, and only for such a book.
+//
+// Whatever comes before the first mark belongs to the first chapter. A title
+// page, an epigraph and a table of contents itself all sit at the front of a
+// book and none of them is a chapter of its own.
+function splitPage(blocks, headingsAreChapters) {
+    var pointing = false;
+    for (var i = 0; i < blocks.length; i++) {
+        if (blocks[i].anchor !== undefined) {
+            pointing = true;
+            break;
+        }
+    }
+    var useHeadings = headingsAreChapters && !pointing;
+    var sections = [];
+    var leading = [];
+    var current = null;
+    for (var b = 0; b < blocks.length; b++) {
+        var named = blocks[b].anchor !== undefined;
+        if (named || (useHeadings && blocks[b].heading)) {
+            current = { label: named ? String(blocks[b].anchor) : String(blocks[b].text || ""), blocks: leading };
+            leading = [];
+            sections.push(current);
+        }
+        if (current) {
+            current.blocks.push(blocks[b]);
+        } else {
+            leading.push(blocks[b]);
+        }
+    }
+    if (sections.length === 0) {
+        sections.push({ label: "", blocks: leading });
+    }
+    return sections;
 }
 
 // The heading a page gives itself. The document's own `<title>` is deliberately
@@ -586,11 +719,15 @@ function uniqueTitle(base, taken) {
 }
 
 // The tags a chapter carries: the code it is filed under, which is how one
-// book's chapters are found as a set; the tag the sidebar lists; and Dogear on
-// the first, which is where a reader enters the book. The code comes first so a
-// chapter's own book is the tag a person sees first.
-function chapterTags(code, index) {
-    var tags = [code, FAVORITE_TAG];
+// book's chapters are found as a set; the tag the sidebar lists, which a chapter
+// named by its place does not carry; and Dogear on the first, which is where a
+// reader enters the book. The code comes first so a chapter's own book is the
+// tag a person sees first.
+function chapterTags(code, index, favorite) {
+    var tags = [code];
+    if (favorite) {
+        tags.push(FAVORITE_TAG);
+    }
     if (index === 0) {
         tags.push(DOGEAR_TAG);
     }
@@ -601,7 +738,8 @@ function chapterTags(code, index) {
 // one the tag falls back to titles, which for a book means A-Z: the order a
 // shelf is filed in, not the order a book is read in. So the chapters are
 // written into that list in document order, after whatever is already favorite,
-// which is the order somebody dragged it into.
+// which is the order somebody dragged it into. Only the chapters that carry the
+// tag are named here, since the ones named by their place are not in that list.
 function favoriteOrder(chapters) {
     var tagTiddler = $tw.wiki.getTiddler(FAVORITE_TAG);
     // Copied rather than built fresh, so a caption or any other field somebody
@@ -613,7 +751,7 @@ function favoriteOrder(chapters) {
     // function's to change, and pushing onto it throws.
     var order = ($tw.utils.parseStringArray(fields.list) || []).slice();
     for (var i = 0; i < chapters.length; i++) {
-        if (order.indexOf(chapters[i].title) === -1) {
+        if (chapters[i].favorite && order.indexOf(chapters[i].title) === -1) {
             order.push(chapters[i].title);
         }
     }
@@ -636,6 +774,7 @@ async function convertEpubToTiddlers(arrayBuffer, fileName, setProgress) {
     var chapters = [];
     var paragraphCount = 0;
     var imageCount = 0;
+    var sectionCount = 0;
     for (var index = 0; index < book.spine.length; index++) {
         var item = book.spine[index];
         note("Importing " + fileName + ": page " + (index + 1) + "/" + book.spine.length + "...");
@@ -644,45 +783,67 @@ async function convertEpubToTiddlers(arrayBuffer, fileName, setProgress) {
             continue;
         }
         var doc = new DOMParser().parseFromString(markup, "text/html");
-        var blocks = readBlocks(doc, item.href);
+        // The places inside this page that the book's table of contents names,
+        // keyed by the id they land on. A book that gives every chapter its own
+        // file names none of these.
+        var named = book.anchors[item.href] || [];
+        var anchorLabels = {};
+        for (var a = 0; a < named.length; a++) {
+            anchorLabels[String(named[a].id).toLowerCase()] = named[a].label;
+        }
+        var blocks = readBlocks(doc, item.href, anchorLabels);
         if (blocks.length === 0) {
             continue;
         }
-        // The book's own name for the page, from its table of contents or its
-        // first heading. A page it does not name is named by its place, which is
-        // the one name that has to carry the code: `Page 003` belongs to no book
-        // in particular, so two of them in one wiki would be one tiddler.
-        var label = chapterName(book.labels[item.href] || headingOf(doc));
-        var chapterTitle = label
-            ? uniqueTitle(label, taken)
-            : uniqueTitle(code + "_Page_" + pad(index + 1), taken);
-        var children = [];
-        for (var b = 0; b < blocks.length; b++) {
-            if (blocks[b].text) {
-                var nodeTitle = uniqueTitle(code + "_p" + pad(++paragraphCount), taken);
-                tiddlers.push({
-                    title: nodeTitle,
-                    parent: chapterTitle,
-                    "stream-type": "default",
-                    text: blocks[b].text
-                });
-                children.push(nodeTitle);
-            } else {
-                var picture = await readImage(bytes, entries, blocks[b].image, book.types);
-                if (picture) {
-                    var imageTitle = uniqueTitle(code + "_img" + pad(++imageCount), taken);
+        var sections = splitPage(blocks, book.spine.length === 1);
+        for (var s = 0; s < sections.length; s++) {
+            sectionCount++;
+            // The book's own name for the chapter, from the point the table of
+            // contents made it start at or the heading it begins with. A chapter
+            // it does not name is named by its place, which is the one name that
+            // has to carry the code: `Page 003` belongs to no book in particular,
+            // so two of them in one wiki would be one tiddler.
+            var label = chapterName(sections[s].label);
+            if (!label && sections.length === 1) {
+                label = chapterName(book.labels[item.href] || headingOf(doc));
+            }
+            var chapterTitle = label
+                ? uniqueTitle(label, taken)
+                : uniqueTitle(code + "_Page_" + pad(sections.length > 1 ? sectionCount : index + 1), taken);
+            var children = [];
+            var part = sections[s].blocks;
+            for (var b = 0; b < part.length; b++) {
+                if (part[b].text) {
+                    var nodeTitle = uniqueTitle(code + "_p" + pad(++paragraphCount), taken);
                     tiddlers.push({
-                        title: imageTitle,
+                        title: nodeTitle,
                         parent: chapterTitle,
-                        type: picture.type,
                         "stream-type": "default",
-                        text: picture.text
+                        text: part[b].text
                     });
-                    children.push(imageTitle);
+                    children.push(nodeTitle);
+                } else {
+                    var picture = await readImage(bytes, entries, part[b].image, book.types);
+                    if (picture) {
+                        var imageTitle = uniqueTitle(code + "_img" + pad(++imageCount), taken);
+                        tiddlers.push({
+                            title: imageTitle,
+                            parent: chapterTitle,
+                            type: picture.type,
+                            "stream-type": "default",
+                            text: picture.text
+                        });
+                        children.push(imageTitle);
+                    }
                 }
             }
+            // A section of nothing but pictures the wiki cannot draw would be a
+            // chapter with nothing under it, so it is not written at all.
+            if (children.length === 0) {
+                continue;
+            }
+            chapters.push({ title: chapterTitle, children: children, favorite: Boolean(label) });
         }
-        chapters.push({ title: chapterTitle, children: children });
     }
     if (chapters.length === 0) {
         throw new Error("The EPUB has no readable text");
@@ -692,7 +853,7 @@ async function convertEpubToTiddlers(arrayBuffer, fileName, setProgress) {
             title: chapters[c].title,
             "stream-type": "default",
             "stream-list": $tw.utils.stringifyList(chapters[c].children),
-            tags: chapterTags(code, c),
+            tags: chapterTags(code, c, chapters[c].favorite),
             text: ""
         };
         // A chapter names the one either side of it, which is what the reading
