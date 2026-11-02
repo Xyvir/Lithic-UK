@@ -6,7 +6,9 @@
 
 [**Try it at lithic.uk**](https://lithic.uk) · [**Download**](https://github.com/Xyvir/Lithic-UK/releases)
 
-[![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/Xyvir/Lithic-UK)
+Mirrors: [Codeberg](https://codeberg.org/Xyvir/Lithic-uk) · [GitLab](https://gitlab.com/tymills620/lithic-uk)
+
+[![Ask DeepWiki](deepwiki-badge.svg)](https://deepwiki.com/Xyvir/Lithic-UK)
 
 Lithic is a personal knowledge base for people who want their notes to outlast the app. Your wiki is a single `.lith` file on a disk you choose, or on a server you run. Nothing requires an account, a subscription or a connection.
 
