@@ -202,6 +202,36 @@ same name in `App.svelte` (`const status = await readGitStatus(...)` and its fou
 search and replace on the bare name silently damages those. The conversions above were anchored on
 statement position (start of line, or after `{ ` or `; `), which is the shape to keep.
 
+## The branch decisions, named
+
+The declarations that decided which launcher a page is now live in `branch-decisions.ts` (91 lines)
+and are called from the page as one-line adapters:
+
+| decision | rule | mentions in the page |
+|---|---|---|
+| `hasLocalSync` | the app, or a shim token | 22 |
+| `shimBackend` | a shim token is present | the disjunction appeared 5 times, now once |
+| `storageMode` | a shim is a file backend, everyone else asks the platform | 1 declaration |
+| `indexDbOnly` | that mode is `index-db` | 10 |
+| `isSelfHost` | the mode is `self-host` | 37 |
+
+**None of them was ever a `let`.** Three were consts, `hasLocalSync` was a `$:` derived from the
+mode, and `isSelfHost` was a function, so the state tree's finding 1 was a naming problem rather
+than a state problem. That makes this the cheapest reduction of the hub list available, and it is
+why it went first: no store, no ownership change, and the 69 mentions that read the names are
+untouched.
+
+Three duplicates went with it: the sites that wrote `mode === 'tauri' || shimToken !== null` by
+hand now read `hasLocalSync`. The one surviving disjunction is `showBookmarks`, which asks a
+different question (`webapp` and an iDevice) and keeps the platform read visible beside it.
+
+The module is pure by construction, which is the part worth copying for the stateful pass: every
+function is an answer about an environment the page has already read, so the seven cases in
+`branch-decisions.test.ts` (a shim on a browser with no picker, a shim told to use the fallback, a
+published page with and without the API, the query override, an app that cannot hold a document,
+each mode against the local-backend question) run without a page at all. The inline copies could
+only be tested by driving the whole launcher.
+
 ## Why git and vault come last
 
 Not because they are big, but because their boundary is made of hubs:
