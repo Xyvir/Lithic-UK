@@ -222,8 +222,9 @@ why it went first: no store, no ownership change, and the 69 mentions that read 
 untouched.
 
 Three duplicates went with it: the sites that wrote `mode === 'tauri' || shimToken !== null` by
-hand now read `hasLocalSync`. The one surviving disjunction is `showBookmarks`, which asks a
-different question (`webapp` and an iDevice) and keeps the platform read visible beside it.
+hand now read `hasLocalSync`. `showBookmarks` followed as a fifth decision, taking the iOS answer
+as an argument so the platform read stays where `isIosDevice` documents it. There is now no
+`mode === 'tauri' ||` left in the page at all.
 
 The module is pure by construction, which is the part worth copying for the stateful pass: every
 function is an answer about an environment the page has already read, so the seven cases in
