@@ -89,6 +89,37 @@ ul .menu-separator {
 	overflow: visible;
 }
 
+/* The menu pops in the way every other drop-down in Lithic does. The Notebook theme
+   animates .tc-drop-down on its own, which is why the streams node menu already fades
+   in, but this menu is its own element (#contextMenu, classed .context-menu) and never
+   matches that selector, so the same frames are declared here. The keyframes name is
+   local so the menu does not depend on the theme in use, and it uses the theme's exact
+   stopping points (0.8, a 1.03 overshoot, settle at 1) so the two menus feel the same.
+   Forwards is deliberately omitted: a lingering transform would leave a stacking
+   context on an element the popover already lifts above the page, and the settled
+   scale(1) is what the menu looks like without any transform at all. The animation
+   replays on every open because closeMenu sets display: none, which restarts it. */
+@keyframes lithic-context-menu-pop {
+	0% {
+		transform: scale(0.8);
+		opacity: 0;
+	}
+
+	80% {
+		transform: scale(1.03);
+		opacity: 1;
+	}
+
+	100% {
+		transform: scale(1);
+		opacity: 1;
+	}
+}
+
+#contextMenu {
+	animation: lithic-context-menu-pop 0.15s ease-in;
+}
+
 /* Context Menu Highlight Patch - applies when right-clicking a stream node or link.
    Palette-aware and live: the notify-bg/-fg contrast roles are derived from the SAME
    palette fields as the streams patch's own highlight band

@@ -95,12 +95,16 @@ export function resolveDefaultPlugins(): string[] {
 
 /**
  * Tiddlers the launcher itself puts into every mounted wiki: the shared widget
- * override and the Ephemeral API integration, plus the plugin-library flag the
- * engine bootstrap sets. They are part of how Lithic runs, not the user's
- * content, so a save must not write them into a .lith. The next mount injects
- * them again on top, and the copy in the file goes stale. `~` is the launcher's
- * own marking for an injected override, which is why a prefix rule covers the
- * whole class.
+ * override and the Ephemeral API integration. They are part of how Lithic runs,
+ * not the user's content, so a save must not write them into a .lith. The next
+ * mount injects them again on top, and the copy in the file goes stale. `~` is
+ * the launcher's own marking for an injected override, which is why a prefix
+ * rule covers the whole class.
+ *
+ * `$:/config/OfficialPluginLibrary` is named as well, though no mount writes it
+ * any more: an older bootstrap replaced core's registration with a flag, which
+ * left the official plugin library with no tab, and this exclusion is what drops
+ * that stale copy the next time a file carrying it is saved.
  */
 export const LITHIC_INJECTED_EXCLUSIONS =
   '-[prefix[~]] -[prefix[$:/plugins/lithic/ephemeral/]] -[[$:/config/OfficialPluginLibrary]]';

@@ -127,3 +127,13 @@ export function searchCachedWikis(entries: readonly CachedWiki[], query: string,
   }
   return matches;
 }
+
+/**
+ * One cached wiki, as the list draws it.
+ *
+ * `lastModified` is when this device wrote that copy. It is the answer a row's hover shows
+ * wherever no process could name the file's own stamp (see `last-modified.ts`), which is
+ * every browser mount: the handle's permission has not been granted, and asking for it on a
+ * hover is a prompt nobody wanted.
+ */
+export type CacheSearchEntry = CachedWiki & { sizeBytes: number; lastModified?: number | null };

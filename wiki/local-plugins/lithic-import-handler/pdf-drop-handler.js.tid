@@ -14,6 +14,19 @@ exports.platforms = ["browser"];
 exports.after = ["startup"];
 exports.synchronous = true;
 
+// A book is unpacked by its own module: the archive reader and the package
+// document are a different job from rendering a page, and keeping them apart is
+// what lets one be changed without the other. Its archive reader is what a Word
+// document is unpacked with too, because both are a zip holding XML.
+var bookFormat = require("$:/plugins/lithic/lithic-import-handler/epub.js");
+var convertEpubToTiddlers = bookFormat.convertEpubToTiddlers;
+var readEntries = bookFormat.readEntries;
+var readText = bookFormat.readText;
+var findEntry = bookFormat.findEntry;
+var entryBytes = bookFormat.entryBytes;
+var parseXml = bookFormat.parseXml;
+var resolveHref = bookFormat.resolveHref;
+
 function generateUUID() {
     if (typeof crypto !== "undefined" && crypto.randomUUID) {
         return crypto.randomUUID();
@@ -408,6 +421,324 @@ async function convertPdfDataToTiddlers(arrayBuffer, fileName, setProgress) {
     return tiddlers;
 }
 
+// --- Word documents ----------------------------------------------------------
+//
+// A `.docx` is a zip holding the document as XML, which is the same container a book is
+// unpacked from, so the archive reader `epub.js` already has is what reads it: one reader
+// for one container, rather than a second one that would fail on the same entries.
+//
+// What is read is best effort and deliberately shallow. A paragraph becomes a line, its
+// words as written; a heading keeps its level and a list item keeps its bullet, because
+// those are structure rather than formatting and a document without them reads as one long
+// paragraph. Runs, column widths, comments, footnotes, tracked changes and equations are
+// not read: a Lith is a place to keep what a document said, and reproducing its layout is a
+// job for the program that made it. Pictures are read, and they are drawn on a board the
+// way a PDF's pages are, because a board is where this wiki puts a picture a person can
+// write beside.
+
+var DOCX_MIME = "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
+
+// The pictures a browser can decode, keyed by the extension an archive gives them. A Word
+// archive also holds `.emf` and `.wmf` drawings, which no browser can draw, so those are
+// left out rather than imported as a node nothing renders.
+var DOCX_IMAGE_TYPES = {
+    png: "image/png",
+    jpg: "image/jpeg",
+    jpeg: "image/jpeg",
+    gif: "image/gif",
+    bmp: "image/bmp",
+    webp: "image/webp"
+};
+
+// An element's name without its namespace prefix. An XML parse keeps `w:p` in `tagName`
+// and puts `p` in `localName`, while the forgiving HTML parse used on a file that will not
+// parse as XML names every element with its prefix; reading the name without one is what
+// makes both parses the same code.
+function docxName(node) {
+    return String((node && (node.localName || node.tagName)) || "").replace(/^[^:]*:/, "");
+}
+
+function docxChild(node, name) {
+    for (var child = node && node.firstElementChild; child; child = child.nextElementSibling) {
+        if (docxName(child) === name) {
+            return child;
+        }
+    }
+    return null;
+}
+
+// `w:val` is the attribute every OOXML property carries, and its prefix is dropped for the
+// same reason it is above.
+function docxValue(node) {
+    if (!node || !node.getAttribute) {
+        return "";
+    }
+    return node.getAttribute("w:val") || node.getAttribute("val") || "";
+}
+
+// The words of one paragraph, on one line. A tab and a hard break read as the space they
+// are; a field's code and text somebody deleted are not the document's words, which is what
+// reading the two tags that hold words gives for free.
+function docxParagraphText(paragraph) {
+    var text = "";
+    (function read(node){
+        for (var child = node.firstElementChild; child; child = child.nextElementSibling) {
+            var name = docxName(child);
+            if (name === "Fallback") {
+                // A text box is written twice, once as the shape and once for a reader that
+                // does not know it. Reading both would say it twice.
+                continue;
+            }
+            if (name === "t") {
+                text += String(child.textContent || "");
+            } else if (name === "tab" || name === "br" || name === "cr") {
+                text += " ";
+            } else if (name === "noBreakHyphen") {
+                text += "-";
+            } else {
+                read(child);
+            }
+        }
+    })(paragraph);
+    return text.replace(/\s+/g, " ").trim();
+}
+
+// How deep a heading is: the outline level Word stores, or, where a document carries none,
+// the level its style's own name says. 0 is an ordinary paragraph.
+function docxHeading(properties) {
+    if (!properties) {
+        return 0;
+    }
+    var outline = parseInt(docxValue(docxChild(properties, "outlineLvl")), 10);
+    if (!isNaN(outline) && outline >= 0 && outline <= 5) {
+        return outline + 1;
+    }
+    var style = docxValue(docxChild(properties, "pStyle")).toLowerCase();
+    var match = /^heading\s*([1-6])$/.exec(style);
+    return match ? parseInt(match[1], 10) : 0;
+}
+
+// Every paragraph in the document, in the order a reader meets it. A table's cells are
+// paragraphs like any other, which is why this walks the tree rather than the body's own
+// children.
+function docxBlocks(node, blocks) {
+    for (var child = node && node.firstElementChild; child; child = child.nextElementSibling) {
+        var name = docxName(child);
+        if (name === "Fallback") {
+            continue;
+        }
+        if (name !== "p") {
+            docxBlocks(child, blocks);
+            continue;
+        }
+        var text = docxParagraphText(child);
+        if (!text) {
+            continue;
+        }
+        var properties = docxChild(child, "pPr");
+        var heading = docxHeading(properties);
+        if (heading) {
+            blocks.push(new Array(heading + 1).join("#") + " " + text);
+        } else if (docxChild(properties, "numPr")) {
+            blocks.push("- " + text);
+        } else {
+            blocks.push(text);
+        }
+    }
+}
+
+// Which entry each picture is: `word/_rels/document.xml.rels` maps the id a drawing names
+// to the file holding its bytes, and that file is addressed from `word/`, which is why the
+// target is resolved against the document rather than from the archive's root.
+function docxRelationships(bytes, entries) {
+    return readText(bytes, entries, "word/_rels/document.xml.rels").then(function(markup){
+        var found = {};
+        if (!markup) {
+            return found;
+        }
+        var doc = parseXml(markup);
+        var all = doc.getElementsByTagName("*");
+        for (var i = 0; i < all.length; i++) {
+            var element = all[i];
+            if (docxName(element) !== "Relationship") {
+                continue;
+            }
+            var id = element.getAttribute("Id");
+            var target = element.getAttribute("Target");
+            if (!id || !target || !/\/image$/.test(element.getAttribute("Type") || "")) {
+                continue;
+            }
+            // A linked picture is a file beside the document rather than inside it, so
+            // there are no bytes to read and nothing to draw.
+            if (element.getAttribute("TargetMode") === "External") {
+                continue;
+            }
+            found[id] = resolveHref("word/document.xml", target);
+        }
+        return found;
+    });
+}
+
+// The pictures the document draws, in the order it draws them, once each: a page is a place
+// the document has a picture, not a shape to repeat.
+function docxImageIds(doc) {
+    var ids = [];
+    var seen = {};
+    var all = doc.getElementsByTagName("*");
+    for (var i = 0; i < all.length; i++) {
+        var element = all[i];
+        var id = element.getAttribute ? (element.getAttribute("r:embed") || "") : "";
+        if (!id && docxName(element) === "imagedata") {
+            // The older picture element names its file with `r:id` instead.
+            id = element.getAttribute("r:id") || "";
+        }
+        if (id && !seen[id]) {
+            seen[id] = true;
+            ids.push(id);
+        }
+    }
+    return ids;
+}
+
+// The archive's bytes as the address a picture is drawn from. A data URL rather than an
+// object URL because the picture becomes an asset inside the Lith, so the address has to be
+// the bytes rather than a place in this page.
+function bytesToDataUrl(mime, bytes) {
+    var binary = "";
+    var chunk = 0x8000;
+    for (var i = 0; i < bytes.length; i += chunk) {
+        binary += String.fromCharCode.apply(null, bytes.subarray(i, i + chunk));
+    }
+    return "data:" + mime + ";base64," + btoa(binary);
+}
+
+/**
+ * One picture from the archive, at the size a board keeps it: decoded once to learn its
+ * size, drawn no larger than an imported image is, and written out as WebP for the reason a
+ * dropped picture is, the asset living inside the Lith.
+ *
+ * Resolves to null for a picture this browser cannot decode, because the words of a document
+ * are worth more than none of it.
+ */
+function docxPicture(image) {
+    return new Promise(function(resolve){
+        var element = new Image();
+        element.onload = function(){
+            var width = element.naturalWidth || element.width;
+            var height = element.naturalHeight || element.height;
+            if (!width || !height) {
+                resolve(null);
+                return;
+            }
+            var scale = Math.min(1, MAX_IMAGE_EDGE / Math.max(width, height));
+            var canvas = document.createElement("canvas");
+            canvas.width = Math.max(1, Math.round(width * scale));
+            canvas.height = Math.max(1, Math.round(height * scale));
+            canvas.getContext("2d").drawImage(element, 0, 0, canvas.width, canvas.height);
+            resolve({
+                filename: image.filename.replace(/\.[^/.]+$/, "") + ".webp",
+                dataUri: canvas.toDataURL("image/webp", 0.75),
+                width: canvas.width,
+                height: canvas.height
+            });
+        };
+        element.onerror = function(){
+            resolve(null);
+        };
+        element.src = image.dataUri;
+    });
+}
+
+/**
+ * A Word document as the nodestream a document becomes: one container holding the words and
+ * the pictures, so a save writes one Lith rather than a note with a board somewhere else.
+ *
+ * The shape is the PDF import's, down to the titles: the container is named after the file,
+ * `-text` holds the words and `-whiteboard` holds the pictures, which is what lets a Lith
+ * made from either be read, and re-opened, the same way (see `boardOf` in
+ * `pdf-open-request.js`).
+ */
+async function convertDocxToTiddlers(arrayBuffer, fileName, setProgress) {
+    var note = typeof setProgress === "function" ? setProgress : function() {};
+    var bytes = new Uint8Array(arrayBuffer);
+    var entries = readEntries(bytes);
+    var markup = entries ? await readText(bytes, entries, "word/document.xml") : null;
+    if (!markup) {
+        throw new Error("Not a Word document");
+    }
+
+    note("Reading " + fileName + "...");
+    var doc = parseXml(markup);
+    var blocks = [];
+    docxBlocks(doc.documentElement, blocks);
+
+    var relationships = await docxRelationships(bytes, entries);
+    var ids = docxImageIds(doc);
+    var pictures = [];
+    for (var i = 0; i < ids.length; i++) {
+        var target = relationships[ids[i]];
+        var entry = target ? findEntry(entries, target) : null;
+        var match = target ? /\.([^./]+)$/.exec(target) : null;
+        var mime = match ? DOCX_IMAGE_TYPES[match[1].toLowerCase()] : "";
+        if (!entry || !mime) {
+            continue;
+        }
+        note("Reading " + fileName + ": picture " + (i + 1) + "/" + ids.length + "...");
+        var picture = await docxPicture({
+            filename: target.replace(/^.*\//, ""),
+            dataUri: bytesToDataUrl(mime, await entryBytes(bytes, entry))
+        });
+        if (picture) {
+            pictures.push(picture);
+        }
+    }
+
+    if (blocks.length === 0 && pictures.length === 0) {
+        throw new Error("The Word document has nothing to read");
+    }
+
+    var baseName = fileName.replace(/\.docx$/i, "");
+    var containerTitle = $tw.wiki.generateNewTitle(baseName);
+    var children = [];
+    var tiddlers = [];
+
+    if (blocks.length > 0) {
+        var textTitle = $tw.wiki.generateNewTitle(containerTitle + "-text");
+        tiddlers.push({
+            title: textTitle,
+            parent: containerTitle,
+            // The document's own words, without a heading built from the filename: a Word
+            // document usually opens with its title already, and saying it twice is
+            // furniture the person then deletes.
+            text: blocks.join("\n\n"),
+            type: "text/x-markdown",
+            "stream-type": "default"
+        });
+        children.push(textTitle);
+    }
+
+    if (pictures.length > 0) {
+        var boardTitle = $tw.wiki.generateNewTitle(containerTitle + "-whiteboard");
+        tiddlers.push({
+            title: boardTitle,
+            parent: containerTitle,
+            text: JSON.stringify(generateWhiteboardData(pictures)),
+            type: "application/tldr",
+            "stream-type": "default",
+            "whiteboard-height": pictures[0].height > pictures[0].width ? "1056px" : "540px"
+        });
+        children.push(boardTitle);
+    }
+
+    tiddlers.unshift({
+        title: containerTitle,
+        "stream-list": $tw.utils.stringifyList(children),
+        "stream-type": "default",
+        text: ""
+    });
+    return tiddlers;
+}
+
 // The render path, published for the one other caller: a PDF the desktop app was asked to
 // open by file association. The launcher cannot render a PDF (the renderer lives in this
 // wiki), so it mounts a blank Lith with a request tiddler naming the file and a reader for
@@ -417,6 +748,12 @@ $tw.lithic = $tw.lithic || {};
 $tw.lithic.convertPdfToTiddlers = convertPdfDataToTiddlers;
 // The same handoff for an image, which the desktop app also opens by association.
 $tw.lithic.convertImageToTiddlers = convertImageDataToTiddlers;
+// And for a book, which it opens the same way: the launcher cannot unzip an EPUB either, so the
+// bytes travel and the converter above does the work in this wiki.
+$tw.lithic.convertEpubToTiddlers = convertEpubToTiddlers;
+// And for a Word document, which is the same shape of handoff for the same reason: unpacking one
+// is this reader's job, and the launcher has no reader at all.
+$tw.lithic.convertDocxToTiddlers = convertDocxToTiddlers;
 
 exports.startup = function() {
     var alertTitle = "$:/temp/alerts/lithic-import-progress";
@@ -538,8 +875,10 @@ exports.startup = function() {
         const pdfFiles = Array.from(files).filter(f => f.type === "application/pdf" || f.name.toLowerCase().endsWith(".pdf"));
         const imageFiles = Array.from(files).filter(f => f.type.startsWith("image/"));
         const notebookFiles = Array.from(files).filter(f => f.type === "application/x-ipynb+json" || f.name.toLowerCase().endsWith(".ipynb"));
-        if (pdfFiles.length > 0 || imageFiles.length > 0 || notebookFiles.length > 0) {
-            // We found PDFs or images, so intercept this event completely
+        const epubFiles = Array.from(files).filter(f => f.type === "application/epub+zip" || f.name.toLowerCase().endsWith(".epub"));
+        const docxFiles = Array.from(files).filter(f => f.type === DOCX_MIME || f.name.toLowerCase().endsWith(".docx"));
+        if (pdfFiles.length > 0 || imageFiles.length > 0 || notebookFiles.length > 0 || epubFiles.length > 0 || docxFiles.length > 0) {
+            // We found a file this handler converts, so intercept this event completely
             event.preventDefault();
             event.stopPropagation();
             event.stopImmediatePropagation();
@@ -567,6 +906,22 @@ exports.startup = function() {
                     }
                 }
 
+                for (const file of docxFiles) {
+                    setProgress("Importing " + file.name + " as a document...");
+                    const arrayBuffer = await file.arrayBuffer();
+                    const tiddlers = await convertDocxToTiddlers(arrayBuffer, file.name, setProgress);
+                    for (const fields of tiddlers) {
+                        $tw.wiki.addTiddler(new $tw.Tiddler(
+                            $tw.wiki.getCreationFields(),
+                            $tw.wiki.getModificationFields(),
+                            fields
+                        ));
+                        if (!fields.parent) { // It's the container
+                            createdTitles.push(fields.title);
+                        }
+                    }
+                }
+
                 for (const file of notebookFiles) {
                     setProgress("Importing " + file.name + " as a nodestream...");
                     const tiddlers = await convertNotebookToTiddlers(file);
@@ -580,6 +935,21 @@ exports.startup = function() {
                             createdTitles.push(fields.title);
                         }
                     }
+                }
+
+                for (const file of epubFiles) {
+                    setProgress("Importing " + file.name + " as a book...");
+                    const arrayBuffer = await file.arrayBuffer();
+                    const book = await convertEpubToTiddlers(arrayBuffer, file.name, setProgress);
+                    for (const fields of book.tiddlers) {
+                        $tw.wiki.addTiddler(new $tw.Tiddler(
+                            $tw.wiki.getCreationFields(),
+                            $tw.wiki.getModificationFields(),
+                            fields
+                        ));
+                    }
+                    // A book is entered at its first chapter; the rest is a step away.
+                    createdTitles.push(book.entry);
                 }
 
                 for (const file of imageFiles) {
@@ -661,7 +1031,7 @@ exports.startup = function() {
                 }));
 
                 // Handle other (non-PDF/image/notebook) files that were part of the same selection
-                const otherFiles = Array.from(files).filter(f => !pdfFiles.includes(f) && !imageFiles.includes(f) && !notebookFiles.includes(f));
+                const otherFiles = Array.from(files).filter(f => !pdfFiles.includes(f) && !imageFiles.includes(f) && !notebookFiles.includes(f) && !epubFiles.includes(f) && !docxFiles.includes(f));
                 if (otherFiles.length > 0) {
                     $tw.utils.each(otherFiles, function(file) {
                         $tw.utils.deserializeTiddlers(file.type, file, {}, function(tiddlers) {

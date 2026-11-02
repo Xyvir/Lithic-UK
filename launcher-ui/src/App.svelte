@@ -7,6 +7,7 @@
   import {
     createFileBridge,
     PickerUnavailableError,
+    type SaveOutcome,
     saveTextVerifiably,
     tauriInvoke,
     tauriListen
@@ -38,19 +39,26 @@
   } from './shim-sync';
   import { bootLegacyWiki, bootLegacyHtml, writeHandoff, type RemoteTarget } from './legacy-launcher-runtime';
   import { EMOJI_LIST, uploadInstanceIcon, clearInstanceIcon, emojiFaviconUrl, applyFavicon, bustIconCache, readInstanceEmoji, readServerEmoji, saveInstanceEmoji, clearInstanceEmoji, instanceMarkUrl } from './instance-icon';
-  import { getRecentFiles, setRecentRows, mergeRecentRow, mergeRecentLists, isAnonymousRow, clearAllRecentFiles, purgeOldestCachesIfNeeded, saveSearchCache, forgetWikiCache, cachedWikiNames, idb, getSearchCacheText, readFetchedLith, rememberFetchedLith, listWikiVersions, wikiHasHistory, downloadWikiVersion, getDirtyState, clearDirtyState, listDirtyRecoveries, isWikiDriftedFromHead, isInstallDismissed, setInstallDismissed, recentDiskPath, type DirtyStateRecord, type RecentEntry, type RecentRow } from './storage';
-  import { isIosDevice, rememberRowKind, resolveStorageMode, storageModeOverride, browserOnlyMarkTitle, type StorageMode } from './browser-storage';
+  import { getRecentFiles, setRecentRows, mergeRecentRow, mergeRecentLists, isAnonymousRow, clearAllRecentFiles, purgeOldestCachesIfNeeded, saveSearchCache, forgetWikiCache, cachedWikiNames, idb, getSearchCacheText, readFetchedLith, rememberFetchedLith, listWikiVersions, wikiHasHistory, downloadWikiVersion, getDirtyState, clearDirtyState, listDirtyRecoveries, isWikiDriftedFromHead, isInstallDismissed, setInstallDismissed, recentDiskPath, type DirtyStateRecord, type DirtyRecovery, type RecentEntry, type RecentRow } from './storage';
+  import { isIosDevice, rememberRowKind, browserOnlyMarkTitle, type StorageMode } from './browser-storage';
+  import { branchHasLocalSync, branchIndexDbOnly, branchIsSelfHost, branchShimBackend, branchShowBookmarks, branchStorageMode } from './branch-decisions';
   import { readBookmarkEntries, saveBookmark, removeBookmark, setBookmarkIcon, writeBookmarkList, refreshBookmarkIcon, verifyInstanceUrl, normalizeInstanceUrl, instanceLabel, type BookmarkEntry, type InstanceVerification } from './bookmarks';
-  import { LOGIN_CHECK_LABELS, askInstanceAboutLogin, loginVerdict, loginVerdictFromError, typedLoginCheck, type LoginCheckState, type LoginVerdict } from './login-check';
+  import { LOGIN_CHECK_LABELS, loginVerdict, loginVerdictFromError, type LoginCheckState, type LoginVerdict } from './login-check';
   import { copyDropNote, forgetInstanceCopy } from './instance-copy';
   import { offlineMode, looksUnreachable } from './offline-mode';
+  import { IMPORT_FALLBACK_NAME, IMPORT_REQUEST, importContainerTitle, importKindOf, importLithName, type ImportKind } from './import-kinds';
+  import { alignNewLithLabel, positionCachePreview, trackListScroll } from './launcher-geometry';
   import { createStageBeat, type InstallPreflight, type StageBeat } from './launcher-stage';
   import PinEntry from './PinEntry.svelte';
+  import FlashDialog from './FlashDialog.svelte';
+  import DirtyRecoveryDialog from './DirtyRecoveryDialog.svelte';
+  import TrailPanel from './TrailPanel.svelte';
+  import CredentialOfferDialog from './CredentialOfferDialog.svelte';
   import { deleteRemoteFile, fetchRemoteFiles, fetchRemoteWiki, fetchRemoteWikiMeta, probeAppliance, probePatchApi, createLockHeartbeat, readRemoteLock, uploadRemoteFile, webdavUrl, resolveSessionId, lithUploadName, type WebdavFile } from './webdav';
   import { normalizeLithName } from './legacy-saver';
-  import { esp32PasswordOk, esp32Percent, esp32StageLine, flashLithicAppliance, serialFlashSupported } from './esp32-flash';
-  import { documentStem, runsInWebView, typedDocumentName } from './document-format';
-  import { searchCachedWikis } from './cache-search';
+  import { serialFlashSupported } from './esp32-flash';
+  import { clipFilename, documentStem, runsInWebView, typedDocumentName } from './document-format';
+  import { searchCachedWikis, type CacheSearchEntry } from './cache-search';
   import { matchMarkup, showsForQuery, titleMatches, titleMarkup } from './name-match';
   import { cachedStamp, modifiedTitle } from './last-modified';
   import { topHits, type InstanceCacheRead, type InstanceReads } from './instance-search';
@@ -60,8 +68,8 @@ import { backupFileName, collectInstanceBackup, mergeBookmarks, parseInstanceBac
   import { copyText } from './clipboard';
   import { syncIndicator, shouldHeartbeat, healthFailure, verifiedAge, SYNC_PULSE_MS, type SyncIndicator, type HealthState } from './git-sync-health';
   import { gapCount, versionGap } from './history-gap';
-  import { unsavedFileName, utcStamp } from './wiki-history';
-  import { TRAIL_LIMIT, parseTrailCommits, trailGapLabel, trailRows as trailRowList, type TrailCommit, type TrailPill, type TrailRow } from './instance-trail';
+  import { unsavedFileName, utcStamp, type HistoryEntry, type HistoryRow } from './wiki-history';
+  import { TRAIL_LIMIT, parseTrailCommits, type TrailAnswer, type TrailCommit, type TrailRow, type TrailView } from './instance-trail';
   import { createServerRepo, disconnectServerSync, fetchServerSyncHistory, fetchServerSyncStatus, listServerRepos, pollServerDeviceToken, requestServerDeviceCode, revertServerSync, serverSyncIndicator, setupServerSync, type ServerSyncStatus } from './server-git-sync';
   import { serializeJsonToLith, parseLithToJSON } from './lithic-format';
   import { mergeCaptureIntoDocument } from './dirty-merge';
@@ -156,7 +164,7 @@ import { backupFileName, collectInstanceBackup, mergeBookmarks, parseInstanceBac
    * from every other distribution. It is what lets the install offer, which the desktop app
    * answers through Tauri, be answered here through the wire instead.
    */
-  const shimBackend = shimToken !== null;
+  const shimBackend = branchShimBackend(shimToken);
   /**
    * Whether the shim that served this page answered its command wire.
    *
@@ -182,29 +190,28 @@ import { backupFileName, collectInstanceBackup, mergeBookmarks, parseInstanceBac
    * page itself does, this flag covers in both backends, and the calls that still name one
    * backend say why at their call site.
    */
-  $: hasLocalSync = mode === 'tauri' || shimToken !== null;
+  $: hasLocalSync = branchHasLocalSync(mode, shimToken);
   /**
    * A shim that served this page answers `file` on every browser, because the shim itself
    * writes the path the desktop's chooser named: on Firefox the platform has no File System
    * Access API, yet this page does have a process that can write a real file. Everywhere else
    * the platform still decides. `shimToken` is read above and cannot change while the page lives.
    */
-  const storageMode: StorageMode = shimToken
-    ? 'file'
-    : resolveStorageMode(
-        mode,
-        typeof window === 'undefined' ? undefined : (window as unknown as { showSaveFilePicker?: unknown }),
-        typeof window === 'undefined' ? null : storageModeOverride(window.location.search),
-        // A process that cannot hold a document of its own gets the storage fallback, so the
-        // version history is the copy that can be taken off the device. Every platform this app
-        // ships to can hold one, the phone included; the branch is kept for a build that cannot.
-        documents
-      );
+  const storageMode: StorageMode = branchStorageMode({
+    mode,
+    shimToken,
+    search: typeof window === 'undefined' ? null : window.location.search,
+    pickerHost: typeof window === 'undefined' ? undefined : (window as unknown as { showSaveFilePicker?: unknown }),
+    // A process that cannot hold a document of its own gets the storage fallback, so the
+    // version history is the copy that can be taken off the device. Every platform this app
+    // ships to can hold one, the phone included; the branch is kept for a build that cannot.
+    documents
+  });
   /**
    * The index-db-only fallback: no Lith mounted here has a file behind it, so
    * its cached copy in this browser *is* the document.
    */
-  const indexDbOnly = storageMode === 'index-db';
+  const indexDbOnly = branchIndexDbOnly(storageMode);
   /**
    * Whether this page is an iPhone, asked once because it cannot change while the page lives.
    * The only platform read in the launcher, and `isIosDevice` explains why it has to exist.
@@ -226,7 +233,7 @@ import { backupFileName, collectInstanceBackup, mergeBookmarks, parseInstanceBac
    * minimum-friction path the rest of the desktop is offered. Telling the two apart is what
    * `isIosDevice` is for, and it is the reason this is written as a platform question.
    */
-  $: showBookmarks = mode === 'tauri' || (mode === 'webapp' && iosDevice);
+  $: showBookmarks = branchShowBookmarks(mode, iosDevice);
   /**
    * The instance's own mark, or null where there is no instance to read one from (see
    * `instanceMarkUrl`). Settled at boot like the storage mode, and for the same reason:
@@ -289,7 +296,32 @@ import { backupFileName, collectInstanceBackup, mergeBookmarks, parseInstanceBac
     const settle = () => { statusSettled = true; };
     cancelStatusDeadline = text === held
       ? armStatusHold({ settle })
-      : armStatusClear({ clear: () => { if (status === text) status = ''; } });
+      : armStatusClear({ clear: () => clearStatus(text) });
+  }
+
+  /**
+   * Say what the launcher just did, in the line every other sentence replaces.
+   *
+   * This is the page's one plain write to `status`. It stays a bare assignment because the
+   * deadline above already follows the text: the sentence's class is named at the site, and the
+   * timing is untouched. The four verbs are that naming, and they are the inventory a component
+   * boundary needs. `report` goes at the deadline, `reportHeld` stands, `reportAndRetire` keeps
+   * its own clock, `clearStatus` takes the line away. A surface handed `report` as `onReport`
+   * writes exactly the sentence the page wrote before it, with nothing else to thread.
+   */
+  function report(message: string): void {
+    status = message;
+  }
+
+  /**
+   * Take the line away, or stand one down only if it is still the sentence named.
+   *
+   * The text is for the callers that act on a timer (`reportAndRetire`, the install confirmation,
+   * the deadline's own clear): by the time one runs, a newer sentence may own the line, and an
+   * older report arriving late must never remove it.
+   */
+  function clearStatus(only?: string): void {
+    if (only === undefined || status === only) status = '';
   }
 
   /**
@@ -304,7 +336,7 @@ import { backupFileName, collectInstanceBackup, mergeBookmarks, parseInstanceBac
    */
   function reportHeld(message: string): void {
     heldStatus = message;
-    status = message;
+    report(message);
   }
 
   $: syncStatusDeadlines(status, heldStatus);
@@ -356,14 +388,12 @@ import { backupFileName, collectInstanceBackup, mergeBookmarks, parseInstanceBac
    * firmware branch, and the password is written into the flash beside them.
    */
   let flashShow = false;
-  let flashBusy = false;
-  let flashLine = '';
+  /**
+   * The failure the manager row shows when a browser will not start. The dialog's own failure band
+   * is bound to this same variable: one band, two writers, and the dialog covers the row while it
+   * is open.
+   */
   let flashProblem = '';
-  let flashPercent = 0;
-  let flashPassword = '';
-  /** Whether the flash may start, which is the one thing the field decides. */
-  let flashPasswordOk = false;
-  $: flashPasswordOk = esp32PasswordOk(flashPassword);
   /** The handoff in flight, so the row cannot be pressed twice while a browser starts. */
   let flashBrowserBusy = false;
   /**
@@ -693,7 +723,7 @@ import { backupFileName, collectInstanceBackup, mergeBookmarks, parseInstanceBac
    */
   $: installOffer =
     (!browserOnly || shimUpdateHost || shimBackend) && installOfferReady && !(installDismissed && installState !== 'stale')
-      ? mode === 'tauri' || shimBackend
+      ? hasLocalSync
         ? installState === 'current' || !platformInstallable
           ? null
           : 'desktop'
@@ -705,6 +735,18 @@ import { backupFileName, collectInstanceBackup, mergeBookmarks, parseInstanceBac
             ? 'pwa'
             : null
       : null;
+
+  /**
+   * Whether either of the window's bottom corners holds a control.
+   *
+   * The stylesheet reserves a bottom band under the panel on a window between 601px and 899px,
+   * where a corner control sits over the launcher column instead of beside it (see that query
+   * in styles.css). The reservation is room made for something that is there, so it follows the
+   * two conditions the footer renders on rather than the mode: a desktop window draws no project
+   * link, and a window whose install question answered "nothing to offer" draws no button, and
+   * with both absent the band was 76px of nothing under the last row of the list.
+   */
+  $: footerControlsShown = (mode === 'webapp' && !browserOnly) || Boolean(installOffer && !recentPanelShown);
 
   /**
    * Whether the window is the width at which the install offer leaves the window's corner for
@@ -781,7 +823,7 @@ import { backupFileName, collectInstanceBackup, mergeBookmarks, parseInstanceBac
         try {
           await tauriInvoke('open_external', { url: updateUrl });
         } catch (error) {
-          status = copy.install.openFailed(error instanceof Error ? error.message : String(error));
+          report(copy.install.openFailed(error instanceof Error ? error.message : String(error)));
         }
       } else {
         openExternally(updateUrl);
@@ -883,7 +925,7 @@ import { backupFileName, collectInstanceBackup, mergeBookmarks, parseInstanceBac
   async function installPwa() {
     const outcome = await promptPwaInstall();
     if (outcome === 'unavailable') {
-      status = copy.install.unavailable;
+      report(copy.install.unavailable);
     }
   }
 
@@ -1545,21 +1587,6 @@ import { backupFileName, collectInstanceBackup, mergeBookmarks, parseInstanceBac
   // top of where the branch is, so the trail grows by one row and the move is itself undone by
   // reverting to the commit it replaced.
 
-  /** What the trail in hand is: a read in flight, rows, or one of the two ways of having none. */
-  type TrailView = 'idle' | 'loading' | 'ready' | 'no-repo' | 'failed';
-
-  /**
-   * One shape for the three backends' answers, so the state machine below is written once.
-   *
-   * The server's own read answers this already (`ServerTrail`); the two local backends are
-   * folded into it here. `no-repo` means a repository to have a trail in, and the dialog draws
-   * nothing at all for it. `[]` is a repository with no commits yet, which it says out loud.
-   */
-  type TrailAnswer =
-    | { state: 'trail'; commits: TrailCommit[] }
-    | { state: 'no-repo' }
-    | { state: 'failed'; message: string };
-
   /**
    * What a revert answers, in the desktop app's own field names, whichever prong ran it.
    * `error` is the push's: the instance is back either way, and a backup that did not upload is
@@ -1578,28 +1605,6 @@ import { backupFileName, collectInstanceBackup, mergeBookmarks, parseInstanceBac
   let trailNote = '';
   /** Which repository the rows in hand came from, so a reopen does not re-read it. */
   let trailSource = '';
-
-  /**
-   * A row's pill: what the commit was, in one of three words.
-   *
-   * The tones are the version trail's own badge tones, so the two lists are not learnt twice:
-   * green for a save Lithic made on its own, the accent blue for a deliberate go-back, and the
-   * quiet grey for a commit nothing here recognises. Each title carries the explanation and then
-   * the commit's own message, which is the fact a pill cannot state and the row no longer prints.
-   */
-  function trailBadge(kind: TrailPill, message: string) {
-    const trail = copy.dialogs.gitSync.trail;
-    const raw = message.trim();
-    if (kind === 'auto') return { label: trail.pillAuto, tone: 'sync', title: trail.pillAutoTitle(raw).trim() };
-    if (kind === 'revert') return { label: trail.pillRevert, tone: '', title: trail.pillRevertTitle(raw).trim() };
-    return { label: trail.pillOther, tone: 'delta', title: trail.pillOtherTitle(raw).trim() };
-  }
-
-  /**
-   * The rows the list draws: each commit stamped, its distance from the row above, and the pill
-   * its own message earns it.
-   */
-  $: trailRows = trailRowList(trailCommits).map((row) => ({ ...row, badge: trailBadge(row.pill, row.summary) }));
 
   /**
    * Whether there is a screen to draw a trail on.
@@ -1807,7 +1812,7 @@ import { backupFileName, collectInstanceBackup, mergeBookmarks, parseInstanceBac
       // Best effort: a failure here is reported by the sync icon like any other
       // backup that did not land, and the file is still backed up by its next save.
       await tauriInvoke('git_sync_commit', { path: copied.path, message: `Add ${copied.name} from Lithic` }).catch(() => {});
-      status = copy.install.copied(copied.name, folder);
+      report(copy.install.copied(copied.name, folder));
     } catch (error) {
       mountError = error instanceof Error ? error.message : String(error);
     }
@@ -2565,7 +2570,7 @@ import { backupFileName, collectInstanceBackup, mergeBookmarks, parseInstanceBac
           installStatus = preflight.holder
             ? copy.install.blocked(preflight.holder)
             : copy.install.blockedUnknown;
-          status = installStatus;
+          report(installStatus);
           return;
         }
         installStatus = '';
@@ -2577,10 +2582,10 @@ import { backupFileName, collectInstanceBackup, mergeBookmarks, parseInstanceBac
       // and both of these are paths.
       installStatus = result.path;
       installState = 'current';
-      status = copy.install.installed(result.entry ?? result.path);
+      report(copy.install.installed(result.entry ?? result.path));
       // The status line animates while it has text; retire the message
       // once it has had a moment to be read.
-      setTimeout(() => { if (status.startsWith(copy.install.installedPrefix)) status = ''; }, 6000);
+      setTimeout(() => { if (status.startsWith(copy.install.installedPrefix)) clearStatus(); }, 6000);
       // The install has said all it has to say, and the folder the new copy landed in is open
       // in front of the user: this window is the older copy now, so it gets out of the way and
       // leaves them to launch the new one. Only where the folder was actually opened: a
@@ -2589,7 +2594,7 @@ import { backupFileName, collectInstanceBackup, mergeBookmarks, parseInstanceBac
       if (mode === 'tauri' && result.revealed) closeForInstall();
     } catch (error) {
       installStatus = copy.install.failed(error instanceof Error ? error.message : String(error));
-      status = installStatus;
+      report(installStatus);
     } finally {
       installBusy = false;
     }
@@ -2606,15 +2611,6 @@ import { backupFileName, collectInstanceBackup, mergeBookmarks, parseInstanceBac
   function closeForInstall(): void {
     void tauriInvoke('quit_launcher').catch(() => { /* the window is going either way */ });
   }
-  /**
-   * One cached wiki, as the list draws it.
-   *
-   * `lastModified` is when this device wrote that copy. It is the answer a row's hover shows
-   * wherever no process could name the file's own stamp (see `last-modified.ts`), which is
-   * every browser mount: the handle's permission has not been granted, and asking for it on a
-   * hover is a prompt nobody wanted.
-   */
-  type CacheSearchEntry = { name: string; text: string; sizeBytes: number; lastModified?: number | null };
   type CacheSearchMatch = { preview: string; title?: string };
 
   function formatCacheSize(bytes: number): string {
@@ -2640,19 +2636,6 @@ import { backupFileName, collectInstanceBackup, mergeBookmarks, parseInstanceBac
   }
 
   /**
-   * Shorten a wiki file name for the version-history title while keeping its
-   * extension visible (a 30+ char stem reads as `Long…name.lith` rather than
-   * losing the `.lith`). The full name stays available via the title tooltip.
-   */
-  function clipFilename(name: string, limit = 20): string {
-    if (name.length <= limit) return name;
-    const ext = name.match(/\.(?:html?|lith|json)$/i)?.[0] ?? '';
-    const stemLimit = limit - ext.length;
-    if (stemLimit <= 3) return name.slice(0, limit - 1) + '…';
-    return name.slice(0, stemLimit - 1) + '…' + ext;
-  }
-
-  /**
    * The grey line the history trail draws between two versions: how much later the row above
    * was saved than the row below it, in the one unit `versionGap` picks and this locale's own
    * decimal mark. Only the greatest unit is ever named, so one sentence covers a four second
@@ -2673,7 +2656,6 @@ import { backupFileName, collectInstanceBackup, mergeBookmarks, parseInstanceBac
   let fileStamps: Record<string, number> = {};
   let cacheSearchMatches: Record<string, CacheSearchMatch> = {};
   let cacheSearchRequest = 0;
-  type HistoryEntry = { id: string; ts: number; sizeBytes: number; isBase?: boolean; external?: boolean; lastModified: string };
   let showHistoryModal = false;
   let historyName = '';
   let historyEntries: HistoryEntry[] = [];
@@ -2694,13 +2676,26 @@ import { backupFileName, collectInstanceBackup, mergeBookmarks, parseInstanceBac
    * re-read on every press.
    */
   let historyDirty: DirtyStateRecord | null = null;
+  /** The capture row's own key: the one row in the trail that is not a version, so it has no id. */
+  const CAPTURE_ROW_ID = 'inline';
   let historyCaptureOpen = false;
   let historyCaptureSaving = false;
   /**
-   * What the row says after a save lands. The header's status line is behind this modal, so a
+   * What this dialog says after a merge lands. The header's status line is behind the modal, so a
    * sentence about what the dialog just wrote has to be drawn in the dialog.
    */
-  let historyCaptureNotice = '';
+  let historyNotice = '';
+  /**
+   * What each row's download reports, in the pill the warning dialogs have always drawn beside a
+   * row's download button (`orphanPill`). These rows reported in the header's status line
+   * instead, which this dialog covers: on an instance page inside the app a download wrote the
+   * file and said nothing at all. Keyed by the row's own id, so a row's mark stays on its row.
+   */
+  let historyDownloads: Record<string, OrphanDownloadState> = {};
+
+  function setHistoryDownload(id: string, state: OrphanDownloadState): void {
+    historyDownloads = { ...historyDownloads, [id]: state };
+  }
   // Per-wiki version-history availability keys the history affordance:
   // wikis with no recorded versions (never saved, scratch-before-save)
   // hide the button instead of opening an empty modal.
@@ -2726,9 +2721,8 @@ import { backupFileName, collectInstanceBackup, mergeBookmarks, parseInstanceBac
     const availability = await wikiHasHistory(names);
     historyAvailable = { ...historyAvailable, ...availability };
   }
-  type DirtyInfo = { name: string; ts: number; tiddlers: Array<Record<string, string>> };
   let showDirtyModal = false;
-  let dirtyInfo: DirtyInfo | null = null;
+  let dirtyInfo: DirtyRecovery | null = null;
   let dirtyResolver: ((decision: 'merge' | 'discard' | 'later') => void) | null = null;
   let dirtyEntries: Record<string, number> = {};
 
@@ -2786,149 +2780,6 @@ import { backupFileName, collectInstanceBackup, mergeBookmarks, parseInstanceBac
     confirmationResolver = null;
     confirmation = null;
     resolve?.(ok);
-  }
-
-  function positionCachePreview(node: HTMLElement) {
-    let frame = 0;
-    const list = node.closest('.recent-list');
-
-    const update = () => {
-      frame = 0;
-      if (window.matchMedia('(max-width: 950px)').matches) {
-        node.style.display = 'none';
-        return;
-      }
-
-      const row = node.closest('.recent-row');
-      const listRect = list?.getBoundingClientRect();
-      const rowRect = row?.getBoundingClientRect();
-      if (!rowRect || !listRect || rowRect.bottom < listRect.top || rowRect.top > listRect.bottom) {
-        node.style.opacity = '0';
-        return;
-      }
-
-      const containerRect = document.querySelector('.container')?.getBoundingClientRect();
-      if (!containerRect) return;
-      node.style.display = 'block';
-      node.style.maxWidth = `${Math.min(430, Math.max(120, window.innerWidth - containerRect.right - 20))}px`;
-      node.style.left = `${containerRect.right + 10}px`;
-      node.style.top = `${rowRect.top + rowRect.height / 2}px`;
-      node.style.transform = 'translateY(-50%)';
-      node.style.opacity = '1';
-    };
-
-    const schedule = () => {
-      if (!frame) frame = requestAnimationFrame(update);
-    };
-
-    schedule();
-    window.addEventListener('resize', schedule);
-    list?.addEventListener('scroll', schedule, { passive: true });
-    return {
-      destroy() {
-        if (frame) cancelAnimationFrame(frame);
-        window.removeEventListener('resize', schedule);
-        list?.removeEventListener('scroll', schedule);
-      }
-    };
-  }
-
-  /**
-   * Draw the recent list's scrollbar only while the list is being scrolled.
-   *
-   * A scrollbar is a fact about the list, not about the row being read: at rest the panel's
-   * rows already carry the gap and the reserved gutter a thumb needs, so what the thumb
-   * adds is four dark pixels of furniture on the one panel that is nearly all list, and on
-   * a phone, where the window is barely wider than the column, the gutter is the only thing
-   * in the panel's right padding at all.
-   *
-   * `.scrolling` is the whole mechanism (see the stylesheet) because a native scrollbar
-   * cannot be animated: Blink paints a scrollbar from its un-animated style, so a transition
-   * or an animation on the thumb is measured to do nothing at all, and the thumb can only
-   * cut between hidden and drawn. A class toggle costs the same frame either way.
-   *
-   * Written as a class rather than reactive state because a scroll burst fires on every
-   * frame of the gesture and nothing else on the page reads this: state would schedule a
-   * render per frame to change one attribute the user is not looking at, and the linger is a
-   * timer, which is not something a template can hold.
-   *
-   * The linger is the other half of the idea. Hiding the thumb as soon as the last scroll
-   * event lands would blink it off between two wheel notches (a flick of a trackpad lands
-   * events tens of milliseconds apart) so the class outlives the gesture by long enough
-   * that a burst reads as one continuous scroll.
-   */
-  function trackListScroll(node: HTMLElement) {
-    let linger: ReturnType<typeof setTimeout> | null = null;
-    const onScroll = () => {
-      node.classList.add('scrolling');
-      if (linger) clearTimeout(linger);
-      linger = setTimeout(() => node.classList.remove('scrolling'), 700);
-    };
-    node.addEventListener('scroll', onScroll, { passive: true });
-    return {
-      destroy() {
-        if (linger) clearTimeout(linger);
-        node.removeEventListener('scroll', onScroll);
-      }
-    };
-  }
-
-  /**
-   * Align the new-document label, and the reset control under the card, with the centered
-   * mount label in the landscape layout.
-   *
-   * The measurement is published on the page's container rather than on the button it was
-   * taken from, because two controls in two subtrees read it: the label inside New Blank
-   * Lith, and the reset control in the panel's foot, which is a sibling of the action card
-   * rather than a child of it. The number is the distance from the card's own content edge
-   * to the type the two of them are matching, so each turns it into the padding its own box
-   * needs (see the landscape block in the stylesheet).
-   *
-   * The property outlives the button it was measured against. When the inline title field
-   * takes that button's row the field is the same full width, so the mount label does not
-   * move and the reset control below stays where it was while a title is typed.
-   */
-  function alignNewLithLabel(node: HTMLButtonElement) {
-    const card = node.parentElement;
-    const page = node.closest<HTMLElement>('main.container');
-    let frame = 0;
-    const update = () => {
-      frame = 0;
-      if (!window.matchMedia('(orientation: landscape) and (max-height: 560px) and (max-width: 950px)').matches) {
-        page?.style.removeProperty('--mount-label-offset');
-        return;
-      }
-      const mount = card?.querySelector<HTMLButtonElement>('.mount-button');
-      const label = mount?.querySelector<HTMLElement>('.mount-label');
-      if (!mount || !label) return;
-      const newRect = node.getBoundingClientRect();
-      const mountRect = mount.getBoundingClientRect();
-      const labelRect = label.getBoundingClientRect();
-      if (!newRect.width || !mountRect.width || !labelRect.width) return;
-      const style = getComputedStyle(node);
-      const inset =
-        (Number.parseFloat(style.borderLeftWidth) || 0) + (Number.parseFloat(style.paddingLeft) || 0);
-      page?.style.setProperty('--mount-label-offset', `${Math.max(0, labelRect.left - newRect.left - inset)}px`);
-    };
-    const schedule = () => {
-      if (!frame) frame = requestAnimationFrame(update);
-    };
-    const observer = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(schedule);
-    observer?.observe(node);
-    if (card) observer?.observe(card);
-    const mount = card?.querySelector('.mount-button');
-    if (mount) observer?.observe(mount);
-    const label = mount?.querySelector('.mount-label');
-    if (label) observer?.observe(label);
-    window.addEventListener('resize', schedule);
-    schedule();
-    return {
-      destroy() {
-        if (frame) cancelAnimationFrame(frame);
-        observer?.disconnect();
-        window.removeEventListener('resize', schedule);
-      }
-    };
   }
 
   function getEntryName(entry: RecentEntry | { name?: string; handle?: any }): string {
@@ -3360,7 +3211,7 @@ import { backupFileName, collectInstanceBackup, mergeBookmarks, parseInstanceBac
       // conflicts but stay below engine plumbing.
       pendingImports = mergePendingImports(pendingImports, dirty.tiddlers.map((tiddler) => ({ ...tiddler })));
       await clearDirtyState(safeName);
-      status = copy.status.recovering(dirty.tiddlers.length, safeName);
+      report(copy.status.recovering(dirty.tiddlers.length, safeName));
     } else if (decision === 'discard') {
       await clearDirtyState(safeName);
     }
@@ -3483,7 +3334,7 @@ import { backupFileName, collectInstanceBackup, mergeBookmarks, parseInstanceBac
         });
         if (!replace) {
           busy = false;
-          status = '';
+          clearStatus();
           return;
         }
       }
@@ -3511,7 +3362,7 @@ import { backupFileName, collectInstanceBackup, mergeBookmarks, parseInstanceBac
     if (!unwritten && tracksUnsavedEdits(name)) {
       if ((await prepareDirtyRecovery(safeName, dirtyAnswer)) === 'later') {
         busy = false;
-        status = copy.status.editsKept;
+        report(copy.status.editsKept);
         return;
       }
     }
@@ -3537,8 +3388,8 @@ import { backupFileName, collectInstanceBackup, mergeBookmarks, parseInstanceBac
       stageBeat?.stage('wiki', safeName);
       await bootLegacyHtml(contents, safeName, path, indexDbOnly, shimToken);
       // The mount replaced this document, and `document.open` took its listeners with it: the
-      // share ask is armed again on the document that is now showing.
-      armShareWatch();
+      // handed-content ask is armed again on the document that is now showing.
+      armHandedWatch();
       return;
     }
     const handoff = { name: safeName, path, text: contents, ...(unwritten ? { unwritten: true } : {}) };
@@ -3564,9 +3415,9 @@ import { backupFileName, collectInstanceBackup, mergeBookmarks, parseInstanceBac
       __EPHEMERAL_MODE__: mode === 'self-host' ? 'self-host' : 'paper-light',
       __LITHIC_LAUNCHER_MODE__: mode
     }, { driftedFromHead, scratchMode, remote, browserOnly: indexDbOnly, shimToken, openBoardFor });
-    // Same as the monolith branch above: the engine booted in place, so the share ask is armed
-    // again on the document it wrote.
-    armShareWatch();
+    // Same as the monolith branch above: the engine booted in place, so the handed-content ask is
+    // armed again on the document it wrote.
+    armHandedWatch();
     pendingImports = [];
     skippedImports = [];
     intentionalImports = [];
@@ -3574,7 +3425,7 @@ import { backupFileName, collectInstanceBackup, mergeBookmarks, parseInstanceBac
 
   async function blankLith() {
     busy = true;
-    status = copy.status.loadingBlank;
+    report(copy.status.loadingBlank);
     try {
       await mountWiki('', 'new.lith');
     } catch (error) {
@@ -3618,7 +3469,7 @@ import { backupFileName, collectInstanceBackup, mergeBookmarks, parseInstanceBac
     const siteTitle = documentStem(safeName);
     showNewLithModal = false;
     busy = true;
-    status = copy.status.loadingBlank;
+    report(copy.status.loadingBlank);
     try {
       await mountWiki('', safeName, undefined, undefined, [{ title: '$:/SiteTitle', text: siteTitle }]);
     } catch (error) {
@@ -3647,10 +3498,10 @@ import { backupFileName, collectInstanceBackup, mergeBookmarks, parseInstanceBac
    */
   async function mountFromDisk() {
     if (mode === 'self-host') return uploadLithToServer();
-    busy = true; status = copy.status.opening;
+    busy = true; report(copy.status.opening);
     try {
       const picks = await files.openMany();
-      if (picks.length === 0) { status = ''; return; }
+      if (picks.length === 0) { clearStatus(); return; }
       if (picks.length === 1) {
         const [only] = picks;
         // The picker named the file; the bytes are read here, once, for the one Lith
@@ -3658,7 +3509,7 @@ import { backupFileName, collectInstanceBackup, mergeBookmarks, parseInstanceBac
         const text = await files.readText(only);
         lithText = text; fileName = only.name; filePath = only.path;
         await mountWiki(text, only.name, only.path, only.handle);
-        status = copy.status.mounted(only.name);
+        report(copy.status.mounted(only.name));
         return;
       }
       // In reverse, because every row goes to the head of the list: folding the last
@@ -3672,13 +3523,13 @@ import { backupFileName, collectInstanceBackup, mergeBookmarks, parseInstanceBac
       }
       // No full stop: the status line strips trailing punctuation, because the
       // activity dots sit right after it.
-      status = copy.status.added(picks.length);
+      report(copy.status.added(picks.length));
     } catch (error) {
       // A chooser the platform never drew is not a failure of a file: it is a page that cannot
       // ask for one, and the sentence that helps is the address this page is served from. The
       // `Opening` line goes with it, because nothing was ever being opened.
       const refused = refusedPicker(error);
-      if (refused) status = '';
+      if (refused) clearStatus();
       reportHeld(refused ?? copy.status.openFailed(error instanceof Error ? error.message : String(error)));
     }
     finally { busy = false; }
@@ -3700,13 +3551,13 @@ import { backupFileName, collectInstanceBackup, mergeBookmarks, parseInstanceBac
    * and the list the server answers with is how one of them is read next.
    */
   async function uploadLithToServer(): Promise<void> {
-    busy = true; status = copy.status.opening;
+    busy = true; report(copy.status.opening);
     try {
       const picks = await files.openMany();
       // A dismissed chooser is an answer, and the control has to come back: this branch used to
       // return with `busy` still set, which left the mount button disabled for the rest of the
       // session after nothing more than closing a dialog.
-      if (picks.length === 0) { status = ''; busy = false; return; }
+      if (picks.length === 0) { clearStatus(); busy = false; return; }
       // A Lith lands under the server's name for it, so everything said about the
       // uploads below (the replace question and the progress line) uses that name.
       const uploaded = picks.map((pick) => ({ ...pick, name: lithUploadName(pick.name) }));
@@ -3715,7 +3566,7 @@ import { backupFileName, collectInstanceBackup, mergeBookmarks, parseInstanceBac
         remoteFiles.some((file) => file.name.toLowerCase() === pick.name.toLowerCase())
       );
       if (clashes.length > 0) {
-        status = ''; busy = false;
+        clearStatus(); busy = false;
         const replace = await askConfirmation({
           title: clashes.length === 1 ? copy.status.replaceOne : copy.status.replaceMany,
           body: clashes.length === 1
@@ -3727,7 +3578,7 @@ import { backupFileName, collectInstanceBackup, mergeBookmarks, parseInstanceBac
         if (!replace) return;
         busy = true;
       }
-      status = copy.status.uploading(uploaded.map((pick) => pick.name));
+      report(copy.status.uploading(uploaded.map((pick) => pick.name)));
       for (const pick of uploaded) {
         await uploadRemoteFile(pick.name, await files.readText(pick));
       }
@@ -3736,7 +3587,7 @@ import { backupFileName, collectInstanceBackup, mergeBookmarks, parseInstanceBac
       if (uploaded.length > 1) {
         // A list, not a decision: the uploads are the work and the list below is how
         // one of them is opened, so nothing opens by itself here.
-        status = copy.status.uploaded(uploaded.length);
+        report(copy.status.uploaded(uploaded.length));
         return;
       }
       await openRemoteFile(uploaded[0].name);
@@ -3847,28 +3698,113 @@ import { backupFileName, collectInstanceBackup, mergeBookmarks, parseInstanceBac
     // to answer (`open-wiki-import.ts`).
     if (importIntoOpenWiki(payload, (window as any).$tw)) return;
     enqueuePending(payload);
-    status = copy.pending.sharedReady(payload.length);
+    report(copy.pending.sharedReady(payload.length));
   }
 
   /**
-   * Ask for a share whenever this page is shown.
+   * Open a document another app asked this one to open.
    *
-   * Its own handler rather than a line in `onVisibilityChange`, because it is the one listener
-   * that has to outlive a mount. A share brings the app forward instead of starting it, so there
-   * is no boot to hang this on, and the ask has to be armed on the document that is showing.
-   * Measured in Chromium: a listener registered on the document is gone once the engine has taken
-   * it (the same Document object comes back with an empty body, so it is the document that was
-   * emptied and not a new one), and a listener registered afterwards is reached by the next event.
-   * Without this second arming, a Lith that has just taken the window would never read a share.
-   * Arming the same function twice is safe either way, because `addEventListener` ignores it.
+   * This is the phone's version of a double-click: a file manager's "Open with Lithic" hands the
+   * app an intent carrying a `content://` reference instead of starting it with a path, and the
+   * activity keeps it until this page asks (`take_open_document`). The answer is consumed when
+   * read, so a reload is not handed the same document twice.
+   *
+   * One rule, and it is the difference between opening a file and losing one: a handed document
+   * only replaces the launcher screen. Where the engine has taken the window there is a Lith
+   * open, and a second document has no business mounting over it, so the request is left unread
+   * and waits for the launcher to be the page again. The test is the same one the share path uses
+   * to tell the two apart, because it is the same question: `$tw` is in this window exactly when
+   * a Lith is. `busy` is asked for the same reason: a document consumed while a mount is in
+   * flight would be dropped by `openTauriPath`, so it is left for the next ask instead.
+   *
+   * The mount is `openTauriPath`, which is the route a desktop's own association already takes,
+   * so a `.lith` opened this way is the same mount a double-click produces. It also reads the
+   * file through the app's bridge, which is the only thing that can open a phone's reference.
+   *
+   * A file this app converts is the one deliberate asymmetry with a share. A share is notes
+   * waiting for a destination, so it queues in the panel; opening a PDF, a book or a picture is
+   * somebody saying "read this", so it opens, in a new Lith named after the file. What it cannot
+   * have here is the sibling a desktop writes, since a `content://` reference has no folder this
+   * app may write into, so the new Lith has no file behind it and its first save asks where to go
+   * (`save_lith_file` with no path is the platform's own save picker). That is the same choice the
+   * sibling would have made silently, moved to the one moment the person is thinking about it.
+   *
+   * The name is asked of the platform rather than parsed out of the reference, because a granted
+   * URI's last component is a document id and not `statement.pdf`. The kind is read off that name,
+   * which is the same test a desktop association's path goes through.
    */
-  function armShareWatch(): void {
-    document.addEventListener('visibilitychange', onShareVisible);
+  async function openHandedDocument(): Promise<void> {
+    if (mode !== 'tauri' || busy) return;
+    if ((window as any).$tw) return;
+    let reference: string | null = null;
+    try {
+      reference = await tauriInvoke<string | null>('take_open_document');
+    } catch {
+      // A build from before the phone could be handed a file answers nothing.
+      return;
+    }
+    if (!reference) return;
+    let sourceName = '';
+    try {
+      sourceName = await tauriInvoke<string>('document_name', { path: reference });
+    } catch {
+      // A provider that will not name its own document leaves the kind unknown, and an unknown
+      // kind is opened as a document, which is what every file this app edits does.
+      sourceName = '';
+    }
+    const kind = importKindOf(sourceName);
+    if (!kind) {
+      await openTauriPath(reference);
+      return;
+    }
+    try {
+      await importIntoBlankLith(reference, sourceName || IMPORT_FALLBACK_NAME[kind], kind);
+    } catch (error) {
+      reportHeld(copy.status.openFailed(error instanceof Error ? error.message : String(error)));
+    }
   }
 
-  function onShareVisible(): void {
+  /**
+   * Import a file another app handed over into a new Lith with no file behind it yet.
+   *
+   * The same handoff `importIntoNewLith` makes, minus the sibling: the bytes are read through the
+   * app's bridge (the only thing that can read a phone's reference), left on the window for the
+   * engine's own importer, and the blank Lith is mounted over the launcher so the pages, chapters
+   * or board arrive in a document the person is looking at. Nothing is written anywhere, so the
+   * first save is what chooses a home.
+   */
+  async function importIntoBlankLith(source: string, sourceName: string, kind: ImportKind) {
+    const base64 = await tauriInvoke<string>('read_file_base64', { path: source });
+    (window as any)[IMPORT_REQUEST[kind]] = { filename: sourceName, base64 };
+    const name = importLithName(sourceName);
+    lithText = '';
+    fileName = name;
+    filePath = undefined;
+    await mountWiki('', name);
+    report(copy.status.mounted(name));
+  }
+
+  /**
+   * Ask for whatever another app handed this one, whenever this page is shown.
+   *
+   * Its own handler rather than a line in `onVisibilityChange`, because it is the one listener
+   * that has to outlive a mount. A share or an opened file brings the app forward instead of
+   * starting it, so there is no boot to hang this on, and the ask has to be armed on the document
+   * that is showing. Measured in Chromium: a listener registered on the document is gone once the
+   * engine has taken it (the same Document object comes back with an empty body, so it is the
+   * document that was emptied and not a new one), and a listener registered afterwards is reached
+   * by the next event. Without this second arming, a Lith that has just taken the window would
+   * never read either. Arming the same function twice is safe, because `addEventListener` ignores
+   * it.
+   */
+  function armHandedWatch(): void {
+    document.addEventListener('visibilitychange', onHandedVisible);
+  }
+
+  function onHandedVisible(): void {
     if (document.hidden) return;
     void openHandedShare();
+    void openHandedDocument();
   }
 
   async function openRecent(
@@ -3883,7 +3819,7 @@ import { backupFileName, collectInstanceBackup, mergeBookmarks, parseInstanceBac
     opts: { dirtyAnswer?: 'merge'; quietFail?: boolean } = {}
   ): Promise<boolean> {
     busy = true;
-    status = copy.status.openingRecent;
+    report(copy.status.openingRecent);
     try {
       const rawHandle = (recent as any).handle;
       const tauriPath = recentDiskPath(recent);
@@ -3897,13 +3833,13 @@ import { backupFileName, collectInstanceBackup, mergeBookmarks, parseInstanceBac
         const cached = isHtmlMonolithName(name) ? '' : await getSearchCacheText(name);
         const text = cached || (recent as any).text || '';
         await mountWiki(text, name, undefined, undefined, [], null, undefined, { dirtyAnswer: opts.dirtyAnswer });
-        status = copy.status.mounted(name);
+        report(copy.status.mounted(name));
         return true;
       }
       // A row with a disk path is read through whichever process can: the app's Rust bridge
       // under Tauri, the shim's wire when a shim served this page. A shim handle carries a
       // path and no `getFile`, so it belongs here rather than in the browser-handle block.
-      if ((mode === 'tauri' || shimToken !== null) && tauriPath) {
+      if (hasLocalSync && tauriPath) {
         return await mountDiskPath(tauriPath, undefined, opts);
       }
       if (mode === 'tauri' && !rawHandle?.getFile) {
@@ -3928,14 +3864,14 @@ import { backupFileName, collectInstanceBackup, mergeBookmarks, parseInstanceBac
         const file = await handle.getFile();
         const text = await file.text();
         await mountWiki(text, file.name, recentDiskPath(recent) ?? undefined, handle, [], null, undefined, { dirtyAnswer: opts.dirtyAnswer });
-        status = copy.status.mounted(file.name);
+        report(copy.status.mounted(file.name));
         return true;
       }
       if ((recent as any).text !== undefined) {
         lithText = (recent as any).text;
         fileName = (recent as any).name || 'untitled.lith';
         filePath = recentDiskPath(recent) ?? undefined;
-        status = copy.status.mounted(fileName);
+        report(copy.status.mounted(fileName));
         await mountWiki(lithText, fileName, filePath, undefined, [], null, undefined, { dirtyAnswer: opts.dirtyAnswer });
         return true;
       } else if (recentDiskPath(recent) && mode === 'tauri') {
@@ -3968,7 +3904,7 @@ import { backupFileName, collectInstanceBackup, mergeBookmarks, parseInstanceBac
   async function openTauriPath(path: string) {
     if (busy) return;
     busy = true;
-    status = copy.status.opening;
+    report(copy.status.opening);
     try {
       await mountDiskPath(path);
     } finally {
@@ -3977,62 +3913,26 @@ import { backupFileName, collectInstanceBackup, mergeBookmarks, parseInstanceBac
   }
 
   /**
-   * The kinds of associated file this app imports rather than edits.
+   * Import the file into the Lith that sits beside it: a PDF's pages, a book's chapters, or an
+   * image on a board.
    *
-   * A PDF is rendered into pages and an image is drawn on a board. Neither is a document body,
-   * so each has to be told apart before anything reads it as text, and the two share everything
-   * after that: a Lith is written beside the file, the bytes travel to the engine, and the board
-   * that comes back is what opens.
+   * Nothing here renders anything: the three converters live in the wiki, so the launcher reads
+   * the file's bytes, hands them to the mounted document, and the importer's own startup turns
+   * them into the tiddlers. The source file itself is only ever read.
    *
-   * `jpg` is the same format as `jpeg` under the extension most cameras write, and both are
-   * registered, so both have to arrive here.
-   */
-  type ImportKind = 'pdf' | 'image';
-
-  function importKindOf(path: string): ImportKind | null {
-    if (/\.pdf$/i.test(path)) return 'pdf';
-    if (/\.(png|jpe?g|bmp|webp)$/i.test(path)) return 'image';
-    return null;
-  }
-
-  /**
-   * The container the import names after the file: its name without the extension.
-   *
-   * The importer derives its own titles from the file the same way (`paper.pdf` becomes a
-   * container `paper` holding `paper-text` and `paper-whiteboard`, and `photo.png` becomes
-   * `photo` holding `photo-whiteboard`), so this is that name and not a second rule. It travels
-   * with the mount so the engine can open the board under it when that file is what a person
-   * opened (see `openBoardFor`).
-   */
-  function importContainerTitle(path: string): string {
-    const name = path.split(/[\\/]/).pop() || '';
-    return name.replace(/\.(?:pdf|png|jpe?g|bmp|webp)$/i, '');
-  }
-
-  /**
-   * Import the file into the Lith that sits beside it: a PDF's pages, or an image on a board.
-   *
-   * Nothing here renders anything: both converters live in the wiki, so the launcher reads the
-   * file's bytes, hands them to the mounted document, and the importer's own startup turns them
-   * into the tiddlers. The source file itself is only ever read.
-   *
-   * The sibling is not written and not listed: reading a PDF through this app is a view of that
-   * PDF, and a file on the desktop for every look is clutter nobody asked for. The path is where
-   * a save will go, so the file the first save creates is the one `import_lith_target` would have
-   * answered with on the next open, and the row arrives with it (see `mount.unwritten` below).
+   * The sibling is not written and not listed: reading a PDF or a book through this app is a view
+   * of that file, and a file on the desktop for every look is clutter nobody asked for. The path
+   * is where a save will go, so the file the first save creates is the one `import_lith_target`
+   * would have answered with on the next open, and the row arrives with it (see `mount.unwritten`
+   * below).
    */
   async function importIntoNewLith(sourcePath: string, lithPath: string, kind: ImportKind) {
-    const sourceName = sourcePath.split(/[\\/]/).pop() || (kind === 'pdf' ? 'document.pdf' : 'image.png');
+    const sourceName = sourcePath.split(/[\\/]/).pop() || IMPORT_FALLBACK_NAME[kind];
     const lithName = lithPath.split(/[\\/]/).pop() || `${importContainerTitle(sourceName) || 'document'}.lith`;
     // The bytes are read before anything is mounted, so a file this process cannot read opens no
     // document at all rather than one holding a failed import.
     const base64 = await tauriInvoke<string>('read_file_base64', { path: sourcePath });
-    // Each converter runs inside the mounted document, which cannot reach this process's bridge
-    // any other way, so the payload travels on the window. A window property survives the
-    // engine's document.open/write boot, which is the same reason the file handle is left there.
-    // The two keys are separate because the engine reads one and never the other: one gesture is
-    // a PDF or an image, and a startup that had to sniff the bytes would be guessing.
-    (window as any)[kind === 'pdf' ? '__LITHIC_PDF_IMPORT__' : '__LITHIC_IMAGE_IMPORT__'] = {
+    (window as any)[IMPORT_REQUEST[kind]] = {
       filename: sourceName,
       base64
     };
@@ -4056,9 +3956,9 @@ import { backupFileName, collectInstanceBackup, mergeBookmarks, parseInstanceBac
     try {
       const kind = importKindOf(path);
       if (kind) {
-        // Before the text read below, which neither of these has any business going through:
-        // a PDF's pages or an image's pixels are turned into a Lith beside the file instead of
-        // being mounted as a body.
+        // Before the text read below, which none of these has any business going through: a
+        // PDF's pages, a book's chapters or an image's pixels are turned into a Lith beside the
+        // file instead of being mounted as a body.
         const target = await tauriInvoke<{ path: string; exists: boolean }>('import_lith_target', { file: path });
         if (target.exists) {
           // This file has already become a Lith, so the copy opens as it stands. Re-importing
@@ -4068,11 +3968,12 @@ import { backupFileName, collectInstanceBackup, mergeBookmarks, parseInstanceBac
           // is the board rather than the layout that Lith was last saved in, so the container the
           // import wrote travels along and the engine opens the board. Opening that same Lith on
           // its own, from the recents list or a Mount, carries no container and leaves it exactly
-          // as it says.
-          return await mountDiskPath(target.path, importContainerTitle(path), opts);
+          // as it says. A book has no container to force open: its sibling is the whole book, so
+          // `open the EPUB` means the Lith as it says, at whatever chapter it was left on.
+          return await mountDiskPath(target.path, kind === 'epub' || kind === 'docx' ? undefined : importContainerTitle(path), opts);
         }
         await importIntoNewLith(path, target.path, kind);
-        status = copy.status.mounted(fileName);
+        report(copy.status.mounted(fileName));
         return true;
       }
       const result =
@@ -4087,7 +3988,7 @@ import { backupFileName, collectInstanceBackup, mergeBookmarks, parseInstanceBac
       fileName = result.name;
       filePath = result.path;
       await mountWiki(result.text, result.name, result.path, undefined, [], null, openBoardFor, { dirtyAnswer: opts.dirtyAnswer });
-      status = copy.status.mounted(result.name);
+      report(copy.status.mounted(result.name));
       return true;
     } catch (error) {
       if (!opts.quietFail) reportHeld(copy.status.openFailed(error instanceof Error ? error.message : String(error)));
@@ -4140,6 +4041,32 @@ import { backupFileName, collectInstanceBackup, mergeBookmarks, parseInstanceBac
     skippedImports = result.refused;
   }
 
+  /**
+   * Start a Lith from a book or a Word document dropped on the launcher.
+   *
+   * Neither has a sibling to become: the launcher is the page before any document, so the drop
+   * starts one, named the way the Lith beside a file is named. The chapters, or the words and the
+   * pictures, are made by the importer inside the mounted document rather than here, so the bytes
+   * are read, encoded and left on the window for the engine's startup to take, which is what a
+   * double-clicked file does too (see `pdf-open-request.js`).
+   */
+  async function openDroppedImport(file: File, kind: 'epub' | 'docx') {
+    const bytes = new Uint8Array(await file.arrayBuffer());
+    // A chunk at a time rather than one character per byte: a book or a document runs to
+    // megabytes, and 32 KB is under the argument count every browser accepts.
+    let binary = '';
+    for (let index = 0; index < bytes.length; index += 0x8000) {
+      binary += String.fromCharCode(...bytes.subarray(index, index + 0x8000));
+    }
+    (window as any)[IMPORT_REQUEST[kind]] = { filename: file.name, base64: btoa(binary) };
+    const name = `${file.name.replace(new RegExp(`\\.${kind}$`, 'i'), '')}_${kind}.lith`;
+    lithText = '';
+    fileName = name;
+    filePath = undefined;
+    await mountWiki('', name);
+    report(copy.status.mounted(name));
+  }
+
   async function handleDrop(event: DragEvent) {
     const droppedText = event.dataTransfer?.getData('URL') || event.dataTransfer?.getData('text/plain') || '';
     if (droppedText && isPayloadShareUrl(droppedText)) {
@@ -4166,6 +4093,8 @@ import { backupFileName, collectInstanceBackup, mergeBookmarks, parseInstanceBac
     // three files expects to see three. Reading `files[0]` made the rest arrive nowhere.
     const queued: PendingTiddler[] = [];
     let wiki: File | null = null;
+    let book: File | null = null;
+    let word: File | null = null;
     let unreadable = false;
     for (const file of Array.from(files)) {
       const lowerName = file.name.toLowerCase();
@@ -4190,6 +4119,13 @@ import { backupFileName, collectInstanceBackup, mergeBookmarks, parseInstanceBac
       } else if (/\.(?:html?|htm)$/.test(lowerName) && !wiki) {
         // One page opens at a time, so the first wiki in a drop is the one that opens.
         wiki = file;
+      } else if (lowerName.endsWith('.epub') && !book) {
+        // One book at a time, for the same reason: a mount holds one document.
+        book = file;
+      } else if (lowerName.endsWith('.docx') && !word) {
+        // A Word document is the same shape of gesture as a book: one at a time, and it opens
+        // rather than queues, because a document somebody dragged here is one they want to read.
+        word = file;
       }
     }
     if (queued.length > 0) {
@@ -4203,6 +4139,14 @@ import { backupFileName, collectInstanceBackup, mergeBookmarks, parseInstanceBac
       // those tiddlers merged rather than leaving them queued behind a replaced page.
       try {
         await mountWiki(await wiki.text(), wiki.name);
+      } catch (error) {
+        mountError = error instanceof Error ? error.message : String(error);
+      }
+    } else if (book || word) {
+      // A book or a document dropped beside a page is not opened: the page is the document, and
+      // the second mount would replace it.
+      try {
+        await openDroppedImport((book || word) as File, book ? 'epub' : 'docx');
       } catch (error) {
         mountError = error instanceof Error ? error.message : String(error);
       }
@@ -4225,11 +4169,11 @@ import { backupFileName, collectInstanceBackup, mergeBookmarks, parseInstanceBac
       // wiki with the shared payload queued for injection.
       window.history.replaceState({}, document.title, window.location.pathname);
       pendingImports = payload;
-      status = copy.pending.sharedReady(payload.length);
+      report(copy.pending.sharedReady(payload.length));
       await blankLith();
     } else {
       mountError = copy.status.payloadFailed;
-      status = '';
+      clearStatus();
     }
   }
 
@@ -4240,7 +4184,7 @@ import { backupFileName, collectInstanceBackup, mergeBookmarks, parseInstanceBac
    * this mode is always the origin serving this page.
    */
   function isSelfHost(): boolean {
-    return mode === 'self-host';
+    return branchIsSelfHost(mode);
   }
 
   /**
@@ -4296,7 +4240,7 @@ import { backupFileName, collectInstanceBackup, mergeBookmarks, parseInstanceBac
     if (busy) return;
     busy = true;
     remoteError = '';
-    status = copy.status.openingName(name);
+    report(copy.status.openingName(name));
     // readRemoteLock is failure-tolerant by design: a lock check that cannot
     // run (or a stale/own lock) returns null, so the open proceeds normally.
     const lock = await readRemoteLock(name, resolveSessionId());
@@ -4305,7 +4249,7 @@ import { backupFileName, collectInstanceBackup, mergeBookmarks, parseInstanceBac
       // (claims no lock, installs no saver) instead of a yes/no prompt that
       // would otherwise silently overwrite their copy.
       busy = false;
-      status = '';
+      clearStatus();
       remoteCollision = { name, who: lock.user || '' };
       return;
     }
@@ -4321,7 +4265,7 @@ import { backupFileName, collectInstanceBackup, mergeBookmarks, parseInstanceBac
   async function mountRemoteFile(name: string, readOnly = false): Promise<void> {
     busy = true;
     remoteError = '';
-    status = copy.status.openingName(name);
+    report(copy.status.openingName(name));
     try {
       let text: string;
       let digest = '';
@@ -4370,10 +4314,10 @@ import { backupFileName, collectInstanceBackup, mergeBookmarks, parseInstanceBac
       activeRemote = { name, digest, api: patchApiAvailable && Boolean(digest) };
       if (readOnly) {
         stopLockHeartbeat();
-        status = copy.status.mountedReadOnly(name);
+        report(copy.status.mountedReadOnly(name));
       } else {
         await startLockHeartbeat(name);
-        status = activeRemote.api ? copy.status.mountedPatched(name) : copy.status.mounted(name);
+        report(activeRemote.api ? copy.status.mountedPatched(name) : copy.status.mounted(name));
       }
       await mountWiki(text, name, undefined, undefined, [], {
         fileName: name,
@@ -4409,7 +4353,7 @@ import { backupFileName, collectInstanceBackup, mergeBookmarks, parseInstanceBac
     showNewLithModal = false;
     remoteError = '';
     busy = true;
-    status = copy.status.creating(name);
+    report(copy.status.creating(name));
     try {
       await uploadRemoteFile(name, '');
       await refreshRemoteList();
@@ -4446,7 +4390,7 @@ import { backupFileName, collectInstanceBackup, mergeBookmarks, parseInstanceBac
     remoteError = '';
     remoteNotice = '';
     busy = true;
-    status = copy.status.deleting(name);
+    report(copy.status.deleting(name));
     try {
       await deleteRemoteFile(name);
       void fetch(`${webdavUrl(name)}.lock`, { method: 'DELETE' }).catch(() => {});
@@ -4454,7 +4398,7 @@ import { backupFileName, collectInstanceBackup, mergeBookmarks, parseInstanceBac
     } catch (error) {
       remoteError = copy.status.deleteFailed(name, error instanceof Error ? error.message : String(error));
     } finally {
-      status = '';
+      clearStatus();
       busy = false;
     }
   }
@@ -4515,6 +4459,7 @@ import { backupFileName, collectInstanceBackup, mergeBookmarks, parseInstanceBac
     emojiChoice = brandEmoji;
     emojiStatus = '';
     backupStatus = '';
+    backupDownload = 'idle';
     flashProblem = '';
     showEmojiPicker = true;
   }
@@ -4533,6 +4478,7 @@ import { backupFileName, collectInstanceBackup, mergeBookmarks, parseInstanceBac
   function closeInstanceManagement(): void {
     showEmojiPicker = false;
     backupStatus = '';
+    backupDownload = 'idle';
   }
 
   /** Preview on click: the header and tab update before anything is saved. */
@@ -4784,25 +4730,14 @@ import { backupFileName, collectInstanceBackup, mergeBookmarks, parseInstanceBac
    * open across a recovery stops claiming edits it no longer has.
    */
   $: historyUnsavedTs = showHistoryModal ? historyDirty?.ts ?? dirtyEntries[historyName] ?? 0 : 0;
-  /**
-   * The trail's rows: this Lith's unsaved capture first, then its saves, newest first.
-   *
-   * The capture is a row rather than a notice beside the title because the list is where a
-   * reader looks for this Lith's states, and the wiki as it stands is one of them: edits no
-   * save has written yet, badged `live` beside the `full` and `step` rows they are not.
-   * Putting it in the list also gives it
-   * the trail's own grammar, so the chevron and the distance below it say how long the edits
-   * have been waiting since the save under them, and the row's own trailing control is the
-   * download every other row has: what it hands over is the capture, which is a real file even
-   * though it is not a version. The row is synthesised here instead of being stored, because
-   * it is not a version: no id, no bytes, and it disappears with the capture rather than ageing
-   * out of a capped list.
-   */
-  type HistoryRow = HistoryEntry & { inline?: boolean };
+  // Each row's download mark, resolved here so the markup stays a plain loop, the way the
+  // warning dialogs' rows resolve theirs.
   $: historyRows = (historyUnsavedTs
-    ? [{ id: 'inline', ts: historyUnsavedTs, sizeBytes: 0, lastModified: utcStamp(historyUnsavedTs), inline: true } as HistoryRow]
+    ? [{ id: CAPTURE_ROW_ID, ts: historyUnsavedTs, sizeBytes: 0, lastModified: utcStamp(historyUnsavedTs), inline: true } as HistoryRow]
     : ([] as HistoryRow[])
-  ).concat(historyEntries);
+  )
+    .concat(historyEntries)
+    .map((row) => ({ ...row, pill: orphanPill(historyDownloads[row.id] ?? 'idle') }));
   /** The row this dialog is about, when the list still has it. */
   $: historyRow = showHistoryModal ? recentFiles.find((item) => getEntryName(item) === historyName) ?? null : null;
   /**
@@ -4818,7 +4753,7 @@ import { backupFileName, collectInstanceBackup, mergeBookmarks, parseInstanceBac
     const handle = (row as any).handle;
     if (handle && typeof handle.createWritable === 'function') return true;
     const path = recentDiskPath(row);
-    return Boolean(path) && (mode === 'tauri' || shimToken !== null);
+    return Boolean(path) && hasLocalSync;
   }
   /**
    * Which rung merging is on, and therefore what the disclosure can promise.
@@ -4846,7 +4781,8 @@ import { backupFileName, collectInstanceBackup, mergeBookmarks, parseInstanceBac
     historyDirty = null;
     historyCaptureOpen = false;
     historyCaptureSaving = false;
-    historyCaptureNotice = '';
+    historyNotice = '';
+    historyDownloads = {};
     historyBrowserOnly = browserOnly;
     historyError = '';
     showHistoryModal = true;
@@ -4876,7 +4812,8 @@ import { backupFileName, collectInstanceBackup, mergeBookmarks, parseInstanceBac
     historyDirty = null;
     historyCaptureOpen = false;
     historyCaptureSaving = false;
-    historyCaptureNotice = '';
+    historyNotice = '';
+    historyDownloads = {};
   }
 
   /**
@@ -4890,22 +4827,33 @@ import { backupFileName, collectInstanceBackup, mergeBookmarks, parseInstanceBac
    * write actually landed.
    */
   async function downloadHistoryVersion(id: string) {
+    // The mark is the report, on the row whose button was pressed: it says the copy is being
+    // written, then what came of it.
+    setHistoryDownload(id, 'saving');
     try {
       const version = await downloadWikiVersion(historyName, id);
       if (!version) {
+        setHistoryDownload(id, 'idle');
         historyError = copy.status.noHistoryVersion;
         return;
       }
       const lith = version.text.trim().startsWith('[') ? serializeJsonToLith(version.text) : version.text;
+      let outcome: SaveOutcome = 'started';
       if (documents) {
-        const outcome = await saveTextVerifiably(version.fileName, lith, documents);
-        // The user backed out of the save dialog: no file, no notice, and no error.
-        if (outcome === 'cancelled') return;
+        outcome = await saveTextVerifiably(version.fileName, lith, documents);
+        // The user backed out of the save dialog: no file, no mark, and no error.
+        if (outcome === 'cancelled') {
+          setHistoryDownload(id, 'idle');
+          return;
+        }
       } else {
         saveBlobAs(version.fileName, version.text);
       }
-      status = copy.status.recovered(version.fileName);
+      // Only the app's own write earns the green check: no browser reports whether a download
+      // finished, and an instance page inside the app is exactly that shape.
+      setHistoryDownload(id, outcome === 'saved' ? 'saved' : 'unverified');
     } catch (error) {
+      setHistoryDownload(id, 'failed');
       historyError = error instanceof Error ? error.message : String(error);
     }
   }
@@ -4933,26 +4881,28 @@ import { backupFileName, collectInstanceBackup, mergeBookmarks, parseInstanceBac
       return;
     }
     historyCaptureSaving = true;
-    historyCaptureNotice = '';
+    setHistoryDownload(CAPTURE_ROW_ID, 'saving');
+    historyNotice = '';
     historyError = '';
     try {
       const fileName = unsavedFileName(historyName, record.ts);
       const json = JSON.stringify(record.tiddlers);
       if (documents) {
         const outcome = await saveTextVerifiably(fileName, serializeJsonToLith(json), documents);
-        // The user backed out of the save dialog: no file, no notice, and no error.
-        if (outcome === 'cancelled') return;
-        // `started` is the platform's unconfirmed download. It says what happened rather
-        // than borrowing the sentence a confirmed write earns, for the reason
-        // `saveTextVerifiably` documents: the browser never reports whether it finished.
-        historyCaptureNotice = outcome === 'saved'
-          ? copy.dialogs.history.savedCopy(record.tiddlers.length)
-          : copy.dialogs.history.startedCopy(record.tiddlers.length);
+        // The user backed out of the save dialog: no file, no mark, and no error.
+        if (outcome === 'cancelled') {
+          setHistoryDownload(CAPTURE_ROW_ID, 'idle');
+          return;
+        }
+        // The same two states a version row reports, for the reason `downloadHistoryVersion`
+        // gives: only the app's own write can prove the bytes landed.
+        setHistoryDownload(CAPTURE_ROW_ID, outcome === 'saved' ? 'saved' : 'unverified');
       } else {
         saveBlobAs(fileName, json);
-        historyCaptureNotice = copy.dialogs.history.startedCopy(record.tiddlers.length);
+        setHistoryDownload(CAPTURE_ROW_ID, 'unverified');
       }
     } catch (error) {
+      setHistoryDownload(CAPTURE_ROW_ID, 'failed');
       historyError = error instanceof Error ? error.message : String(error);
     } finally {
       historyCaptureSaving = false;
@@ -5046,7 +4996,7 @@ import { backupFileName, collectInstanceBackup, mergeBookmarks, parseInstanceBac
       return;
     }
     historyCaptureSaving = true;
-    historyCaptureNotice = '';
+    historyNotice = '';
     historyError = '';
     try {
       const target = historyHasFile(historyRow) ? await openHistoryDocument(name) : null;
@@ -5070,7 +5020,7 @@ import { backupFileName, collectInstanceBackup, mergeBookmarks, parseInstanceBac
       historyCaptureOpen = false;
       historyEntries = await listWikiVersions(name);
       void refreshDirtyBadges();
-      historyCaptureNotice = target
+      historyNotice = target
         ? copy.dialogs.history.merged(merged.applied)
         : copy.dialogs.history.mergedIntoCopy(merged.applied);
     } catch (error) {
@@ -5092,7 +5042,7 @@ import { backupFileName, collectInstanceBackup, mergeBookmarks, parseInstanceBac
     await clearDirtyState(historyName);
     historyDirty = null;
     historyCaptureOpen = false;
-    historyCaptureNotice = '';
+    historyNotice = '';
     historyError = '';
     void refreshDirtyBadges();
   }
@@ -5152,8 +5102,9 @@ import { backupFileName, collectInstanceBackup, mergeBookmarks, parseInstanceBac
         setOrphanDownload(name, 'idle');
         return;
       }
+      // The pill is the report. Every press this reaches is inside a dialog, and the header's
+      // status line is behind it, so a sentence there would be no confirmation at all.
       setOrphanDownload(name, outcome === 'saved' ? 'saved' : 'unverified');
-      status = outcome === 'saved' ? copy.status.savedFile(fileName) : copy.status.downloadingFile(fileName);
     } catch (error) {
       setOrphanDownload(name, 'failed');
       mountError = copy.status.downloadFailed(error instanceof Error ? error.message : String(error));
@@ -5229,8 +5180,15 @@ import { backupFileName, collectInstanceBackup, mergeBookmarks, parseInstanceBac
   /** Whether the fallback's gated Backup and Reset dialog is on screen. */
   let showInstanceBackup = false;
   let backupBusy = false;
-  /** What the last export said, on whichever dialog offered it. */
+  /** Why the last export failed, on whichever dialog offered it. */
   let backupStatus = '';
+  /**
+   * What the whole-instance export reports, beside the button that was pressed, in the same pill
+   * the rows use. `backupStatus` keeps the failures, because a mark says a copy failed while the
+   * sentence says why.
+   */
+  let backupDownload: OrphanDownloadState = 'idle';
+  $: backupPill = orphanPill(backupDownload);
   /** Whether the whole instance has been written out this session, which opens the gate. */
   let fullBackupTaken = false;
   /** Names a dropped backup could not land, because this device already holds them. */
@@ -5279,37 +5237,48 @@ import { backupFileName, collectInstanceBackup, mergeBookmarks, parseInstanceBac
    */
   $: backupCopy = backupResettable ? copy.dialogs.instanceBackup : copy.dialogs.instanceBackup.backupOnly;
 
-  /** Open the dialog. */
+  /**
+   * Open the dialog.
+   *
+   * The marks go with the previous visit: a row whose download was taken wears that mark instead
+   * of its button, and coming back here is how a person takes a second copy, so the buttons have
+   * to be there when the dialog opens.
+   */
   function openInstanceBackup(): void {
     backupStatus = '';
+    backupDownload = 'idle';
+    orphanDownloads = {};
     showInstanceBackup = true;
   }
 
   /**
    * Write the whole store out as one file.
    *
-   * `source` decides which of two sentences confirms it, because the gated dialog has already
-   * explained what the file is for and the other two dialogs have not.
+   * One answer for all four dialogs that offer it, which is why this takes no `source`: the mark
+   * beside the button says what came of the press, and the dialog around it already explains what
+   * the file is for.
    */
-  async function downloadInstanceBackup(source: 'manage' | 'gate' | 'rebuild' | 'reset'): Promise<void> {
+  async function downloadInstanceBackup(): Promise<void> {
     if (backupBusy) return;
     backupBusy = true;
     backupStatus = '';
+    backupDownload = 'saving';
     try {
       // The bookmark list is handed in rather than read: it lives in localStorage, which is the
       // page's store, and the module that builds the document reads only the wiki store.
       const backup = await collectInstanceBackup(idb, { mode, origin: window.location.origin }, Date.now(), bookmarks);
       const outcome = await saveTextVerifiably(backupFileName(), serializeInstanceBackup(backup), documents);
       // The user backed out of the save dialog, which is not a backup: the gate stays shut.
-      if (outcome === 'cancelled') return;
+      if (outcome === 'cancelled') {
+        backupDownload = 'idle';
+        return;
+      }
       fullBackupTaken = true;
-      backupStatus =
-        outcome === 'saved'
-          ? source === 'gate'
-            ? copy.dialogs.instanceBackup.fullBackupTaken
-            : copy.dialogs.icon.backupSaved
-          : copy.dialogs.icon.backupStarted;
+      // The gate counts an unconfirmed download as a download, which is what the browser's own
+      // answer is: `saved` is only ever the app's write.
+      backupDownload = outcome === 'saved' ? 'saved' : 'unverified';
     } catch (error) {
+      backupDownload = 'failed';
       backupStatus = copy.dialogs.icon.backupFailed(error instanceof Error ? error.message : String(error));
     } finally {
       backupBusy = false;
@@ -5324,6 +5293,7 @@ import { backupFileName, collectInstanceBackup, mergeBookmarks, parseInstanceBac
     orphanDownloads = {};
     fullBackupTaken = false;
     backupStatus = '';
+    backupDownload = 'idle';
   }
 
   /**
@@ -5443,7 +5413,7 @@ import { backupFileName, collectInstanceBackup, mergeBookmarks, parseInstanceBac
 
     const indexed: string[] = [];
     for (const [position, entry] of targets.entries()) {
-      status = copy.status.indexProgress(label, position + 1, targets.length, entry.name);
+      report(copy.status.indexProgress(label, position + 1, targets.length, entry.name));
       try {
         // Self-host reads through the patch API when it is there, because that read also
         // answers the digest: a rebuilt cache is then also the copy a later open mounts without
@@ -5516,8 +5486,8 @@ import { backupFileName, collectInstanceBackup, mergeBookmarks, parseInstanceBac
    * install confirmation is retired the same way, for the same reason.
    */
   function reportAndRetire(message: string, ms = 6000): void {
-    status = message;
-    setTimeout(() => { if (status === message) status = ''; }, ms);
+    report(message);
+    setTimeout(() => clearStatus(message), ms);
   }
 
   /**
@@ -5542,7 +5512,7 @@ import { backupFileName, collectInstanceBackup, mergeBookmarks, parseInstanceBac
     if (rebuildBusy) return;
     rebuildBusy = true;
     mountError = '';
-    status = copy.status.reindexing;
+    report(copy.status.reindexing);
     try {
       // Pass 1: re-list, replacing the list rather than patching it. That is
       // what lets one button do the job: the recent list is a *view* of what
@@ -5609,7 +5579,7 @@ import { backupFileName, collectInstanceBackup, mergeBookmarks, parseInstanceBac
       // usually a move or an unmounted drive, so it gets a say rather than a
       // silent disappearance.
       if (orphans.length > 0 && !(await promptRebuildOrphans(orphans))) {
-        status = copy.status.rebuildCancelled;
+        report(copy.status.rebuildCancelled);
         return;
       }
       // Confirmed: nothing about them is kept. Not the row, not the cached
@@ -5646,11 +5616,13 @@ import { backupFileName, collectInstanceBackup, mergeBookmarks, parseInstanceBac
       else for (const row of recentRows()) if (row.path) targets.push(row);
 
       const indexed = await indexRowsHere(targets, copy.status.reindexingLabel);
-      status = indexed > 0
-        ? copy.status.reindexed(indexed)
-        : copy.status.nothingToIndex;
+      report(
+        indexed > 0
+          ? copy.status.reindexed(indexed)
+          : copy.status.nothingToIndex
+      );
     } catch (error) {
-      status = '';
+      clearStatus();
       mountError = copy.status.reindexFailed(error instanceof Error ? error.message : String(error));
     } finally {
       rebuildBusy = false;
@@ -5693,7 +5665,7 @@ import { backupFileName, collectInstanceBackup, mergeBookmarks, parseInstanceBac
       if (decision === 'merge') {
         parsed = [...parsed, ...dirty.tiddlers.map((tiddler) => ({ ...tiddler }))];
         await clearDirtyState(name);
-        status = copy.status.recovering(dirty.tiddlers.length, name);
+        report(copy.status.recovering(dirty.tiddlers.length, name));
       } else if (decision === 'discard') {
         await clearDirtyState(name);
       }
@@ -5828,6 +5800,9 @@ import { backupFileName, collectInstanceBackup, mergeBookmarks, parseInstanceBac
     // Content another app shared into this one is queued for a Lith to be chosen, so this page is
     // not only the way in here: it is where the share waits until its home is decided.
     void openHandedShare();
+    // A file another app asked this one to open is the phone's own "Open with", and it waits for
+    // this page for the reason a share does: the window has to be the launcher to open one.
+    void openHandedDocument();
     // The wire's liveness, asked once and never awaited by anything: no render waits on
     // it, and a backend that does not answer leaves the flag false rather than an error.
     if (shimToken) {
@@ -5915,11 +5890,11 @@ import { backupFileName, collectInstanceBackup, mergeBookmarks, parseInstanceBac
       void runGitSyncHeartbeat();
       // A tap in the board's sign-in window brings this app forward rather than starting it, so
       // the intent is read again each time the page is shown. The share's own ask is armed
-      // separately, because it is the one that has to survive a mount (`armShareWatch`).
+      // separately, because it is the ones that have to survive a mount (`armHandedWatch`).
       void openHandedBoard();
     };
     document.addEventListener('visibilitychange', onVisibilityChange);
-    armShareWatch();
+    armHandedWatch();
     // Proactive quota relief, deliberately not run in the index-db-only
     // fallback: it deletes the oldest-modified caches, and there the oldest
     // cache is somebody's only copy of a Lith. The same all-clear this mode
@@ -6055,7 +6030,7 @@ import { backupFileName, collectInstanceBackup, mergeBookmarks, parseInstanceBac
       stopGitSyncProgressTimer();
       window.removeEventListener('lithic-git-sync-saved', onGitSyncSaved);
       document.removeEventListener('visibilitychange', onVisibilityChange);
-      document.removeEventListener('visibilitychange', onShareVisible);
+      document.removeEventListener('visibilitychange', onHandedVisible);
       gitPollAborted = true;
     };
   });
@@ -6073,18 +6048,6 @@ import { backupFileName, collectInstanceBackup, mergeBookmarks, parseInstanceBac
   // measures a weak one and says so, rather than quietly accepting it.
   type VaultStatus = { exists: boolean; granted: boolean; count: number; path: string };
   type VaultEntry = { origin: string; user: string };
-  /**
-   * A candidate PIN's verdict: the word it reads as, the band that colours it, and the
-   * sentence Rust wrote behind the word.
-   *
-   * The band is a class name as well as a word, so the colour cannot disagree with the
-   * arithmetic behind it. `refused` is the one case Rust does not band, because the
-   * only refusal possible here is the shape the boxes already enforce. The word is that
-   * band capitalized: Rust bands the shape and composes the sentence, so the only thing
-   * left to spell here is the word the sentence already opens with.
-   */
-  type SecretVerdict = { label: string; text: string; band: string };
-
   let showVaultModal = false;
   let vaultStatus: VaultStatus | null = null;
   let vaultEntries: VaultEntry[] = [];
@@ -6103,7 +6066,6 @@ import { backupFileName, collectInstanceBackup, mergeBookmarks, parseInstanceBac
    * reveal, so neither costs a row of its own.
    */
   let pinReveal = false;
-  let passwordReveal = false;
   /** Bumped when a PIN is refused, so the boxes empty and take the caret again. */
   let vaultPinReset = 0;
   let vaultError = '';
@@ -6187,28 +6149,6 @@ import { backupFileName, collectInstanceBackup, mergeBookmarks, parseInstanceBac
    * only ever be written for an instance the user was already pointing at.
    */
   let credentialOffer: { origin: string; address: string; kind: 'prompt' | 'row'; query: string } | null = null;
-  let offerPin = '';
-  let offerPinConfirm = '';
-  let offerUser = '';
-  let offerPassword = '';
-  let offerError = '';
-  /** The candidate PIN's band and sentence, or null while nothing complete is typed. */
-  let offerWarning: SecretVerdict | null = null;
-  let offerBusy = false;
-  /** Bumped when a PIN is refused, so the boxes empty and take the caret again. */
-  let offerPinReset = 0;
-  /** Bumped when the PIN is complete, to move the caret on to its confirmation. */
-  let offerPinConfirmFocus = 0;
-  /**
-   * What this dialog's fields last answered when they were put to the instance.
-   * Null while they are still being typed into, or hold something other than a
-   * complete login. See `typedLoginCheck` for when it is asked and when it is
-   * cleared. Both buttons of the dialog read it, which is why it is asked for a
-   * typed login rather than for a save.
-   */
-  let offerCheckVerdict: LoginVerdict | null = null;
-  const offerLoginCheck = typedLoginCheck((verdict) => (offerCheckVerdict = verdict));
-  $: offerLoginCheck(credentialOffer?.origin ?? '', offerUser, offerPassword);
 
   /** The exact address a saved login is kept under, for the origin field's hints. */
   function vaultOriginOf(url: string): string {
@@ -6306,7 +6246,6 @@ import { backupFileName, collectInstanceBackup, mergeBookmarks, parseInstanceBac
     vaultNotice = '';
     vaultSecret = '';
     pinReveal = false;
-    passwordReveal = false;
     // Last time's verdicts were about last time; nothing is carried over.
     vaultChecks = {};
     // Every visit starts closed, because nothing is ever left open between them.
@@ -6565,191 +6504,7 @@ import { backupFileName, collectInstanceBackup, mergeBookmarks, parseInstanceBac
    */
   function openCredentialOffer(origin: string, address: string, kind: 'prompt' | 'row', query = '') {
     credentialOffer = { origin, address, kind, query };
-    offerPin = '';
-    offerPinConfirm = '';
-    offerUser = '';
-    offerPassword = '';
-    offerError = '';
-    offerWarning = null;
     pinReveal = false;
-    passwordReveal = false;
-    offerPinReset += 1;
-  }
-
-  function closeCredentialOffer() {
-    credentialOffer = null;
-    offerPin = '';
-    offerPinConfirm = '';
-    offerPassword = '';
-    offerError = '';
-    offerWarning = null;
-  }
-
-  /** A PIN's band and sentence, measured by Rust so the rule has one home. */
-  async function secretVerdict(secret: string): Promise<SecretVerdict | null> {
-    if (!secret) return null;
-    try {
-      const verdict = await tauriInvoke<{
-        ok: boolean;
-        problem?: string | null;
-        warning?: string | null;
-        band?: string | null;
-      }>('check_credentials_secret', { secret });
-      if (!verdict.ok) {
-        // A refusal is not a band: it is said in the same colour every time, because
-        // the only thing it can be is the shape the boxes already enforce.
-        return verdict.problem
-          ? { label: verdict.problem, text: verdict.problem, band: 'refused' }
-          : null;
-      }
-      if (!verdict.warning) return null;
-      const band = verdict.band ?? 'average';
-      return { label: band.charAt(0).toUpperCase() + band.slice(1), text: verdict.warning, band };
-    } catch (error) {
-      return {
-        label: error instanceof Error ? error.message : String(error),
-        text: error instanceof Error ? error.message : String(error),
-        band: 'refused'
-      };
-    }
-  }
-
-  /**
-   * The PIN is complete: say whether it is weak, and move on to its confirmation.
-   *
-   * Only while creating. With a vault already on disk there is nothing to choose.
-   * the PIN is either this vault's or it is not, and `Save` is where that is decided,
-   * so checking it here would only be a second derivation of the same key.
-   */
-  async function offerPinComplete(pin: string) {
-    if (!vaultCreateMode) return;
-    offerPinConfirmFocus += 1;
-    offerWarning = await secretVerdict(pin);
-  }
-
-  /**
-   * Save this instance's login and open it, in one unlock.
-   *
-   * One command rather than unlock-then-save-then-lend: the PIN is derived once, and
-   * the vault that the derivation opens is dropped on the way out with nothing left
-   * open behind it. The answer is the same one-origin, expiring grant any other
-   * instance open leaves.
-   */
-  async function saveOfferedCredential() {
-    const target = credentialOffer;
-    if (!target || offerBusy) return;
-    offerBusy = true;
-    offerError = '';
-    try {
-      // A verdict is always about the text in the boxes right now (any change to
-      // them clears it) so one that has already arrived costs nothing to use. If
-      // none has, the answer is still on its way, and this is the moment it would
-      // decide something: the gap between typing and clicking is exactly where a
-      // password the instance will refuse would otherwise get through.
-      const verdict = offerCheckVerdict && offerCheckVerdict.state !== 'busy'
-        ? offerCheckVerdict
-        : await askInstanceAboutLogin(target.origin, offerUser, offerPassword);
-      offerCheckVerdict = verdict;
-      if (verdict.state === 'refused') {
-        offerError = copy.dialogs.credential.notSaved;
-        return;
-      }
-      await tauriInvoke('save_login_for_instance', {
-        origin: target.origin,
-        secret: offerPin,
-        user: offerUser,
-        password: offerPassword,
-      });
-      offerPin = '';
-      offerPinConfirm = '';
-      offerPassword = '';
-      credentialOffer = null;
-      // The row's key is drawn from the vault file's index, which the save just
-      // rewrote: a stale set would leave it grey for a login that now exists.
-      void refreshVaultStatus();
-      void refreshVaultCoverage();
-      window.location.href = withLauncherHandoff(target.address, window.location.href, target.query);
-    } catch (error) {
-      offerError = error instanceof Error ? error.message : String(error);
-      offerPinReset += 1;
-    } finally {
-      offerBusy = false;
-    }
-  }
-
-  /**
-   * Open it with the login that was just typed, and save nothing.
-   *
-   * This is the workflow for not using the credential manager, and it is what replaced
-   * both reasons the page's own prompt used to appear: the answer is borrowed for one
-   * load rather than written down. Nothing is opened and no PIN is needed (the values
-   * came from the boxes) so it works in the first-run shape too, where the PIN boxes
-   * are empty and only the other button wants them.
-   *
-   * What is left behind is the same one-origin, expiring grant an unlock leaves, which
-   * is what lets the page answer its own 401s (`webview_auth.rs`) (including the
-   * instance's `/sync/` traffic) without a login ever being stored for it.
-   */
-  async function openOfferedLoginWithoutSaving() {
-    const target = credentialOffer;
-    if (!target || offerBusy) return;
-    offerBusy = true;
-    offerError = '';
-    try {
-      // The same question `Save Credential` asks, for the same reason: the one moment
-      // a password can be tried before it is handed over.
-      const verdict = offerCheckVerdict && offerCheckVerdict.state !== 'busy'
-        ? offerCheckVerdict
-        : await askInstanceAboutLogin(target.origin, offerUser, offerPassword);
-      offerCheckVerdict = verdict;
-      if (verdict.state === 'refused') {
-        offerError = copy.dialogs.credential.notOpened;
-        return;
-      }
-      await tauriInvoke('lend_instance_credentials', {
-        origin: target.origin,
-        user: offerUser,
-        password: offerPassword,
-      });
-      offerPassword = '';
-      credentialOffer = null;
-      // Nothing was written, so no row colour changes and no coverage needs asking
-      // again: the vault holds exactly what it held a moment ago.
-      window.location.href = withLauncherHandoff(target.address, window.location.href, target.query);
-    } catch (error) {
-      offerError = error instanceof Error ? error.message : String(error);
-    } finally {
-      offerBusy = false;
-    }
-  }
-
-  /**
-   * The offer's one action. The stages collapse into a single line because only one of
-   * them can be happening, and a failure keeps the loader's own reason after its clause.
-   */
-  async function runFlash(): Promise<void> {
-    flashBusy = true;
-    flashProblem = '';
-    flashPercent = 0;
-    flashLine = copy.esp32.downloading;
-    try {
-      await flashLithicAppliance({
-        password: flashPassword,
-        onStage: (stage) => {
-          flashLine = esp32StageLine(stage);
-        },
-        onProgress: (progress) => {
-          flashPercent = esp32Percent(progress);
-        }
-      });
-      // The password is on the board now, so the field stops holding a secret.
-      flashPassword = '';
-    } catch (error) {
-      flashProblem = copy.esp32.failed(error instanceof Error ? error.message : String(error));
-      flashLine = '';
-    } finally {
-      flashBusy = false;
-    }
   }
 
   /**
@@ -6778,19 +6533,12 @@ import { backupFileName, collectInstanceBackup, mergeBookmarks, parseInstanceBac
     // dismissal rules disagree about which one Escape ends.
     showEmojiPicker = false;
     flashShow = true;
-    flashLine = '';
-    flashPercent = 0;
-  }
-
-  function closeFlash(): void {
-    if (flashBusy) return;
-    flashShow = false;
   }
 </script>
 
 <svelte:head><title>{copy.app.title}</title></svelte:head>
 
-<main class="container" class:panelled={recentPanelShown} data-mode={mode} data-shim-backend={shimBackendUp}>
+<main class="container" class:panelled={recentPanelShown} class:footer-controls={footerControlsShown} data-mode={mode} data-shim-backend={shimBackendUp}>
   <!--
     The full-export mark, drawn in front of its label wherever the whole-instance export is
     offered: the Instance Management dialog, the rebuild confirmation and the fallback's gated
@@ -7048,69 +6796,13 @@ import { backupFileName, collectInstanceBackup, mergeBookmarks, parseInstanceBac
     is undone by reverting to the commit it replaced.
   -->
   {#snippet instanceTrail()}
-    {#if trailOffered && trailView !== 'no-repo'}
-      <div class="trail-panel">
-        <p class="trail-title">{copy.dialogs.gitSync.trail.title}</p>
-        {#if trailView === 'loading'}
-          <p class="trail-note">{copy.dialogs.gitSync.trail.loading}</p>
-        {:else if trailView === 'failed'}
-          <p class="status-line error" role="alert">{trailNote}</p>
-        {:else if trailRows.length === 0}
-          <p class="trail-note">{copy.dialogs.gitSync.trail.none}</p>
-        {:else}
-          <ul class="trail-list">
-            {#each trailRows as row, index (row.hash)}
-              {#if index > 0}
-                <!--
-                  What joins two commits, exactly as the wiki trail joins two versions: the
-                  chevron points up at the newer row, and the distance beside it is that row's
-                  own sentence. Decorative, so it stays out of the accessibility tree, and the
-                  chevron is pinned to the column's centre line so the arrows read as one spine.
-                -->
-                <li class="history-link" aria-hidden="true">
-                  <svg viewBox="0 0 14 8" aria-hidden="true"><path d="M1.5 6.5 7 1.5l5.5 5"></path></svg>
-                  {#if row.gap}<span class="history-gap">{trailGapLabel(row.gap, copy.dialogs.history.later, LOCALE_TAG)}</span>{/if}
-                </li>
-              {/if}
-              <li class="history-entry">
-                <span class="trail-hash" title={row.hash}>{row.short}</span>
-                <!--
-                  What the commit was, rather than the sentence git stored with it: every
-                  message in this history was written by Lithic itself, so the row can say
-                  which kind of save it was at a glance. The sentence is still there on the
-                  pill's own tooltip, which is where a message nobody can read at a glance
-                  belongs. The words and their tones are the deck's (`trailBadge`).
-                -->
-                <span class="history-badge trail-badge {row.badge.tone}" title={row.badge.title}>{row.badge.label}</span>
-                <span class="history-time trail-time">{row.stamp}</span>
-                <!--
-                  The revert glyph, supplied as artwork rather than redrawn: the history trail's
-                  own mark turned a quarter turn, so it reads as the same family as the download
-                  icon beside the versions without being mistaken for it. It is drawn in the
-                  download icon's own coordinate box (`viewBox`, and the same `.history-download-icon`
-                  size rule) with one translate, which is what makes the two marks the same size
-                  whatever either of them is later restyled to.
-                -->
-                <button
-                  class="recent-icon-button history-download-button trail-revert"
-                  type="button"
-                  disabled={gitSyncBusy}
-                  aria-label={copy.dialogs.gitSync.trail.revertAria(row.short, row.stamp)}
-                  title={copy.dialogs.gitSync.trail.revertTitle}
-                  on:click={() => askTrailRevert(row)}
-                >
-                  <svg class="history-download-icon" viewBox="56 108 33 36" aria-hidden="true"><g transform="translate(-7.01 5.03)"><path class="history-icon-shape" d="m 80.482426,115.61206 v 8.05016 h 7.125663 v -1.59836 h -5.527311 v -6.4518 z"></path><path class="history-icon-shape" d="m 96.232885,121.64218 c 0,-7.19823 -5.58342,-13.10362 -12.64471,-13.64723 v -0.007 h -15.85743 v -1.32502 l -4.02559,2.32389 4.02559,2.32441 v -1.32343 h 15.85123 c 5.97937,0.53018 10.65103,5.5348 10.65103,11.65458 0,6.47462 -5.22855,11.70316 -11.70316,11.70316 -6.47462,0 -11.70161,-5.22854 -11.70161,-11.70316 0,-2.64451 0.87232,-5.08081 2.34508,-7.03781 h -2.39572 c -1.23707,2.05816 -1.94924,4.46633 -1.94924,7.03781 0,7.5555 6.14599,13.70356 13.70149,13.70356 7.5555,0 13.70304,-6.14806 13.70304,-13.70356 z"></path></g></svg>
-                </button>
-              </li>
-            {/each}
-          </ul>
-        {/if}
-      </div>
+    {#if trailOffered}
+      <TrailPanel view={trailView} commits={trailCommits} note={trailNote} busy={gitSyncBusy} on:revert={(event) => askTrailRevert(event.detail)} />
     {/if}
   {/snippet}
   {#if showGitSyncModal}
     <div class="modal-overlay" role="presentation" on:click={(event) => event.currentTarget === event.target && closeGitSyncModal()}>
-      <div class="launcher-modal git-sync-modal" class:has-trail={trailOffered && trailRows.length > 0} role="dialog" aria-modal="true" aria-labelledby="gitsync-title">          <button class="modal-close" aria-label={copy.dialogs.gitSync.closeAria} on:click={closeGitSyncModal}>×</button>
+      <div class="launcher-modal git-sync-modal" class:has-trail={trailOffered && trailCommits.length > 0} role="dialog" aria-modal="true" aria-labelledby="gitsync-title">          <button class="modal-close" aria-label={copy.dialogs.gitSync.closeAria} on:click={closeGitSyncModal}>×</button>
         <h2 id="gitsync-title">{copy.dialogs.gitSync.title}</h2>
         {#if gitSyncFolderEditable}
           <!--
@@ -7348,35 +7040,7 @@ import { backupFileName, collectInstanceBackup, mergeBookmarks, parseInstanceBac
       </div>
     </div>
   {/if}
-  {#if flashShow}
-    <!--
-      The one-time flash offer. A blank board is the subject, so the dialog asks for one thing:
-      the password the board will broadcast its network with, which is written into the flash
-      beside the published images. The button waits for a usable password and then stays
-      disabled for the run rather than offering a second start over the top of the first. It
-      opens only from the manager row, which is drawn only where Web Serial exists, so there
-      is no unsupported shape to draw here.
-    -->
-    <div class="modal-overlay" role="presentation" on:click={(event) => event.currentTarget === event.target && closeFlash()}>
-      <div class="launcher-modal flash-modal" role="dialog" aria-modal="true" aria-labelledby="flash-title">
-        <button class="modal-close" aria-label={copy.esp32.closeAria} disabled={flashBusy} on:click={closeFlash}>×</button>
-        <h2 id="flash-title">{copy.esp32.title}</h2>
-        <p>{copy.esp32.intro}</p>
-        <label class="flash-field">
-          <span>{copy.esp32.passwordLabel}</span>
-          <input bind:value={flashPassword} type="password" autocomplete="new-password" aria-describedby="flash-password-rule" disabled={flashBusy} />
-        </label>
-        <p class="flash-rule" id="flash-password-rule">{copy.esp32.passwordRule}</p>
-        {#if flashLine}
-          <p class="status-line" role="status">{flashLine}{#if flashBusy && flashPercent > 0}{' - '}{flashPercent}%{/if}</p>
-        {/if}
-        {#if flashProblem}<p class="status-line error" role="alert">{flashProblem}</p>{/if}
-        <div class="modal-actions">
-          <button class="modal-action" disabled={flashBusy || !flashPasswordOk} on:click={runFlash}>{copy.esp32.flash}</button>
-        </div>
-      </div>
-    </div>
-  {/if}
+  <FlashDialog bind:show={flashShow} bind:problem={flashProblem} on:close={() => (flashShow = false)} />
   {#if showBookmarks && showBookmarkModal}
     <div class="modal-overlay" role="presentation" on:click={(event) => event.currentTarget === event.target && closeBookmarkModal()}>
       <div class="launcher-modal bookmark-modal" role="dialog" aria-modal="true" aria-labelledby="bookmark-title">
@@ -7449,104 +7113,15 @@ import { backupFileName, collectInstanceBackup, mergeBookmarks, parseInstanceBac
     </div>
   {/if}
   {#if credentialOffer}
-    <!--
-      The one dialog that writes a login, and the only place a password can be typed
-      for an instance nothing is saved for: either the offer a challenging instance
-      makes while it is opened, or a bookmark row's key. Closed, it borrows the login
-      for this one load and stores nothing, which is what replaced the page's own prompt.
-      The answer is in the grant either way, so the webview never has to ask.
-    -->
-    <div class="modal-overlay" role="presentation" on:click={(event) => event.currentTarget === event.target && closeCredentialOffer()}>
-      <div class="launcher-modal vault-modal" role="dialog" aria-modal="true" aria-labelledby="credential-offer-title">
-        <button class="modal-close" aria-label={copy.dialogs.credential.closeAria} on:click={closeCredentialOffer}>×</button>
-        <h2 id="credential-offer-title">{copy.dialogs.credential.title}</h2>
-        <!--
-          One line, whichever way this dialog was reached. It used to have two: the
-          offer's said why the dialog had opened ("www.foobar.com asks for a password")
-          and the row's what the credential was tied to ("answered per exact address").
-          The first was the heading again with an address in it, and an address the user
-          just clicked is not news. The second read as a scope the user might weigh, when
-          it is only how the vault decides what to offer. What is left is the one fact
-          this dialog cannot do without: which instance the credential is for.
-        -->
-        <p class="vault-sub">{copy.dialogs.credential.forInstance(instanceLabel(credentialOffer.origin))}</p>
-        <div class="vault-pin credential-offer-pin">
-          <PinEntry
-            bind:value={offerPin}
-            bind:reveal={pinReveal}
-            revealToggle={!vaultCreateMode}
-            label={vaultCreateMode ? copy.common.choosePin : copy.common.pin}
-            disabled={offerBusy}
-            reset={offerPinReset}
-            complete={(pin) => void offerPinComplete(pin)}
-          />
-          <!--
-            The band word, at the end of the boxes' own label line: it is about the PIN
-            those boxes hold, and it is the whole of what this dialog says about it. That
-            end of that line is where the password field below puts its own Show toggle,
-            and the two are never drawn together, because this word exists only while a
-            PIN is being chosen, which is the mode that draws no toggle. The
-            arithmetic behind the word rides in the word's title, so the estimate is
-            still there to be read without a paragraph standing in the dialog. It
-            describes a complete candidate, so it goes when the boxes no longer hold one:
-            a band about a PIN that has been cleared is about nothing.
-          -->
-          {#if offerWarning && offerPin.length === 6}
-            <p class="vault-band {offerWarning.band}" role="status" title={offerWarning.text}>{offerWarning.label}</p>
-          {/if}
-        </div>
-        {#if vaultCreateMode}
-          <div class="vault-pin credential-offer-pin-confirm">
-            <PinEntry
-              bind:value={offerPinConfirm}
-              bind:reveal={pinReveal}
-              label={copy.common.repeatPin}
-              disabled={offerBusy}
-              reset={offerPinReset}
-              focusSignal={offerPinConfirmFocus}
-            />
-          </div>
-        {/if}
-        <label class="vault-field"><span>{copy.dialogs.credential.username}</span><input class="credential-offer-user" bind:value={offerUser} autocomplete="off" /></label>
-        <!-- One password box, not two: the instance is asked about what is typed here,
-             and it is the only thing that can tell a mistyped password from a correct
-             one. Two identical typos satisfy a repeat box. Its toggle sits in its label
-             row, at the right edge of it, which is the input's own width. The same place
-             the PIN's toggle lands on its boxes, because this is the field nothing
-             repeats back. It is a label of its own rather than one wrapped around the
-             field: a label cannot hold another label, and the row above the input is
-             where the toggle's place is. -->
-        <div class="vault-field">
-          <div class="pin-head">
-            <label class="pin-label" for="credential-offer-password">{copy.dialogs.credential.password}</label>
-            <label class="vault-reveal"><input type="checkbox" bind:checked={passwordReveal} /> {copy.common.show}</label>
-          </div>
-          <input id="credential-offer-password" class="credential-offer-password" type={passwordReveal ? 'text' : 'password'} bind:value={offerPassword} autocomplete="off" />
-        </div>
-        {#if offerCheckVerdict}
-          <!-- Said in the dialog rather than discovered after the handoff: this is
-               the last screen that can tell the user a password is wrong, because
-               the page it signs in to is one this app cannot speak on. -->
-          <p class="vault-check-line {offerCheckVerdict.state}" role="status" title={offerCheckVerdict.detail}>{offerCheckVerdict.detail}</p>
-        {/if}
-        {#if offerError}<p class="status-line error" role="alert">{offerError}</p>{/if}
-        <div class="modal-actions">
-          <button
-            class="modal-action credential-offer-save"
-            disabled={offerBusy || offerPin.length !== 6 || (vaultCreateMode && offerPin !== offerPinConfirm) || !offerUser || !offerPassword || offerCheckVerdict?.state === 'refused'}
-            on:click={saveOfferedCredential}
-          >{offerBusy ? copy.dialogs.credential.saving : copy.dialogs.credential.save}</button>
-          <!-- No PIN, because nothing is written: this is the whole of "not using the
-               credential manager", and it is why the page's own prompt no longer needs
-               to exist in the desktop app. -->
-          <button
-            class="modal-action secondary credential-offer-without-saving"
-            disabled={offerBusy || !offerUser || !offerPassword || offerCheckVerdict?.state === 'refused'}
-            on:click={openOfferedLoginWithoutSaving}
-          >{offerBusy ? '…' : copy.dialogs.credential.openWithoutSaving}</button>
-        </div>
-      </div>
-    </div>
+    {#key credentialOffer}
+      <CredentialOfferDialog
+        offer={credentialOffer}
+        {vaultCreateMode}
+        bind:pinReveal
+        on:close={() => (credentialOffer = null)}
+        on:saved={() => { void refreshVaultStatus(); void refreshVaultCoverage(); }}
+      />
+    {/key}
   {/if}
   {#if showVaultModal}
     <!-- Saved logins: the list, and the PIN that opens it. Three shapes rather than a
@@ -7716,7 +7291,11 @@ import { backupFileName, collectInstanceBackup, mergeBookmarks, parseInstanceBac
           its business rather than as part of the icon choice above.
         -->
         <div class="modal-actions management-actions">
-          <button class="modal-action secondary full-backup-button" disabled={backupBusy} on:click={() => downloadInstanceBackup('manage')} title={copy.dialogs.icon.backupTitle}>{@render fullBackupIcon()}{backupBusy ? '…' : copy.dialogs.icon.backup}</button>
+          {#if backupPill}
+          <span class="orphan-pill {backupPill.tone}" role="status" title={backupPill.title}>{backupPill.label}</span>
+          {:else}
+          <button class="modal-action secondary full-backup-button" disabled={backupBusy} on:click={downloadInstanceBackup} title={copy.dialogs.icon.backupTitle}>{@render fullBackupIcon()}{backupBusy ? '…' : copy.dialogs.icon.backup}</button>
+          {/if}
           <!--
             The appliance offer, drawn only where pressing it can reach a board: a Chromium
             tab has Web Serial, and the desktop app has a browser it can hand the page to.
@@ -7772,10 +7351,12 @@ import { backupFileName, collectInstanceBackup, mergeBookmarks, parseInstanceBac
               {#if !row.orphan.path}<span class="orphan-tag">{copy.dialogs.rebuild.cachedOnly}</span>{/if}
               {#if dirtyEntries[row.orphan.name]}<span class="orphan-tag dirty" title={copy.dialogs.rebuild.unsavedCaptured(new Date(dirtyEntries[row.orphan.name]).toLocaleString(LOCALE_TAG))}>{copy.dialogs.rebuild.unsavedTag}</span>{/if}
               {#if cachedEntries[row.orphan.name]}
+                {#if row.pill}<span class="orphan-pill {row.pill.tone}" role="status" title={row.pill.title}>{row.pill.label}</span>
+                {:else}
                 <button class="recent-icon-button" type="button" aria-label={copy.row.downloadAria(row.orphan.name)} title={copy.row.downloadTitle} on:click={() => downloadCachedSnapshot(row.orphan.name)}>
                   <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 4v11"></path><path d="m7.5 10.5 4.5 4.5 4.5-4.5"></path><path d="M5 19h14"></path></svg>
                 </button>
-                {#if row.pill}<span class="orphan-pill {row.pill.tone}" role="status" title={row.pill.title}>{row.pill.label}</span>{/if}
+                {/if}
               {/if}
               {#if historyAvailable[row.orphan.name]}
               <button class="recent-icon-button cache-history-button" type="button" aria-label={copy.row.historyAria(row.orphan.name)} title={copy.row.olderVersions} on:click={() => openHistoryModal(row.orphan.name)}>
@@ -7792,7 +7373,11 @@ import { backupFileName, collectInstanceBackup, mergeBookmarks, parseInstanceBac
           recents that were never in the list below; the note under it says so.
         -->
         <div class="instance-backup-full">
-          <button class="modal-action secondary full-backup-button" disabled={backupBusy} on:click={() => downloadInstanceBackup('rebuild')} title={copy.dialogs.rebuild.fullBackupTitle}>{@render fullBackupIcon()}{backupBusy ? '…' : copy.dialogs.rebuild.fullBackup}</button>
+          {#if backupPill}
+          <span class="orphan-pill {backupPill.tone}" role="status" title={backupPill.title}>{backupPill.label}</span>
+          {:else}
+          <button class="modal-action secondary full-backup-button" disabled={backupBusy} on:click={downloadInstanceBackup} title={copy.dialogs.rebuild.fullBackupTitle}>{@render fullBackupIcon()}{backupBusy ? '…' : copy.dialogs.rebuild.fullBackup}</button>
+          {/if}
         </div>
         <p class="git-sync-note">{copy.dialogs.rebuild.fullBackupNote}</p>
         {#if backupStatus}<p class="status-line" role="status">{backupStatus}</p>{/if}
@@ -7832,17 +7417,23 @@ import { backupFileName, collectInstanceBackup, mergeBookmarks, parseInstanceBac
               {#if !row.row.path}<span class="orphan-tag">{copy.dialogs.rebuild.cachedOnly}</span>{/if}
               {#if dirtyEntries[row.row.name]}<span class="orphan-tag dirty" title={copy.dialogs.rebuild.unsavedCaptured(new Date(dirtyEntries[row.row.name]).toLocaleString(LOCALE_TAG))}>{copy.dialogs.rebuild.unsavedTag}</span>{/if}
               {#if cachedEntries[row.row.name]}
+                {#if row.pill}<span class="orphan-pill {row.pill.tone}" role="status" title={row.pill.title}>{row.pill.label}</span>
+                {:else}
                 <button class="recent-icon-button" type="button" aria-label={copy.row.downloadAria(row.row.name)} title={copy.row.downloadTitle} on:click={() => downloadCachedSnapshot(row.row.name)}>
                   <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 4v11"></path><path d="m7.5 10.5 4.5 4.5 4.5-4.5"></path><path d="M5 19h14"></path></svg>
                 </button>
-                {#if row.pill}<span class="orphan-pill {row.pill.tone}" role="status" title={row.pill.title}>{row.pill.label}</span>{/if}
+                {/if}
               {/if}
             </li>
           {/each}
         </ul>
         {#if resetRiskNote}<p class="orphan-progress" role="status">{resetRiskNote}</p>{/if}
         <div class="instance-backup-full">
-          <button class="modal-action secondary full-backup-button" disabled={backupBusy} on:click={() => downloadInstanceBackup('reset')} title={copy.dialogs.rebuild.fullBackupTitle}>{@render fullBackupIcon()}{backupBusy ? '…' : copy.dialogs.rebuild.fullBackup}</button>
+          {#if backupPill}
+          <span class="orphan-pill {backupPill.tone}" role="status" title={backupPill.title}>{backupPill.label}</span>
+          {:else}
+          <button class="modal-action secondary full-backup-button" disabled={backupBusy} on:click={downloadInstanceBackup} title={copy.dialogs.rebuild.fullBackupTitle}>{@render fullBackupIcon()}{backupBusy ? '…' : copy.dialogs.rebuild.fullBackup}</button>
+          {/if}
         </div>
         <p class="git-sync-note">{copy.dialogs.rebuild.fullBackupNote}</p>
         {#if backupStatus}<p class="status-line" role="status">{backupStatus}</p>{/if}
@@ -7876,16 +7467,21 @@ import { backupFileName, collectInstanceBackup, mergeBookmarks, parseInstanceBac
           {#each backupRows as row (row.name)}
             <li class="orphan-row">
               <span class="orphan-name" title={row.name}>{row.name}</span>
+              {#if row.pill}<span class="orphan-pill {row.pill.tone}" role="status" title={row.pill.title}>{row.pill.label}</span>
+              {:else}
               <button class="recent-icon-button" type="button" aria-label={copy.row.downloadAria(row.name)} title={copy.row.downloadTitle} on:click={() => downloadCachedSnapshot(row.name, row.text)}>
                 <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 4v11"></path><path d="m7.5 10.5 4.5 4.5 4.5-4.5"></path><path d="M5 19h14"></path></svg>
               </button>
-              {#if row.pill}<span class="orphan-pill {row.pill.tone}" role="status" title={row.pill.title}>{row.pill.label}</span>{/if}
+              {/if}
             </li>
           {/each}
         </ul>
         <div class="instance-backup-full">
-          <button class="modal-action secondary full-backup-button" disabled={backupBusy} on:click={() => downloadInstanceBackup('gate')} title={copy.dialogs.instanceBackup.fullBackupTitle}>{@render fullBackupIcon()}{backupBusy ? '…' : copy.dialogs.instanceBackup.fullBackup}</button>
-          {#if fullBackupTaken}<span class="instance-backup-mark" role="status">{copy.dialogs.instanceBackup.fullBackupTaken}</span>{/if}
+          {#if backupPill}
+          <span class="orphan-pill {backupPill.tone}" role="status" title={backupPill.title}>{backupPill.label}</span>
+          {:else}
+          <button class="modal-action secondary full-backup-button" disabled={backupBusy} on:click={downloadInstanceBackup} title={copy.dialogs.instanceBackup.fullBackupTitle}>{@render fullBackupIcon()}{backupBusy ? '…' : copy.dialogs.instanceBackup.fullBackup}</button>
+          {/if}
         </div>
         {#if backupStatus}<p class="status-line" role="status">{backupStatus}</p>{/if}
         {#if backupResettable}
@@ -7998,18 +7594,23 @@ import { backupFileName, collectInstanceBackup, mergeBookmarks, parseInstanceBac
                       <span class="history-inline-note">{copy.dialogs.history.inlineNote}</span>
                       <svg class="history-capture-chevron" viewBox="0 0 14 8" aria-hidden="true"><path d="M1.5 1.5 7 6.5l5.5-5"></path></svg>
                     </button>
+                    {#if entry.pill}<span class="orphan-pill {entry.pill.tone}" role="status" title={entry.pill.title}>{entry.pill.label}</span>
+                    {:else}
                     <button class="recent-icon-button history-download-button" type="button" aria-label={copy.dialogs.history.downloadCaptureAria(entry.lastModified)} title={copy.dialogs.history.downloadCaptureTitle} disabled={historyCaptureSaving} on:click={saveHistoryCapture}>
                       <svg class="history-download-icon" viewBox="56 108 33 36" aria-hidden="true"><path class="history-icon-shape" d="m 73.595508,109.76746 c -7.198235,0 -13.103617,5.58342 -13.647229,12.64471 h -0.0072 V 138.2696 H 58.61606 l 2.32389,4.02559 2.324405,-4.02559 h -1.323433 v -15.85123 c 0.530186,-5.97937 5.534806,-10.65103 11.654586,-10.65103 6.474618,0 11.703161,5.22855 11.703161,11.70316 0,6.47462 -5.228543,11.70161 -11.703161,11.70161 -2.644513,0 -5.080809,-0.87232 -7.037814,-2.34508 v 2.39572 c 2.058162,1.23707 4.46633,1.94924 7.037814,1.94924 7.555498,0 13.703556,-6.14599 13.703556,-13.70149 0,-7.5555 -6.148058,-13.70304 -13.703556,-13.70304 z m -2.108915,7.49825 v 8.05016 h 7.125663 v -1.59836 h -5.527311 v -6.4518 z"></path></svg>
                     </button>
+                    {/if}
                   </div>
                   {#if historyCaptureOpen}
                     <div class="history-capture-body" id="history-capture-body">
                       {#if historyDirty && historyDirty.tiddlers.length > 0}
-                        <!-- The same list the recovery prompt draws, so the edits on offer are the
-                           edits either window would recover: a title apiece, capped, and a count
-                           for the rest rather than a scrollbar nobody reads. No sentence above
-                           it: the row's own stamp is the moment, `Not saved yet` is the state,
-                           and a line repeating either would be the third account of one fact. -->
+                        <!-- The edits on offer here are the edits the recovery prompt would
+                           recover, and this rung draws them as titles alone: a title apiece,
+                           capped, and a count for the rest. The prompt is where a body can be
+                           opened and read, because that is the window whose whole question is
+                           whether the edits are worth keeping. No sentence above it: the
+                           row's own stamp is the moment, `Not saved yet` is the state, and a
+                           line repeating either would be the third account of one fact. -->
                         <ul class="dirty-tiddler-list">
                           {#each historyDirty.tiddlers.slice(0, 8) as tiddler (tiddler.title)}
                             <li>{tiddler.title}</li>
@@ -8030,20 +7631,24 @@ import { backupFileName, collectInstanceBackup, mergeBookmarks, parseInstanceBac
                   {#if entry.isBase && entry.external}<span class="history-badge sync" title={copy.dialogs.history.badgeSyncTitle}>{copy.dialogs.history.badgeSync}</span>{:else if entry.isBase}<span class="history-badge" title={copy.dialogs.history.badgeFullTitle}>{copy.dialogs.history.badgeFull}</span>{:else}<span class="history-badge delta" title={copy.dialogs.history.badgeStepTitle}>{copy.dialogs.history.badgeStep}</span>{/if}
                   <span class="history-time">{entry.lastModified}</span>
                   <span class="history-size">{formatCacheSize(entry.sizeBytes)}</span>
+                  {#if entry.pill}<span class="orphan-pill {entry.pill.tone}" role="status" title={entry.pill.title}>{entry.pill.label}</span>
+                  {:else}
                   <button class="recent-icon-button history-download-button" type="button" aria-label={copy.dialogs.history.downloadAria(entry.lastModified)} title={copy.row.downloadTitle} on:click={() => downloadHistoryVersion(entry.id)}>
                     <svg class="history-download-icon" viewBox="56 108 33 36" aria-hidden="true"><path class="history-icon-shape" d="m 73.595508,109.76746 c -7.198235,0 -13.103617,5.58342 -13.647229,12.64471 h -0.0072 V 138.2696 H 58.61606 l 2.32389,4.02559 2.324405,-4.02559 h -1.323433 v -15.85123 c 0.530186,-5.97937 5.534806,-10.65103 11.654586,-10.65103 6.474618,0 11.703161,5.22855 11.703161,11.70316 0,6.47462 -5.228543,11.70161 -11.703161,11.70161 -2.644513,0 -5.080809,-0.87232 -7.037814,-2.34508 v 2.39572 c 2.058162,1.23707 4.46633,1.94924 7.037814,1.94924 7.555498,0 13.703556,-6.14599 13.703556,-13.70149 0,-7.5555 -6.148058,-13.70304 -13.703556,-13.70304 z m -2.108915,7.49825 v 8.05016 h 7.125663 v -1.59836 h -5.527311 v -6.4518 z"></path></svg>
                   </button>
+                  {/if}
                 {/if}
               </li>
             {/each}
           </ul>
           {#if historyError}<p class="status-line error" role="alert">{historyError}</p>{/if}
           <!--
-            What the last merge or download said, at the dialog's own level rather than inside
-            the disclosure: a merge that worked retires the very row the notice would have been
+            What the last merge said, at the dialog's own level rather than inside the
+            disclosure: a merge that worked retires the very row the notice would have been
             drawn in, and a sentence hidden by the thing it describes is no confirmation at all.
+            A download needs no sentence here: it leaves a mark on its own row.
           -->
-          {#if historyCaptureNotice}<p class="history-capture-notice" role="status">{historyCaptureNotice}</p>{/if}
+          {#if historyNotice}<p class="history-capture-notice" role="status">{historyNotice}</p>{/if}
           <!--
             Only when something here can be downloaded. The line tells a reader what to do
             with a version they take; beside a trail whose only row is the unsaved capture
@@ -8055,32 +7660,7 @@ import { backupFileName, collectInstanceBackup, mergeBookmarks, parseInstanceBac
     </div>
   {/if}
   {#if showDirtyModal && dirtyInfo}
-    <div class="modal-overlay" role="presentation">
-      <div class="launcher-modal dirty-modal" role="dialog" aria-modal="true" aria-labelledby="dirty-title">
-        <h2 id="dirty-title">{copy.dialogs.dirty.title}</h2>
-        <p>
-          {copy.dialogs.dirty.body(dirtyInfo.name, dirtyInfo.tiddlers.length, new Date(dirtyInfo.ts).toLocaleString(LOCALE_TAG))}
-        </p>
-        <ul class="dirty-tiddler-list">
-          {#each dirtyInfo.tiddlers.slice(0, 8) as tiddler (tiddler.title)}
-            <li>{tiddler.title}</li>
-          {/each}
-          {#if dirtyInfo.tiddlers.length > 8}<li class="dirty-more">{copy.dialogs.dirty.more(dirtyInfo.tiddlers.length - 8)}</li>{/if}
-        </ul>
-        <div class="modal-actions">
-          <button class="modal-action" on:click={() => resolveDirtyModal('merge')}>{copy.dialogs.dirty.recover}</button>
-          <button class="modal-action secondary" on:click={() => resolveDirtyModal('later')}>{copy.dialogs.dirty.later}</button>
-          <!--
-            The one answer here that cannot be taken back, so the one that wears the red: merging
-            folds the edits into the mount and deciding later leaves the question open, where
-            discarding clears the copy of them that exists nowhere else (see
-            `prepareDirtyRecovery`). The dialog is the three-way prompt with no × and no Cancel,
-            so the cost has to be on the button rather than on a second window behind it.
-          -->
-          <button class="modal-action danger" on:click={() => resolveDirtyModal('discard')}>{copy.dialogs.dirty.discard}</button>
-        </div>
-      </div>
-    </div>
+    <DirtyRecoveryDialog info={dirtyInfo} on:resolve={(event) => resolveDirtyModal(event.detail)} />
   {/if}
   {#if confirmation}
     <div class="modal-overlay" role="presentation">

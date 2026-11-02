@@ -19,6 +19,7 @@ title: $:/plugins/kebi/tiddlystudy-references/filters
   </$reveal>
 \end
 
+<div class={{{ lithic-pill-bar [{$:/config/lithic/sticky-pill-bar}else[yes]match[no]then[]else[lithic-pill-bar-sticky]] +[join[ ]] }}}>
 <$let
   backlink-cloud-state={{{ [[$:/state/lithic/backlink-cloud-visibility/]addsuffix<currentTiddler>] }}}
   backlink-cloud-default={{{ [{$:/config/lithic/backlink-cloud-default}else[show]] }}}
@@ -106,3 +107,4 @@ Next &gt;&gt;
 </$let>
 </$let>
 </$wikify>
+</div>

@@ -320,3 +320,16 @@ export function serverDocumentName(name: string, format: DocumentFormat = DOCUME
 function stemOf(name: string): string {
   return name.replace(/\.[^.]+$/, '');
 }
+
+/**
+ * Shorten a wiki file name for the version-history title while keeping its
+ * extension visible (a 30+ char stem reads as `Long…name.lith` rather than
+ * losing the `.lith`). The full name stays available via the title tooltip.
+ */
+export function clipFilename(name: string, limit = 20): string {
+  if (name.length <= limit) return name;
+  const ext = name.match(/\.(?:html?|lith|json)$/i)?.[0] ?? '';
+  const stemLimit = limit - ext.length;
+  if (stemLimit <= 3) return name.slice(0, limit - 1) + '…';
+  return name.slice(0, stemLimit - 1) + '…' + ext;
+}

@@ -18,6 +18,7 @@ type: text/vnd.tiddlywiki
   <div class="lithic-settings-heading">Lithic Settings</div>
   <<lithicSettingsToggle target:"$:/config/AutoSave" label:"Autosave" default:"no" reload:"yes" hint:"(takes effect after reload)">>
   <<lithicSettingsToggle target:"$:/themes/nico/notebook/options/stickytitles" label:"Sticky titles" default:"yes">>
+  <<lithicSettingsToggle target:"$:/config/lithic/sticky-pill-bar" label:"Sticky backlink bar" default:"yes" hint:"(mobile only)">>
   <$reveal type="match" state="$:/state/lithic/ephemeral-runner/mode" text="self-host">
     <<lithicSettingsToggle target:"$:/config/lithic/ephemeral-runner/enabled" label:"Use Private Ephemeral Runner" default:"yes" hint:"(takes effect immediately)">>
   </$reveal>

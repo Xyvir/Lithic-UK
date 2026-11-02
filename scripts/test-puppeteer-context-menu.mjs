@@ -74,6 +74,11 @@ const MEASURE = async () => {
   }
   const menu = menuOf();
   if (!menu) return { status: 'no-menu' };
+  // The menu pops in (a 0.15s scale animation added so this menu moves like every other
+  // drop-down in the wiki), and a transform moves the rect it reports, so the geometry
+  // below is read once that settle has finished rather than sampled mid-pop. Every
+  // assertion is unchanged: it still measures the menu's own box, just the settled one.
+  await Promise.all(menu.getAnimations().map((animation) => animation.finished.catch(() => {})));
   const rect = menu.getBoundingClientRect();
   return {
     status: 'ok',

@@ -110,8 +110,19 @@ fn lith_modified_times(paths: Vec<String>) -> std::collections::HashMap<String, 
 /// the launcher). Nothing writes back to the source: a PDF or an image is read once to make a
 /// new Lith, and the file it came from is not a document this app edits.
 #[tauri::command]
-fn read_file_base64(path: String) -> Result<String, String> {
-    platform::read_document_base64(&path)
+fn read_file_base64(app: tauri::AppHandle, path: String) -> Result<String, String> {
+    platform::read_document_base64(&app, &path)
+}
+
+/// The name a document goes by, for a row that has to show one.
+///
+/// The launcher's pending panel is what asks: a file another app handed over is a row named after
+/// itself before it is opened, and on a phone the granted `content://` reference that names it has
+/// no readable last component, so the display name comes from the provider through the platform's
+/// own resolver (`platform::document_name`).
+#[tauri::command]
+fn document_name(app: tauri::AppHandle, path: String) -> String {
+    platform::document_name(&app, &path)
 }
 
 /// Where a file the app renders or draws on is written, and whether that file is already there.
@@ -266,6 +277,31 @@ async fn save_lith_file(
         }
     };
     platform::write_document(&app, &document, &text)?;
+    Ok(SavedLithFile {
+        name: platform::document_name(&app, &document),
+        path: document,
+    })
+}
+
+/// Write a copy where the platform puts a download, with no dialog in the way.
+///
+/// The launcher's export buttons used to open `save_lith_file`'s dialog, which turned a copy
+/// somebody asked to keep into a question about where to put it. A download is not that
+/// question: the same page in a browser writes to its Downloads folder and asks nothing, and this
+/// is what makes the app behave that way. The file is created beside whatever is already there
+/// under a numbered name rather than over it (`platform::download_document`).
+///
+/// An error is one of two things, and the launcher tells them apart by retrying the dialog: a
+/// platform with no Downloads folder this app may write to (a phone's storage is app-private),
+/// or a folder that refused the write. The dialog is a fine answer to both.
+#[tauri::command]
+async fn save_lith_download(
+    app: tauri::AppHandle,
+    text: String,
+    suggested_name: String,
+) -> Result<SavedLithFile, String> {
+    let target = platform::download_document(&suggested_name, &text)?;
+    let document = target.to_string_lossy().into_owned();
     Ok(SavedLithFile {
         name: platform::document_name(&app, &document),
         path: document,
@@ -437,6 +473,19 @@ fn take_deep_link(app: tauri::AppHandle) -> Option<String> {
 #[tauri::command]
 fn take_shared_text(app: tauri::AppHandle) -> Option<platform::SharedText> {
     platform::take_shared_text(&app)
+}
+
+/// A file another app asked this one to open, if one did, and only once.
+///
+/// The phone's answer to "Open with": a file manager hands the app an intent carrying a
+/// `content://` reference, the activity keeps it, and `platform::take_open_document` reads it
+/// here. The page asks at boot and again whenever it is shown, because opening a file for a
+/// running app brings it forward rather than starting it, and the answer is consumed so a reload
+/// does not open the same document twice. Every desktop answers `None`: there the OS starts the
+/// app with the file as its argument, which `get_startup_file` already answers.
+#[tauri::command]
+fn take_open_document(app: tauri::AppHandle) -> Option<String> {
+    platform::take_open_document(&app)
 }
 
 /// This window, as the other Lithic windows on this machine see it.
@@ -3585,11 +3634,13 @@ pub fn run() {
             read_lith_path,
             lith_modified_times,
             read_file_base64,
+            document_name,
             import_lith_target,
             pdf_lith_target,
             open_lith_file,
             open_lith_files,
             save_lith_file,
+            save_lith_download,
             write_text_path,
             copy_lith_to_synced_dir,
             launcher_stage,
@@ -3601,6 +3652,7 @@ pub fn run() {
             platform_capabilities,
             take_deep_link,
             take_shared_text,
+            take_open_document,
             flash_in_browser,
             install_offer_status,
             set_install_dismissed,

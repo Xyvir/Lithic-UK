@@ -1,2 +1,2 @@
 title: $:/config/flibbles/uglify/blacklist
-text: [[$:/plugins/lithic/lithic-import-handler/pdf-drop-handler.js]] [[$:/plugins/lithic/lithic-import-handler/pdf-open-request.js]] [[$:/plugins/lithic/lithic-import-handler/pdf.js]] [[$:/plugins/lithic/lithic-import-handler/pdf.worker.js]]
+text: [[$:/plugins/lithic/lithic-import-handler/pdf-drop-handler.js]] [[$:/plugins/lithic/lithic-import-handler/pdf-open-request.js]] [[$:/plugins/lithic/lithic-import-handler/pdf.js]] [[$:/plugins/lithic/lithic-import-handler/pdf.worker.js]] [[$:/plugins/lithic/lithic-import-handler/epub.js]]

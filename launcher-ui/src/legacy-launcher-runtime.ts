@@ -1450,8 +1450,8 @@ export function buildEngineHtml(
     (tiddler) => typeof tiddler.title === 'string' && tiddler.title.trim() !== ''
   );
   // The engine's journal stub creates the today entry at boot, so blank
-  // liths no longer need a pre-hydrated journal tiddler here. Saver and
-  // plugin-library defaults are still injected before the store.
+  // liths no longer need a pre-hydrated journal tiddler here. The saver
+  // default is still injected before the store.
   if (options.remote && !options.remote.readOnly) {
     // Enables the engine-side lock release (tm-lithic-stop-lock); excluded from
     // saves by LITHIC_BASE_FILTER so it never lands in the wiki.
@@ -1463,7 +1463,10 @@ export function buildEngineHtml(
     });
   }
   tiddlers.push({ title: '$:/state/DisableAutoSaver', text: 'yes' });
-  tiddlers.push({ title: '$:/config/OfficialPluginLibrary', text: 'yes' });
+  // `$:/config/OfficialPluginLibrary` used to be injected here with a text of
+  // "yes", which replaced core's registration and left the official plugin
+  // library with no tab. The engine's own copy is left alone now, so the tab
+  // is there and its order is decided in the wiki, by $:/tags/PluginLibrary.
 
   // TiddlyWiki's boot script is usually present in lithic.html. Keep this
   // guard so a future engine build without an initial store still boots.

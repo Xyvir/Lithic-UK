@@ -9,19 +9,40 @@ type: text/vnd.tiddlywiki
   display: none;
 }
 
-/* Container: position relative for absolute button placement */
+/* Container: one row, so the toggle keeps a lane of its own instead of
+   floating over the pills. The lane is pulled out by the width the streams
+   add-node control sits at (4px column padding + 16px arrow), which is the
+   button this toggle lines up under. Pulling it out here rather than
+   overhanging the button keeps the row inside the tiddler frame. */
 .backlink-cloud-wrapper {
-  position: relative;
-  padding-left: 4px;
+  display: flex;
+  align-items: flex-start;
+  gap: 2px;
+  margin-left: -20px;
+  padding-left: 20px;
 }
 
-/* The collapse toggle button — positioned in the left margin */
+/* Streams only outdents its control column by 1em below 600px, so the gap
+   the lane fills is already closed there. */
+@media (max-width: 600px) {
+  .backlink-cloud-wrapper {
+    margin-left: 0;
+    padding-left: 0;
+  }
+}
+
+/* Pills take the rest of the row and wrap inside it, never under the toggle */
+.backlink-cloud-wrapper > .footer {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+/* The collapse toggle: a fixed 20px lane at the start of the row */
 .backlink-cloud-collapser {
-  position: absolute;
-  left: -31px;
-  top: 2px;
+  flex: 0 0 20px;
   width: 20px;
   height: 20px;
+  margin-top: 2px;
   padding: 0;
   border: none;
   background: none;
@@ -31,7 +52,6 @@ type: text/vnd.tiddlywiki
   display: flex;
   align-items: center;
   justify-content: center;
-  z-index: 1;
 }
 
 .backlink-cloud-collapser svg {
@@ -44,17 +64,14 @@ type: text/vnd.tiddlywiki
   transform: rotate(0deg);
 }
 
-/* Show button on hover near the backlink cloud area */
-.backlink-cloud-wrapper:hover .backlink-cloud-collapser {
-  opacity: 1;
-}
-
-/* Always show when cloud IS collapsed (to indicate hidden content) */
+/* Always legible when the cloud IS collapsed (to indicate hidden content) */
 .backlink-cloud-collapsed .backlink-cloud-collapser {
   opacity: 0.7;
 }
 
-.backlink-cloud-collapsed:hover .backlink-cloud-collapser {
+/* Brighten on hover of the toggle or the row it sits in */
+.backlink-cloud-wrapper:hover .backlink-cloud-collapser,
+.backlink-cloud-collapser:hover {
   opacity: 1;
 }
 

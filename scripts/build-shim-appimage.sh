@@ -102,6 +102,7 @@ optional=(
   intro.html
   intro.lith
   404.html
+  readme.html
   src/app-icon.png
   src/mstile-150x150.png
 )

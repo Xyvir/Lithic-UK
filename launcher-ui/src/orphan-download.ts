@@ -65,9 +65,9 @@ export function orphanDownloadNote(states: readonly OrphanDownloadState[]): stri
  * on disk.
  *
  * `saved` is proof and `unverified` is a claim the browser cannot check, and a gate counts both.
- * Waiting for proof would make Reset unreachable on the one platform the gate exists for: Safari
- * and Firefox have no `showSaveFilePicker`, so every download there reports `unverified` and the
- * green check would never arrive.
+ * Waiting for proof would make Reset unreachable on every browser the gate exists for: no browser
+ * reports whether a download finished, so every download reports `unverified` there and the green
+ * check would never arrive. Only the app's own write answers `saved`.
  */
 export function downloadAttained(state: OrphanDownloadState | undefined): boolean {
   return state === 'saved' || state === 'unverified';

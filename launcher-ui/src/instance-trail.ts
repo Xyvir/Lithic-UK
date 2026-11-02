@@ -66,6 +66,14 @@ export interface TrailRow extends TrailCommit {
 export type TrailPill = 'auto' | 'revert' | 'other';
 
 /**
+ * What the panel is doing, as one value rather than two flags.
+ *
+ * `no-repo` is the shape that draws nothing at all, which is a fact about the instance rather than
+ * a failure, so it is told apart from `failed` where the reason is worth a line.
+ */
+export type TrailView = 'idle' | 'loading' | 'ready' | 'no-repo' | 'failed';
+
+/**
  * The messages Lithic's own writers make, each with the writer that makes it.
  *
  * They are matched as prefixes because that is how they are written: the ones that carry a
@@ -187,3 +195,15 @@ export function trailGapLabel(
 ): string {
   return later[gap.unit](gapCount(gap, localeTag));
 }
+
+/**
+ * One shape for the three backends' answers, so the state machine below is written once.
+ *
+ * The server's own read answers this already (`ServerTrail`); the two local backends are
+ * folded into it here. `no-repo` means a repository to have a trail in, and the dialog draws
+ * nothing at all for it. `[]` is a repository with no commits yet, which it says out loud.
+ */
+export type TrailAnswer =
+  | { state: 'trail'; commits: TrailCommit[] }
+  | { state: 'no-repo' }
+  | { state: 'failed'; message: string };

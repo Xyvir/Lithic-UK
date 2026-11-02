@@ -21,11 +21,18 @@
  * them, and the listener is handed the new values each time; a one-shot measurement would be
  * right until the first rotation.
  *
- * The two intents this activity can be started for are a `lithic://` hand-off from a board's
- * sign-in window and a share from another app, and neither is acted on here. Each is kept for the
- * page's own question, because the webview may not exist yet when the intent arrives and the page
- * is the only thing that knows what a share becomes (`LithicBridge.takeDeepLink` and
- * `takeSharedText` read them, once each).
+ * The three intents this activity can be started for are a `lithic://` hand-off from a board's
+ * sign-in window, a share from another app, and a document another app was asked to open, and
+ * none of them is acted on here. Each is kept for the page's own question, because the webview
+ * may not exist yet when the intent arrives and the page is the only thing that knows what a
+ * share becomes or where a document goes (`LithicBridge.takeDeepLink`, `takeSharedText` and
+ * `takeOpenDocument` read them, once each).
+ *
+ * The third one is what a file manager's "Open with Lithic" sends: `ACTION_VIEW` carrying a
+ * `content://` reference, which is the shape this app's own picker answers with too, so the page
+ * opens it by the route it already has for a picked document. What the manifest claims is an
+ * intent filter and lives in `scripts/patch-android.mjs`, generated from the same table the
+ * desktop registrations read (`src-tauri/src/platform/associations.json`).
  *
  * `displayCutout` is asked for beside `systemBars` because a camera cutout is not a bar: on a
  * phone whose notch is taller than the status bar, the bars alone leave the top of the page
@@ -51,6 +58,7 @@ class MainActivity : TauriActivity() {
     // kept here for the same reason: a share is the other thing this activity can be started for.
     rememberHandoff(intent)
     rememberShare(intent)
+    rememberDocument(intent)
     enableEdgeToEdge()
     super.onCreate(savedInstanceState)
 
@@ -77,6 +85,7 @@ class MainActivity : TauriActivity() {
     setIntent(intent)
     rememberHandoff(intent)
     rememberShare(intent)
+    rememberDocument(intent)
   }
 
   /** Keep a `lithic://` address for the page, and ignore every other intent this app receives. */
@@ -115,6 +124,41 @@ class MainActivity : TauriActivity() {
     pendingShare = Share(text, offered)
   }
 
+  /**
+   * Keep the document another app asked this one to open, for the page's own question.
+   *
+   * `ACTION_VIEW` with a `content://` (or, from an older file manager, a `file://`) reference is
+   * what a file manager's "Open with" sends. It is kept rather than opened for the reason the
+   * other two are: the webview may not exist yet, and a document is the launcher's to mount.
+   *
+   * A `lithic://` address also arrives as `ACTION_VIEW`, and is deliberately not this: the
+   * scheme is a board hand-off, which `rememberHandoff` above keeps and the page reads
+   * separately. Restricting this to the two document schemes is what keeps the two apart without
+   * either of them having to know about the other.
+   *
+   * The sender's grant is usually readable and writable for this activity's task only, so the
+   * app asks the platform to keep it. A provider that refuses a persistent grant still hands
+   * over a usable reference for this session, which is why the attempt is best effort and the
+   * same one the picker makes (`LithicBridge.keep`). Without the attempt, a document opened this
+   * way could be read and then never saved, which is the shape the picker exists to avoid.
+   */
+  private fun rememberDocument(intent: Intent?) {
+    if (intent == null || intent.action != Intent.ACTION_VIEW) return
+    val reference = intent.data ?: return
+    val scheme = reference.scheme ?: return
+    if (scheme != "content" && scheme != "file") return
+    pendingDocument = reference.toString()
+    val granted = intent.flags and
+      (Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION)
+    if (granted == 0 || scheme != "content") return
+    try {
+      contentResolver.takePersistableUriPermission(reference, granted)
+    } catch (ex: SecurityException) {
+      // The sender offered no persistent grant. The document still opens, and a save will ask
+      // for somewhere to put it.
+    }
+  }
+
   /** What another app shared: the content, and the title it offered when it offered one. */
   data class Share(val text: String, val title: String)
 
@@ -139,5 +183,15 @@ class MainActivity : TauriActivity() {
      */
     @Volatile
     var pendingShare: Share? = null
+
+    /**
+     * The document this app was asked to open, waiting for the page's own question.
+     *
+     * The same arrangement and the same reason as the two above: the intent arrives before any
+     * plugin exists, and `LithicBridge.takeOpenDocument` reads it once, so a reload of the
+     * launcher is not handed the same document a second time.
+     */
+    @Volatile
+    var pendingDocument: String? = null
   }
 }

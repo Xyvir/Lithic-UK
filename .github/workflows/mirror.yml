@@ -1,0 +1,225 @@
+name: Mirror off GitHub
+
+# WHAT THIS IS FOR. GitHub is where the work happens and where every release ships from, which
+# makes it the one host whose loss has no copy behind it. This pushes the same branches and tags to
+# two independent forges on a daily clock, so a clone is always available somewhere that is not
+# GitHub.
+#
+# WHAT IT IS NOT. A mirror follows the source: a force-push, a rewritten history and a deleted tag
+# all propagate within one run. So this protects against GitHub disappearing, and not against a
+# mistake of ours. The dated `git bundle` snapshots in object storage are the other half, because
+# they are append-only and nothing rewrites them.
+#
+# WHY GITHUB PUSHES RATHER THAN THE FORGES PULLING. GitLab's pull mirroring is Premium and Ultimate
+# only, which is why `Mirror direction` is locked to Push on a free project, and Codeberg disabled
+# member-created pull mirrors for the reason this job exists at all. A pull mirror is also the wrong
+# tool for deletions: GitLab documents that a branch or tag deleted upstream is not reflected
+# downstream, and that a diverged branch stops the mirror updating. This job deletes them, because
+# `--mirror` makes the destination match the source rather than accumulate everything that ever
+# existed.
+#
+# WHY NO PUSH TRIGGER. `build-wiki.yml` already reacts to a push by staging a release review, and a
+# second job racing to write to a third host buys nothing: a mirror a day behind is still a mirror,
+# and a daily run is the schedule that cannot collide with a release.
+#
+# THE TWO CREDENTIALS, AND WHY THEY DIFFER. GitLab is pushed over SSH with a deploy key that has
+# write access: keys do not expire, where a GitLab.com personal access token is capped at 365 days
+# (400 only when an administrator flips a feature flag), and a backup credential that quietly dies
+# once a year is worse than one you never touch again. That key is scoped to this one project rather
+# than to the whole account. Codeberg is pushed over HTTPS with a Forgejo access token, because
+# Codeberg has no deploy-key equivalent and its tokens can be generated without an expiry date.
+#
+# Both steps are skipped, with a notice rather than a failure, while their secret is absent, so
+# adding the job before the credentials exist cannot turn `main` red.
+on:
+  schedule:
+    - cron: '40 4 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# One run at a time and no cancellation: two mirror pushes overlapping would have the second one
+# force-updating refs the first had just written, for no gain.
+concurrency:
+  group: mirror-off-github
+  cancel-in-progress: false
+
+jobs:
+  mirror:
+    runs-on: ubuntu-latest
+    env:
+      GITLAB_REMOTE: git@gitlab.com:tymills620/lithic-uk.git
+      CODEBERG_REMOTE: https://codeberg.org/Xyvir/Lithic-uk.git
+      # The token's owner, which Forgejo wants as the HTTP username. Not a secret: it is the account
+      # name on the public URL above.
+      CODEBERG_USER: Xyvir
+    steps:
+      - name: Check out every branch and tag
+        uses: actions/checkout@v4
+        with:
+          # Every branch and every tag, because the mirror is the whole repository and not this
+          # commit. 87 MB and 530 tags is nothing to a runner.
+          fetch-depth: 0
+          # The job pushes to two hosts with two other credentials and never to GitHub, so the
+          # token checkout leaves behind is neither needed nor wanted.
+          persist-credentials: false
+
+      # The destination is fed from a scratch bare repository rather than from the workspace, and
+      # the difference matters twice. `--mirror` pushes every ref the local repository holds, so a
+      # scratch one holding exactly branches and tags cannot accidentally carry `refs/pull/*` or a
+      # stash to a forge. And a checkout has one local branch, where this has all of them.
+      - name: Collect branches and tags
+        run: |
+          set -euo pipefail
+          git init --bare --quiet "$RUNNER_TEMP/out.git"
+          git --git-dir="$RUNNER_TEMP/out.git" remote add github "$GITHUB_WORKSPACE"
+          # `refs/remotes/origin/*` rather than `refs/*`: the checkout carries `origin/HEAD` as a
+          # symbolic ref, which this refspec would land on the destination as a branch called HEAD.
+          git --git-dir="$RUNNER_TEMP/out.git" fetch --quiet --prune github \
+            '+refs/remotes/origin/*:refs/heads/*' \
+            '+refs/tags/*:refs/tags/*'
+          git --git-dir="$RUNNER_TEMP/out.git" update-ref -d refs/heads/HEAD 2>/dev/null || true
+          echo "collected $(git --git-dir="$RUNNER_TEMP/out.git" for-each-ref refs/heads | wc -l) branch(es) and $(git --git-dir="$RUNNER_TEMP/out.git" for-each-ref refs/tags | wc -l) tag(s)"
+
+      - name: Mirror to GitLab over SSH
+        env:
+          GITLAB_MIRROR_KEY: ${{ secrets.GITLAB_MIRROR_KEY }}
+        run: |
+          set -euo pipefail
+          if [ -z "${GITLAB_MIRROR_KEY:-}" ]; then
+            echo "::notice::no GITLAB_MIRROR_KEY secret, so GitLab was not mirrored by this run"
+            exit 0
+          fi
+          # 600 because OpenSSH refuses a private key other accounts can read, and the trailing
+          # newline is added here rather than trusted to survive a secret: a secret stored without
+          # one is still a valid secret and stops being a valid key.
+          install -m 600 /dev/null "$RUNNER_TEMP/gitlab_key"
+          printf '%s\n' "$GITLAB_MIRROR_KEY" > "$RUNNER_TEMP/gitlab_key"
+          # Pinned host keys rather than `accept-new`: this is the one connection that decides where
+          # a copy of the repository goes, so an unverified host key is the wrong default here.
+          ssh-keyscan -t ed25519 gitlab.com > "$RUNNER_TEMP/known_hosts" 2>/dev/null
+          export GIT_SSH_COMMAND="ssh -i $RUNNER_TEMP/gitlab_key -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile=$RUNNER_TEMP/known_hosts"
+          git --git-dir="$RUNNER_TEMP/out.git" push --mirror "$GITLAB_REMOTE"
+          # WHAT LANDED, ASKED RATHER THAN ASSUMED. The push's exit code says the transfer was
+          # accepted; this asks the destination what it holds and compares that with the scratch
+          # repository ref for ref, which is the only statement that means "this is the same
+          # repository". Sizes and timestamps were considered and left out on purpose: a forge's
+          # reported size counts things this repository does not contain (on GitLab the wiki, the
+          # package registry and build artifacts as well as the repository), `last_activity_at`
+          # moves for a star or a comment, and a mirror with nothing new is SUPPOSED to carry
+          # yesterday's timestamp, so a quiet day would read as a fault every single day while a
+          # broken one still read as fine.
+          git --git-dir="$RUNNER_TEMP/out.git" for-each-ref \
+            --format='%(objectname) %(refname)' refs/heads refs/tags | sort > "$RUNNER_TEMP/expected.txt"
+          git ls-remote --refs "$GITLAB_REMOTE" | awk '{print $1" "$2}' \
+            | grep -E ' refs/(heads|tags)/' | sort > "$RUNNER_TEMP/actual.txt"
+          if diff -q "$RUNNER_TEMP/expected.txt" "$RUNNER_TEMP/actual.txt" >/dev/null; then
+            echo "verified: GitLab holds exactly the $(wc -l < "$RUNNER_TEMP/expected.txt") refs collected here"
+          else
+            echo "::error::GitLab does not hold what this run pushed"
+            diff "$RUNNER_TEMP/expected.txt" "$RUNNER_TEMP/actual.txt" | head -20
+            exit 1
+          fi
+
+      - name: Mirror to Codeberg over HTTPS
+        env:
+          CODEBERG_MIRROR_TOKEN: ${{ secrets.CODEBERG_MIRROR_TOKEN }}
+        run: |
+          set -euo pipefail
+          if [ -z "${CODEBERG_MIRROR_TOKEN:-}" ]; then
+            echo "::notice::no CODEBERG_MIRROR_TOKEN secret, so Codeberg was not mirrored by this run"
+            exit 0
+          fi
+          # The token is handed to git by a credential helper rather than written into the remote
+          # URL, because git prints the URL it failed on and a build log is not a place to keep a
+          # credential. The helper is expanded by git with this step's environment, so the secret
+          # itself never appears in the command line, in `ps` or in the log.
+          HELPER='!f() { echo "username=$CODEBERG_USER"; echo "password=$CODEBERG_MIRROR_TOKEN"; }; f'
+          gitc() { git --git-dir="$RUNNER_TEMP/out.git" -c "credential.helper=$HELPER" "$@"; }
+          # THE PUSH IS STAGED, and the first two attempts are what taught us to stage it. One mirror
+          # push of the whole repository is 87 MB and 537 refs in a single request, which Codeberg's
+          # front end answered with HTTP 504 seventy seconds in, mid-sideband, having accepted
+          # nothing. Staging `main` alone fixed that and then the tag push failed the same way at 522
+          # ref updates, so every request below is now sized to finish inside the gateway's patience.
+          # `main` carries nearly all of the object volume, and what follows is refs over objects the
+          # far side already has.
+          gitc push --force "$CODEBERG_REMOTE" 'refs/heads/main:refs/heads/main'
+          # The rest of the branches, pruned so that a branch deleted here is deleted there. The
+          # wildcard is what makes `--prune` mean anything: handed an explicit ref it prunes nothing.
+          gitc push --force --prune "$CODEBERG_REMOTE" 'refs/heads/*:refs/heads/*'
+          # THE TAGS GO IN BATCHES, and only the ones that are missing or moved. Asking the
+          # destination what it already holds turns a second and later run into no requests at all
+          # for the 522 tags that have not changed, where a wildcard push would resend all of them
+          # every day and earn the same 504 on the days the gateway is slow.
+          gitc ls-remote --tags --refs "$CODEBERG_REMOTE" | awk '{print $1" "$2}' | sort > "$RUNNER_TEMP/remote-tags.txt"
+          git --git-dir="$RUNNER_TEMP/out.git" for-each-ref --format='%(objectname) %(refname)' refs/tags | sort > "$RUNNER_TEMP/local-tags.txt"
+          comm -23 "$RUNNER_TEMP/local-tags.txt" "$RUNNER_TEMP/remote-tags.txt" | awk '{print $2}' > "$RUNNER_TEMP/tags-to-push.txt"
+          comm -13 "$RUNNER_TEMP/local-tags.txt" "$RUNNER_TEMP/remote-tags.txt" | awk '{print $2}' > "$RUNNER_TEMP/tags-to-delete.txt"
+          # A hundred per request: enough that a run is a handful of calls, few enough that a slow
+          # afternoon on somebody's forge does not turn into a lost push. The refspec is built pair
+          # by pair rather than with a pattern substitution, because bash does not expand `&` in
+          # `${refs[@]/%/:&}` and the resulting `refs/tags/x:` is not a copy but a DELETION.
+          send_tags() {
+            local file="$1" verb="$2"
+            split -l 100 "$file" "$RUNNER_TEMP/$verb." 2>/dev/null || true
+            for batch in "$RUNNER_TEMP"/"$verb".*; do
+              [ -e "$batch" ] || continue
+              mapfile -t REFS < "$batch"
+              # `split` leaves an empty batch behind when the list it was given was empty, which is
+              # the normal case for deletions on a mirror that has nothing to remove, and
+              # `git push --delete` with no refs is a fatal error rather than a no-op.
+              [ "${#REFS[@]}" -gt 0 ] || continue
+              echo "$verb: ${#REFS[@]} tag(s)"
+              if [ "$verb" = delete ]; then
+                gitc push --force --delete "$CODEBERG_REMOTE" "${REFS[@]}"
+              else
+                SPECS=()
+                for r in "${REFS[@]}"; do SPECS+=("$r:$r"); done
+                gitc push --force "$CODEBERG_REMOTE" "${SPECS[@]}"
+              fi
+            done
+          }
+          send_tags "$RUNNER_TEMP/tags-to-push.txt" push
+          send_tags "$RUNNER_TEMP/tags-to-delete.txt" delete
+          echo "tags: $(wc -l < "$RUNNER_TEMP/tags-to-push.txt") sent, $(wc -l < "$RUNNER_TEMP/tags-to-delete.txt") removed"
+          # The same comparison as GitLab, made through the helper that holds the token.
+          git --git-dir="$RUNNER_TEMP/out.git" for-each-ref \
+            --format='%(objectname) %(refname)' refs/heads refs/tags | sort > "$RUNNER_TEMP/expected.txt"
+          gitc ls-remote --refs "$CODEBERG_REMOTE" | awk '{print $1" "$2}' \
+            | grep -E ' refs/(heads|tags)/' | sort > "$RUNNER_TEMP/actual.txt"
+          if diff -q "$RUNNER_TEMP/expected.txt" "$RUNNER_TEMP/actual.txt" >/dev/null; then
+            echo "verified: Codeberg holds exactly the $(wc -l < "$RUNNER_TEMP/expected.txt") refs collected here"
+          else
+            echo "::error::Codeberg does not hold what this run pushed"
+            diff "$RUNNER_TEMP/expected.txt" "$RUNNER_TEMP/actual.txt" | head -20
+            exit 1
+          fi
+
+      # A SIZE CANARY, AND THE ONE NUMBER THE REF COMPARISON CANNOT GIVE. Everything above proves
+      # the far side holds the same refs; none of it says how large the repository has grown, and
+      # Codeberg is the host with a soft ceiling worth watching. It reports 228 MiB for a repository
+      # whose local `.git` is 87 MB, because a forge's fresh pack is nothing like as well delta'd as
+      # a locally repacked one, so the ceiling is nearer than the local number suggests and a figure
+      # measured here is the only one that answers "how close are we".
+      #
+      # NON-GATING ON PURPOSE, and `always()`. A backup must not fail for being large, so a size past
+      # the warning line is an annotation and never a non-zero exit; and a run whose push failed still
+      # says how much the far side holds, which is exactly when somebody is deciding what to do about
+      # it. The endpoint is Codeberg's public API, so no token is needed or used here.
+      - name: Report the Codeberg repository size
+        if: always()
+        run: |
+          set -euo pipefail
+          API="https://codeberg.org/api/v1/repos/$CODEBERG_USER/Lithic-uk"
+          if ! BODY=$(curl -fsS --max-time 20 "$API" 2>/dev/null); then
+            echo "::notice::the Codeberg size could not be read (its API did not answer), which does not affect the mirror"
+            exit 0
+          fi
+          SIZE_KB=$(printf '%s' "$BODY" | node -e 'let raw="";process.stdin.on("data",(c)=>raw+=c).on("end",()=>{try{const j=JSON.parse(raw);process.stdout.write(String(Number(j.size||0)))}catch{process.stdout.write("0")}})')
+          awk -v kb="$SIZE_KB" 'BEGIN{
+            mib = kb/1024; limit = 750;
+            printf "Codeberg holds %.0f MiB, %.0f%% of its %d MiB soft limit\n", mib, mib/limit*100, limit;
+            if (mib >= limit*0.8) printf "::warning::the Codeberg mirror is %.0f MiB, past 80%% of Codeberg\x27s 750 MiB soft limit\n", mib;
+            else if (mib >= limit*0.5) printf "::notice::the Codeberg mirror is %.0f MiB, past half of Codeberg\x27s 750 MiB soft limit\n", mib;
+          }'
