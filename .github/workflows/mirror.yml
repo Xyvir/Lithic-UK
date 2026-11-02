@@ -101,6 +101,26 @@ jobs:
           ssh-keyscan -t ed25519 gitlab.com > "$RUNNER_TEMP/known_hosts" 2>/dev/null
           export GIT_SSH_COMMAND="ssh -i $RUNNER_TEMP/gitlab_key -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile=$RUNNER_TEMP/known_hosts"
           git --git-dir="$RUNNER_TEMP/out.git" push --mirror "$GITLAB_REMOTE"
+          # WHAT LANDED, ASKED RATHER THAN ASSUMED. The push's exit code says the transfer was
+          # accepted; this asks the destination what it holds and compares that with the scratch
+          # repository ref for ref, which is the only statement that means "this is the same
+          # repository". Sizes and timestamps were considered and left out on purpose: a forge's
+          # reported size counts things this repository does not contain (on GitLab the wiki, the
+          # package registry and build artifacts as well as the repository), `last_activity_at`
+          # moves for a star or a comment, and a mirror with nothing new is SUPPOSED to carry
+          # yesterday's timestamp, so a quiet day would read as a fault every single day while a
+          # broken one still read as fine.
+          git --git-dir="$RUNNER_TEMP/out.git" for-each-ref \
+            --format='%(objectname) %(refname)' refs/heads refs/tags | sort > "$RUNNER_TEMP/expected.txt"
+          git ls-remote --refs "$GITLAB_REMOTE" | awk '{print $1" "$2}' \
+            | grep -E ' refs/(heads|tags)/' | sort > "$RUNNER_TEMP/actual.txt"
+          if diff -q "$RUNNER_TEMP/expected.txt" "$RUNNER_TEMP/actual.txt" >/dev/null; then
+            echo "verified: GitLab holds exactly the $(wc -l < "$RUNNER_TEMP/expected.txt") refs collected here"
+          else
+            echo "::error::GitLab does not hold what this run pushed"
+            diff "$RUNNER_TEMP/expected.txt" "$RUNNER_TEMP/actual.txt" | head -20
+            exit 1
+          fi
 
       - name: Mirror to Codeberg over HTTPS
         env:
@@ -163,3 +183,15 @@ jobs:
           send_tags "$RUNNER_TEMP/tags-to-push.txt" push
           send_tags "$RUNNER_TEMP/tags-to-delete.txt" delete
           echo "tags: $(wc -l < "$RUNNER_TEMP/tags-to-push.txt") sent, $(wc -l < "$RUNNER_TEMP/tags-to-delete.txt") removed"
+          # The same comparison as GitLab, made through the helper that holds the token.
+          git --git-dir="$RUNNER_TEMP/out.git" for-each-ref \
+            --format='%(objectname) %(refname)' refs/heads refs/tags | sort > "$RUNNER_TEMP/expected.txt"
+          gitc ls-remote --refs "$CODEBERG_REMOTE" | awk '{print $1" "$2}' \
+            | grep -E ' refs/(heads|tags)/' | sort > "$RUNNER_TEMP/actual.txt"
+          if diff -q "$RUNNER_TEMP/expected.txt" "$RUNNER_TEMP/actual.txt" >/dev/null; then
+            echo "verified: Codeberg holds exactly the $(wc -l < "$RUNNER_TEMP/expected.txt") refs collected here"
+          else
+            echo "::error::Codeberg does not hold what this run pushed"
+            diff "$RUNNER_TEMP/expected.txt" "$RUNNER_TEMP/actual.txt" | head -20
+            exit 1
+          fi
