@@ -195,3 +195,31 @@ jobs:
             diff "$RUNNER_TEMP/expected.txt" "$RUNNER_TEMP/actual.txt" | head -20
             exit 1
           fi
+
+      # A SIZE CANARY, AND THE ONE NUMBER THE REF COMPARISON CANNOT GIVE. Everything above proves
+      # the far side holds the same refs; none of it says how large the repository has grown, and
+      # Codeberg is the host with a soft ceiling worth watching. It reports 228 MiB for a repository
+      # whose local `.git` is 87 MB, because a forge's fresh pack is nothing like as well delta'd as
+      # a locally repacked one, so the ceiling is nearer than the local number suggests and a figure
+      # measured here is the only one that answers "how close are we".
+      #
+      # NON-GATING ON PURPOSE, and `always()`. A backup must not fail for being large, so a size past
+      # the warning line is an annotation and never a non-zero exit; and a run whose push failed still
+      # says how much the far side holds, which is exactly when somebody is deciding what to do about
+      # it. The endpoint is Codeberg's public API, so no token is needed or used here.
+      - name: Report the Codeberg repository size
+        if: always()
+        run: |
+          set -euo pipefail
+          API="https://codeberg.org/api/v1/repos/$CODEBERG_USER/Lithic-uk"
+          if ! BODY=$(curl -fsS --max-time 20 "$API" 2>/dev/null); then
+            echo "::notice::the Codeberg size could not be read (its API did not answer), which does not affect the mirror"
+            exit 0
+          fi
+          SIZE_KB=$(printf '%s' "$BODY" | node -e 'let raw="";process.stdin.on("data",(c)=>raw+=c).on("end",()=>{try{const j=JSON.parse(raw);process.stdout.write(String(Number(j.size||0)))}catch{process.stdout.write("0")}})')
+          awk -v kb="$SIZE_KB" 'BEGIN{
+            mib = kb/1024; limit = 750;
+            printf "Codeberg holds %.0f MiB, %.0f%% of its %d MiB soft limit\n", mib, mib/limit*100, limit;
+            if (mib >= limit*0.8) printf "::warning::the Codeberg mirror is %.0f MiB, past 80%% of Codeberg\x27s 750 MiB soft limit\n", mib;
+            else if (mib >= limit*0.5) printf "::notice::the Codeberg mirror is %.0f MiB, past half of Codeberg\x27s 750 MiB soft limit\n", mib;
+          }'
