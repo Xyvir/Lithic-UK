@@ -748,10 +748,12 @@ jobs:
       # alternatives to it: merging the newest is what publishes, so a list still showing older
       # releases as waiting on a person is a list that has to be read twice to be trusted.
       #
-      # They are CLOSED, never merged. Closing publishes nothing, because no tag and no release
-      # exist until a merge (publish-release.yml fires on the merged bytes), so there is nothing
-      # to undo, and the branch a closed review was built from is left where it is rather than
-      # deleted, which keeps "not merged yet" and "gone" different states.
+      # They are CLOSED, never merged, and their branch goes with them. Closing publishes
+      # nothing, because no tag and no release exist until a merge (publish-release.yml fires on
+      # the merged bytes), so there is nothing to undo; and the build that branch carries is one
+      # nobody will merge, so keeping it only accumulates the stale `release/` list this step
+      # exists to clear. The review stays readable either way, because GitHub keeps a pull
+      # request's head commits reachable through `refs/pull/<number>/head` once the branch is gone.
       #
       # It runs AFTER the pull request above, on purpose: closing the earlier ones first would
       # mean a create that then failed left no review at all to look at, where this order can
@@ -784,7 +786,7 @@ jobs:
           while IFS= read -r NUMBER; do
             [ -n "$NUMBER" ] || continue
             echo "closing the superseded review #$NUMBER, whose successor is build-$STAMP"
-            gh pr close "$NUMBER" --comment "Superseded by build-$STAMP, which carries the newest review." ||
+            gh pr close "$NUMBER" --delete-branch --comment "Superseded by build-$STAMP, which carries the newest review." ||
               UNCLOSED="$UNCLOSED #$NUMBER"
           done <<< "$SIBLINGS"
           if [ -n "$UNCLOSED" ]; then

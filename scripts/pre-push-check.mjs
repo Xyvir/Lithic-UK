@@ -291,6 +291,13 @@ function checkReleaseTrigger() {
   if (!/BRANCH/.test(retireRun)) {
     return `${file}: the step that closes superseded reviews does not exclude the branch under review — it would close the pull request it just opened`;
   }
+  // And the branch goes with the review, which is the half that was missing: a closed review whose
+  // branch was left behind accumulated forty `release/` branches on a repository whose reviewer kept
+  // missing the merge button's delete tick, and each one is a build nobody will ever merge. What is
+  // checked is that the close still deletes it, because the two are one action here.
+  if (!/--delete-branch/.test(retireRun)) {
+    return `${file}: the step that closes superseded reviews leaves their branches behind — a session's worth of abandoned \`release/\` branches piles up until somebody sweeps them by hand`;
+  }
   return null;
 }
 
