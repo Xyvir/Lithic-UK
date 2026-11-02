@@ -55,7 +55,7 @@ function generateWhiteboardData(images) {
         // Add page
         pages[uuidPage] = {
             id: uuidPage,
-            name: `Page ${i}`,
+            name: img.name || `Page ${i}`,
             childIndex: i,
             shapes: {},
             bindings: {}
@@ -150,23 +150,23 @@ function generateWhiteboardData(images) {
 var MAX_IMAGE_EDGE = 3000;
 
 /**
- * One image, as the tiddlers a board is made of.
+ * One picture as the page a board keeps: decoded once to learn its size, drawn no larger than an
+ * imported image is, and re-encoded as WebP for the reason a PDF page is, the asset living
+ * inside the Lith.
  *
- * The board is the one a dropped image produces, camera included, because it is built by the
- * same generator: opening a picture and dropping it are two ways to the same canvas, and a
- * second layout rule for the same input is how the two would drift. What is added is the
- * container the desktop app names, so a re-opened image finds its own board again, exactly as a
- * re-opened PDF finds the pages it was made from (see `boardOf` in `pdf-open-request.js`).
- * A promise because decoding and re-encoding take the browser's own time, not this function's.
+ * A promise because decoding and re-encoding take the browser's own time. It resolves to null for
+ * bytes this browser cannot draw, because a page missing from a document is worth more than a
+ * gesture that failed.
  */
-function convertImageDataToTiddlers(image) {
-    return new Promise(function(resolve, reject){
+function readPicturePage(image) {
+    return new Promise(function(resolve){
         var element = new Image();
         element.onload = function(){
             var width = element.naturalWidth || element.width;
             var height = element.naturalHeight || element.height;
             if (!width || !height) {
-                reject(new Error("The image has no size to draw"));
+                // A picture with no size is one nothing can place on a page.
+                resolve(null);
                 return;
             }
             var scale = Math.min(1, MAX_IMAGE_EDGE / Math.max(width, height));
@@ -177,37 +177,60 @@ function convertImageDataToTiddlers(image) {
             context.drawImage(element, 0, 0, canvas.width, canvas.height);
             // WebP for the same reason the drop path re-encodes: the asset is carried inside the
             // Lith, and the payload measurement there was 858 KB as WebP against 3.4 MB as PNG.
-            var dataUri = canvas.toDataURL("image/webp", 0.75);
-            var baseName = String(image.name || "image").replace(/\.[^/.]+$/, "") || "image";
-            var containerTitle = $tw.wiki.generateNewTitle(baseName);
-            var boardTitle = $tw.wiki.generateNewTitle(containerTitle + "-whiteboard");
-            var payload = generateWhiteboardData([{
-                filename: baseName + ".webp",
-                dataUri: dataUri,
+            resolve({
+                filename: pictureBaseName(image.name) + ".webp",
+                dataUri: canvas.toDataURL("image/webp", 0.75),
                 width: canvas.width,
                 height: canvas.height
-            }]);
-            resolve([
-                {
-                    title: containerTitle,
-                    "stream-list": $tw.utils.stringifyList([boardTitle]),
-                    "stream-type": "default",
-                    text: ""
-                },
-                {
-                    title: boardTitle,
-                    parent: containerTitle,
-                    text: JSON.stringify(payload),
-                    type: "application/tldr",
-                    "stream-type": "default",
-                    "whiteboard-height": canvas.height > canvas.width ? "1056px" : "540px"
-                }
-            ]);
+            });
         };
         element.onerror = function(){
-            reject(new Error("The image could not be read"));
+            resolve(null);
         };
         element.src = image.dataUri;
+    });
+}
+
+// A picture's name as its node and its asset are titled: the file name without the extension,
+// which is the name the drop path gives the board too, and the one a re-opened image is found
+// under.
+function pictureBaseName(name) {
+    return String(name || "image").replace(/\.[^/.]+$/, "") || "image";
+}
+
+/**
+ * One image, as the tiddlers a board is made of.
+ *
+ * The board is the one a dropped image produces, camera included, because it is built by the
+ * same generator: opening a picture and dropping it are two ways to the same canvas, and a
+ * second layout rule for the same input is how the two would drift. What is added is the
+ * container the desktop app names, so a re-opened image finds its own board again, exactly as a
+ * re-opened PDF finds the pages it was made from (see `boardOf` in `pdf-open-request.js`).
+ */
+function convertImageDataToTiddlers(image) {
+    return readPicturePage(image).then(function(page){
+        if (!page) {
+            throw new Error("The image could not be read");
+        }
+        var containerTitle = $tw.wiki.generateNewTitle(pictureBaseName(image.name));
+        var boardTitle = $tw.wiki.generateNewTitle(containerTitle + "-whiteboard");
+        var payload = generateWhiteboardData([page]);
+        return [
+            {
+                title: containerTitle,
+                "stream-list": $tw.utils.stringifyList([boardTitle]),
+                "stream-type": "default",
+                text: ""
+            },
+            {
+                title: boardTitle,
+                parent: containerTitle,
+                text: JSON.stringify(payload),
+                type: "application/tldr",
+                "stream-type": "default",
+                "whiteboard-height": page.height > page.width ? "1056px" : "540px"
+            }
+        ];
     });
 }
 
@@ -297,7 +320,15 @@ function uprightTurn(readings) {
     return turn;
 }
 
-async function convertPdfDataToTiddlers(arrayBuffer, fileName, setProgress) {
+/**
+ * A PDF as the pieces a document is built from: every page drawn once at the angle the
+ * document is written at, and the words each page carries.
+ *
+ * The reading is separate from the tiddlers because a PDF dropped beside others is these same
+ * pages and these same words: only the shape of the Lith around them differs, so one reader
+ * serves both and the two cannot drift.
+ */
+async function readPdfPages(arrayBuffer, fileName, setProgress) {
     const pdfjsLib = require("$:/plugins/lithic/lithic-import-handler/pdf.js");
     
     // --- Worker Configuration ---
@@ -322,7 +353,7 @@ async function convertPdfDataToTiddlers(arrayBuffer, fileName, setProgress) {
     
     const pdf = await loadingTask.promise;
     const images = [];
-    var pageTexts = [];
+    var texts = [];
 
     // Which way the document is written, read before a single page is drawn so that every page is
     // rendered once, at the angle this answers.
@@ -371,9 +402,23 @@ async function convertPdfDataToTiddlers(arrayBuffer, fileName, setProgress) {
             .replace(/\s+/g, " ")
             .trim();
         if (pageText) {
-            pageTexts.push("#### Page " + i + "\n\n" + pageText);
+            texts.push({ page: i, text: pageText });
         }
     }
+
+    return { pages: images, texts: texts };
+}
+
+/**
+ * The tiddlers one PDF becomes on its own: a container, the words extracted under it, and the
+ * board its pages were drawn on.
+ */
+async function convertPdfDataToTiddlers(arrayBuffer, fileName, setProgress) {
+    var read = await readPdfPages(arrayBuffer, fileName, setProgress);
+    var images = read.pages;
+    var pageTexts = read.texts.map(function(entry) {
+        return "#### Page " + entry.page + "\n\n" + entry.text;
+    });
 
     const baseName = fileName.replace(/\.pdf$/i, "");
     const containerTitle = $tw.wiki.generateNewTitle(baseName);
@@ -739,6 +784,114 @@ async function convertDocxToTiddlers(arrayBuffer, fileName, setProgress) {
     return tiddlers;
 }
 
+// --- One gesture, one document ------------------------------------------------
+//
+// A selection of pictures, a folder of scans, a deck delivered as one PDF per slide: each
+// file used to become its own Lith, so reading them in order meant opening each one. A gesture
+// carrying more than one of them is evidently one document, so it becomes one: a single
+// container, one board whose pages are every page in the order they were picked, and one text
+// tiddler holding the words those pages carry.
+//
+// The title is the first file's, because that is the only name the gesture arrived with, and a
+// person who wants another renames the one node.
+
+/**
+ * The markdown one text tiddler holds: the container's heading, then each document that had
+ * words, its file name, and its pages numbered as they are in the file they came from.
+ *
+ * A document with no words is skipped rather than named, because a picture has none to show
+ * and an empty heading would only be a row to delete. Nothing is returned when no document had
+ * any, which is how a selection of pictures ends up with a board and no text at all.
+ */
+function mergedTextBody(containerTitle, documents) {
+    var sections = [];
+    documents.forEach(function(doc) {
+        if (!doc.texts.length) {
+            return;
+        }
+        var section = "";
+        // The file name is what tells two documents' page ones apart; one document needs no
+        // introduction.
+        if (documents.length > 1) {
+            section += "### " + doc.fileName + "\n\n";
+        }
+        section += doc.texts.map(function(entry) {
+            return "#### Page " + entry.page + "\n\n" + entry.text;
+        }).join("\n\n");
+        sections.push(section);
+    });
+    if (!sections.length) {
+        return null;
+    }
+    return "## " + containerTitle + "\n\n" + sections.join("\n\n");
+}
+
+/**
+ * Several files imported at once, as the one Lith they were meant to be.
+ *
+ * Every page of every document goes on one board in the order the gesture carried them, and
+ * each page is named for the file it came from: a deck reads as `deck 1`, `deck 2`, and a
+ * picture beside it reads as `photo`, which is what makes the page menu a table of contents
+ * rather than a row of identical page numbers.
+ *
+ * The board height is portrait if any page is. A page too tall for the viewer is worse than
+ * margins around one that fits, and the taller height is what a full portrait page needs.
+ */
+function mergedDocumentTiddlers(documents) {
+    var pages = [];
+    documents.forEach(function(doc) {
+        doc.pages.forEach(function(page, index) {
+            pages.push({
+                filename: page.filename,
+                dataUri: page.dataUri,
+                width: page.width,
+                height: page.height,
+                name: doc.pages.length > 1 ? doc.title + " " + (index + 1) : doc.title
+            });
+        });
+    });
+    if (!pages.length) {
+        return [];
+    }
+
+    var containerTitle = $tw.wiki.generateNewTitle(documents[0].title);
+    var tiddlers = [];
+    var children = [];
+
+    var body = mergedTextBody(containerTitle, documents);
+    if (body) {
+        var textTitle = $tw.wiki.generateNewTitle(containerTitle + "-text");
+        tiddlers.push({
+            title: textTitle,
+            parent: containerTitle,
+            text: body,
+            type: "text/x-markdown",
+            "stream-type": "default"
+        });
+        children.push(textTitle);
+    }
+
+    var boardTitle = $tw.wiki.generateNewTitle(containerTitle + "-whiteboard");
+    var portrait = pages.some(function(page) { return page.height > page.width; });
+    tiddlers.push({
+        title: boardTitle,
+        parent: containerTitle,
+        text: JSON.stringify(generateWhiteboardData(pages)),
+        type: "application/tldr",
+        "stream-type": "default",
+        "whiteboard-height": portrait ? "1056px" : "540px"
+    });
+    children.push(boardTitle);
+
+    tiddlers.unshift({
+        title: containerTitle,
+        "stream-list": $tw.utils.stringifyList(children),
+        "stream-type": "default",
+        text: ""
+    });
+    return tiddlers;
+}
+
 // The render path, published for the one other caller: a PDF the desktop app was asked to
 // open by file association. The launcher cannot render a PDF (the renderer lives in this
 // wiki), so it mounts a blank Lith with a request tiddler naming the file and a reader for
@@ -754,6 +907,12 @@ $tw.lithic.convertEpubToTiddlers = convertEpubToTiddlers;
 // And for a Word document, which is the same shape of handoff for the same reason: unpacking one
 // is this reader's job, and the launcher has no reader at all.
 $tw.lithic.convertDocxToTiddlers = convertDocxToTiddlers;
+// The pieces a gesture carrying several files is built from, published for the handoff in
+// `pdf-open-request.js`: the same readers the one-file paths use, so a selection dropped on the
+// launcher and a double-click cannot produce two different documents.
+$tw.lithic.readPdfPages = readPdfPages;
+$tw.lithic.readPicturePage = readPicturePage;
+$tw.lithic.mergeDocumentTiddlers = mergedDocumentTiddlers;
 
 exports.startup = function() {
     var alertTitle = "$:/temp/alerts/lithic-import-progress";
@@ -794,6 +953,32 @@ exports.startup = function() {
                 reject(new Error("Failed to read file"));
             };
             reader.readAsDataURL(file);
+        });
+    }
+
+    /**
+     * One dropped picture as a page: decoded once to learn its size, and re-encoded as WebP for
+     * the reason a PDF's page is, the asset living inside the Lith. An SVG is passed through
+     * untouched, since a canvas would rasterise it.
+     */
+    function readImagePage(file) {
+        return loadImage(file).then(function(img) {
+            if (file.type !== "image/svg+xml" && !file.name.toLowerCase().endsWith(".svg")) {
+                const canvas = document.createElement("canvas");
+                const context = canvas.getContext("2d");
+                canvas.width = img.width;
+                canvas.height = img.height;
+                context.drawImage(img.imgElement, 0, 0);
+
+                img.dataUri = canvas.toDataURL("image/webp", 0.75);
+                img.filename = img.filename.replace(/\.[^/.]+$/, "") + ".webp";
+            }
+            return {
+                filename: img.filename,
+                dataUri: img.dataUri,
+                width: img.width,
+                height: img.height
+            };
         });
     }
 
@@ -893,7 +1078,48 @@ exports.startup = function() {
 
             try {
                 var createdTitles = [];
-                for (const file of pdfFiles) {
+                // One gesture, one Lith. A selection holding more than one picture or PDF is
+                // one board made of every page and one text extract of every word, in the order
+                // the files arrived, rather than a Lith per file opened one by one.
+                var together = Array.from(files).filter(function(file) {
+                    return pdfFiles.includes(file) || imageFiles.includes(file);
+                });
+                var asOne = together.length > 1;
+                if (asOne) {
+                    var documents = [];
+                    for (const file of together) {
+                        if (pdfFiles.includes(file)) {
+                            var pdfRead = await readPdfPages(await file.arrayBuffer(), file.name, setProgress);
+                            documents.push({
+                                title: file.name.replace(/\.pdf$/i, ""),
+                                fileName: file.name,
+                                pages: pdfRead.pages,
+                                texts: pdfRead.texts
+                            });
+                        } else {
+                            setProgress("Converting " + file.name + " to whiteboard...");
+                            documents.push({
+                                title: file.name.replace(/\.[^/.]+$/, ""),
+                                fileName: file.name,
+                                pages: [await readImagePage(file)],
+                                texts: []
+                            });
+                        }
+                    }
+                    setProgress("Building one whiteboard from " + documents.length + " documents...");
+                    for (const fields of mergedDocumentTiddlers(documents)) {
+                        $tw.wiki.addTiddler(new $tw.Tiddler(
+                            $tw.wiki.getCreationFields(),
+                            $tw.wiki.getModificationFields(),
+                            fields
+                        ));
+                        if (!fields.parent) { // It's the container
+                            createdTitles.push(fields.title);
+                        }
+                    }
+                }
+
+                for (const file of (asOne ? [] : pdfFiles)) {
                     const arrayBuffer = await file.arrayBuffer();
                     const tiddlers = await convertPdfDataToTiddlers(arrayBuffer, file.name, setProgress);
                     
@@ -952,21 +1178,9 @@ exports.startup = function() {
                     createdTitles.push(book.entry);
                 }
 
-                for (const file of imageFiles) {
+                for (const file of (asOne ? [] : imageFiles)) {
                     setProgress("Converting " + file.name + " to whiteboard...");
-                    const img = await loadImage(file);
-                    
-                    if (file.type !== "image/svg+xml" && !file.name.toLowerCase().endsWith(".svg")) {
-                        const canvas = document.createElement("canvas");
-                        const context = canvas.getContext("2d");
-                        canvas.width = img.width;
-                        canvas.height = img.height;
-                        context.drawImage(img.imgElement, 0, 0);
-
-                        const webpDataUri = canvas.toDataURL("image/webp", 0.75);
-                        img.dataUri = webpDataUri;
-                        img.filename = img.filename.replace(/\.[^/.]+$/, "") + ".webp";
-                    }
+                    const img = await readImagePage(file);
 
                     // Apply unique title logic if name is "image.png"
                     let title = file.name;

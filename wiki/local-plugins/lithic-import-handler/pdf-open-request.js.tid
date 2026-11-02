@@ -88,6 +88,12 @@ var EPUB_REQUEST = "__LITHIC_EPUB_IMPORT__";
 // so it reads the bytes and hands them over, and what opens is the document's own words.
 var DOCX_REQUEST = "__LITHIC_DOCX_IMPORT__";
 
+// The handoff for a gesture that carried several of them at once: files dropped on the launcher
+// together. Entries keep the order they arrived in, which is the order of the pages, and each
+// carries its own name so the kind is read from the file rather than from a property beside it
+// that could come to disagree with it.
+var FILES_REQUEST = "__LITHIC_IMPORT_FILES__";
+
 // What each registered extension is, as the type a data URL has to declare for the browser's own
 // decoder to read the bytes. `jpg` and `jpeg` are one format under the two spellings it has.
 var IMAGE_MIME = {
@@ -394,6 +400,93 @@ function openRequestedDocument(request) {
     });
 }
 
+// A file's name without its extension, which is the container the importer titles it with.
+function containerNameOf(filename) {
+    return String(filename).replace(/\.[^/.]+$/, "");
+}
+
+/**
+ * A gesture that carried several pictures and PDFs, as the one document they were meant to be.
+ *
+ * The files are a folder of scans, a deck delivered as one PDF per slide, or a page beside the
+ * pictures of it. Each becomes a page of one board, in the order the gesture carried them, and
+ * the words of the PDFs become one text extract under the container the importer names.
+ *
+ * One file travels on this same property and is answered by the one-file readers above, so a
+ * drop of a single PDF and a double-click on that PDF cannot produce different documents.
+ */
+function openRequestedFiles(files) {
+    if (!Array.isArray(files) || files.length === 0) {
+        return;
+    }
+    if (files.length === 1) {
+        var only = files[0];
+        if (!only || typeof only.base64 !== "string") {
+            return;
+        }
+        if (/\.pdf$/i.test(only.filename || "")) {
+            openRequestedPdf(only);
+        } else {
+            openRequestedImage(only);
+        }
+        return;
+    }
+
+    var readers = $tw.lithic || {};
+    var merge = readers.mergeDocumentTiddlers;
+    if (typeof readers.readPdfPages !== "function" || typeof readers.readPicturePage !== "function" || typeof merge !== "function") {
+        return;
+    }
+
+    setProgress("Importing " + files.length + " files...");
+    (async function() {
+        var documents = [];
+        for (var i = 0; i < files.length; i++) {
+            var file = files[i];
+            if (!file || typeof file.base64 !== "string") {
+                continue;
+            }
+            var name = file.filename || "file";
+            if (/\.pdf$/i.test(name)) {
+                var read = await readers.readPdfPages(base64ToArrayBuffer(file.base64), name, setProgress);
+                documents.push({ title: containerNameOf(name), fileName: name, pages: read.pages, texts: read.texts });
+            } else {
+                // A picture this browser cannot draw is left out rather than failing the
+                // gesture: the pages that did arrive are still worth having.
+                var page = await readers.readPicturePage({ name: name, dataUri: dataUrlOf(name, file.base64) });
+                if (page) {
+                    documents.push({ title: containerNameOf(name), fileName: name, pages: [page], texts: [] });
+                }
+            }
+        }
+        setProgress("Building one whiteboard from " + documents.length + " files...");
+        var tiddlers = merge(documents);
+        if (tiddlers.length === 0) {
+            throw new Error("nothing could be read");
+        }
+        var board = "";
+        tiddlers.forEach(function(fields) {
+            $tw.wiki.addTiddler(new $tw.Tiddler(
+                $tw.wiki.getCreationFields(),
+                $tw.wiki.getModificationFields(),
+                fields
+            ));
+            if (fields.type === BOARD_TYPE) {
+                board = fields.title;
+            }
+        });
+        clearProgress();
+        if (board) {
+            // The board is the point of the gesture, so it is what opens, the way a dropped
+            // PDF's pages do.
+            openBoard(board);
+        }
+    })().catch(function(error) {
+        clearProgress();
+        setProgress("Could not import the files: " + (error && error.message ? error.message : error));
+    });
+}
+
 exports.startup = function() {
     if (typeof window === "undefined") {
         return;
@@ -427,6 +520,14 @@ exports.startup = function() {
         // And the same rule again: a document taken off the window before anything else reads it.
         window[DOCX_REQUEST] = null;
         openRequestedDocument(word);
+        return;
+    }
+    var files = window[FILES_REQUEST];
+    if (files) {
+        // And the same rule again: the whole gesture comes off the window before anything else
+        // can read it, so a later mount in this window never imports one it did not make.
+        window[FILES_REQUEST] = null;
+        openRequestedFiles(files);
         return;
     }
     var board = window[BOARD_REQUEST];

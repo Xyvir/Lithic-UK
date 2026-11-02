@@ -63,6 +63,16 @@ export const IMPORT_REQUEST: Record<ImportKind, string> = {
   image: '__LITHIC_IMAGE_IMPORT__'
 };
 
+/**
+ * The window property a gesture carrying several imported files travels on.
+ *
+ * One request for the whole gesture rather than one per kind, because the files arrive as one
+ * document: the entries keep the order they were dropped in, which is the order of its pages, and
+ * the importer reads each entry's kind from its own name. A single file travels here too, and is
+ * answered with exactly what the one-file property above would have produced.
+ */
+export const IMPORT_FILES_REQUEST = '__LITHIC_IMPORT_FILES__';
+
 /** The name each kind falls back to when a path carries none of its own. */
 export const IMPORT_FALLBACK_NAME: Record<ImportKind, string> = {
   pdf: 'document.pdf',

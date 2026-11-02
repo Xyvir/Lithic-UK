@@ -46,7 +46,7 @@
   import { LOGIN_CHECK_LABELS, loginVerdict, loginVerdictFromError, type LoginCheckState, type LoginVerdict } from './login-check';
   import { copyDropNote, forgetInstanceCopy } from './instance-copy';
   import { offlineMode, looksUnreachable } from './offline-mode';
-  import { IMPORT_FALLBACK_NAME, IMPORT_REQUEST, importContainerTitle, importKindOf, importLithName, type ImportKind } from './import-kinds';
+  import { IMPORT_FALLBACK_NAME, IMPORT_FILES_REQUEST, IMPORT_REQUEST, importContainerTitle, importKindOf, importLithName, type ImportKind } from './import-kinds';
   import { alignNewLithLabel, positionCachePreview, trackListScroll } from './launcher-geometry';
   import { createStageBeat, type InstallPreflight, type StageBeat } from './launcher-stage';
   import PinEntry from './PinEntry.svelte';
@@ -4041,6 +4041,18 @@ import { backupFileName, collectInstanceBackup, mergeBookmarks, parseInstanceBac
     skippedImports = result.refused;
   }
 
+  /** A file's bytes as the base64 string the engine's importer is handed. */
+  async function fileBase64(file: File): Promise<string> {
+    const bytes = new Uint8Array(await file.arrayBuffer());
+    // A chunk at a time rather than one character per byte: a book or a document runs to
+    // megabytes, and 32 KB is under the argument count every browser accepts.
+    let binary = '';
+    for (let index = 0; index < bytes.length; index += 0x8000) {
+      binary += String.fromCharCode(...bytes.subarray(index, index + 0x8000));
+    }
+    return btoa(binary);
+  }
+
   /**
    * Start a Lith from a book or a Word document dropped on the launcher.
    *
@@ -4051,15 +4063,33 @@ import { backupFileName, collectInstanceBackup, mergeBookmarks, parseInstanceBac
    * double-clicked file does too (see `pdf-open-request.js`).
    */
   async function openDroppedImport(file: File, kind: 'epub' | 'docx') {
-    const bytes = new Uint8Array(await file.arrayBuffer());
-    // A chunk at a time rather than one character per byte: a book or a document runs to
-    // megabytes, and 32 KB is under the argument count every browser accepts.
-    let binary = '';
-    for (let index = 0; index < bytes.length; index += 0x8000) {
-      binary += String.fromCharCode(...bytes.subarray(index, index + 0x8000));
-    }
-    (window as any)[IMPORT_REQUEST[kind]] = { filename: file.name, base64: btoa(binary) };
+    (window as any)[IMPORT_REQUEST[kind]] = { filename: file.name, base64: await fileBase64(file) };
     const name = `${file.name.replace(new RegExp(`\\.${kind}$`, 'i'), '')}_${kind}.lith`;
+    lithText = '';
+    fileName = name;
+    filePath = undefined;
+    await mountWiki('', name);
+    report(copy.status.mounted(name));
+  }
+
+  /**
+   * Start a Lith from pictures or PDFs dropped on the launcher.
+   *
+   * The gesture is one thing, so it lands as one document: every file travels, in the order it
+   * was dropped, and the importer inside the mounted page draws one board of every page and one
+   * text extract of the words. That is what the same selection becomes when it is dropped into an
+   * open wiki, and this is that document started from nothing.
+   *
+   * A single file travels the same way and is answered with what a double-click on that file
+   * produces, so the two routes cannot disagree.
+   */
+  async function openDroppedImports(files: File[]) {
+    const entries = [];
+    for (const file of files) {
+      entries.push({ filename: file.name, base64: await fileBase64(file) });
+    }
+    (window as any)[IMPORT_FILES_REQUEST] = entries;
+    const name = importLithName(files[0].name);
     lithText = '';
     fileName = name;
     filePath = undefined;
@@ -4095,6 +4125,9 @@ import { backupFileName, collectInstanceBackup, mergeBookmarks, parseInstanceBac
     let wiki: File | null = null;
     let book: File | null = null;
     let word: File | null = null;
+    // The files this gesture imports as pages of one document rather than as documents of their
+    // own. Every one of them travels, in the order it arrived.
+    const imported: File[] = [];
     let unreadable = false;
     for (const file of Array.from(files)) {
       const lowerName = file.name.toLowerCase();
@@ -4126,6 +4159,14 @@ import { backupFileName, collectInstanceBackup, mergeBookmarks, parseInstanceBac
         // A Word document is the same shape of gesture as a book: one at a time, and it opens
         // rather than queues, because a document somebody dragged here is one they want to read.
         word = file;
+      } else {
+        // The one route a PDF or a picture has into a wiki that is not open yet, and before this
+        // there was none: the branches above cover the kinds that are documents of their own, so
+        // these files fell out of the loop and the gesture did nothing at all.
+        const kind = importKindOf(file.name);
+        if (kind === 'pdf' || kind === 'image') {
+          imported.push(file);
+        }
       }
     }
     if (queued.length > 0) {
@@ -4147,6 +4188,14 @@ import { backupFileName, collectInstanceBackup, mergeBookmarks, parseInstanceBac
       // the second mount would replace it.
       try {
         await openDroppedImport((book || word) as File, book ? 'epub' : 'docx');
+      } catch (error) {
+        mountError = error instanceof Error ? error.message : String(error);
+      }
+    } else if (imported.length > 0) {
+      // One mount holds one document, so a page, a book or a Word document wins the gesture and
+      // the PDFs and pictures beside it are not opened. On their own they are the document.
+      try {
+        await openDroppedImports(imported);
       } catch (error) {
         mountError = error instanceof Error ? error.message : String(error);
       }

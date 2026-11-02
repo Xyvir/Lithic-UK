@@ -47,7 +47,7 @@
     - [ ] Add "view frame" background item to DefaultCanvas
     - [ ] Create parallel layout for "Presentation Mode" that is non-editable and can navigate forward/back between whiteboard pages; with the above animations as toggleable options
 
-- [ ] When multiple images are drag-and-dropped simultaneously, serialize them into a single multi-page whiteboard (like PDF import) instead of individual whiteboard objects.
+- [x] When multiple images, or PDFs, arrive in one gesture (dropped, selected in the Import dialog, or pasted together), serialize them into a single multi-page whiteboard (like PDF import) instead of individual whiteboard objects. Now one Lith for the whole gesture: one container named for the first file, one board holding every page in the order the files were picked, and one text extract naming each file before its own page numbers. Pictures have no words, so a selection of pictures gets the board and no text node. A PDF or a picture dropped on the launcher travels the same way and makes the same document; it used to fall out of the launcher's drop handling entirely and do nothing.
 
 - [ ] Test preserving existing 'rendered height' on unieditor when editing existing nodes/blocks. (IE images which are generally much taller than their sourcecode) Having the viewport jump around in response to editing text can be jarring. (which is the default behavior in logseq but is worth reviewing.)
 - ~~Simple mobile Camera OCR import as text capture feature?~~ (Decided against: too heavy for a capture path the journal already covers, and a bundled OCR model would add megabytes to a single-file wiki.)

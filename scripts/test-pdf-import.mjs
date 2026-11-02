@@ -120,6 +120,23 @@ function createPdfContext({ pages = [{}] } = {}) {
     exports: {},
     globalThis: {},
     require: (title) => {
+      // The drop handler's module scope asks for the archive reader a book and a Word document
+      // are both unpacked with. Nothing here imports either, so the names it destructures only
+      // have to exist: a test that reached one would be testing a second module.
+      if (title === '$:/plugins/lithic/lithic-import-handler/epub.js') {
+        const unused = () => {
+          throw new Error('the archive reader is not part of this test');
+        };
+        return {
+          convertEpubToTiddlers: unused,
+          readEntries: () => null,
+          readText: async () => null,
+          findEntry: () => null,
+          entryBytes: unused,
+          parseXml: unused,
+          resolveHref: unused,
+        };
+      }
       assert.equal(title, '$:/plugins/lithic/lithic-import-handler/pdf.js');
       return pdfjsLib;
     },
@@ -155,6 +172,32 @@ function createPdfContext({ pages = [{}] } = {}) {
       querySelectorAll: () => [],
     },
     crypto: { randomUUID: () => `test-uuid-${++uuid}` },
+    // The picture half of a drop: a decoder that reports a size, and a reader that hands back a
+    // data URL. Both answer on the next tick, the way a real one does rather than inside the
+    // call that asked, which is what lets the importer await them.
+    Image: class {
+      constructor() {
+        this.width = 400;
+        this.height = 300;
+        this.naturalWidth = 400;
+        this.naturalHeight = 300;
+      }
+      set src(value) {
+        this._src = value;
+        setTimeout(() => this.onload && this.onload(), 0);
+      }
+      get src() {
+        return this._src;
+      }
+    },
+    FileReader: class {
+      readAsDataURL(file) {
+        setTimeout(() => {
+          this.result = `data:${file.type};base64,stub-picture`;
+          if (this.onload) this.onload({ target: this });
+        }, 0);
+      }
+    },
     console: { error: (...args) => errors.push(args), log: () => {} },
     atob,
     Date,
@@ -437,4 +480,180 @@ test('a page with almost no text is not turned', async () => {
   await context.$tw.lithic.convertPdfToTiddlers(new ArrayBuffer(8), 'stamped-doc.pdf', () => {});
 
   assert.deepEqual(viewports, [0], 'five letters on one page are not a document direction');
+});
+
+// --- One gesture, one document ------------------------------------------------
+//
+// A selection is one thing to the person making it, so it has to be one thing in the wiki: two
+// PDFs dropped together used to become two Liths, and reading them in order meant opening each
+// one. The page names are what the page menu is read from, and the file names are what tells two
+// documents' page ones apart in the text extract.
+function dropFiles(loaded, files) {
+  const event = {
+    type: 'drop',
+    dataTransfer: { files },
+    preventDefault() {},
+    stopPropagation() {},
+    stopImmediatePropagation() {},
+  };
+  loaded.listeners.drop(event);
+  return new Promise((resolve) => {
+    const poll = () => {
+      if (loaded.tiddlers.has('$:/Import')) resolve();
+      else setTimeout(poll, 0);
+    };
+    poll();
+  });
+}
+
+function pdfFile(name) {
+  return { name, type: 'application/pdf', arrayBuffer: async () => new ArrayBuffer(8) };
+}
+
+test('two PDFs dropped together become one Lith with a page each', async () => {
+  // Two pages in each, so the page names have to tell the two documents' page ones apart rather
+  // than only being numbered once per board.
+  const loaded = loadPdfImportPlugin({ pages: [{}, {}] });
+
+  await dropFiles(loaded, [pdfFile('first.pdf'), pdfFile('second.pdf')]);
+
+  assert.deepEqual(loaded.errors, [], 'the import finishes without reporting an error');
+  assert.ok(loaded.tiddlers.get('first'), 'the selection lands under one container, named for its first file');
+  assert.equal(loaded.tiddlers.has('second'), false, 'and the second file does not get a Lith of its own');
+
+  const container = loaded.tiddlers.get('first');
+  assert.deepEqual(
+    container.fields['stream-list'].split(' '),
+    ['first-text', 'first-whiteboard'],
+    'one text extract and one board, in that order'
+  );
+
+  const document = JSON.parse(loaded.tiddlers.get('first-whiteboard').fields.text).document;
+  const pages = Object.values(document.pages);
+  assert.equal(pages.length, 4, 'every page of every document is on the one board');
+  assert.deepEqual(
+    pages.map((page) => page.name),
+    ['first 1', 'first 2', 'second 1', 'second 2'],
+    'the page menu names the file each page came from, so two page ones are told apart'
+  );
+  assert.equal(
+    loaded.tiddlers.get('first-whiteboard').fields['whiteboard-height'],
+    '1056px',
+    'a portrait page sets the height even when it is not the first one'
+  );
+
+  const text = loaded.tiddlers.get('first-text').fields.text;
+  assert.match(text, /^## first\n\n### first\.pdf/, 'the extract opens with the container, then the file');
+  assert.match(text, /### second\.pdf/, 'and each document is named before its words');
+  assert.equal(text.match(/#### Page 1/g).length, 2, 'both documents number their pages from their own first');
+  assert.equal(text.match(/#### Page 2/g).length, 2, 'and their own second');
+});
+
+test('pictures dropped together become one multi-page board rather than one board each', async () => {
+  const loaded = loadPdfImportPlugin();
+  const pictures = ['one.png', 'two.png', 'three.png'].map((name) => ({
+    name,
+    type: 'image/png',
+    arrayBuffer: async () => new ArrayBuffer(8),
+  }));
+
+  await dropFiles(loaded, pictures);
+
+  assert.deepEqual(loaded.errors, [], 'the import finishes without reporting an error');
+  assert.ok(loaded.tiddlers.get('one'), 'the pictures land under one container');
+  assert.deepEqual(
+    ['two', 'three'].filter((title) => loaded.tiddlers.has(title)),
+    [],
+    'a picture beside others is a page of that board, not a board of its own'
+  );
+  assert.equal(
+    loaded.tiddlers.has('one-text'),
+    false,
+    'pictures have no words to extract, so no empty text node is invented for them'
+  );
+
+  const document = JSON.parse(loaded.tiddlers.get('one-whiteboard').fields.text).document;
+  const pages = Object.values(document.pages);
+  assert.equal(pages.length, 3, 'one page per picture');
+  assert.deepEqual(
+    pages.map((page) => page.name),
+    ['one', 'two', 'three'],
+    'each page wears the name of the picture on it'
+  );
+  assert.deepEqual(
+    Object.values(document.assets).map((asset) => asset.fileName),
+    ['one.webp', 'two.webp', 'three.webp'],
+    'and each asset is the re-encoded picture, in the order the gesture carried them'
+  );
+  assert.equal(
+    loaded.tiddlers.get('one-whiteboard').fields['whiteboard-height'],
+    '540px',
+    'a wide picture sets the height, the same rule a single dropped picture takes'
+  );
+});
+
+// --- The launcher's gesture ---------------------------------------------------
+//
+// A selection dropped on the launcher has no open document to land in, so it travels as a list
+// and the mounted page imports it. The tests below are the handoff that list arrives on.
+async function settle(tiddlers) {
+  for (let attempt = 0; attempt < 200 && !tiddlers.has('$:/StoryList'); attempt++) {
+    await new Promise((resolve) => setTimeout(resolve, 0));
+  }
+}
+
+test('several files dropped on the launcher become one Lith with a page each', async () => {
+  const { context, tiddlers, errors } = loadPdfOpenRequest({
+    handoff: {
+      __LITHIC_IMPORT_FILES__: [
+        { filename: 'deck.pdf', base64: 'AAAA' },
+        { filename: 'photo.png', base64: 'AAAA' },
+      ],
+    },
+  });
+
+  context.exports.startup();
+  await settle(tiddlers);
+
+  assert.deepEqual(errors, [], 'the import finishes without reporting an error');
+  assert.equal(
+    context.window.__LITHIC_IMPORT_FILES__,
+    null,
+    'the gesture is taken off the window, so a later mount cannot import it again'
+  );
+  assert.ok(tiddlers.get('deck'), 'the document is named for the first file in the gesture');
+  assert.equal(tiddlers.has('photo'), false, 'and the picture beside it is a page, not a Lith of its own');
+
+  const document = JSON.parse(tiddlers.get('deck-whiteboard').fields.text).document;
+  assert.deepEqual(
+    Object.values(document.pages).map((page) => page.name),
+    ['deck', 'photo'],
+    'one board holding the PDF page and the picture, in the order they were dropped'
+  );
+  assert.match(tiddlers.get('deck-text').fields.text, /### deck\.pdf/, 'the words are extracted beside the board');
+  assert.equal(
+    tiddlers.get('$:/StoryList').fields.list,
+    'deck-whiteboard',
+    'and the board is what opens, the way a dropped PDF opens'
+  );
+});
+
+// One file on the gesture property is answered by the one-file route, so dropping a single PDF
+// and double-clicking it produce the same document rather than two layouts of one import.
+test('one file on the gesture route is read the way a double-click reads it', async () => {
+  const { context, tiddlers } = loadPdfOpenRequest({
+    handoff: { __LITHIC_IMPORT_FILES__: [{ filename: 'solo.pdf', base64: 'AAAA' }] },
+  });
+
+  context.exports.startup();
+  await settle(tiddlers);
+
+  assert.ok(tiddlers.get('solo'), 'the container is named for the file, as a double-click names it');
+  const document = JSON.parse(tiddlers.get('solo-whiteboard').fields.text).document;
+  assert.deepEqual(
+    Object.values(document.pages).map((page) => page.name),
+    ['Page 1'],
+    'the one-file page naming, not the merged one that names pages after their file'
+  );
+  assert.equal(tiddlers.has('solo-text'), true, 'and the words are extracted, which a single PDF always gets');
 });
