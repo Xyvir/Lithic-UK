@@ -1,0 +1,120 @@
+name: Mirror off GitHub
+
+# WHAT THIS IS FOR. GitHub is where the work happens and where every release ships from, which
+# makes it the one host whose loss has no copy behind it. This pushes the same branches and tags to
+# two independent forges on a daily clock, so a clone is always available somewhere that is not
+# GitHub.
+#
+# WHAT IT IS NOT. A mirror follows the source: a force-push, a rewritten history and a deleted tag
+# all propagate within one run. So this protects against GitHub disappearing, and not against a
+# mistake of ours. The dated `git bundle` snapshots in object storage are the other half, because
+# they are append-only and nothing rewrites them.
+#
+# WHY GITHUB PUSHES RATHER THAN THE FORGES PULLING. GitLab's pull mirroring is Premium and Ultimate
+# only, which is why `Mirror direction` is locked to Push on a free project, and Codeberg disabled
+# member-created pull mirrors for the reason this job exists at all. A pull mirror is also the wrong
+# tool for deletions: GitLab documents that a branch or tag deleted upstream is not reflected
+# downstream, and that a diverged branch stops the mirror updating. This job deletes them, because
+# `--mirror` makes the destination match the source rather than accumulate everything that ever
+# existed.
+#
+# WHY NO PUSH TRIGGER. `build-wiki.yml` already reacts to a push by staging a release review, and a
+# second job racing to write to a third host buys nothing: a mirror a day behind is still a mirror,
+# and a daily run is the schedule that cannot collide with a release.
+#
+# THE TWO CREDENTIALS, AND WHY THEY DIFFER. GitLab is pushed over SSH with a deploy key that has
+# write access: keys do not expire, where a GitLab.com personal access token is capped at 365 days
+# (400 only when an administrator flips a feature flag), and a backup credential that quietly dies
+# once a year is worse than one you never touch again. That key is scoped to this one project rather
+# than to the whole account. Codeberg is pushed over HTTPS with a Forgejo access token, because
+# Codeberg has no deploy-key equivalent and its tokens can be generated without an expiry date.
+#
+# Both steps are skipped, with a notice rather than a failure, while their secret is absent, so
+# adding the job before the credentials exist cannot turn `main` red.
+on:
+  schedule:
+    - cron: '40 4 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# One run at a time and no cancellation: two mirror pushes overlapping would have the second one
+# force-updating refs the first had just written, for no gain.
+concurrency:
+  group: mirror-off-github
+  cancel-in-progress: false
+
+jobs:
+  mirror:
+    runs-on: ubuntu-latest
+    env:
+      GITLAB_REMOTE: git@gitlab.com:tymills620/lithic-uk.git
+      CODEBERG_REMOTE: https://codeberg.org/Xyvir/Lithic-uk.git
+      # The token's owner, which Forgejo wants as the HTTP username. Not a secret: it is the account
+      # name on the public URL above.
+      CODEBERG_USER: Xyvir
+    steps:
+      - name: Check out every branch and tag
+        uses: actions/checkout@v4
+        with:
+          # Every branch and every tag, because the mirror is the whole repository and not this
+          # commit. 87 MB and 530 tags is nothing to a runner.
+          fetch-depth: 0
+          # The job pushes to two hosts with two other credentials and never to GitHub, so the
+          # token checkout leaves behind is neither needed nor wanted.
+          persist-credentials: false
+
+      # The destination is fed from a scratch bare repository rather than from the workspace, and
+      # the difference matters twice. `--mirror` pushes every ref the local repository holds, so a
+      # scratch one holding exactly branches and tags cannot accidentally carry `refs/pull/*` or a
+      # stash to a forge. And a checkout has one local branch, where this has all of them.
+      - name: Collect branches and tags
+        run: |
+          set -euo pipefail
+          git init --bare --quiet "$RUNNER_TEMP/out.git"
+          git --git-dir="$RUNNER_TEMP/out.git" remote add github "$GITHUB_WORKSPACE"
+          # `refs/remotes/origin/*` rather than `refs/*`: the checkout carries `origin/HEAD` as a
+          # symbolic ref, which this refspec would land on the destination as a branch called HEAD.
+          git --git-dir="$RUNNER_TEMP/out.git" fetch --quiet --prune github \
+            '+refs/remotes/origin/*:refs/heads/*' \
+            '+refs/tags/*:refs/tags/*'
+          git --git-dir="$RUNNER_TEMP/out.git" update-ref -d refs/heads/HEAD 2>/dev/null || true
+          echo "collected $(git --git-dir="$RUNNER_TEMP/out.git" for-each-ref refs/heads | wc -l) branch(es) and $(git --git-dir="$RUNNER_TEMP/out.git" for-each-ref refs/tags | wc -l) tag(s)"
+
+      - name: Mirror to GitLab over SSH
+        env:
+          GITLAB_MIRROR_KEY: ${{ secrets.GITLAB_MIRROR_KEY }}
+        run: |
+          set -euo pipefail
+          if [ -z "${GITLAB_MIRROR_KEY:-}" ]; then
+            echo "::notice::no GITLAB_MIRROR_KEY secret, so GitLab was not mirrored by this run"
+            exit 0
+          fi
+          # 600 because OpenSSH refuses a private key other accounts can read, and the trailing
+          # newline is added here rather than trusted to survive a secret: a secret stored without
+          # one is still a valid secret and stops being a valid key.
+          install -m 600 /dev/null "$RUNNER_TEMP/gitlab_key"
+          printf '%s\n' "$GITLAB_MIRROR_KEY" > "$RUNNER_TEMP/gitlab_key"
+          # Pinned host keys rather than `accept-new`: this is the one connection that decides where
+          # a copy of the repository goes, so an unverified host key is the wrong default here.
+          ssh-keyscan -t ed25519 gitlab.com > "$RUNNER_TEMP/known_hosts" 2>/dev/null
+          export GIT_SSH_COMMAND="ssh -i $RUNNER_TEMP/gitlab_key -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile=$RUNNER_TEMP/known_hosts"
+          git --git-dir="$RUNNER_TEMP/out.git" push --mirror "$GITLAB_REMOTE"
+
+      - name: Mirror to Codeberg over HTTPS
+        env:
+          CODEBERG_MIRROR_TOKEN: ${{ secrets.CODEBERG_MIRROR_TOKEN }}
+        run: |
+          set -euo pipefail
+          if [ -z "${CODEBERG_MIRROR_TOKEN:-}" ]; then
+            echo "::notice::no CODEBERG_MIRROR_TOKEN secret, so Codeberg was not mirrored by this run"
+            exit 0
+          fi
+          # The token is handed to git by a credential helper rather than written into the remote
+          # URL, because git prints the URL it failed on and a build log is not a place to keep a
+          # credential. The helper is expanded by git with this step's environment, so the secret
+          # itself never appears in the command line, in `ps` or in the log.
+          HELPER='!f() { echo "username=$CODEBERG_USER"; echo "password=$CODEBERG_MIRROR_TOKEN"; }; f'
+          git --git-dir="$RUNNER_TEMP/out.git" -c "credential.helper=$HELPER" \
+            push --mirror "$CODEBERG_REMOTE"
