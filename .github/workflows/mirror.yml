@@ -146,6 +146,10 @@ jobs:
             for batch in "$RUNNER_TEMP"/"$verb".*; do
               [ -e "$batch" ] || continue
               mapfile -t REFS < "$batch"
+              # `split` leaves an empty batch behind when the list it was given was empty, which is
+              # the normal case for deletions on a mirror that has nothing to remove, and
+              # `git push --delete` with no refs is a fatal error rather than a no-op.
+              [ "${#REFS[@]}" -gt 0 ] || continue
               echo "$verb: ${#REFS[@]} tag(s)"
               if [ "$verb" = delete ]; then
                 gitc push --force --delete "$CODEBERG_REMOTE" "${REFS[@]}"
