@@ -133,11 +133,34 @@ it becomes `export` in a new file, the page gains one import, and nothing else c
 (`positionCachePreview`, `trackListScroll`, `alignNewLithLabel`, 143 lines between them). Their
 bodies moved unchanged, verified line for line against `HEAD`.
 
-What is left in that class is small, and worth doing only if it can join a module that already
-exists rather than creating one: the external-link pair and `PROJECT_URL` (37 lines), the two size
-formatters and the filename clip (42), and the import routing constants and their two readers
-(59). The one snippet with no bindings at all, `fullBackupIcon`, is 14 lines of path data and is
-not worth a component of its own.
+Two more rounds of that class were taken, and together they are what the last 128 lines of the
+page were worth:
+
+| move | lines | where it landed |
+|---|---|---|
+| the import routing group | 86 | new module `import-kinds.ts` |
+| five type declarations | 12 | the modules that own their data |
+| `clipFilename` | 8 | `document-format.ts` |
+
+The import group is the one case where a new file is right, because its six declarations are one
+decision (a file is one of four kinds, and its name, its window key and its fallback follow from
+that): `ImportKind`, `importKindOf`, `importLithName`, `IMPORT_REQUEST`, `IMPORT_FALLBACK_NAME`,
+`importContainerTitle`. `importKindOf` and `importContainerTitle` keep their names and bodies;
+`importLithName` was a page-local function and is now exported.
+
+The types went to their owners instead of into one `launcher-types.ts`, on the grounds that a
+shared type file is how a hub is born: `TrailAnswer` belongs to `instance-trail.ts`,
+`HistoryEntry` and `HistoryRow` to `wiki-history.ts`, `CacheSearchEntry` to `cache-search.ts`.
+Two details cost a pass each. `HistoryRow` is `HistoryEntry & { inline?: boolean }`, so the pair
+moves together and the dependency should be declared first even though TypeScript hoists it. And a
+one line declaration is not a safe slice anchor, which is how `CacheSearchEntry` was nearly left
+behind in the page while its type was deleted.
+
+What is still in that class is small enough to leave alone until it has a home: the external-link
+pair and `PROJECT_URL` (37 lines), and the two size formatters (24). `openExternally` reads `mode`,
+which is an exported prop rather than a constant, so it is not free at all and it stays where the
+prop is. The one snippet with no bindings, `fullBackupIcon`, is 14 lines of path data and is not
+worth a component of its own.
 
 ## Why git and vault come last
 
