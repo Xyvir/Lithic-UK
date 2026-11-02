@@ -13,7 +13,8 @@
 //! declared. What each platform does with a row is that platform's business: an extension and a
 //! label become a ProgID here, a MIME type becomes a category there. The one field that is not
 //! a spelling of the same fact is `imported`, which names the types this app does not edit but
-//! converts into a Lith beside the file (a PDF's pages, a book's chapters, an image on a board).
+//! converts into a Lith beside the file (a PDF's pages, a book's chapters, a Word document's
+//! words and pictures, an image on a board).
 //! Windows and Linux register those like any other, because there the file is on a filesystem
 //! with the app's own write access beside it; the phone's filter leaves them out for the reason
 //! `patch-android.mjs` states, since a `content://` reference has no beside to write a Lith in.
@@ -153,7 +154,10 @@ mod tests {
             .filter(|association| association.imported)
             .map(|association| association.ext.as_str())
             .collect();
-        assert_eq!(imported, vec!["pdf", "epub", "png", "jpg", "jpeg", "bmp", "webp"]);
+        assert_eq!(
+            imported,
+            vec!["pdf", "epub", "docx", "png", "jpg", "jpeg", "bmp", "webp"]
+        );
         assert!(
             !imported.contains(&"lith"),
             "this app's own format is a document it edits, never one it imports"

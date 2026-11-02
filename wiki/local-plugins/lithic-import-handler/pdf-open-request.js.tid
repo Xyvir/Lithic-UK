@@ -36,6 +36,11 @@ A book is that gesture with the chapters as the answer. The launcher hands over 
 bytes, this module splits it into a chapter per spine document and opens the first one, and the
 chapters are Favorites in reading order so the sidebar is how a person reads on. The river holds
 one chapter rather than a whole book, which is the same reason a PDF opens as a board.
+
+A Word document is the same handoff with the words as the answer: the bytes travel because the
+launcher cannot unpack a `.docx`, the converter turns them into a container holding the words
+and the pictures, and the river holds the words. The board is one step away rather than in
+front, because a document is what a person opened.
 \*/
 (function(){
 
@@ -77,6 +82,11 @@ var IMAGE_REQUEST = "__LITHIC_IMAGE_IMPORT__";
 // page, so what opens is its first chapter, and the whole book is the chapter list rather than
 // one river.
 var EPUB_REQUEST = "__LITHIC_EPUB_IMPORT__";
+
+// The fourth handoff, for the last file this app converts rather than edits: a Word document.
+// The launcher cannot unpack a `.docx` (a zip of XML, and the reader for it lives in this wiki),
+// so it reads the bytes and hands them over, and what opens is the document's own words.
+var DOCX_REQUEST = "__LITHIC_DOCX_IMPORT__";
 
 // What each registered extension is, as the type a data URL has to declare for the browser's own
 // decoder to read the bytes. `jpg` and `jpeg` are one format under the two spellings it has.
@@ -334,6 +344,56 @@ function openRequestedBook(request) {
     });
 }
 
+/**
+ * The Word document itself: convert it, then open its words.
+ *
+ * The words are what a person opened, so the text node is what the river holds. The pictures are
+ * one step away in the container the import wrote, on the board beside them, which is the same
+ * shape a PDF arrives in: a container, a text node, and a board.
+ *
+ * A document that is all pictures has no words to open, so the board opens instead of an empty
+ * page. Nothing is saved here, for the reason no import saves: opening a file to read it is a
+ * view, and the save is what writes the Lith beside it.
+ */
+function openRequestedDocument(request) {
+    var base64 = request.base64;
+    var filename = request.filename || "document.docx";
+    var convert = $tw.lithic && $tw.lithic.convertDocxToTiddlers;
+    if (typeof base64 !== "string" || base64 === "" || typeof convert !== "function") {
+        return;
+    }
+
+    setProgress("Importing " + filename + " as a document...");
+    Promise.resolve(convert(base64ToArrayBuffer(base64), filename, setProgress)).then(function(tiddlers){
+        var words = "";
+        var board = "";
+        tiddlers.forEach(function(fields){
+            $tw.wiki.addTiddler(new $tw.Tiddler(
+                $tw.wiki.getCreationFields(),
+                $tw.wiki.getModificationFields(),
+                fields
+            ));
+            if (fields.type === BOARD_TYPE) {
+                board = fields.title;
+            } else if (fields.type === "text/x-markdown") {
+                words = fields.title;
+            }
+        });
+        clearProgress();
+        if (words) {
+            $tw.wiki.addTiddler(new $tw.Tiddler({
+                title: "$:/StoryList",
+                list: $tw.utils.stringifyList([words])
+            }));
+        } else if (board) {
+            openBoard(board);
+        }
+    }).catch(function(error){
+        clearProgress();
+        setProgress("Could not open the document: " + (error && error.message ? error.message : error));
+    });
+}
+
 exports.startup = function() {
     if (typeof window === "undefined") {
         return;
@@ -360,6 +420,13 @@ exports.startup = function() {
         // something a later mount in this window should find and import again.
         window[EPUB_REQUEST] = null;
         openRequestedBook(book);
+        return;
+    }
+    var word = window[DOCX_REQUEST];
+    if (word) {
+        // And the same rule again: a document taken off the window before anything else reads it.
+        window[DOCX_REQUEST] = null;
+        openRequestedDocument(word);
         return;
     }
     var board = window[BOARD_REQUEST];

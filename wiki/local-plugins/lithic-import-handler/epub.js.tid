@@ -174,7 +174,7 @@ function readEntries(bytes) {
 
 function inflate(data) {
     if (typeof DecompressionStream !== "function") {
-        return Promise.reject(new Error("This browser cannot unpack an EPUB"));
+        return Promise.reject(new Error("This browser cannot unpack this file"));
     }
     var stream = new Blob([data]).stream().pipeThrough(new DecompressionStream("deflate-raw"));
     return new Response(stream).arrayBuffer().then(function(buffer){
@@ -185,7 +185,7 @@ function inflate(data) {
 function entryBytes(bytes, entry) {
     var view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
     if (view.getUint32(entry.offset, true) !== 0x04034b50) {
-        return Promise.reject(new Error("The EPUB is damaged"));
+        return Promise.reject(new Error("The archive is damaged"));
     }
     var nameLength = view.getUint16(entry.offset + 26, true);
     var extraLength = view.getUint16(entry.offset + 28, true);
@@ -195,7 +195,7 @@ function entryBytes(bytes, entry) {
         return Promise.resolve(data);
     }
     if (entry.method !== METHOD_DEFLATE) {
-        return Promise.reject(new Error("The EPUB uses a compression this wiki cannot read"));
+        return Promise.reject(new Error("The archive uses a compression this wiki cannot read"));
     }
     return inflate(data);
 }
@@ -877,5 +877,15 @@ async function convertEpubToTiddlers(arrayBuffer, fileName, setProgress) {
 
 exports.convertEpubToTiddlers = convertEpubToTiddlers;
 exports.shortcode = shortcode;
+
+// The archive reader, published for the other format that is a zip holding XML: a Word
+// document is unpacked by exactly these functions, and a second reader for the same
+// container would be the same bugs written twice.
+exports.readEntries = readEntries;
+exports.entryBytes = entryBytes;
+exports.findEntry = findEntry;
+exports.readText = readText;
+exports.parseXml = parseXml;
+exports.resolveHref = resolveHref;
 
 })();

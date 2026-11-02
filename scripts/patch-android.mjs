@@ -143,7 +143,7 @@ const SHARE_FILTER = [
  *     provider with an opaque document id has no extension in its path and is not covered, which
  *     is a limit of the platform rather than of this filter: the type cannot save it either.
  *
- * Every row is claimed, including the `imported` ones (`pdf`, an `epub`, the images), and the two
+ * Every row is claimed, including the `imported` ones (`pdf`, an `epub`, a `docx`, the images), and the two
  * kinds differ only in what opens. A document this app edits opens where it says. A file it
  * converts opens in a new Lith with no file behind it, named the way its sibling would have been,
  * because a `content://` reference has no folder beside it for the import to be written into: the
@@ -639,6 +639,9 @@ function selfTest() {
     'claims the imported types as well, since a handed file opens in a Lith of its own',
     patchedManifest.includes('<data android:mimeType="application/pdf" />') &&
       patchedManifest.includes('<data android:mimeType="application/epub+zip" />') &&
+      patchedManifest.includes(
+        '<data android:mimeType="application/vnd.openxmlformats-officedocument.wordprocessingml.document" />'
+      ) &&
       patchedManifest.includes('<data android:mimeType="image/png" />') &&
       patchedManifest.includes('<data android:mimeType="image/jpeg" />') &&
       patchedManifest.includes('<data android:scheme="content" android:pathPattern=".*\\.pdf" />')

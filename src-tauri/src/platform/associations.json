@@ -9,6 +9,7 @@
     { "ext": "html", "label": "Lithic HTML", "mime": "text/html" },
     { "ext": "pdf", "label": "Lithic PDF", "mime": "application/pdf", "imported": true },
     { "ext": "epub", "label": "Lithic Book", "mime": "application/epub+zip", "imported": true },
+    { "ext": "docx", "label": "Lithic Word Document", "mime": "application/vnd.openxmlformats-officedocument.wordprocessingml.document", "imported": true },
     { "ext": "png", "label": "Lithic Image", "mime": "image/png", "imported": true },
     { "ext": "jpg", "label": "Lithic Image", "mime": "image/jpeg", "imported": true },
     { "ext": "jpeg", "label": "Lithic Image", "mime": "image/jpeg", "imported": true },

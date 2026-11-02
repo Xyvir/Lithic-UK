@@ -336,6 +336,7 @@ mod tests {
             "text/html",
             "application/pdf",
             "application/epub+zip",
+            "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
             "image/png",
             "image/jpeg",
             "image/bmp",
@@ -357,8 +358,9 @@ mod tests {
         assert_eq!(
             associations::mime_types(),
             "application/x-lith;text/markdown;text/plain;text/vnd.tiddlywiki;application/json;\
-             application/x-ipynb+json;text/html;application/pdf;application/epub+zip;image/png;\
-             image/jpeg;image/bmp;image/webp;"
+             application/x-ipynb+json;text/html;application/pdf;application/epub+zip;\
+             application/vnd.openxmlformats-officedocument.wordprocessingml.document;\
+             image/png;image/jpeg;image/bmp;image/webp;"
         );
         // And it is what the entry carries, rather than a list this test and the entry each
         // know separately.

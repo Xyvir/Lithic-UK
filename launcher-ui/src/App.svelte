@@ -4123,20 +4123,22 @@ import { backupFileName, collectInstanceBackup, mergeBookmarks, parseInstanceBac
   /**
    * The kinds of associated file this app imports rather than edits.
    *
-   * A PDF is rendered into pages, an EPUB is split into a chapter per spine document, and an
-   * image is drawn on a board. None is a document body, so each has to be told apart before
-   * anything reads it as text, and the three share everything after that: a Lith is written
-   * beside the file, the bytes travel to the engine, and the importer's own converter does the
-   * work there, so a double-click and a drop produce the same tiddlers.
+   * A PDF is rendered into pages, an EPUB is split into a chapter per spine document, a Word
+   * document becomes its words with the pictures on a board, and an image is drawn on a board.
+   * None is a document body, so each has to be told apart before anything reads it as text, and
+   * the four share everything after that: a Lith is written beside the file, the bytes travel to
+   * the engine, and the importer's own converter does the work there, so a double-click and a
+   * drop produce the same tiddlers.
    *
    * `jpg` is the same format as `jpeg` under the extension most cameras write, and both are
    * registered, so both have to arrive here.
    */
-  type ImportKind = 'pdf' | 'epub' | 'image';
+  type ImportKind = 'pdf' | 'epub' | 'docx' | 'image';
 
   function importKindOf(path: string): ImportKind | null {
     if (/\.pdf$/i.test(path)) return 'pdf';
     if (/\.epub$/i.test(path)) return 'epub';
+    if (/\.docx$/i.test(path)) return 'docx';
     if (/\.(png|jpe?g|bmp|webp)$/i.test(path)) return 'image';
     return null;
   }
@@ -4152,6 +4154,7 @@ import { backupFileName, collectInstanceBackup, mergeBookmarks, parseInstanceBac
   const IMPORT_REQUEST: Record<ImportKind, string> = {
     pdf: '__LITHIC_PDF_IMPORT__',
     epub: '__LITHIC_EPUB_IMPORT__',
+    docx: '__LITHIC_DOCX_IMPORT__',
     image: '__LITHIC_IMAGE_IMPORT__'
   };
 
@@ -4159,6 +4162,7 @@ import { backupFileName, collectInstanceBackup, mergeBookmarks, parseInstanceBac
   const IMPORT_FALLBACK_NAME: Record<ImportKind, string> = {
     pdf: 'document.pdf',
     epub: 'book.epub',
+    docx: 'document.docx',
     image: 'image.png'
   };
 
@@ -4173,7 +4177,7 @@ import { backupFileName, collectInstanceBackup, mergeBookmarks, parseInstanceBac
    */
   function importContainerTitle(path: string): string {
     const name = path.split(/[\\/]/).pop() || '';
-    return name.replace(/\.(?:pdf|png|jpe?g|bmp|webp)$/i, '');
+    return name.replace(/\.(?:pdf|epub|docx|png|jpe?g|bmp|webp)$/i, '');
   }
 
   /**
@@ -4234,7 +4238,7 @@ import { backupFileName, collectInstanceBackup, mergeBookmarks, parseInstanceBac
           // its own, from the recents list or a Mount, carries no container and leaves it exactly
           // as it says. A book has no container to force open: its sibling is the whole book, so
           // `open the EPUB` means the Lith as it says, at whatever chapter it was left on.
-          return await mountDiskPath(target.path, kind === 'epub' ? undefined : importContainerTitle(path), opts);
+          return await mountDiskPath(target.path, kind === 'epub' || kind === 'docx' ? undefined : importContainerTitle(path), opts);
         }
         await importIntoNewLith(path, target.path, kind);
         status = copy.status.mounted(fileName);
@@ -4306,24 +4310,24 @@ import { backupFileName, collectInstanceBackup, mergeBookmarks, parseInstanceBac
   }
 
   /**
-   * Start a Lith from a book dropped on the launcher.
+   * Start a Lith from a book or a Word document dropped on the launcher.
    *
-   * A book dropped here has no sibling to become: the launcher is the page before any document,
-   * so the drop starts one, named the way the Lith beside a file is named. The chapters are made
-   * by the importer inside the mounted document rather than here, so the bytes are read, encoded
-   * and left on the window for the engine's startup to take, which is what a double-clicked book
-   * does too (see `pdf-open-request.js`).
+   * Neither has a sibling to become: the launcher is the page before any document, so the drop
+   * starts one, named the way the Lith beside a file is named. The chapters, or the words and the
+   * pictures, are made by the importer inside the mounted document rather than here, so the bytes
+   * are read, encoded and left on the window for the engine's startup to take, which is what a
+   * double-clicked file does too (see `pdf-open-request.js`).
    */
-  async function openDroppedBook(file: File) {
+  async function openDroppedImport(file: File, kind: 'epub' | 'docx') {
     const bytes = new Uint8Array(await file.arrayBuffer());
-    // A chunk at a time rather than one character per byte: a book runs to megabytes, and 32 KB
-    // is under the argument count every browser accepts.
+    // A chunk at a time rather than one character per byte: a book or a document runs to
+    // megabytes, and 32 KB is under the argument count every browser accepts.
     let binary = '';
     for (let index = 0; index < bytes.length; index += 0x8000) {
       binary += String.fromCharCode(...bytes.subarray(index, index + 0x8000));
     }
-    (window as any)[IMPORT_REQUEST.epub] = { filename: file.name, base64: btoa(binary) };
-    const name = `${file.name.replace(/\.epub$/i, '')}_epub.lith`;
+    (window as any)[IMPORT_REQUEST[kind]] = { filename: file.name, base64: btoa(binary) };
+    const name = `${file.name.replace(new RegExp(`\\.${kind}$`, 'i'), '')}_${kind}.lith`;
     lithText = '';
     fileName = name;
     filePath = undefined;
@@ -4358,6 +4362,7 @@ import { backupFileName, collectInstanceBackup, mergeBookmarks, parseInstanceBac
     const queued: PendingTiddler[] = [];
     let wiki: File | null = null;
     let book: File | null = null;
+    let word: File | null = null;
     let unreadable = false;
     for (const file of Array.from(files)) {
       const lowerName = file.name.toLowerCase();
@@ -4385,6 +4390,10 @@ import { backupFileName, collectInstanceBackup, mergeBookmarks, parseInstanceBac
       } else if (lowerName.endsWith('.epub') && !book) {
         // One book at a time, for the same reason: a mount holds one document.
         book = file;
+      } else if (lowerName.endsWith('.docx') && !word) {
+        // A Word document is the same shape of gesture as a book: one at a time, and it opens
+        // rather than queues, because a document somebody dragged here is one they want to read.
+        word = file;
       }
     }
     if (queued.length > 0) {
@@ -4401,11 +4410,11 @@ import { backupFileName, collectInstanceBackup, mergeBookmarks, parseInstanceBac
       } catch (error) {
         mountError = error instanceof Error ? error.message : String(error);
       }
-    } else if (book) {
-      // A book dropped beside a page is not opened: the page is the document, and the second
-      // mount would replace it.
+    } else if (book || word) {
+      // A book or a document dropped beside a page is not opened: the page is the document, and
+      // the second mount would replace it.
       try {
-        await openDroppedBook(book);
+        await openDroppedImport((book || word) as File, book ? 'epub' : 'docx');
       } catch (error) {
         mountError = error instanceof Error ? error.message : String(error);
       }
