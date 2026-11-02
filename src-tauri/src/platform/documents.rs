@@ -162,12 +162,23 @@ pub fn create_download(folder: &Path, suggested_name: &str, text: &str) -> Resul
 /// name that must not be allowed to write outside the one folder this exists for. An empty name
 /// is a name this will not invent a folder from, and it gets the one word a download can always
 /// be called.
+///
+/// Either separator ends a component, on every system this is compiled for: the name arrives
+/// from a page rather than from the filesystem it will be written to, so what counts as a
+/// separator cannot be the host's answer. `Path::file_name` gives that host's answer, which is
+/// why a name carrying a Windows path reached a Linux runner whole and became a file named the
+/// path; the Rust gate is the only one that runs anywhere but Windows, so the difference sat
+/// unnoticed. `.` and `..` are folders rather than names and keep answering the fallback, as
+/// they did through `file_name`.
 fn download_base_name(suggested_name: &str) -> String {
-    Path::new(suggested_name)
-        .file_name()
-        .map(|name| name.to_string_lossy().into_owned())
-        .filter(|name| !name.trim().is_empty())
-        .unwrap_or_else(|| "download.lith".to_string())
+    let name = suggested_name
+        .rsplit(['/', '\\'])
+        .next()
+        .unwrap_or_default();
+    if name.trim().is_empty() || name == "." || name == ".." {
+        return "download.lith".to_string();
+    }
+    name.to_string()
 }
 
 /// `base` for the first copy, then the same name with the number a second copy takes.
