@@ -116,17 +116,46 @@ jobs:
           # credential. The helper is expanded by git with this step's environment, so the secret
           # itself never appears in the command line, in `ps` or in the log.
           HELPER='!f() { echo "username=$CODEBERG_USER"; echo "password=$CODEBERG_MIRROR_TOKEN"; }; f'
-          PUSH=(git --git-dir="$RUNNER_TEMP/out.git" -c "credential.helper=$HELPER" push --force)
-          # THE PUSH IS STAGED, and the first attempt is what taught us to stage it: one mirror push
-          # of the whole repository is 87 MB and 537 refs in a single request, and Codeberg's front
-          # end answered that with HTTP 504 seventy seconds in, mid-sideband, having accepted
-          # nothing at all. `main` carries nearly all of the object volume, so it travels alone;
-          # what follows is refs and objects that a forge can take quickly. Each request is its own
-          # chance at the timeout and each one is small enough to finish inside it.
-          "${PUSH[@]}" "$CODEBERG_REMOTE" 'refs/heads/main:refs/heads/main'
-          # The rest of the branches, and then the tags, pruned so that a branch or tag deleted here
-          # is deleted there. The wildcard is what makes `--prune` mean anything: handed an explicit
-          # ref it prunes nothing, and the mirror would rot back into the accumulate-everything
-          # shape this job exists to avoid.
-          "${PUSH[@]}" --prune "$CODEBERG_REMOTE" 'refs/heads/*:refs/heads/*'
-          "${PUSH[@]}" --prune "$CODEBERG_REMOTE" 'refs/tags/*:refs/tags/*'
+          gitc() { git --git-dir="$RUNNER_TEMP/out.git" -c "credential.helper=$HELPER" "$@"; }
+          # THE PUSH IS STAGED, and the first two attempts are what taught us to stage it. One mirror
+          # push of the whole repository is 87 MB and 537 refs in a single request, which Codeberg's
+          # front end answered with HTTP 504 seventy seconds in, mid-sideband, having accepted
+          # nothing. Staging `main` alone fixed that and then the tag push failed the same way at 522
+          # ref updates, so every request below is now sized to finish inside the gateway's patience.
+          # `main` carries nearly all of the object volume, and what follows is refs over objects the
+          # far side already has.
+          gitc push --force "$CODEBERG_REMOTE" 'refs/heads/main:refs/heads/main'
+          # The rest of the branches, pruned so that a branch deleted here is deleted there. The
+          # wildcard is what makes `--prune` mean anything: handed an explicit ref it prunes nothing.
+          gitc push --force --prune "$CODEBERG_REMOTE" 'refs/heads/*:refs/heads/*'
+          # THE TAGS GO IN BATCHES, and only the ones that are missing or moved. Asking the
+          # destination what it already holds turns a second and later run into no requests at all
+          # for the 522 tags that have not changed, where a wildcard push would resend all of them
+          # every day and earn the same 504 on the days the gateway is slow.
+          gitc ls-remote --tags --refs "$CODEBERG_REMOTE" | awk '{print $1" "$2}' | sort > "$RUNNER_TEMP/remote-tags.txt"
+          git --git-dir="$RUNNER_TEMP/out.git" for-each-ref --format='%(objectname) %(refname)' refs/tags | sort > "$RUNNER_TEMP/local-tags.txt"
+          comm -23 "$RUNNER_TEMP/local-tags.txt" "$RUNNER_TEMP/remote-tags.txt" | awk '{print $2}' > "$RUNNER_TEMP/tags-to-push.txt"
+          comm -13 "$RUNNER_TEMP/local-tags.txt" "$RUNNER_TEMP/remote-tags.txt" | awk '{print $2}' > "$RUNNER_TEMP/tags-to-delete.txt"
+          # A hundred per request: enough that a run is a handful of calls, few enough that a slow
+          # afternoon on somebody's forge does not turn into a lost push. The refspec is built pair
+          # by pair rather than with a pattern substitution, because bash does not expand `&` in
+          # `${refs[@]/%/:&}` and the resulting `refs/tags/x:` is not a copy but a DELETION.
+          send_tags() {
+            local file="$1" verb="$2"
+            split -l 100 "$file" "$RUNNER_TEMP/$verb." 2>/dev/null || true
+            for batch in "$RUNNER_TEMP"/"$verb".*; do
+              [ -e "$batch" ] || continue
+              mapfile -t REFS < "$batch"
+              echo "$verb: ${#REFS[@]} tag(s)"
+              if [ "$verb" = delete ]; then
+                gitc push --force --delete "$CODEBERG_REMOTE" "${REFS[@]}"
+              else
+                SPECS=()
+                for r in "${REFS[@]}"; do SPECS+=("$r:$r"); done
+                gitc push --force "$CODEBERG_REMOTE" "${SPECS[@]}"
+              fi
+            done
+          }
+          send_tags "$RUNNER_TEMP/tags-to-push.txt" push
+          send_tags "$RUNNER_TEMP/tags-to-delete.txt" delete
+          echo "tags: $(wc -l < "$RUNNER_TEMP/tags-to-push.txt") sent, $(wc -l < "$RUNNER_TEMP/tags-to-delete.txt") removed"
