@@ -40,11 +40,13 @@
   import { bootLegacyWiki, bootLegacyHtml, writeHandoff, type RemoteTarget } from './legacy-launcher-runtime';
   import { EMOJI_LIST, uploadInstanceIcon, clearInstanceIcon, emojiFaviconUrl, applyFavicon, bustIconCache, readInstanceEmoji, readServerEmoji, saveInstanceEmoji, clearInstanceEmoji, instanceMarkUrl } from './instance-icon';
   import { getRecentFiles, setRecentRows, mergeRecentRow, mergeRecentLists, isAnonymousRow, clearAllRecentFiles, purgeOldestCachesIfNeeded, saveSearchCache, forgetWikiCache, cachedWikiNames, idb, getSearchCacheText, readFetchedLith, rememberFetchedLith, listWikiVersions, wikiHasHistory, downloadWikiVersion, getDirtyState, clearDirtyState, listDirtyRecoveries, isWikiDriftedFromHead, isInstallDismissed, setInstallDismissed, recentDiskPath, type DirtyStateRecord, type DirtyRecovery, type RecentEntry, type RecentRow } from './storage';
-  import { isIosDevice, rememberRowKind, resolveStorageMode, storageModeOverride, browserOnlyMarkTitle, type StorageMode } from './browser-storage';
+  import { isIosDevice, rememberRowKind, browserOnlyMarkTitle, type StorageMode } from './browser-storage';
+  import { branchHasLocalSync, branchIndexDbOnly, branchIsSelfHost, branchShimBackend, branchShowBookmarks, branchStorageMode } from './branch-decisions';
   import { readBookmarkEntries, saveBookmark, removeBookmark, setBookmarkIcon, writeBookmarkList, refreshBookmarkIcon, verifyInstanceUrl, normalizeInstanceUrl, instanceLabel, type BookmarkEntry, type InstanceVerification } from './bookmarks';
   import { LOGIN_CHECK_LABELS, loginVerdict, loginVerdictFromError, type LoginCheckState, type LoginVerdict } from './login-check';
   import { copyDropNote, forgetInstanceCopy } from './instance-copy';
   import { offlineMode, looksUnreachable } from './offline-mode';
+  import { IMPORT_FALLBACK_NAME, IMPORT_REQUEST, importContainerTitle, importKindOf, importLithName, type ImportKind } from './import-kinds';
   import { alignNewLithLabel, positionCachePreview, trackListScroll } from './launcher-geometry';
   import { createStageBeat, type InstallPreflight, type StageBeat } from './launcher-stage';
   import PinEntry from './PinEntry.svelte';
@@ -55,8 +57,8 @@
   import { deleteRemoteFile, fetchRemoteFiles, fetchRemoteWiki, fetchRemoteWikiMeta, probeAppliance, probePatchApi, createLockHeartbeat, readRemoteLock, uploadRemoteFile, webdavUrl, resolveSessionId, lithUploadName, type WebdavFile } from './webdav';
   import { normalizeLithName } from './legacy-saver';
   import { serialFlashSupported } from './esp32-flash';
-  import { documentStem, runsInWebView, typedDocumentName } from './document-format';
-  import { searchCachedWikis } from './cache-search';
+  import { clipFilename, documentStem, runsInWebView, typedDocumentName } from './document-format';
+  import { searchCachedWikis, type CacheSearchEntry } from './cache-search';
   import { matchMarkup, showsForQuery, titleMatches, titleMarkup } from './name-match';
   import { cachedStamp, modifiedTitle } from './last-modified';
   import { topHits, type InstanceCacheRead, type InstanceReads } from './instance-search';
@@ -66,8 +68,8 @@ import { backupFileName, collectInstanceBackup, mergeBookmarks, parseInstanceBac
   import { copyText } from './clipboard';
   import { syncIndicator, shouldHeartbeat, healthFailure, verifiedAge, SYNC_PULSE_MS, type SyncIndicator, type HealthState } from './git-sync-health';
   import { gapCount, versionGap } from './history-gap';
-  import { unsavedFileName, utcStamp } from './wiki-history';
-  import { TRAIL_LIMIT, parseTrailCommits, type TrailCommit, type TrailRow, type TrailView } from './instance-trail';
+  import { unsavedFileName, utcStamp, type HistoryEntry, type HistoryRow } from './wiki-history';
+  import { TRAIL_LIMIT, parseTrailCommits, type TrailAnswer, type TrailCommit, type TrailRow, type TrailView } from './instance-trail';
   import { createServerRepo, disconnectServerSync, fetchServerSyncHistory, fetchServerSyncStatus, listServerRepos, pollServerDeviceToken, requestServerDeviceCode, revertServerSync, serverSyncIndicator, setupServerSync, type ServerSyncStatus } from './server-git-sync';
   import { serializeJsonToLith, parseLithToJSON } from './lithic-format';
   import { mergeCaptureIntoDocument } from './dirty-merge';
@@ -162,7 +164,7 @@ import { backupFileName, collectInstanceBackup, mergeBookmarks, parseInstanceBac
    * from every other distribution. It is what lets the install offer, which the desktop app
    * answers through Tauri, be answered here through the wire instead.
    */
-  const shimBackend = shimToken !== null;
+  const shimBackend = branchShimBackend(shimToken);
   /**
    * Whether the shim that served this page answered its command wire.
    *
@@ -188,29 +190,28 @@ import { backupFileName, collectInstanceBackup, mergeBookmarks, parseInstanceBac
    * page itself does, this flag covers in both backends, and the calls that still name one
    * backend say why at their call site.
    */
-  $: hasLocalSync = mode === 'tauri' || shimToken !== null;
+  $: hasLocalSync = branchHasLocalSync(mode, shimToken);
   /**
    * A shim that served this page answers `file` on every browser, because the shim itself
    * writes the path the desktop's chooser named: on Firefox the platform has no File System
    * Access API, yet this page does have a process that can write a real file. Everywhere else
    * the platform still decides. `shimToken` is read above and cannot change while the page lives.
    */
-  const storageMode: StorageMode = shimToken
-    ? 'file'
-    : resolveStorageMode(
-        mode,
-        typeof window === 'undefined' ? undefined : (window as unknown as { showSaveFilePicker?: unknown }),
-        typeof window === 'undefined' ? null : storageModeOverride(window.location.search),
-        // A process that cannot hold a document of its own gets the storage fallback, so the
-        // version history is the copy that can be taken off the device. Every platform this app
-        // ships to can hold one, the phone included; the branch is kept for a build that cannot.
-        documents
-      );
+  const storageMode: StorageMode = branchStorageMode({
+    mode,
+    shimToken,
+    search: typeof window === 'undefined' ? null : window.location.search,
+    pickerHost: typeof window === 'undefined' ? undefined : (window as unknown as { showSaveFilePicker?: unknown }),
+    // A process that cannot hold a document of its own gets the storage fallback, so the
+    // version history is the copy that can be taken off the device. Every platform this app
+    // ships to can hold one, the phone included; the branch is kept for a build that cannot.
+    documents
+  });
   /**
    * The index-db-only fallback: no Lith mounted here has a file behind it, so
    * its cached copy in this browser *is* the document.
    */
-  const indexDbOnly = storageMode === 'index-db';
+  const indexDbOnly = branchIndexDbOnly(storageMode);
   /**
    * Whether this page is an iPhone, asked once because it cannot change while the page lives.
    * The only platform read in the launcher, and `isIosDevice` explains why it has to exist.
@@ -232,7 +233,7 @@ import { backupFileName, collectInstanceBackup, mergeBookmarks, parseInstanceBac
    * minimum-friction path the rest of the desktop is offered. Telling the two apart is what
    * `isIosDevice` is for, and it is the reason this is written as a platform question.
    */
-  $: showBookmarks = mode === 'tauri' || (mode === 'webapp' && iosDevice);
+  $: showBookmarks = branchShowBookmarks(mode, iosDevice);
   /**
    * The instance's own mark, or null where there is no instance to read one from (see
    * `instanceMarkUrl`). Settled at boot like the storage mode, and for the same reason:
@@ -295,7 +296,32 @@ import { backupFileName, collectInstanceBackup, mergeBookmarks, parseInstanceBac
     const settle = () => { statusSettled = true; };
     cancelStatusDeadline = text === held
       ? armStatusHold({ settle })
-      : armStatusClear({ clear: () => { if (status === text) status = ''; } });
+      : armStatusClear({ clear: () => clearStatus(text) });
+  }
+
+  /**
+   * Say what the launcher just did, in the line every other sentence replaces.
+   *
+   * This is the page's one plain write to `status`. It stays a bare assignment because the
+   * deadline above already follows the text: the sentence's class is named at the site, and the
+   * timing is untouched. The four verbs are that naming, and they are the inventory a component
+   * boundary needs. `report` goes at the deadline, `reportHeld` stands, `reportAndRetire` keeps
+   * its own clock, `clearStatus` takes the line away. A surface handed `report` as `onReport`
+   * writes exactly the sentence the page wrote before it, with nothing else to thread.
+   */
+  function report(message: string): void {
+    status = message;
+  }
+
+  /**
+   * Take the line away, or stand one down only if it is still the sentence named.
+   *
+   * The text is for the callers that act on a timer (`reportAndRetire`, the install confirmation,
+   * the deadline's own clear): by the time one runs, a newer sentence may own the line, and an
+   * older report arriving late must never remove it.
+   */
+  function clearStatus(only?: string): void {
+    if (only === undefined || status === only) status = '';
   }
 
   /**
@@ -310,7 +336,7 @@ import { backupFileName, collectInstanceBackup, mergeBookmarks, parseInstanceBac
    */
   function reportHeld(message: string): void {
     heldStatus = message;
-    status = message;
+    report(message);
   }
 
   $: syncStatusDeadlines(status, heldStatus);
@@ -697,7 +723,7 @@ import { backupFileName, collectInstanceBackup, mergeBookmarks, parseInstanceBac
    */
   $: installOffer =
     (!browserOnly || shimUpdateHost || shimBackend) && installOfferReady && !(installDismissed && installState !== 'stale')
-      ? mode === 'tauri' || shimBackend
+      ? hasLocalSync
         ? installState === 'current' || !platformInstallable
           ? null
           : 'desktop'
@@ -797,7 +823,7 @@ import { backupFileName, collectInstanceBackup, mergeBookmarks, parseInstanceBac
         try {
           await tauriInvoke('open_external', { url: updateUrl });
         } catch (error) {
-          status = copy.install.openFailed(error instanceof Error ? error.message : String(error));
+          report(copy.install.openFailed(error instanceof Error ? error.message : String(error)));
         }
       } else {
         openExternally(updateUrl);
@@ -899,7 +925,7 @@ import { backupFileName, collectInstanceBackup, mergeBookmarks, parseInstanceBac
   async function installPwa() {
     const outcome = await promptPwaInstall();
     if (outcome === 'unavailable') {
-      status = copy.install.unavailable;
+      report(copy.install.unavailable);
     }
   }
 
@@ -1562,18 +1588,6 @@ import { backupFileName, collectInstanceBackup, mergeBookmarks, parseInstanceBac
   // reverting to the commit it replaced.
 
   /**
-   * One shape for the three backends' answers, so the state machine below is written once.
-   *
-   * The server's own read answers this already (`ServerTrail`); the two local backends are
-   * folded into it here. `no-repo` means a repository to have a trail in, and the dialog draws
-   * nothing at all for it. `[]` is a repository with no commits yet, which it says out loud.
-   */
-  type TrailAnswer =
-    | { state: 'trail'; commits: TrailCommit[] }
-    | { state: 'no-repo' }
-    | { state: 'failed'; message: string };
-
-  /**
    * What a revert answers, in the desktop app's own field names, whichever prong ran it.
    * `error` is the push's: the instance is back either way, and a backup that did not upload is
    * a second fact rather than a failed revert.
@@ -1798,7 +1812,7 @@ import { backupFileName, collectInstanceBackup, mergeBookmarks, parseInstanceBac
       // Best effort: a failure here is reported by the sync icon like any other
       // backup that did not land, and the file is still backed up by its next save.
       await tauriInvoke('git_sync_commit', { path: copied.path, message: `Add ${copied.name} from Lithic` }).catch(() => {});
-      status = copy.install.copied(copied.name, folder);
+      report(copy.install.copied(copied.name, folder));
     } catch (error) {
       mountError = error instanceof Error ? error.message : String(error);
     }
@@ -2556,7 +2570,7 @@ import { backupFileName, collectInstanceBackup, mergeBookmarks, parseInstanceBac
           installStatus = preflight.holder
             ? copy.install.blocked(preflight.holder)
             : copy.install.blockedUnknown;
-          status = installStatus;
+          report(installStatus);
           return;
         }
         installStatus = '';
@@ -2568,10 +2582,10 @@ import { backupFileName, collectInstanceBackup, mergeBookmarks, parseInstanceBac
       // and both of these are paths.
       installStatus = result.path;
       installState = 'current';
-      status = copy.install.installed(result.entry ?? result.path);
+      report(copy.install.installed(result.entry ?? result.path));
       // The status line animates while it has text; retire the message
       // once it has had a moment to be read.
-      setTimeout(() => { if (status.startsWith(copy.install.installedPrefix)) status = ''; }, 6000);
+      setTimeout(() => { if (status.startsWith(copy.install.installedPrefix)) clearStatus(); }, 6000);
       // The install has said all it has to say, and the folder the new copy landed in is open
       // in front of the user: this window is the older copy now, so it gets out of the way and
       // leaves them to launch the new one. Only where the folder was actually opened: a
@@ -2580,7 +2594,7 @@ import { backupFileName, collectInstanceBackup, mergeBookmarks, parseInstanceBac
       if (mode === 'tauri' && result.revealed) closeForInstall();
     } catch (error) {
       installStatus = copy.install.failed(error instanceof Error ? error.message : String(error));
-      status = installStatus;
+      report(installStatus);
     } finally {
       installBusy = false;
     }
@@ -2597,15 +2611,6 @@ import { backupFileName, collectInstanceBackup, mergeBookmarks, parseInstanceBac
   function closeForInstall(): void {
     void tauriInvoke('quit_launcher').catch(() => { /* the window is going either way */ });
   }
-  /**
-   * One cached wiki, as the list draws it.
-   *
-   * `lastModified` is when this device wrote that copy. It is the answer a row's hover shows
-   * wherever no process could name the file's own stamp (see `last-modified.ts`), which is
-   * every browser mount: the handle's permission has not been granted, and asking for it on a
-   * hover is a prompt nobody wanted.
-   */
-  type CacheSearchEntry = { name: string; text: string; sizeBytes: number; lastModified?: number | null };
   type CacheSearchMatch = { preview: string; title?: string };
 
   function formatCacheSize(bytes: number): string {
@@ -2631,19 +2636,6 @@ import { backupFileName, collectInstanceBackup, mergeBookmarks, parseInstanceBac
   }
 
   /**
-   * Shorten a wiki file name for the version-history title while keeping its
-   * extension visible (a 30+ char stem reads as `Long…name.lith` rather than
-   * losing the `.lith`). The full name stays available via the title tooltip.
-   */
-  function clipFilename(name: string, limit = 20): string {
-    if (name.length <= limit) return name;
-    const ext = name.match(/\.(?:html?|lith|json)$/i)?.[0] ?? '';
-    const stemLimit = limit - ext.length;
-    if (stemLimit <= 3) return name.slice(0, limit - 1) + '…';
-    return name.slice(0, stemLimit - 1) + '…' + ext;
-  }
-
-  /**
    * The grey line the history trail draws between two versions: how much later the row above
    * was saved than the row below it, in the one unit `versionGap` picks and this locale's own
    * decimal mark. Only the greatest unit is ever named, so one sentence covers a four second
@@ -2664,7 +2656,6 @@ import { backupFileName, collectInstanceBackup, mergeBookmarks, parseInstanceBac
   let fileStamps: Record<string, number> = {};
   let cacheSearchMatches: Record<string, CacheSearchMatch> = {};
   let cacheSearchRequest = 0;
-  type HistoryEntry = { id: string; ts: number; sizeBytes: number; isBase?: boolean; external?: boolean; lastModified: string };
   let showHistoryModal = false;
   let historyName = '';
   let historyEntries: HistoryEntry[] = [];
@@ -3220,7 +3211,7 @@ import { backupFileName, collectInstanceBackup, mergeBookmarks, parseInstanceBac
       // conflicts but stay below engine plumbing.
       pendingImports = mergePendingImports(pendingImports, dirty.tiddlers.map((tiddler) => ({ ...tiddler })));
       await clearDirtyState(safeName);
-      status = copy.status.recovering(dirty.tiddlers.length, safeName);
+      report(copy.status.recovering(dirty.tiddlers.length, safeName));
     } else if (decision === 'discard') {
       await clearDirtyState(safeName);
     }
@@ -3343,7 +3334,7 @@ import { backupFileName, collectInstanceBackup, mergeBookmarks, parseInstanceBac
         });
         if (!replace) {
           busy = false;
-          status = '';
+          clearStatus();
           return;
         }
       }
@@ -3371,7 +3362,7 @@ import { backupFileName, collectInstanceBackup, mergeBookmarks, parseInstanceBac
     if (!unwritten && tracksUnsavedEdits(name)) {
       if ((await prepareDirtyRecovery(safeName, dirtyAnswer)) === 'later') {
         busy = false;
-        status = copy.status.editsKept;
+        report(copy.status.editsKept);
         return;
       }
     }
@@ -3434,7 +3425,7 @@ import { backupFileName, collectInstanceBackup, mergeBookmarks, parseInstanceBac
 
   async function blankLith() {
     busy = true;
-    status = copy.status.loadingBlank;
+    report(copy.status.loadingBlank);
     try {
       await mountWiki('', 'new.lith');
     } catch (error) {
@@ -3478,7 +3469,7 @@ import { backupFileName, collectInstanceBackup, mergeBookmarks, parseInstanceBac
     const siteTitle = documentStem(safeName);
     showNewLithModal = false;
     busy = true;
-    status = copy.status.loadingBlank;
+    report(copy.status.loadingBlank);
     try {
       await mountWiki('', safeName, undefined, undefined, [{ title: '$:/SiteTitle', text: siteTitle }]);
     } catch (error) {
@@ -3507,10 +3498,10 @@ import { backupFileName, collectInstanceBackup, mergeBookmarks, parseInstanceBac
    */
   async function mountFromDisk() {
     if (mode === 'self-host') return uploadLithToServer();
-    busy = true; status = copy.status.opening;
+    busy = true; report(copy.status.opening);
     try {
       const picks = await files.openMany();
-      if (picks.length === 0) { status = ''; return; }
+      if (picks.length === 0) { clearStatus(); return; }
       if (picks.length === 1) {
         const [only] = picks;
         // The picker named the file; the bytes are read here, once, for the one Lith
@@ -3518,7 +3509,7 @@ import { backupFileName, collectInstanceBackup, mergeBookmarks, parseInstanceBac
         const text = await files.readText(only);
         lithText = text; fileName = only.name; filePath = only.path;
         await mountWiki(text, only.name, only.path, only.handle);
-        status = copy.status.mounted(only.name);
+        report(copy.status.mounted(only.name));
         return;
       }
       // In reverse, because every row goes to the head of the list: folding the last
@@ -3532,13 +3523,13 @@ import { backupFileName, collectInstanceBackup, mergeBookmarks, parseInstanceBac
       }
       // No full stop: the status line strips trailing punctuation, because the
       // activity dots sit right after it.
-      status = copy.status.added(picks.length);
+      report(copy.status.added(picks.length));
     } catch (error) {
       // A chooser the platform never drew is not a failure of a file: it is a page that cannot
       // ask for one, and the sentence that helps is the address this page is served from. The
       // `Opening` line goes with it, because nothing was ever being opened.
       const refused = refusedPicker(error);
-      if (refused) status = '';
+      if (refused) clearStatus();
       reportHeld(refused ?? copy.status.openFailed(error instanceof Error ? error.message : String(error)));
     }
     finally { busy = false; }
@@ -3560,13 +3551,13 @@ import { backupFileName, collectInstanceBackup, mergeBookmarks, parseInstanceBac
    * and the list the server answers with is how one of them is read next.
    */
   async function uploadLithToServer(): Promise<void> {
-    busy = true; status = copy.status.opening;
+    busy = true; report(copy.status.opening);
     try {
       const picks = await files.openMany();
       // A dismissed chooser is an answer, and the control has to come back: this branch used to
       // return with `busy` still set, which left the mount button disabled for the rest of the
       // session after nothing more than closing a dialog.
-      if (picks.length === 0) { status = ''; busy = false; return; }
+      if (picks.length === 0) { clearStatus(); busy = false; return; }
       // A Lith lands under the server's name for it, so everything said about the
       // uploads below (the replace question and the progress line) uses that name.
       const uploaded = picks.map((pick) => ({ ...pick, name: lithUploadName(pick.name) }));
@@ -3575,7 +3566,7 @@ import { backupFileName, collectInstanceBackup, mergeBookmarks, parseInstanceBac
         remoteFiles.some((file) => file.name.toLowerCase() === pick.name.toLowerCase())
       );
       if (clashes.length > 0) {
-        status = ''; busy = false;
+        clearStatus(); busy = false;
         const replace = await askConfirmation({
           title: clashes.length === 1 ? copy.status.replaceOne : copy.status.replaceMany,
           body: clashes.length === 1
@@ -3587,7 +3578,7 @@ import { backupFileName, collectInstanceBackup, mergeBookmarks, parseInstanceBac
         if (!replace) return;
         busy = true;
       }
-      status = copy.status.uploading(uploaded.map((pick) => pick.name));
+      report(copy.status.uploading(uploaded.map((pick) => pick.name)));
       for (const pick of uploaded) {
         await uploadRemoteFile(pick.name, await files.readText(pick));
       }
@@ -3596,7 +3587,7 @@ import { backupFileName, collectInstanceBackup, mergeBookmarks, parseInstanceBac
       if (uploaded.length > 1) {
         // A list, not a decision: the uploads are the work and the list below is how
         // one of them is opened, so nothing opens by itself here.
-        status = copy.status.uploaded(uploaded.length);
+        report(copy.status.uploaded(uploaded.length));
         return;
       }
       await openRemoteFile(uploaded[0].name);
@@ -3707,7 +3698,7 @@ import { backupFileName, collectInstanceBackup, mergeBookmarks, parseInstanceBac
     // to answer (`open-wiki-import.ts`).
     if (importIntoOpenWiki(payload, (window as any).$tw)) return;
     enqueuePending(payload);
-    status = copy.pending.sharedReady(payload.length);
+    report(copy.pending.sharedReady(payload.length));
   }
 
   /**
@@ -3774,25 +3765,6 @@ import { backupFileName, collectInstanceBackup, mergeBookmarks, parseInstanceBac
   }
 
   /**
-   * The Lith a file becomes when it is imported, named the way its sibling would have been.
-   *
-   * `<stem>_<extension>.lith`, which is `lith_sibling_of` in `lib.rs` spelled here: the extension
-   * stays in the name because the sibling of a PDF and the sibling of a picture are different
-   * documents, so a folder holding `foobar.pdf` beside `foobar.png` must not hand the second file
-   * the first file's board. The extension is carried through as the file writes it rather than
-   * folded, and a name with no extension is named for itself rather than trailing an underscore.
-   *
-   * The one difference is that no folder is involved: on a phone there is no beside to put it in,
-   * which is why this returns a name and not a path.
-   */
-  function importLithName(sourceName: string): string {
-    const name = sourceName.trim() || 'document';
-    const dot = name.lastIndexOf('.');
-    if (dot <= 0 || dot === name.length - 1) return `${name}.lith`;
-    return `${name.slice(0, dot)}_${name.slice(dot + 1)}.lith`;
-  }
-
-  /**
    * Import a file another app handed over into a new Lith with no file behind it yet.
    *
    * The same handoff `importIntoNewLith` makes, minus the sibling: the bytes are read through the
@@ -3809,7 +3781,7 @@ import { backupFileName, collectInstanceBackup, mergeBookmarks, parseInstanceBac
     fileName = name;
     filePath = undefined;
     await mountWiki('', name);
-    status = copy.status.mounted(name);
+    report(copy.status.mounted(name));
   }
 
   /**
@@ -3847,7 +3819,7 @@ import { backupFileName, collectInstanceBackup, mergeBookmarks, parseInstanceBac
     opts: { dirtyAnswer?: 'merge'; quietFail?: boolean } = {}
   ): Promise<boolean> {
     busy = true;
-    status = copy.status.openingRecent;
+    report(copy.status.openingRecent);
     try {
       const rawHandle = (recent as any).handle;
       const tauriPath = recentDiskPath(recent);
@@ -3861,13 +3833,13 @@ import { backupFileName, collectInstanceBackup, mergeBookmarks, parseInstanceBac
         const cached = isHtmlMonolithName(name) ? '' : await getSearchCacheText(name);
         const text = cached || (recent as any).text || '';
         await mountWiki(text, name, undefined, undefined, [], null, undefined, { dirtyAnswer: opts.dirtyAnswer });
-        status = copy.status.mounted(name);
+        report(copy.status.mounted(name));
         return true;
       }
       // A row with a disk path is read through whichever process can: the app's Rust bridge
       // under Tauri, the shim's wire when a shim served this page. A shim handle carries a
       // path and no `getFile`, so it belongs here rather than in the browser-handle block.
-      if ((mode === 'tauri' || shimToken !== null) && tauriPath) {
+      if (hasLocalSync && tauriPath) {
         return await mountDiskPath(tauriPath, undefined, opts);
       }
       if (mode === 'tauri' && !rawHandle?.getFile) {
@@ -3892,14 +3864,14 @@ import { backupFileName, collectInstanceBackup, mergeBookmarks, parseInstanceBac
         const file = await handle.getFile();
         const text = await file.text();
         await mountWiki(text, file.name, recentDiskPath(recent) ?? undefined, handle, [], null, undefined, { dirtyAnswer: opts.dirtyAnswer });
-        status = copy.status.mounted(file.name);
+        report(copy.status.mounted(file.name));
         return true;
       }
       if ((recent as any).text !== undefined) {
         lithText = (recent as any).text;
         fileName = (recent as any).name || 'untitled.lith';
         filePath = recentDiskPath(recent) ?? undefined;
-        status = copy.status.mounted(fileName);
+        report(copy.status.mounted(fileName));
         await mountWiki(lithText, fileName, filePath, undefined, [], null, undefined, { dirtyAnswer: opts.dirtyAnswer });
         return true;
       } else if (recentDiskPath(recent) && mode === 'tauri') {
@@ -3932,72 +3904,12 @@ import { backupFileName, collectInstanceBackup, mergeBookmarks, parseInstanceBac
   async function openTauriPath(path: string) {
     if (busy) return;
     busy = true;
-    status = copy.status.opening;
+    report(copy.status.opening);
     try {
       await mountDiskPath(path);
     } finally {
       busy = false;
     }
-  }
-
-  /**
-   * The kinds of associated file this app imports rather than edits.
-   *
-   * A PDF is rendered into pages, an EPUB is split into a chapter per spine document, a Word
-   * document becomes its words with the pictures on a board, and an image is drawn on a board.
-   * None is a document body, so each has to be told apart before anything reads it as text, and
-   * the four share everything after that: a Lith is written beside the file, the bytes travel to
-   * the engine, and the importer's own converter does the work there, so a double-click and a
-   * drop produce the same tiddlers.
-   *
-   * `jpg` is the same format as `jpeg` under the extension most cameras write, and both are
-   * registered, so both have to arrive here.
-   */
-  type ImportKind = 'pdf' | 'epub' | 'docx' | 'image';
-
-  function importKindOf(path: string): ImportKind | null {
-    if (/\.pdf$/i.test(path)) return 'pdf';
-    if (/\.epub$/i.test(path)) return 'epub';
-    if (/\.docx$/i.test(path)) return 'docx';
-    if (/\.(png|jpe?g|bmp|webp)$/i.test(path)) return 'image';
-    return null;
-  }
-
-  /**
-   * The window property each converter is handed on, one per kind.
-   *
-   * A window property rather than a tiddler, because the payload is a whole file and the store is
-   * not a place to carry one, and a separate key per kind because the engine reads one and never
-   * the others: one gesture is one file, and a startup that had to sniff the bytes would be
-   * guessing (see `pdf-open-request.js`, which takes each of these).
-   */
-  const IMPORT_REQUEST: Record<ImportKind, string> = {
-    pdf: '__LITHIC_PDF_IMPORT__',
-    epub: '__LITHIC_EPUB_IMPORT__',
-    docx: '__LITHIC_DOCX_IMPORT__',
-    image: '__LITHIC_IMAGE_IMPORT__'
-  };
-
-  /** The name each kind falls back to when a path carries none of its own. */
-  const IMPORT_FALLBACK_NAME: Record<ImportKind, string> = {
-    pdf: 'document.pdf',
-    epub: 'book.epub',
-    docx: 'document.docx',
-    image: 'image.png'
-  };
-
-  /**
-   * The container the import names after the file: its name without the extension.
-   *
-   * The importer derives its own titles from the file the same way (`paper.pdf` becomes a
-   * container `paper` holding `paper-text` and `paper-whiteboard`, and `photo.png` becomes
-   * `photo` holding `photo-whiteboard`), so this is that name and not a second rule. It travels
-   * with the mount so the engine can open the board under it when that file is what a person
-   * opened (see `openBoardFor`).
-   */
-  function importContainerTitle(path: string): string {
-    const name = path.split(/[\\/]/).pop() || '';
-    return name.replace(/\.(?:pdf|epub|docx|png|jpe?g|bmp|webp)$/i, '');
   }
 
   /**
@@ -4061,7 +3973,7 @@ import { backupFileName, collectInstanceBackup, mergeBookmarks, parseInstanceBac
           return await mountDiskPath(target.path, kind === 'epub' || kind === 'docx' ? undefined : importContainerTitle(path), opts);
         }
         await importIntoNewLith(path, target.path, kind);
-        status = copy.status.mounted(fileName);
+        report(copy.status.mounted(fileName));
         return true;
       }
       const result =
@@ -4076,7 +3988,7 @@ import { backupFileName, collectInstanceBackup, mergeBookmarks, parseInstanceBac
       fileName = result.name;
       filePath = result.path;
       await mountWiki(result.text, result.name, result.path, undefined, [], null, openBoardFor, { dirtyAnswer: opts.dirtyAnswer });
-      status = copy.status.mounted(result.name);
+      report(copy.status.mounted(result.name));
       return true;
     } catch (error) {
       if (!opts.quietFail) reportHeld(copy.status.openFailed(error instanceof Error ? error.message : String(error)));
@@ -4152,7 +4064,7 @@ import { backupFileName, collectInstanceBackup, mergeBookmarks, parseInstanceBac
     fileName = name;
     filePath = undefined;
     await mountWiki('', name);
-    status = copy.status.mounted(name);
+    report(copy.status.mounted(name));
   }
 
   async function handleDrop(event: DragEvent) {
@@ -4257,11 +4169,11 @@ import { backupFileName, collectInstanceBackup, mergeBookmarks, parseInstanceBac
       // wiki with the shared payload queued for injection.
       window.history.replaceState({}, document.title, window.location.pathname);
       pendingImports = payload;
-      status = copy.pending.sharedReady(payload.length);
+      report(copy.pending.sharedReady(payload.length));
       await blankLith();
     } else {
       mountError = copy.status.payloadFailed;
-      status = '';
+      clearStatus();
     }
   }
 
@@ -4272,7 +4184,7 @@ import { backupFileName, collectInstanceBackup, mergeBookmarks, parseInstanceBac
    * this mode is always the origin serving this page.
    */
   function isSelfHost(): boolean {
-    return mode === 'self-host';
+    return branchIsSelfHost(mode);
   }
 
   /**
@@ -4328,7 +4240,7 @@ import { backupFileName, collectInstanceBackup, mergeBookmarks, parseInstanceBac
     if (busy) return;
     busy = true;
     remoteError = '';
-    status = copy.status.openingName(name);
+    report(copy.status.openingName(name));
     // readRemoteLock is failure-tolerant by design: a lock check that cannot
     // run (or a stale/own lock) returns null, so the open proceeds normally.
     const lock = await readRemoteLock(name, resolveSessionId());
@@ -4337,7 +4249,7 @@ import { backupFileName, collectInstanceBackup, mergeBookmarks, parseInstanceBac
       // (claims no lock, installs no saver) instead of a yes/no prompt that
       // would otherwise silently overwrite their copy.
       busy = false;
-      status = '';
+      clearStatus();
       remoteCollision = { name, who: lock.user || '' };
       return;
     }
@@ -4353,7 +4265,7 @@ import { backupFileName, collectInstanceBackup, mergeBookmarks, parseInstanceBac
   async function mountRemoteFile(name: string, readOnly = false): Promise<void> {
     busy = true;
     remoteError = '';
-    status = copy.status.openingName(name);
+    report(copy.status.openingName(name));
     try {
       let text: string;
       let digest = '';
@@ -4402,10 +4314,10 @@ import { backupFileName, collectInstanceBackup, mergeBookmarks, parseInstanceBac
       activeRemote = { name, digest, api: patchApiAvailable && Boolean(digest) };
       if (readOnly) {
         stopLockHeartbeat();
-        status = copy.status.mountedReadOnly(name);
+        report(copy.status.mountedReadOnly(name));
       } else {
         await startLockHeartbeat(name);
-        status = activeRemote.api ? copy.status.mountedPatched(name) : copy.status.mounted(name);
+        report(activeRemote.api ? copy.status.mountedPatched(name) : copy.status.mounted(name));
       }
       await mountWiki(text, name, undefined, undefined, [], {
         fileName: name,
@@ -4441,7 +4353,7 @@ import { backupFileName, collectInstanceBackup, mergeBookmarks, parseInstanceBac
     showNewLithModal = false;
     remoteError = '';
     busy = true;
-    status = copy.status.creating(name);
+    report(copy.status.creating(name));
     try {
       await uploadRemoteFile(name, '');
       await refreshRemoteList();
@@ -4478,7 +4390,7 @@ import { backupFileName, collectInstanceBackup, mergeBookmarks, parseInstanceBac
     remoteError = '';
     remoteNotice = '';
     busy = true;
-    status = copy.status.deleting(name);
+    report(copy.status.deleting(name));
     try {
       await deleteRemoteFile(name);
       void fetch(`${webdavUrl(name)}.lock`, { method: 'DELETE' }).catch(() => {});
@@ -4486,7 +4398,7 @@ import { backupFileName, collectInstanceBackup, mergeBookmarks, parseInstanceBac
     } catch (error) {
       remoteError = copy.status.deleteFailed(name, error instanceof Error ? error.message : String(error));
     } finally {
-      status = '';
+      clearStatus();
       busy = false;
     }
   }
@@ -4818,21 +4730,6 @@ import { backupFileName, collectInstanceBackup, mergeBookmarks, parseInstanceBac
    * open across a recovery stops claiming edits it no longer has.
    */
   $: historyUnsavedTs = showHistoryModal ? historyDirty?.ts ?? dirtyEntries[historyName] ?? 0 : 0;
-  /**
-   * The trail's rows: this Lith's unsaved capture first, then its saves, newest first.
-   *
-   * The capture is a row rather than a notice beside the title because the list is where a
-   * reader looks for this Lith's states, and the wiki as it stands is one of them: edits no
-   * save has written yet, badged `live` beside the `full` and `step` rows they are not.
-   * Putting it in the list also gives it
-   * the trail's own grammar, so the chevron and the distance below it say how long the edits
-   * have been waiting since the save under them, and the row's own trailing control is the
-   * download every other row has: what it hands over is the capture, which is a real file even
-   * though it is not a version. The row is synthesised here instead of being stored, because
-   * it is not a version: no id, no bytes, and it disappears with the capture rather than ageing
-   * out of a capped list.
-   */
-  type HistoryRow = HistoryEntry & { inline?: boolean };
   // Each row's download mark, resolved here so the markup stays a plain loop, the way the
   // warning dialogs' rows resolve theirs.
   $: historyRows = (historyUnsavedTs
@@ -4856,7 +4753,7 @@ import { backupFileName, collectInstanceBackup, mergeBookmarks, parseInstanceBac
     const handle = (row as any).handle;
     if (handle && typeof handle.createWritable === 'function') return true;
     const path = recentDiskPath(row);
-    return Boolean(path) && (mode === 'tauri' || shimToken !== null);
+    return Boolean(path) && hasLocalSync;
   }
   /**
    * Which rung merging is on, and therefore what the disclosure can promise.
@@ -5516,7 +5413,7 @@ import { backupFileName, collectInstanceBackup, mergeBookmarks, parseInstanceBac
 
     const indexed: string[] = [];
     for (const [position, entry] of targets.entries()) {
-      status = copy.status.indexProgress(label, position + 1, targets.length, entry.name);
+      report(copy.status.indexProgress(label, position + 1, targets.length, entry.name));
       try {
         // Self-host reads through the patch API when it is there, because that read also
         // answers the digest: a rebuilt cache is then also the copy a later open mounts without
@@ -5589,8 +5486,8 @@ import { backupFileName, collectInstanceBackup, mergeBookmarks, parseInstanceBac
    * install confirmation is retired the same way, for the same reason.
    */
   function reportAndRetire(message: string, ms = 6000): void {
-    status = message;
-    setTimeout(() => { if (status === message) status = ''; }, ms);
+    report(message);
+    setTimeout(() => clearStatus(message), ms);
   }
 
   /**
@@ -5615,7 +5512,7 @@ import { backupFileName, collectInstanceBackup, mergeBookmarks, parseInstanceBac
     if (rebuildBusy) return;
     rebuildBusy = true;
     mountError = '';
-    status = copy.status.reindexing;
+    report(copy.status.reindexing);
     try {
       // Pass 1: re-list, replacing the list rather than patching it. That is
       // what lets one button do the job: the recent list is a *view* of what
@@ -5682,7 +5579,7 @@ import { backupFileName, collectInstanceBackup, mergeBookmarks, parseInstanceBac
       // usually a move or an unmounted drive, so it gets a say rather than a
       // silent disappearance.
       if (orphans.length > 0 && !(await promptRebuildOrphans(orphans))) {
-        status = copy.status.rebuildCancelled;
+        report(copy.status.rebuildCancelled);
         return;
       }
       // Confirmed: nothing about them is kept. Not the row, not the cached
@@ -5719,11 +5616,13 @@ import { backupFileName, collectInstanceBackup, mergeBookmarks, parseInstanceBac
       else for (const row of recentRows()) if (row.path) targets.push(row);
 
       const indexed = await indexRowsHere(targets, copy.status.reindexingLabel);
-      status = indexed > 0
-        ? copy.status.reindexed(indexed)
-        : copy.status.nothingToIndex;
+      report(
+        indexed > 0
+          ? copy.status.reindexed(indexed)
+          : copy.status.nothingToIndex
+      );
     } catch (error) {
-      status = '';
+      clearStatus();
       mountError = copy.status.reindexFailed(error instanceof Error ? error.message : String(error));
     } finally {
       rebuildBusy = false;
@@ -5766,7 +5665,7 @@ import { backupFileName, collectInstanceBackup, mergeBookmarks, parseInstanceBac
       if (decision === 'merge') {
         parsed = [...parsed, ...dirty.tiddlers.map((tiddler) => ({ ...tiddler }))];
         await clearDirtyState(name);
-        status = copy.status.recovering(dirty.tiddlers.length, name);
+        report(copy.status.recovering(dirty.tiddlers.length, name));
       } else if (decision === 'discard') {
         await clearDirtyState(name);
       }

@@ -323,3 +323,22 @@ export function isHistoryKey(key: string): boolean {
     isDeltaKey(key)
   );
 }
+
+export type HistoryEntry = { id: string; ts: number; sizeBytes: number; isBase?: boolean; external?: boolean; lastModified: string };
+
+/**
+ * The trail's rows: this Lith's unsaved capture first, then its saves, newest first.
+ *
+ * The capture is a row rather than a notice beside the title because the list is where a
+ * reader looks for this Lith's states, and the wiki as it stands is one of them: edits no
+ * save has written yet, badged `live` beside the `full` and `step` rows they are not.
+ * Putting it in the list also gives it
+ * the trail's own grammar, so the chevron and the distance below it say how long the edits
+ * have been waiting since the save under them, and the row's own trailing control is the
+ * download every other row has: what it hands over is the capture, which is a real file even
+ * though it is not a version. The row is synthesised here instead of being stored, because
+ * it is not a version: no id, no bytes, and it disappears with the capture rather than ageing
+ * out of a capped list.
+ */
+export type HistoryRow = HistoryEntry & { inline?: boolean };
+

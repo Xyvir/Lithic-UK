@@ -195,3 +195,15 @@ export function trailGapLabel(
 ): string {
   return later[gap.unit](gapCount(gap, localeTag));
 }
+
+/**
+ * One shape for the three backends' answers, so the state machine below is written once.
+ *
+ * The server's own read answers this already (`ServerTrail`); the two local backends are
+ * folded into it here. `no-repo` means a repository to have a trail in, and the dialog draws
+ * nothing at all for it. `[]` is a repository with no commits yet, which it says out loud.
+ */
+export type TrailAnswer =
+  | { state: 'trail'; commits: TrailCommit[] }
+  | { state: 'no-repo' }
+  | { state: 'failed'; message: string };
