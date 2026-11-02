@@ -162,6 +162,46 @@ which is an exported prop rather than a constant, so it is not free at all and i
 prop is. The one snippet with no bindings, `fullBackupIcon`, is 14 lines of path data and is not
 worth a component of its own.
 
+## The reporting seam, taken before the hubs
+
+`status` is the one hub every extracted surface needs, and 52 places in the page wrote it: 48 bare
+assignments and four guarded clears inside timers and conditionals. It is now four named verbs, and
+the variable itself is now assigned in two places, `report` and the guarded clear inside
+`clearStatus`:
+
+| verb | what it says | sites |
+|---|---|---|
+| `report(message)` | this is what just happened, gone at the deadline | 40 |
+| `reportHeld(message)` | this names something to act on, so it stands | 12 |
+| `reportAndRetire(message, ms)` | this gets its own clock | 2 |
+| `clearStatus(only?)` | say nothing, or stand a line down if it is still that sentence | 12 |
+
+**It changes no state.** `status`, `heldStatus`, `statusSettled` and `cancelStatusDeadline` are
+still the page's, the reactive `$: syncStatusDeadlines(status, heldStatus)` is untouched, and
+`status-lifetime.ts` is not touched at all. What moved is the vocabulary: a site now says which
+class of line it writes instead of leaving that to be inferred from what happens to it later.
+
+**It is name-only, and that was checked rather than asserted.** Every right hand side in `HEAD`
+was compared as a multiset against every `report(...)` argument. The one expression that does not
+appear on the other side is the empty string, which became `clearStatus()`: 40 report calls and 8
+clears account for all 48 assignments, and the four guarded clears became the two argument-taking
+calls and the two inline conditionals.
+
+**What it buys, exactly.** A component boundary needs one prop, `onReport={report}`, and no
+adapter: the callback is the page's own writer, so a surface lifted tomorrow reports what it
+reported yesterday. And the later move into a module or a store is one line inside `report`
+rather than fifty call sites, because the call sites already say `report(...)`.
+
+**What it does not buy.** No line count. The page grew by 27 lines, all of it the two functions and
+their docs, and the prop count of any surface is unchanged until that surface is actually lifted.
+It is a seam, not a saving: worth taking because the alternative is paying for it during the risky
+pass, where a rename of fifty sites is the kind of churn that hides a real change.
+
+**The redeclaration trap, for whoever moves this next.** `status` is shadowed by five locals of the
+same name in `App.svelte` (`const status = await readGitStatus(...)` and its four siblings), so a
+search and replace on the bare name silently damages those. The conversions above were anchored on
+statement position (start of line, or after `{ ` or `; `), which is the shape to keep.
+
 ## Why git and vault come last
 
 Not because they are big, but because their boundary is made of hubs:
