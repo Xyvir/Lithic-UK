@@ -116,5 +116,17 @@ jobs:
           # credential. The helper is expanded by git with this step's environment, so the secret
           # itself never appears in the command line, in `ps` or in the log.
           HELPER='!f() { echo "username=$CODEBERG_USER"; echo "password=$CODEBERG_MIRROR_TOKEN"; }; f'
-          git --git-dir="$RUNNER_TEMP/out.git" -c "credential.helper=$HELPER" \
-            push --mirror "$CODEBERG_REMOTE"
+          PUSH=(git --git-dir="$RUNNER_TEMP/out.git" -c "credential.helper=$HELPER" push --force)
+          # THE PUSH IS STAGED, and the first attempt is what taught us to stage it: one mirror push
+          # of the whole repository is 87 MB and 537 refs in a single request, and Codeberg's front
+          # end answered that with HTTP 504 seventy seconds in, mid-sideband, having accepted
+          # nothing at all. `main` carries nearly all of the object volume, so it travels alone;
+          # what follows is refs and objects that a forge can take quickly. Each request is its own
+          # chance at the timeout and each one is small enough to finish inside it.
+          "${PUSH[@]}" "$CODEBERG_REMOTE" 'refs/heads/main:refs/heads/main'
+          # The rest of the branches, and then the tags, pruned so that a branch or tag deleted here
+          # is deleted there. The wildcard is what makes `--prune` mean anything: handed an explicit
+          # ref it prunes nothing, and the mirror would rot back into the accumulate-everything
+          # shape this job exists to avoid.
+          "${PUSH[@]}" --prune "$CODEBERG_REMOTE" 'refs/heads/*:refs/heads/*'
+          "${PUSH[@]}" --prune "$CODEBERG_REMOTE" 'refs/tags/*:refs/tags/*'
