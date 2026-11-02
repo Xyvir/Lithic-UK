@@ -23,6 +23,15 @@
 //! before there is anything to compile. That is why the table is data rather than a `const` in
 //! this file, and why the script is told to fail loudly if a row it needs is missing.
 
+// The extension, the description and the own-icon decision are the Windows registration's
+// vocabulary: a ProgID needs all three. Linux asks this module for one line of MIME types, and
+// the phone asks for nothing at all, so three fields and `own_icon` are unread wherever
+// `windows.rs` is pruned. That is a fact about which platform is compiling rather than a
+// function that stopped being called, which is why the allowance is written as a cfg instead
+// of on each item: the mirror of `windows.rs`'s own `cfg_attr(windows, allow(dead_code))`, and
+// the reason the phone's-face gate, which fails on any message, stays green.
+#![cfg_attr(not(windows), allow(dead_code))]
+
 use std::sync::OnceLock;
 
 use serde::Deserialize;
