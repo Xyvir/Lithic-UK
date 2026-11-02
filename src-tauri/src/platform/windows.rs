@@ -487,17 +487,26 @@ pub fn register_file_associations(program: &Path) -> Result<(), String> {
 
 /// The icon another program already draws for an extension, ready to be repeated on ours.
 ///
-/// Two answers are worth having, in this order. The handler that currently opens the type is
+/// Three answers are worth having, in this order. The handler that currently opens the type is
 /// the mark the person recognises today, and while that handler is a Windows program the icon
 /// is effectively the system's own art. Failing that, the extension's own registered ProgID is
 /// what Windows considers the type to *be* before anybody has chosen an app for it, which is
-/// where the plain `imageres.dll` pictures for `.png` and `.jpg` come from.
+/// where the plain `imageres.dll` pictures for `.png` and `.jpg` come from. Failing that, the
+/// apps the shell lists as *able* to open the type, because an extension nobody has claimed in
+/// either sense still has a mark on every program that offers to open it.
+///
+/// That third source is what a Word document needs. `.docx` on a machine with an office suite
+/// installed but no default chosen resolves to `docx_auto_file`, the stub Windows invents for
+/// an extension nobody has registered, which has no icon to give; the person's document mark
+/// lives on the suite's own ProgID in `OpenWithProgids` (`ASC.Document.12`,
+/// `Word.Document.12`), and copying it is the difference between a folder of Word documents
+/// reading as what they are and every one of them wearing Lithic's own mark.
 ///
 /// A plain reference always beats an indirect one. An indirect `@{Package?ms-resource://...}`
 /// names the Store package's *version*, so it stops resolving the day that app updates, and it
 /// is worth using only where nothing better exists.
 /// Every icon worth trying for an extension, best first: the handler's, then the extension's
-/// own, with a plain reference ahead of an indirect one.
+/// own, then anything offering to open it, with a plain reference ahead of an indirect one.
 fn borrowed_icons(ext: &str) -> Vec<String> {
     if associations::own_icon(ext) {
         return Vec::new();
@@ -507,6 +516,9 @@ fn borrowed_icons(ext: &str) -> Vec<String> {
         icons.extend(icon_of(&progid));
     }
     if let Some(progid) = stock_handler(ext).filter(|progid| borrowable_progid(progid)) {
+        icons.extend(icon_of(&progid));
+    }
+    for progid in open_with_progids(ext) {
         icons.extend(icon_of(&progid));
     }
     // `false` sorts before `true`, and the sort is stable, so the handler's mark still wins
@@ -531,6 +543,41 @@ fn current_handler(ext: &str) -> Option<String> {
         .ok()?
         .get_value::<String, _>("ProgId")
         .ok()
+}
+
+/// The ProgIDs the shell lists as able to open an extension, in a stable order.
+///
+/// `OpenWithProgids` is the shell's own answer to "what can open this type", which is where a
+/// mark lives when nobody has claimed the type as their own: `.docx` names the install's office
+/// suite there even though `.docx` itself still resolves to a stub.
+fn open_with_progids(ext: &str) -> Vec<String> {
+    use winreg::enums::HKEY_CLASSES_ROOT;
+    use winreg::RegKey;
+    let path = format!(r".{}\OpenWithProgids", ext);
+    let Ok(key) = RegKey::predef(HKEY_CLASSES_ROOT).open_subkey(path) else {
+        return Vec::new();
+    };
+    let names = key
+        .enum_values()
+        .filter_map(|value| value.ok())
+        .map(|(name, _)| name);
+    borrowable_progids(names)
+}
+
+/// Those of a set of ProgID names that are worth asking for an icon, in a stable order.
+///
+/// Sorted rather than left in enumeration order, so two installs of the same machine agree on
+/// which mark a type wears, and filtered so this app's own ProgID and the shell's `*_auto_file`
+/// stubs are never asked: the first would write Lithic's mark back onto Lithic and the second
+/// has nothing to give.
+fn borrowable_progids(names: impl Iterator<Item = String>) -> Vec<String> {
+    let mut progids: Vec<String> = names
+        .filter(|name| borrowable_progid(name))
+        .map(|name| name.trim().to_string())
+        .collect();
+    progids.sort();
+    progids.dedup();
+    progids
 }
 
 /// The ProgID an extension is registered as, independent of who currently opens it.
@@ -971,6 +1018,28 @@ mod tests {
                 association.ext
             );
         }
+    }
+
+    /// Unlike the other two sources, this one is a set rather than a single answer, so it is
+    /// sorted to make two installs of one machine agree on which mark a type wears, and it is
+    /// filtered before anything is asked of it: registration appends this app's own ProgID to
+    /// that list, and copying it would write Lithic's mark back onto Lithic.
+    #[test]
+    fn only_the_apps_that_can_open_a_type_are_asked_for_its_mark() {
+        let names = [
+            "Lithic.docx",
+            "docx_auto_file",
+            " Word.Document.12",
+            "ASC.Document.12",
+            "ASC.Document.12",
+            "",
+        ];
+        let progids = borrowable_progids(names.iter().map(|name| name.to_string()));
+        assert_eq!(
+            progids,
+            vec!["ASC.Document.12", "Word.Document.12"],
+            "sorted, deduplicated, trimmed, and never this app's own ProgID"
+        );
     }
 
     /// A photograph's own icon is a file and an index, which keeps meaning the same thing on
