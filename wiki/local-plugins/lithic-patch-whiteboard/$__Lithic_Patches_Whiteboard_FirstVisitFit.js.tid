@@ -1,0 +1,217 @@
+title: $:/Lithic/Patches/Whiteboard/FirstVisitFit.js
+type: application/javascript
+module-type: startup
+
+/*\
+title: $:/Lithic/Patches/Whiteboard/FirstVisitFit.js
+type: application/javascript
+module-type: startup
+
+The first time a page is opened it is fitted to its content, not to the
+camera it was saved with.
+
+tldraw keeps a camera per page inside the document, so a board reopened on a
+page you once zoomed into comes back at that zoom. That is right for a page
+you have already read and wrong for one you have not: a freshly imported PDF
+opens at whatever the importer's own camera happened to be, at 100% on one
+corner of a sheet. So the first visit to a page in a session runs the board's
+own zoomToFit, and every later visit leaves the saved camera alone, which is
+what makes flipping back to a page you were working on land where you left it.
+
+Both ways in end in the same fact, which is why one tracker covers them: the
+layout's board selector loads a whole different document into the widget, and
+the page controls change the page within it, so watching the document and the
+page together catches a change of either.
+
+Only the fullscreen layout is tracked. An inline board in the story river is
+the same tiddler drawn small, and fitting there would spend the page's first
+visit on a 540px board and then open the layout zoomed out to fit a strip.
+
+The camera is moved through zoomToFit rather than recomputed here, so this is
+the same fit the View menu's Zoom to Fit performs, and it is saved the way any
+other camera change is.
+\*/
+(function(){
+"use strict";
+
+exports.name = "lithic-whiteboard-first-visit-fit";
+exports.platforms = ["browser"];
+exports.after = ["startup"];
+exports.synchronous = true;
+
+// The layout's own board, never an inline one from the story river.
+var BOARD_SELECTOR = ".tw-whiteboard-layout-container .tl-container";
+
+// A React re-mount can replace the app behind a container, so it is resolved
+// again now and then instead of being trusted for the life of the container.
+var RESOLVE_EVERY_FRAMES = 30;
+
+var appCache = new WeakMap();
+var appIds = new WeakMap();
+var nextAppId = 0;
+var boards = [];
+var visited = Object.create(null);
+var frameHandle = null;
+var frame = 0;
+
+var resolveApp = function(container, refresh) {
+	if(!refresh && appCache.has(container)) return appCache.get(container);
+	var key = Object.keys(container).filter(function(name) {
+		return name.indexOf("__reactFiber$") === 0 || name.indexOf("__reactInternalInstance$") === 0;
+	})[0];
+	if(!key) return null;
+	var found = null;
+	var walk = function(node) {
+		if(!node || found) return;
+		var value = node.memoizedProps && node.memoizedProps.value;
+		if(value && typeof value.zoomToFit === "function" && typeof value.changePage === "function") {
+			found = value;
+			return;
+		}
+		walk(node.child);
+		walk(node.sibling);
+	};
+	var fiber = container[key];
+	while(fiber && !found) {
+		walk(fiber);
+		fiber = fiber.return;
+	}
+	if(found) {
+		appCache.set(container, found);
+	} else {
+		appCache.delete(container);
+	}
+	return found;
+};
+
+// Which board a document is, for the purpose of remembering visits. A tldraw
+// document takes the tiddler's title as its name when it is saved, so that is
+// the title; the identity only has to tell two boards apart.
+var boardName = function(app) {
+	var document = app.document || {};
+	if(document.name) return document.name;
+	if(!appIds.has(app)) appIds.set(app, "board-" + (++nextAppId));
+	return appIds.get(app);
+};
+
+var pageKey = function(app) {
+	var state = app.appState || {};
+	return boardName(app) + "\u001f" + (state.currentPageId || "");
+};
+
+// A board that has not been laid out yet has no size, and a fit against the
+// wrong one is worse than no fit: a mount still settling measures its renderer
+// at whatever it happens to be for a frame, and fitting to that parks the
+// content in a corner at the minimum zoom. So the board is only fitted once
+// its renderer agrees with its container at a size the container has held for
+// two frames, which is the point the layout has stopped moving.
+var laidOut = function(board) {
+	var bounds = board.app.rendererBounds;
+	var container = board.container;
+	if(!bounds || !bounds.width || !bounds.height) return false;
+	if(Math.abs(bounds.width - container.clientWidth) > 2) return false;
+	if(Math.abs(bounds.height - container.clientHeight) > 2) return false;
+	var size = container.clientWidth + "x" + container.clientHeight;
+	if(board.size !== size) {
+		board.size = size;
+		return false;
+	}
+	return true;
+};
+
+var fit = function(board) {
+	var app = board.app;
+	if(!app || typeof app.zoomToFit !== "function") return true;
+	if(!laidOut(board)) return false;
+	try {
+		app.zoomToFit();
+	} catch (error) {
+		// A board whose camera cannot be moved keeps the one it loaded with,
+		// which is the behaviour this patch exists to change but never to
+		// break.
+	}
+	visited[board.key] = true;
+	return true;
+};
+
+var step = function() {
+	frameHandle = null;
+	frame++;
+	var live = [];
+	for(var i = 0; i < boards.length; i++) {
+		var board = boards[i];
+		if(!board.container.isConnected) continue;
+		if(frame % RESOLVE_EVERY_FRAMES === 0) {
+			var fresh = resolveApp(board.container, true);
+			if(fresh && fresh !== board.app) {
+				board.app = fresh;
+				board.key = null;
+			}
+		}
+		if(!board.app) {
+			board.app = resolveApp(board.container, false);
+		}
+		var key = board.app ? pageKey(board.app) : null;
+		if(key && key !== board.key) {
+			board.key = key;
+			board.pending = !visited[key];
+		}
+		if(board.pending && fit(board)) {
+			board.pending = false;
+		}
+		live.push(board);
+	}
+	boards = live;
+	if(boards.length) frameHandle = requestAnimationFrame(step);
+};
+
+var track = function() {
+	var containers = document.querySelectorAll(BOARD_SELECTOR);
+	for(var i = 0; i < containers.length; i++) {
+		var container = containers[i];
+		var known = false;
+		for(var j = 0; j < boards.length; j++) {
+			if(boards[j].container === container) {
+				known = true;
+				break;
+			}
+		}
+		if(known) continue;
+		boards.push({
+			container: container,
+			app: resolveApp(container, false),
+			key: null,
+			pending: false,
+		});
+	}
+	var live = [];
+	for(var k = 0; k < boards.length; k++) {
+		if(boards[k].container.isConnected) live.push(boards[k]);
+	}
+	boards = live;
+	if(boards.length && frameHandle === null) {
+		frameHandle = requestAnimationFrame(step);
+	}
+};
+
+exports.startup = function() {
+	if(typeof window === "undefined" || typeof document === "undefined") return;
+
+	// The layout mounts and unmounts its board as the reader moves between the
+	// story river and the whiteboard, so containers are found by watching the
+	// page rather than by looking once.
+	var scheduled = false;
+	var observer = new MutationObserver(function() {
+		if(scheduled) return;
+		scheduled = true;
+		setTimeout(function() {
+			scheduled = false;
+			track();
+		}, 25);
+	});
+	observer.observe(document.body, { childList: true, subtree: true });
+
+	track();
+};
+
+})();
