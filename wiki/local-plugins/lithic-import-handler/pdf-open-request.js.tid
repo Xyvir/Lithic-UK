@@ -41,6 +41,13 @@ A Word document is the same handoff with the words as the answer: the bytes trav
 launcher cannot unpack a `.docx`, the converter turns them into a container holding the words
 and the pictures, and the river holds the words. The board is one step away rather than in
 front, because a document is what a person opened.
+
+A gesture dropped on the launcher arrives as a list on one property rather than one file on one
+of them, because the panel holds the files until the person chooses a document to import them
+into. The list says which of the two the mount is: a Lith started from the gesture opens the
+board it just drew, the way a double-click does, and a Lith the person was already reading keeps
+its view while the engine's own import list names what arrived. Every kind here travels the same
+way, so a book or a Word document queued beside the pages is still the document it is.
 \*/
 (function(){
 
@@ -212,40 +219,107 @@ function base64ToArrayBuffer(base64) {
 }
 
 /**
- * The PDF itself: convert it and open the board it produced.
+ * Add a converted document to the store and say what a page could show of it.
+ *
+ * Converting and opening are two decisions, not one, and this is the line between them. A PDF
+ * the app was handed opens its board, because that is what a double-click on a PDF is for. The
+ * same pages arriving in a Lith the person was already reading must not take the screen over, so
+ * the titles come back rather than being acted on here, and the containers are named separately:
+ * a child with a parent is part of a document, and a child without one is the document.
+ */
+function addDocument(tiddlers) {
+    var opened = { board: "", words: "", entry: "", entries: [] };
+    (tiddlers || []).forEach(function(fields){
+        $tw.wiki.addTiddler(new $tw.Tiddler(
+            $tw.wiki.getCreationFields(),
+            $tw.wiki.getModificationFields(),
+            fields
+        ));
+        if (!fields.parent) {
+            opened.entries.push(fields.title);
+        }
+        if (fields.type === BOARD_TYPE) {
+            opened.board = fields.title;
+        } else if (fields.type === "text/x-markdown") {
+            opened.words = fields.title;
+        }
+    });
+    return opened;
+}
+
+/** What two converted documents amount to when one gesture carried both. */
+function mergeOpened(into, from) {
+    if (!from) {
+        return into;
+    }
+    into.board = from.board || into.board;
+    into.words = from.words || into.words;
+    into.entry = from.entry || into.entry;
+    into.entries = into.entries.concat(from.entries || []);
+    return into;
+}
+
+/** Hand the story river one tiddler, which is how a book and a document are opened. */
+function showInRiver(titles) {
+    if (!titles || !titles.length) {
+        return;
+    }
+    $tw.wiki.addTiddler(new $tw.Tiddler({
+        title: "$:/StoryList",
+        list: $tw.utils.stringifyList(titles)
+    }));
+}
+
+/**
+ * Which converter an entry in the queued gesture wants, read from its own name.
+ *
+ * The launcher's `importKindOf` is the same four kinds, and the name is the only thing either
+ * side needs to agree on: the entry carries the file it came from, so a property beside it
+ * cannot come to disagree with the bytes.
+ */
+function kindOfFile(name) {
+    if (/\.pdf$/i.test(name)) {
+        return "pdf";
+    }
+    if (/\.epub$/i.test(name)) {
+        return "epub";
+    }
+    if (/\.docx$/i.test(name)) {
+        return "docx";
+    }
+    return "image";
+}
+
+/**
+ * The PDF itself, converted.
  *
  * The tiddlers live in the mounted document and nowhere else, which is the point: the gesture
  * is opening a PDF, and a file left on disk for every look is clutter. The first save writes
  * them to the sibling the launcher named, and never back to the PDF.
  */
-function openRequestedPdf(request) {
+function importPdf(request) {
     var base64 = request.base64;
     var filename = request.filename || "document.pdf";
     var convert = $tw.lithic && $tw.lithic.convertPdfToTiddlers;
     if (typeof base64 !== "string" || base64 === "" || typeof convert !== "function") {
-        return;
+        return Promise.resolve(null);
     }
-
-    Promise.resolve(convert(base64ToArrayBuffer(base64), filename, setProgress)).then(function(tiddlers){
-        var whiteboard = null;
-        tiddlers.forEach(function(fields){
-            $tw.wiki.addTiddler(new $tw.Tiddler(
-                $tw.wiki.getCreationFields(),
-                $tw.wiki.getModificationFields(),
-                fields
-            ));
-            if (fields.type === BOARD_TYPE) {
-                whiteboard = fields.title;
-            }
-        });
+    return Promise.resolve(convert(base64ToArrayBuffer(base64), filename, setProgress)).then(function(tiddlers){
         clearProgress();
-        if (whiteboard) {
+        return addDocument(tiddlers);
+    });
+}
+
+/** A PDF the app was handed: convert it, and open the board it produced. */
+function openRequestedPdf(request) {
+    importPdf(request).then(function(opened){
+        if (opened && opened.board) {
             // The board is the point of the gesture, so it is what opens. The container and
             // its extracted text stay in the wiki beside it, and a PDF is opened to be
             // written on, so a double-click lands in the full screen layout rather than on a
             // tiddler in the river, the way the Fullscreen Whiteboard page control and a
             // stream node's handle land there.
-            openBoard(whiteboard);
+            openBoard(opened.board);
         }
     }).catch(function(error){
         clearProgress();
@@ -275,33 +349,27 @@ function openRequestedBoard(board) {
  * is left unsaved for the same reason the PDF's pages are: looking at a picture is not a
  * reason to write a file, and the save is.
  */
-function openRequestedImage(request) {
+function importImage(request) {
     var base64 = request.base64;
     var filename = request.filename || "image.png";
     var convert = $tw.lithic && $tw.lithic.convertImageToTiddlers;
     if (typeof base64 !== "string" || base64 === "" || typeof convert !== "function") {
-        return;
+        return Promise.resolve(null);
     }
-
     setProgress("Drawing " + filename + " on a whiteboard...");
-    Promise.resolve(convert({
+    return Promise.resolve(convert({
         name: filename,
         dataUri: dataUrlOf(filename, base64)
     })).then(function(tiddlers){
-        var board = "";
-        tiddlers.forEach(function(fields){
-            $tw.wiki.addTiddler(new $tw.Tiddler(
-                $tw.wiki.getCreationFields(),
-                $tw.wiki.getModificationFields(),
-                fields
-            ));
-            if (fields.type === BOARD_TYPE) {
-                board = fields.title;
-            }
-        });
         clearProgress();
-        if (board) {
-            openBoard(board);
+        return addDocument(tiddlers);
+    });
+}
+
+function openRequestedImage(request) {
+    importImage(request).then(function(opened){
+        if (opened && opened.board) {
+            openBoard(opened.board);
         }
     }).catch(function(error){
         clearProgress();
@@ -319,30 +387,30 @@ function openRequestedImage(request) {
  * Nothing is saved here, for the same reason a PDF's pages are not: opening a book to read it is
  * a view of that file, and the save the person presses is what writes the Lith beside it.
  */
-function openRequestedBook(request) {
+function importBook(request) {
     var base64 = request.base64;
     var filename = request.filename || "book.epub";
     var convert = $tw.lithic && $tw.lithic.convertEpubToTiddlers;
     if (typeof base64 !== "string" || base64 === "" || typeof convert !== "function") {
-        return;
+        return Promise.resolve(null);
     }
-
     setProgress("Importing " + filename + " as a book...");
-    Promise.resolve(convert(base64ToArrayBuffer(base64), filename, setProgress)).then(function(book){
-        var entry = book.entry;
-        book.tiddlers.forEach(function(fields){
-            $tw.wiki.addTiddler(new $tw.Tiddler(
-                $tw.wiki.getCreationFields(),
-                $tw.wiki.getModificationFields(),
-                fields
-            ));
-        });
+    return Promise.resolve(convert(base64ToArrayBuffer(base64), filename, setProgress)).then(function(book){
+        var opened = addDocument(book.tiddlers);
         clearProgress();
-        if (entry) {
-            $tw.wiki.addTiddler(new $tw.Tiddler({
-                title: "$:/StoryList",
-                list: $tw.utils.stringifyList([entry])
-            }));
+        opened.entry = book.entry || "";
+        // A chapter has no parent, so every chapter of the book counts as a container above.
+        // What a merge reports is the chapter it was entered at, which is the one title a person
+        // needs to find the book again.
+        opened.entries = opened.entry ? [opened.entry] : [];
+        return opened;
+    });
+}
+
+function openRequestedBook(request) {
+    importBook(request).then(function(opened){
+        if (opened && opened.entry) {
+            showInRiver([opened.entry]);
         }
     }).catch(function(error){
         clearProgress();
@@ -361,38 +429,35 @@ function openRequestedBook(request) {
  * page. Nothing is saved here, for the reason no import saves: opening a file to read it is a
  * view, and the save is what writes the Lith beside it.
  */
-function openRequestedDocument(request) {
+function importDocument(request) {
     var base64 = request.base64;
     var filename = request.filename || "document.docx";
     var convert = $tw.lithic && $tw.lithic.convertDocxToTiddlers;
     if (typeof base64 !== "string" || base64 === "" || typeof convert !== "function") {
-        return;
+        return Promise.resolve(null);
     }
-
     setProgress("Importing " + filename + " as a document...");
-    Promise.resolve(convert(base64ToArrayBuffer(base64), filename, setProgress)).then(function(tiddlers){
-        var words = "";
-        var board = "";
-        tiddlers.forEach(function(fields){
-            $tw.wiki.addTiddler(new $tw.Tiddler(
-                $tw.wiki.getCreationFields(),
-                $tw.wiki.getModificationFields(),
-                fields
-            ));
-            if (fields.type === BOARD_TYPE) {
-                board = fields.title;
-            } else if (fields.type === "text/x-markdown") {
-                words = fields.title;
-            }
-        });
+    return Promise.resolve(convert(base64ToArrayBuffer(base64), filename, setProgress)).then(function(tiddlers){
         clearProgress();
-        if (words) {
-            $tw.wiki.addTiddler(new $tw.Tiddler({
-                title: "$:/StoryList",
-                list: $tw.utils.stringifyList([words])
-            }));
-        } else if (board) {
-            openBoard(board);
+        return addDocument(tiddlers);
+    });
+}
+
+/**
+ * A Word document the app was handed: convert it, then open its words.
+ *
+ * The words are what a person opened, so the text node is what the river holds. A document that
+ * is all pictures has no words to open, so the board opens instead of an empty page.
+ */
+function openRequestedDocument(request) {
+    importDocument(request).then(function(opened){
+        if (!opened) {
+            return;
+        }
+        if (opened.words) {
+            showInRiver([opened.words]);
+        } else if (opened.board) {
+            openBoard(opened.board);
         }
     }).catch(function(error){
         clearProgress();
@@ -406,80 +471,117 @@ function containerNameOf(filename) {
 }
 
 /**
- * A gesture that carried several pictures and PDFs, as the one document they were meant to be.
+ * The queued gesture as `{ files, openBoard }`, whichever shape the launcher left.
  *
- * The files are a folder of scans, a deck delivered as one PDF per slide, or a page beside the
- * pictures of it. Each becomes a page of one board, in the order the gesture carried them, and
- * the words of the PDFs become one text extract under the container the importer names.
- *
- * One file travels on this same property and is answered by the one-file readers above, so a
- * drop of a single PDF and a double-click on that PDF cannot produce different documents.
+ * A bare list is what this property used to carry, and it still means what it always did: the
+ * mount exists for those files, so the board they draw is what opens.
  */
-function openRequestedFiles(files) {
-    if (!Array.isArray(files) || files.length === 0) {
-        return;
+function normalizeGesture(value) {
+    if (Array.isArray(value)) {
+        return { files: value, openBoard: true };
     }
-    if (files.length === 1) {
-        var only = files[0];
-        if (!only || typeof only.base64 !== "string") {
-            return;
-        }
-        if (/\.pdf$/i.test(only.filename || "")) {
-            openRequestedPdf(only);
-        } else {
-            openRequestedImage(only);
-        }
-        return;
-    }
+    return {
+        files: Array.isArray(value && value.files) ? value.files : [],
+        openBoard: !(value && value.openBoard === false)
+    };
+}
 
+/**
+ * A gesture the launcher queued, as the one document it was meant to be.
+ *
+ * Pictures and PDFs share one board, every page in the order the gesture carried them, and the
+ * words of the PDFs become one text extract under the container the importer names. A book and a
+ * Word document are documents of their own, because a chapter is not a page: the same selection
+ * dropped into an open wiki becomes the same three shapes, through the same readers.
+ *
+ * One file on this list is answered by the one-file importer, so a drop of a single PDF and a
+ * double-click on that PDF cannot produce different documents.
+ *
+ * `openBoard` is the launcher's answer to what the mount is for. A document started from the
+ * gesture opens the board it just drew, the way a dropped PDF always has; a Lith the person
+ * chose to import into keeps the view they were already reading, so the engine's own import
+ * list is what says the pages arrived.
+ */
+function openRequestedFiles(queued) {
+    var files = Array.isArray(queued.files) ? queued.files.filter(function(file) {
+        return file && typeof file.base64 === "string";
+    }) : [];
+    if (!files.length) {
+        return;
+    }
+    var open = queued.openBoard;
     var readers = $tw.lithic || {};
     var merge = readers.mergeDocumentTiddlers;
     if (typeof readers.readPdfPages !== "function" || typeof readers.readPicturePage !== "function" || typeof merge !== "function") {
         return;
     }
 
-    setProgress("Importing " + files.length + " files...");
+    var entries = files.map(function(file) {
+        var name = file.filename || "file";
+        return { file: file, name: name, kind: kindOfFile(name) };
+    });
+    var graphics = entries.filter(function(entry) {
+        return entry.kind === "pdf" || entry.kind === "image";
+    });
+
+    setProgress("Importing " + files.length + (files.length === 1 ? " file..." : " files..."));
     (async function() {
-        var documents = [];
-        for (var i = 0; i < files.length; i++) {
-            var file = files[i];
-            if (!file || typeof file.base64 !== "string") {
-                continue;
-            }
-            var name = file.filename || "file";
-            if (/\.pdf$/i.test(name)) {
-                var read = await readers.readPdfPages(base64ToArrayBuffer(file.base64), name, setProgress);
-                documents.push({ title: containerNameOf(name), fileName: name, pages: read.pages, texts: read.texts });
-            } else {
-                // A picture this browser cannot draw is left out rather than failing the
-                // gesture: the pages that did arrive are still worth having.
-                var page = await readers.readPicturePage({ name: name, dataUri: dataUrlOf(name, file.base64) });
-                if (page) {
-                    documents.push({ title: containerNameOf(name), fileName: name, pages: [page], texts: [] });
+        var opened = { board: "", words: "", entry: "", entries: [] };
+        if (graphics.length === 1) {
+            // The one-file route, so a single file on this list is the document a double-click
+            // on it makes rather than a merged board of one page.
+            var only = graphics[0];
+            opened = mergeOpened(opened, only.kind === "pdf" ? await importPdf(only.file) : await importImage(only.file));
+        } else if (graphics.length > 1) {
+            var documents = [];
+            for (var i = 0; i < graphics.length; i++) {
+                var entry = graphics[i];
+                if (entry.kind === "pdf") {
+                    var read = await readers.readPdfPages(base64ToArrayBuffer(entry.file.base64), entry.name, setProgress);
+                    documents.push({ title: containerNameOf(entry.name), fileName: entry.name, pages: read.pages, texts: read.texts });
+                } else {
+                    // A picture this browser cannot draw is left out rather than failing the
+                    // gesture: the pages that did arrive are still worth having.
+                    var page = await readers.readPicturePage({ name: entry.name, dataUri: dataUrlOf(entry.name, entry.file.base64) });
+                    if (page) {
+                        documents.push({ title: containerNameOf(entry.name), fileName: entry.name, pages: [page], texts: [] });
+                    }
                 }
             }
-        }
-        setProgress("Building one whiteboard from " + documents.length + " files...");
-        var tiddlers = merge(documents);
-        if (tiddlers.length === 0) {
-            throw new Error("nothing could be read");
-        }
-        var board = "";
-        tiddlers.forEach(function(fields) {
-            $tw.wiki.addTiddler(new $tw.Tiddler(
-                $tw.wiki.getCreationFields(),
-                $tw.wiki.getModificationFields(),
-                fields
-            ));
-            if (fields.type === BOARD_TYPE) {
-                board = fields.title;
+            setProgress("Building one whiteboard from " + documents.length + " files...");
+            var tiddlers = merge(documents);
+            if (tiddlers.length === 0) {
+                throw new Error("nothing could be read");
             }
-        });
+            opened = mergeOpened(opened, addDocument(tiddlers));
+        }
+
+        for (var b = 0; b < entries.length; b++) {
+            if (entries[b].kind === "epub") {
+                opened = mergeOpened(opened, await importBook(entries[b].file));
+            }
+        }
+        for (var d = 0; d < entries.length; d++) {
+            if (entries[d].kind === "docx") {
+                opened = mergeOpened(opened, await importDocument(entries[d].file));
+            }
+        }
+
         clearProgress();
-        if (board) {
+        if (!open) {
+            if (typeof readers.reportImportedTitles === "function") {
+                readers.reportImportedTitles(opened.entries);
+            }
+            return;
+        }
+        if (opened.board) {
             // The board is the point of the gesture, so it is what opens, the way a dropped
             // PDF's pages do.
-            openBoard(board);
+            openBoard(opened.board);
+        } else if (opened.words) {
+            showInRiver([opened.words]);
+        } else if (opened.entry) {
+            showInRiver([opened.entry]);
         }
     })().catch(function(error) {
         clearProgress();
@@ -527,7 +629,7 @@ exports.startup = function() {
         // And the same rule again: the whole gesture comes off the window before anything else
         // can read it, so a later mount in this window never imports one it did not make.
         window[FILES_REQUEST] = null;
-        openRequestedFiles(files);
+        openRequestedFiles(normalizeGesture(files));
         return;
     }
     var board = window[BOARD_REQUEST];

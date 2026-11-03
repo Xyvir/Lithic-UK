@@ -638,6 +638,67 @@ test('several files dropped on the launcher become one Lith with a page each', a
   );
 });
 
+// The launcher's queue, drained into a Lith the person chose rather than into one started for
+// the files: the pages arrive all the same, and the view they were already reading is not taken
+// over. `openBoard` is where the launcher answers which of the two a mount is.
+test('a queued gesture imported into an open Lith leaves its view alone', async () => {
+  const { context, tiddlers, errors } = loadPdfOpenRequest({
+    handoff: {
+      __LITHIC_IMPORT_FILES__: {
+        files: [
+          { filename: 'deck.pdf', base64: 'AAAA' },
+          { filename: 'photo.png', base64: 'AAAA' },
+        ],
+        openBoard: false,
+      },
+    },
+    tiddlers: SIBLING_LITH,
+  });
+
+  context.exports.startup();
+  await settle(tiddlers);
+
+  assert.deepEqual(errors, [], 'the import finishes without reporting an error');
+  assert.ok(tiddlers.get('deck'), 'the pages are imported into the document that was opened');
+  assert.equal(
+    tiddlers.get('$:/layout')?.fields.text,
+    '$:/core/ui/PageTemplate',
+    'the layout the Lith was saved in stands, rather than a board being laid over it'
+  );
+  assert.equal(tiddlers.has(BOARD_STATE), false, 'and no board is named as the one to draw');
+  assert.match(
+    tiddlers.get('$:/Import')?.fields.text ?? '',
+    /\[\[deck\]\]/,
+    'the engine\'s own import list says what arrived, which is what a drop shows as well'
+  );
+  assert.equal(
+    tiddlers.get('$:/StoryList')?.fields.list,
+    '$:/Import',
+    'and that list is what the river opens on, above the page the Lith was reading'
+  );
+});
+
+// The same merge of one file: the queue holds a single PDF, so it is read the way a double-click
+// reads it rather than becoming a merged board of one page.
+test('one queued file keeps the one-file shape when it is merged', async () => {
+  const { context, tiddlers } = loadPdfOpenRequest({
+    handoff: { __LITHIC_IMPORT_FILES__: { files: [{ filename: 'solo.pdf', base64: 'AAAA' }], openBoard: false } },
+    tiddlers: SIBLING_LITH,
+  });
+
+  context.exports.startup();
+  await settle(tiddlers);
+
+  assert.equal(tiddlers.get('$:/layout')?.fields.text, '$:/core/ui/PageTemplate', 'the view is untouched');
+  const document = JSON.parse(tiddlers.get('solo-whiteboard').fields.text).document;
+  assert.deepEqual(
+    Object.values(document.pages).map((page) => page.name),
+    ['Page 1'],
+    'the one-file page naming, not the merged one that names pages after their file'
+  );
+  assert.equal(tiddlers.has('solo-text'), true, 'and the words are extracted beside the board');
+});
+
 // One file on the gesture property is answered by the one-file route, so dropping a single PDF
 // and double-clicking it produce the same document rather than two layouts of one import.
 test('one file on the gesture route is read the way a double-click reads it', async () => {

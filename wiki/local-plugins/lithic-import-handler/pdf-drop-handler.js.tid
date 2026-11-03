@@ -892,6 +892,38 @@ function mergedDocumentTiddlers(documents) {
     return tiddlers;
 }
 
+/**
+ * Say what an import brought, and put that list at the top of the story river.
+ *
+ * This is the engine's own import confirmation, because a drop is an import and the containers
+ * it made are worth naming. Published for the launcher's queued gesture as well: that one can
+ * land in a Lith the person is already reading, where opening a board over it would take a view
+ * they did not ask to lose, so the list is the whole of what says the pages arrived.
+ */
+function reportImportedTitles(titles) {
+    if (!titles || !titles.length) {
+        return;
+    }
+    var importList = titles.map(function(t) { return "# [[" + t + "]]"; }).join("\n");
+    $tw.wiki.addTiddler(new $tw.Tiddler(
+        $tw.wiki.getCreationFields(),
+        $tw.wiki.getModificationFields(),
+        {
+            title: "$:/Import",
+            text: "The following tiddlers were imported:\n\n" + importList,
+            status: "complete"
+        }
+    ));
+    var storyTiddler = $tw.wiki.getTiddler("$:/StoryList");
+    var storyList = storyTiddler ? ($tw.utils.parseStringArray(storyTiddler.fields.list) || []) : [];
+    storyList = storyList.filter(function(t) { return t !== "$:/Import"; });
+    storyList.unshift("$:/Import");
+    $tw.wiki.addTiddler(new $tw.Tiddler({
+        title: "$:/StoryList",
+        list: $tw.utils.stringifyList(storyList)
+    }));
+}
+
 // The render path, published for the one other caller: a PDF the desktop app was asked to
 // open by file association. The launcher cannot render a PDF (the renderer lives in this
 // wiki), so it mounts a blank Lith with a request tiddler naming the file and a reader for
@@ -913,6 +945,9 @@ $tw.lithic.convertDocxToTiddlers = convertDocxToTiddlers;
 $tw.lithic.readPdfPages = readPdfPages;
 $tw.lithic.readPicturePage = readPicturePage;
 $tw.lithic.mergeDocumentTiddlers = mergedDocumentTiddlers;
+// And the confirmation both routes show, so a queued import into a Lith that is already open
+// says what arrived in the same words a drop does.
+$tw.lithic.reportImportedTitles = reportImportedTitles;
 
 exports.startup = function() {
     var alertTitle = "$:/temp/alerts/lithic-import-progress";
@@ -1223,26 +1258,10 @@ exports.startup = function() {
                     }
                 }
 
-                // Update $:/Import and $:/StoryList
-                var importList = createdTitles.map(function(t) { return "# [[" + t + "]]"; }).join("\n");
-                $tw.wiki.addTiddler(new $tw.Tiddler(
-                    $tw.wiki.getCreationFields(),
-                    $tw.wiki.getModificationFields(),
-                    {
-                        title: "$:/Import",
-                        text: "The following tiddlers were imported:\n\n" + importList,
-                        status: "complete"
-                    }
-                ));
-
-                var storyTiddler = $tw.wiki.getTiddler("$:/StoryList");
-                var storyList = storyTiddler ? ($tw.utils.parseStringArray(storyTiddler.fields.list) || []) : [];
-                storyList = storyList.filter(function(t) { return t !== "$:/Import"; });
-                storyList.unshift("$:/Import");
-                $tw.wiki.addTiddler(new $tw.Tiddler({
-                    title: "$:/StoryList",
-                    list: $tw.utils.stringifyList(storyList)
-                }));
+                // Say what arrived and put that list at the top of the river. The same call the
+                // launcher's queued gesture makes: a drop and an import into a Lith the person
+                // was already reading are one confirmation rather than two wordings of it.
+                reportImportedTitles(createdTitles);
 
                 // Handle other (non-PDF/image/notebook) files that were part of the same selection
                 const otherFiles = Array.from(files).filter(f => !pdfFiles.includes(f) && !imageFiles.includes(f) && !notebookFiles.includes(f) && !epubFiles.includes(f) && !docxFiles.includes(f));

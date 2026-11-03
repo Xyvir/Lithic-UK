@@ -343,6 +343,16 @@ import { backupFileName, collectInstanceBackup, mergeBookmarks, parseInstanceBac
   let busy = false;
   let pendingImports: PendingTiddler[] = [];
   /**
+   * The files a gesture brought, waiting for the destination its row is there to be given.
+   *
+   * Held as handles rather than as bytes: a PDF or a book runs to megabytes, most queues are
+   * cleared without being used, and the bytes are wanted once, at the mount that drains this.
+   * A file is not a note and cannot become one until the engine has converted it (pdf.js and
+   * the zip reader live in the wiki), which is why this is its own list rather than a second
+   * kind of row in `pendingImports`.
+   */
+  let pendingFiles: Array<{ file: File; kind: ImportKind }> = [];
+  /**
    * Whether the pending panel draws its list or only its own bar.
    *
    * The panel is fixed over the corner that holds New Blank Lith and Mount a Lith, which is the
@@ -3411,6 +3421,12 @@ import { backupFileName, collectInstanceBackup, mergeBookmarks, parseInstanceBac
     // globals are also injected defensively so integrations that read them
     // (e.g. the Ephemeral runner's __EPHEMERAL_MODE__ hint) work regardless
     // of the boot path.
+    // The queued files travel on the window rather than in the store, because a whole PDF is not
+    // a tiddler: the engine's startup takes them and converts them into this document. Written
+    // here, after every gate above, so a mount that was declined cannot be the one that imports
+    // them. A document that did not exist before this mount is the gesture's own, and the board
+    // it draws is what opens; a Lith the person chose keeps the view they were reading.
+    await queuedFileHandoff(contents.trim() === '');
     await bootLegacyWiki(handoff, [...pendingImports, ...extraTiddlers], {
       __EPHEMERAL_MODE__: mode === 'self-host' ? 'self-host' : 'paper-light',
       __LITHIC_LAUNCHER_MODE__: mode
@@ -3419,6 +3435,7 @@ import { backupFileName, collectInstanceBackup, mergeBookmarks, parseInstanceBac
     // armed again on the document it wrote.
     armHandedWatch();
     pendingImports = [];
+    pendingFiles = [];
     skippedImports = [];
     intentionalImports = [];
   }
@@ -3436,7 +3453,10 @@ import { backupFileName, collectInstanceBackup, mergeBookmarks, parseInstanceBac
   }
 
   function openNewLithModal() {
-    newLithName = '';
+    // A gesture waiting in the panel already said what it is, so the name it would have been
+    // written beside is offered rather than an empty field: `deck.pdf` becomes `deck_pdf.lith`,
+    // the same name the file association gives it.
+    newLithName = pendingFiles.length > 0 ? importLithName(pendingFiles[0].file.name) : '';
     newLithError = '';
     showNewLithModal = true;
     setTimeout(() => newLithInputElement?.focus(), 0);
@@ -4054,47 +4074,42 @@ import { backupFileName, collectInstanceBackup, mergeBookmarks, parseInstanceBac
   }
 
   /**
-   * Start a Lith from a book or a Word document dropped on the launcher.
+   * Queue a file the launcher cannot read, for the document that opens next.
    *
-   * Neither has a sibling to become: the launcher is the page before any document, so the drop
-   * starts one, named the way the Lith beside a file is named. The chapters, or the words and the
-   * pictures, are made by the importer inside the mounted document rather than here, so the bytes
-   * are read, encoded and left on the window for the engine's startup to take, which is what a
-   * double-clicked file does too (see `pdf-open-request.js`).
+   * The converters live in the wiki (pdf.js, the zip reader, the archive reader), so the
+   * launcher's half of an import is the file's name, its bytes and the order the gesture
+   * carried it in. Nothing is converted here and nothing opens: a drop is a request to import
+   * something, and which document it is imported into is the choice the panel leaves open. A
+   * file used to start a Lith of its own the moment it was dropped, which left no way to bring
+   * it into a Lith that already exists.
    */
-  async function openDroppedImport(file: File, kind: 'epub' | 'docx') {
-    (window as any)[IMPORT_REQUEST[kind]] = { filename: file.name, base64: await fileBase64(file) };
-    const name = `${file.name.replace(new RegExp(`\\.${kind}$`, 'i'), '')}_${kind}.lith`;
-    lithText = '';
-    fileName = name;
-    filePath = undefined;
-    await mountWiki('', name);
-    report(copy.status.mounted(name));
+  function queueFile(file: File, kind: ImportKind): void {
+    pendingFiles = [...pendingFiles, { file, kind }];
   }
 
   /**
-   * Start a Lith from pictures or PDFs dropped on the launcher.
+   * The queued files as the engine's handoff, in the order they arrived.
    *
-   * The gesture is one thing, so it lands as one document: every file travels, in the order it
-   * was dropped, and the importer inside the mounted page draws one board of every page and one
-   * text extract of the words. That is what the same selection becomes when it is dropped into an
-   * open wiki, and this is that document started from nothing.
+   * Encoded at the mount rather than at the drop because most queues are cleared unused, and a
+   * gesture of several PDFs is several megabytes of base64 that would otherwise sit in the page
+   * for as long as it is open.
    *
-   * A single file travels the same way and is answered with what a double-click on that file
-   * produces, so the two routes cannot disagree.
+   * `openBoard` is the whole of the difference between the two destinations: a document that
+   * exists only because of the gesture opens the board it just drew, the way a dropped PDF
+   * always has, and a Lith the person chose to import into keeps the view they were already
+   * reading while the engine's own import list says what arrived (see `openRequestedFiles`).
    */
-  async function openDroppedImports(files: File[]) {
-    const entries = [];
-    for (const file of files) {
-      entries.push({ filename: file.name, base64: await fileBase64(file) });
+  async function queuedFileHandoff(startingEmpty: boolean): Promise<void> {
+    if (pendingFiles.length === 0) return;
+    // One handoff per mount. A file the app was handed by association has already put its own
+    // request on the window and the engine reads one of them and stops, so publishing here
+    // would leave this queue to be read by a later mount it was never meant for.
+    if (Object.values(IMPORT_REQUEST).some((key) => Boolean((window as any)[key]))) return;
+    const files = [];
+    for (const entry of pendingFiles) {
+      files.push({ filename: entry.file.name, base64: await fileBase64(entry.file) });
     }
-    (window as any)[IMPORT_FILES_REQUEST] = entries;
-    const name = importLithName(files[0].name);
-    lithText = '';
-    fileName = name;
-    filePath = undefined;
-    await mountWiki('', name);
-    report(copy.status.mounted(name));
+    (window as any)[IMPORT_FILES_REQUEST] = { files, openBoard: startingEmpty };
   }
 
   async function handleDrop(event: DragEvent) {
@@ -4118,16 +4133,12 @@ import { backupFileName, collectInstanceBackup, mergeBookmarks, parseInstanceBac
 
     const files = event.dataTransfer?.files;
     if (!files || files.length === 0) return;
-    // Every file in the gesture is read, not just the first. Three dropped Liths are three
-    // payloads queued, because the panel lists what will be merged and a person who dragged
-    // three files expects to see three. Reading `files[0]` made the rest arrive nowhere.
+    // Every file in the gesture is read, not just the first, and each arrives as its own row:
+    // three dropped Liths are three payloads queued and three dropped PDFs are three files, so a
+    // person who dragged four files expects to see four. Reading `files[0]` made the rest
+    // arrive nowhere.
     const queued: PendingTiddler[] = [];
-    let wiki: File | null = null;
-    let book: File | null = null;
-    let word: File | null = null;
-    // The files this gesture imports as pages of one document rather than as documents of their
-    // own. Every one of them travels, in the order it arrived.
-    const imported: File[] = [];
+    let page: File | null = null;
     let unreadable = false;
     for (const file of Array.from(files)) {
       const lowerName = file.name.toLowerCase();
@@ -4149,24 +4160,17 @@ import { backupFileName, collectInstanceBackup, mergeBookmarks, parseInstanceBac
         } catch {
           unreadable = true;
         }
-      } else if (/\.(?:html?|htm)$/.test(lowerName) && !wiki) {
-        // One page opens at a time, so the first wiki in a drop is the one that opens.
-        wiki = file;
-      } else if (lowerName.endsWith('.epub') && !book) {
-        // One book at a time, for the same reason: a mount holds one document.
-        book = file;
-      } else if (lowerName.endsWith('.docx') && !word) {
-        // A Word document is the same shape of gesture as a book: one at a time, and it opens
-        // rather than queues, because a document somebody dragged here is one they want to read.
-        word = file;
+      } else if (/\.(?:html?|htm)$/.test(lowerName) && !page) {
+        // A page is the one thing here that cannot be merged: it carries its own store and its
+        // own save behaviour, so it is what opens rather than something queued. One page opens
+        // at a time, and a file dropped beside it is not imported with it, for the same reason
+        // there is nowhere to put it.
+        page = file;
       } else {
-        // The one route a PDF or a picture has into a wiki that is not open yet, and before this
-        // there was none: the branches above cover the kinds that are documents of their own, so
-        // these files fell out of the loop and the gesture did nothing at all.
+        // A PDF, a picture, a book or a Word document: the kinds this app converts rather than
+        // edits, so the file waits in the panel for the document it will be imported into.
         const kind = importKindOf(file.name);
-        if (kind === 'pdf' || kind === 'image') {
-          imported.push(file);
-        }
+        if (kind) queueFile(file, kind);
       }
     }
     if (queued.length > 0) {
@@ -4175,27 +4179,13 @@ import { backupFileName, collectInstanceBackup, mergeBookmarks, parseInstanceBac
     if (unreadable) {
       mountError = copy.status.droppedInvalid;
     }
-    if (wiki) {
-      // The mount drains the queue, so a wiki dropped with documents beside it opens with
-      // those tiddlers merged rather than leaving them queued behind a replaced page.
+    if (page) {
+      // A page is served as it is, with its own store, so it is the one mount that takes nothing
+      // from the queue: a document dropped beside it is not imported, and this page replaces the
+      // panel the rows were drawn on. Stated rather than hidden, because a gesture holding both
+      // is the only one where the queue has nowhere to go.
       try {
-        await mountWiki(await wiki.text(), wiki.name);
-      } catch (error) {
-        mountError = error instanceof Error ? error.message : String(error);
-      }
-    } else if (book || word) {
-      // A book or a document dropped beside a page is not opened: the page is the document, and
-      // the second mount would replace it.
-      try {
-        await openDroppedImport((book || word) as File, book ? 'epub' : 'docx');
-      } catch (error) {
-        mountError = error instanceof Error ? error.message : String(error);
-      }
-    } else if (imported.length > 0) {
-      // One mount holds one document, so a page, a book or a Word document wins the gesture and
-      // the PDFs and pictures beside it are not opened. On their own they are the document.
-      try {
-        await openDroppedImports(imported);
+        await mountWiki(await page.text(), page.name);
       } catch (error) {
         mountError = error instanceof Error ? error.message : String(error);
       }
@@ -6784,7 +6774,7 @@ import { backupFileName, collectInstanceBackup, mergeBookmarks, parseInstanceBac
     </div>
   {/if}
   </div>
-  {#if pendingImports.length > 0}
+  {#if pendingImports.length > 0 || pendingFiles.length > 0}
     <div class="pending-imports" class:collapsed={pendingCollapsed} role="status" aria-label={copy.pending.aria}>
       <div class="pending-imports-header">
         <!--
@@ -6805,9 +6795,28 @@ import { backupFileName, collectInstanceBackup, mergeBookmarks, parseInstanceBac
           <span>{copy.pending.heading}</span>
           <svg class="pending-chevron" viewBox="0 0 10 6" aria-hidden="true"><path d="M1 1l4 4 4-4" /></svg>
         </button>
-        <button type="button" class="pending-clear" aria-label={copy.pending.clear} title={copy.pending.clear} on:click={() => { pendingImports = []; skippedImports = []; intentionalImports = []; }}>✕</button>
+        <button type="button" class="pending-clear" aria-label={copy.pending.clear} title={copy.pending.clear} on:click={() => { pendingImports = []; pendingFiles = []; skippedImports = []; intentionalImports = []; }}>✕</button>
       </div>
       <ul id="pending-imports-list" hidden={pendingCollapsed}>
+        <!--
+          The files first, because they are what a gesture left and the row is what says so: a
+          dropped PDF, picture, book or Word document is named here by the file it came from,
+          which is the one thing about it the launcher can know before the engine has read it.
+        -->
+        {#each pendingFiles as entry, index}
+          <li class="pending-file">
+            <span class="pending-row">
+              <span class="pending-title">{entry.file.name}</span>
+              <button
+                type="button"
+                class="pending-remove"
+                aria-label={copy.pending.remove(entry.file.name)}
+                title={copy.pending.remove(entry.file.name)}
+                on:click={() => pendingFiles = removePendingImport(pendingFiles, index)}
+              >✕</button>
+            </span>
+          </li>
+        {/each}
         {#each pendingImports as tiddler, index}
           <li class={/^\d{14}-\d{3,4}$/.test(tiddler.title ?? '') || Boolean(tiddler['stream-type']) ? 'tiddler-list' : ''}>
             <span class="pending-row">

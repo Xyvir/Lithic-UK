@@ -169,13 +169,14 @@ export function mergePendingImports(existing: PendingTiddler[], incoming: Pendin
 }
 
 /**
- * Drop one queued tiddler by position, leaving the rest in the order they arrived.
+ * Drop one queued row by position, leaving the rest in the order they arrived.
  *
  * Position rather than title: a queue can hold two tiddlers with the same title (two dropped
  * files are each their own payload), and removing "the one called X" would then take the
- * wrong row or both.
+ * wrong row or both. The panel holds two lists, notes and the files a gesture brought, and
+ * both remove a row the same way.
  */
-export function removePendingImport(existing: PendingTiddler[], index: number): PendingTiddler[] {
+export function removePendingImport<T>(existing: T[], index: number): T[] {
   if (index < 0 || index >= existing.length) return existing;
   return existing.filter((_, at) => at !== index);
 }
