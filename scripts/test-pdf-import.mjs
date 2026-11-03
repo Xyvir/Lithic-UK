@@ -699,6 +699,57 @@ test('one queued file keeps the one-file shape when it is merged', async () => {
   assert.equal(tiddlers.has('solo-text'), true, 'and the words are extracted beside the board');
 });
 
+// A gesture is not only pages. A book and a Word document queued together are documents of their
+// own, and the queue has to route each entry by its own name: an entry this module does not
+// recognise falls through to the picture reader, which imports it as a page of a board nobody
+// asked for. The converters are stubbed because unpacking either is the archive reader's job.
+test('a queued book and Word document are read by their own converters', async () => {
+  const loaded = loadPdfOpenRequest({
+    handoff: {
+      __LITHIC_IMPORT_FILES__: {
+        files: [
+          { filename: 'book.epub', base64: 'AAAA' },
+          { filename: 'report.docx', base64: 'AAAA' },
+        ],
+        openBoard: false,
+      },
+    },
+    tiddlers: SIBLING_LITH,
+  });
+  const read = [];
+  loaded.context.$tw.lithic.convertEpubToTiddlers = async (buffer, name) => {
+    read.push(name);
+    return { entry: 'book 1', tiddlers: [{ title: 'book 1', 'stream-type': 'default', text: 'chapter' }] };
+  };
+  loaded.context.$tw.lithic.convertDocxToTiddlers = async (buffer, name) => {
+    read.push(name);
+    return [
+      { title: 'report', 'stream-list': 'report-text', 'stream-type': 'default', text: '' },
+      { title: 'report-text', parent: 'report', type: 'text/x-markdown', text: 'the words' },
+    ];
+  };
+
+  loaded.context.exports.startup();
+  await settle(loaded.tiddlers);
+
+  assert.deepEqual(
+    [...read].sort(),
+    ['book.epub', 'report.docx'],
+    'each file is read by the converter its own name asks for, not by the picture reader'
+  );
+  assert.ok(loaded.tiddlers.get('book 1'), 'the chapter a book is entered at lands in the wiki');
+  assert.ok(loaded.tiddlers.get('report'), 'and the Word document keeps the container its importer writes');
+  assert.equal(loaded.tiddlers.get('report-text').fields.text, 'the words');
+  assert.equal(
+    loaded.tiddlers.get('$:/layout')?.fields.text,
+    '$:/core/ui/PageTemplate',
+    'neither of them takes the view over, because this mount is a Lith the person opened'
+  );
+  const report = loaded.tiddlers.get('$:/Import')?.fields.text ?? '';
+  assert.match(report, /\[\[report\]\]/, 'both documents are named in the import list');
+  assert.match(report, /\[\[book 1\]\]/);
+});
+
 // One file on the gesture property is answered by the one-file route, so dropping a single PDF
 // and double-clicking it produce the same document rather than two layouts of one import.
 test('one file on the gesture route is read the way a double-click reads it', async () => {

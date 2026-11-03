@@ -46,6 +46,11 @@
  *      and no way to tell from the phone. The check inflates each one and compares it with
  *      its source, and passes without a word on a machine that has never built the firmware.
  *
+ *  15. the wiki importer's tests (`scripts/test-pdf-import.mjs`): the drop handler and the
+ *      handoff boot in a VM over a fake wiki, so what a queued gesture becomes is checked with
+ *      no browser. It was the one suite nothing ran on a wiki-only change, which is how a
+ *      `require` stub stayed broken through a commit that added a module to it.
+ *
  * Exit 0 = safe to push; nonzero = fix before pushing.
  *
  * Requires: node, launcher-ui deps, VS Build Tools (MSVC) on PATH-adjacent
@@ -498,6 +503,15 @@ const spawned = [
     name: 'android patch self-test',
     cmd: 'node',
     args: ['scripts/patch-android.mjs', '--self-test'],
+  },
+  // The wiki importer's half of the same drop: what a queued gesture converts into. It boots the
+  // importer in a VM with no browser, so it costs a fraction of a second, and it was the suite
+  // nothing ran on a wiki-only change, which is how a require stub stayed broken through a
+  // commit that added a module to it.
+  {
+    name: 'wiki importer tests',
+    cmd: 'node',
+    args: ['--test', 'scripts/test-pdf-import.mjs'],
   },
   {
     name: 'launcher-ui unit tests',

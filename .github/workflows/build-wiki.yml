@@ -269,6 +269,14 @@ jobs:
         if: env.BUILD_CONFIG == 'prod'
         run: npm --prefix launcher-ui test
 
+      # The other half of the same drop. The launcher's tests say what a gesture stages and what
+      # kind it is; these boot the wiki importer in a VM and say what the queued files are
+      # converted into, so a change to one half that outruns the other fails here rather than in
+      # somebody's hands. No install and no browser: a second of builtins only.
+      - name: Run Wiki Importer Tests (prod only)
+        if: env.BUILD_CONFIG == 'prod'
+        run: node --test scripts/test-pdf-import.mjs
+
       - name: Verify Launcher Artifact (prod only)
         if: env.BUILD_CONFIG == 'prod'
         run: npm run test:launcher
