@@ -1,0 +1,152 @@
+title: $:/Lithic/Patches/Whiteboard/MiddleButtonPan.js
+type: application/javascript
+module-type: startup
+
+/*\
+title: $:/Lithic/Patches/Whiteboard/MiddleButtonPan.js
+type: application/javascript
+module-type: startup
+
+Middle-button drag always pans the board, whatever the pointer is over.
+
+tldraw pans on a middle-button drag only when the pointer stays on a surface
+that has its own move handler: the empty canvas, a shape, the selection
+bounds. A middle-button press on something else inside the board leaves the
+grab cursor showing and the camera still, and the pan only starts once the
+pointer leaves that thing and reaches the canvas. Dragging is not editing, so
+the button should never be told apart by what is underneath it.
+
+So this patch owns the middle-button drag itself. It takes the press before
+React sees it (and prevents the browser's own middle-click behaviour, such as
+autoscroll), then pans the camera from the pointer's own movement for as long
+as the button is held. The camera is moved through the board's own state, so
+a pan is still a pan to the rest of the editor: undo history, cursors, the
+save indicator.
+
+The board's app instance is found through the React tree of its container and
+cached per container. When it cannot be found, nothing is intercepted and the
+board behaves exactly as it did before, which is the only honest fallback.
+\*/
+(function(){
+"use strict";
+
+exports.name = "lithic-whiteboard-middle-button-pan";
+exports.platforms = ["browser"];
+exports.after = ["startup"];
+exports.synchronous = true;
+
+var BOARD_SELECTOR = ".tl-container";
+var MIDDLE_BUTTON = 1;
+var MIDDLE_BUTTON_MASK = 4;
+
+// One drag at a time: the pointer belongs to a single board.
+var drag = null;
+var appCache = new WeakMap();
+
+var boardOf = function(target) {
+	if(!target || !target.closest) return null;
+	return target.closest(BOARD_SELECTOR);
+};
+
+var findApp = function(container) {
+	if(appCache.has(container)) return appCache.get(container);
+	var key = Object.keys(container).filter(function(name) {
+		return name.indexOf("__reactFiber$") === 0 || name.indexOf("__reactInternalInstance$") === 0;
+	})[0];
+	if(!key) return null;
+	var found = null;
+	var walk = function(node) {
+		if(!node || found) return;
+		var value = node.memoizedProps && node.memoizedProps.value;
+		if(value && typeof value.createShapes === "function" && typeof value.pan === "function") {
+			found = value;
+			return;
+		}
+		walk(node.child);
+		walk(node.sibling);
+	};
+	var fiber = container[key];
+	while(fiber && !found) {
+		walk(fiber);
+		fiber = fiber.return;
+	}
+	if(found) appCache.set(container, found);
+	return found;
+};
+
+var zoomOf = function(app) {
+	var camera = app.camera || (app.pageState && app.pageState.camera);
+	return camera && camera.zoom ? camera.zoom : 1;
+};
+
+var endDrag = function() {
+	if(!drag) return;
+	if(drag.container) drag.container.style.cursor = drag.previousCursor;
+	drag = null;
+};
+
+var onMouseDown = function(event) {
+	if(event.button !== MIDDLE_BUTTON) return;
+	// No autoscroll, no paste-on-middle-click: the board owns this button.
+	if(boardOf(event.target)) event.preventDefault();
+};
+
+var onPointerDown = function(event) {
+	if(event.button !== MIDDLE_BUTTON) return;
+	var container = boardOf(event.target);
+	if(!container) return;
+	var app = findApp(container);
+	if(!app) return;
+	event.preventDefault();
+	event.stopPropagation();
+	endDrag();
+	drag = {
+		pointerId: event.pointerId,
+		x: event.clientX,
+		y: event.clientY,
+		app: app,
+		container: container,
+		previousCursor: container.style.cursor,
+	};
+	container.style.cursor = "grabbing";
+};
+
+var onPointerMove = function(event) {
+	if(!drag) return;
+	// A release whose pointerup never arrived still ends the drag.
+	if((event.buttons & MIDDLE_BUTTON_MASK) === 0) {
+		endDrag();
+		return;
+	}
+	if(event.pointerId !== drag.pointerId) return;
+	event.preventDefault();
+	event.stopPropagation();
+	var dx = event.clientX - drag.x;
+	var dy = event.clientY - drag.y;
+	if(dx === 0 && dy === 0) return;
+	drag.x = event.clientX;
+	drag.y = event.clientY;
+	var zoom = zoomOf(drag.app);
+	drag.app.pan([-dx / zoom, -dy / zoom]);
+};
+
+var onPointerUp = function(event) {
+	if(!drag) return;
+	if(event.pointerId !== drag.pointerId) return;
+	event.stopPropagation();
+	endDrag();
+};
+
+exports.startup = function() {
+	if(typeof window === "undefined" || typeof document === "undefined") return;
+	// Capture phase throughout: React listens on the board's own root, so this
+	// has to run first to be able to take the gesture away from it.
+	document.addEventListener("mousedown", onMouseDown, true);
+	document.addEventListener("pointerdown", onPointerDown, true);
+	window.addEventListener("pointermove", onPointerMove, true);
+	window.addEventListener("pointerup", onPointerUp, true);
+	window.addEventListener("pointercancel", onPointerUp, true);
+	window.addEventListener("blur", endDrag);
+};
+
+})();
