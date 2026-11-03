@@ -14,7 +14,16 @@
   } from './file-bridge';
   import { opensInstanceInBrowser, type PlatformCapabilities } from './platform-capabilities';
   import { backupGate, orphanPill, orphanDownloadNote, type OrphanDownloadState } from './orphan-download';
-  import { isScratchFileName, isHtmlMonolithName, tracksUnsavedEdits, resolveMountName, resolveScratchKind, type ScratchKind } from './scratch-editor';
+  import {
+    isScratchFileName,
+    isHtmlMonolithName,
+    parseScratchSource,
+    resolveMountName,
+    resolveScratchKind,
+    resolveScratchPlan,
+    tracksUnsavedEdits,
+    type ScratchKind
+  } from './scratch-editor';
   import { pwaInstall, promptPwaInstall, shouldRestoreInstallOfferOnReset } from './pwa-install';
   import { RELEASES_LATEST_PAGE, latestReleaseTag, readBuildTag, updateOffered } from './update-notice';
   import { readShimToken, shimCommand } from './shim-command';
@@ -4170,7 +4179,26 @@ import { backupFileName, collectInstanceBackup, mergeBookmarks, parseInstanceBac
         // A PDF, a picture, a book or a Word document: the kinds this app converts rather than
         // edits, so the file waits in the panel for the document it will be imported into.
         const kind = importKindOf(file.name);
-        if (kind) queueFile(file, kind);
+        if (kind) {
+          queueFile(file, kind);
+          continue;
+        }
+        // An everyday text file: `.md`, `.txt`, `.tid`, a Markdown file under its long spelling,
+        // or a notebook. Explorer opens one in the scratch editor, and a drop queues the same
+        // nodes that editor would make, so it gets the same two destinations as everything else
+        // here. This is the half that used to arrive nowhere at all, because the branches above
+        // covered only the types with a converter and the rest fell out of the loop.
+        //
+        // The nodes keep the file's own name, extension included, exactly as the scratch editor
+        // titles them, so a note merged into a Lith says which file it came from. Opening a file
+        // in place stays Mount's job, the one gesture that names the file it will write back to.
+        const plan = resolveScratchPlan(file.name);
+        if (!plan) continue;
+        try {
+          queued.push(...parseScratchSource(await file.text(), plan));
+        } catch {
+          unreadable = true;
+        }
       }
     }
     if (queued.length > 0) {
