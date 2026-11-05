@@ -16,10 +16,25 @@
  * 6. Dispatching tm-auto-save-wiki flushes the buffer BEFORE the save runs,
  *    so the serializer always sees the latest board state.
  * 7. After the flush the buffer is empty again (a further stroke re-buffers).
+ * 8. A write whose document is unchanged apart from the camera (and tldraw's
+ *    own change counter) is view state: it is held, not written, so a save with
+ *    nothing else to write does not dirty the wiki and panning stays read-only.
+ * 9. A save that has other work to write (the wiki is already dirty) carries
+ *    the held camera with it, so the board comes back where it was left.
+ * 10. Drawing again after a held camera change still flushes immediately.
+ * 11. The document's own name is view state too: the widget re-derives it from
+ *     the tiddler title, so a board still carrying an importer's name is held
+ *     rather than treated as an edit on its first open, and the name lands with
+ *     the next real save.
  *
  * Run:  node scripts/_test_whiteboard_writebehind.mjs
+ *       ARTIFACT=wiki/output/index.html node scripts/_test_whiteboard_writebehind.mjs
  *       HEADED=1 node scripts/_test_whiteboard_writebehind.mjs   (visible window)
  *       CHROME=/path/to/chrome node scripts/_test_whiteboard_writebehind.mjs
+ *
+ * ARTIFACT points the run at a built wiki other than src/lithic.html (the
+ * plugin assembled by `npm run mirror` + `tiddlywiki wiki --build index`),
+ * which is how a change to this patch is checked before it is pushed.
  */
 import { readFileSync, writeFileSync, existsSync } from "node:fs";
 import { fileURLToPath } from "node:url";
@@ -27,7 +42,9 @@ import path from "node:path";
 import puppeteer from "puppeteer";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
-const SRC = path.join(ROOT, "src", "lithic.html");
+const SRC = process.env.ARTIFACT
+  ? path.resolve(ROOT, process.env.ARTIFACT)
+  : path.join(ROOT, "src", "lithic.html");
 const PATCH_TID = path.join(
   ROOT,
   "wiki",
@@ -108,11 +125,19 @@ const TEST_JS = `
     var SHAPE1 = '{"s1":{"id":"s1","type":"draw","name":"Draw","parentId":"page","childIndex":2,"point":[0,0],"rotation":0,"text":""}}';
     var SHAPE2 = '{"s1":{"id":"s1","type":"draw","name":"Draw","parentId":"page","childIndex":2,"point":[10,10],"rotation":0,"text":"x"}}';
     var SHAPE3 = '{"s1":{"id":"s1","type":"draw","name":"Draw","parentId":"page","childIndex":2,"point":[20,20],"rotation":0,"text":"y"}}';
-    function boardJson(name, updatedCount, shapesJson) {
+    function boardJson(name, updatedCount, shapesJson, camera) {
+        camera = camera || {point: [0, 0], zoom: 1};
         return '{"document":{"id":"doc","name":"' + name + '","version":15.5,' +
             '"pages":{"page":{"id":"page","name":"Page 1","childIndex":1,"shapes":' + (shapesJson || "{}") + ',"bindings":{}}},' +
-            '"pageStates":{"page":{"id":"page","selectedIds":[],"camera":{"point":[0,0],"zoom":1}}},' +
+            '"pageStates":{"page":{"id":"page","selectedIds":[],"camera":{"point":[' + camera.point[0] + ',' + camera.point[1] + '],"zoom":' + camera.zoom + '}}},' +
             '"assets":{}},"updatedCount":' + updatedCount + '}';
+    }
+    function clearDirty() {
+        $tw.saverHandler.numChanges = 0;
+        $tw.saverHandler.updateDirtyStatus();
+    }
+    function bodyDirty() {
+        return /(^|\\s)tc-dirty(\\s|$)/.test(document.body.className);
     }
 
     function run() {
@@ -175,11 +200,70 @@ const TEST_JS = `
                         check("postflush-buffered", wiki.getTiddlerText(board) === stroke2,
                             "store still at flushed state after new stroke");
 
-                        // Let the queued change events drain, then verify exactly one fired (the flush).
+                        // ---- G. A camera move is view state, not an edit ----
+                        // disableAutoSave keeps the saver from rendering this whole wiki
+                        // for each dispatch below; the flush hook under test runs BEFORE
+                        // the saver is reached, so this changes nothing it does.
+                        $tw.config.disableAutoSave = true;
+                        $tw.rootWidget.dispatchEvent({type: "tm-auto-save-wiki"});
+                        check("stroke-flushed", wiki.getTiddlerText(board) === stroke3,
+                            "drawn state reached the store");
+                        clearDirty();
+                        var cameraOnly = boardJson("Test WriteBehind Board", 5, SHAPE3, {point: [120, 40], zoom: 0.5});
+                        wiki.setText(board, undefined, undefined, cameraOnly);
+                        check("viewstate-buffered", wiki.getTiddlerText(board) === stroke3,
+                            "a camera move does not reach the store by itself");
+
+                        // ---- H. A save with nothing else to write holds the camera ----
+                        $tw.rootWidget.dispatchEvent({type: "tm-auto-save-wiki"});
+                        check("viewstate-held-on-idle-autosave", wiki.getTiddlerText(board) === stroke3,
+                            "camera not written when the wiki has nothing to save");
+                        check("viewstate-not-dirty", !bodyDirty(),
+                            "body classes: " + document.body.className);
+
+                        // ---- I. A save that is happening anyway carries it ----
+                        $tw.saverHandler.numChanges = 1;
+                        $tw.saverHandler.updateDirtyStatus();
+                        $tw.rootWidget.dispatchEvent({type: "tm-auto-save-wiki"});
+                        check("viewstate-rides-real-save", wiki.getTiddlerText(board) === cameraOnly,
+                            "camera persisted with the save that had other work");
+
+                        // ---- J. Drawing after a held camera change still saves at once ----
+                        clearDirty();
+                        var drawnAfterCamera = boardJson("Test WriteBehind Board", 6, SHAPE1, {point: [120, 40], zoom: 0.5});
+                        wiki.setText(board, undefined, undefined, drawnAfterCamera);
+                        $tw.rootWidget.dispatchEvent({type: "tm-auto-save-wiki"});
+                        check("stroke-after-camera-flushed", wiki.getTiddlerText(board) === drawnAfterCamera,
+                            "a stroke still flushes immediately");
+
+                        // ---- K. The document's name is derived, not authored ----
+                        // A board that still carries the importer's document name, which
+                        // is the shape a fresh import has when it is first opened.
+                        clearDirty();
+                        var importedName = boardJson("Imported Board", 7, SHAPE1, {point: [120, 40], zoom: 0.5});
+                        wiki.setText(board, undefined, undefined, importedName);
+                        check("docname-buffered", wiki.getTiddlerText(board) === drawnAfterCamera,
+                            "a derived name change does not reach the store by itself");
+                        $tw.rootWidget.dispatchEvent({type: "tm-auto-save-wiki"});
+                        check("docname-held-on-idle-autosave", wiki.getTiddlerText(board) === drawnAfterCamera,
+                            "a board's derived name is not an edit");
+                        check("docname-not-dirty", !bodyDirty(),
+                            "body classes: " + document.body.className);
+
+                        // ---- L. ... and it lands with the next real save ----
+                        $tw.saverHandler.numChanges = 1;
+                        $tw.saverHandler.updateDirtyStatus();
+                        $tw.rootWidget.dispatchEvent({type: "tm-auto-save-wiki"});
+                        check("docname-rides-real-save", wiki.getTiddlerText(board) === importedName,
+                            "derived name persisted with the save that had other work");
+
+                        // Let the queued change events drain. Several writes to one title
+                        // in a single tick coalesce, so this only proves a flush announced
+                        // itself rather than counting them.
                         setTimeout(function() {
-                            check("flush-change-event", changeEvents === 1, "change events: " + changeEvents);
+                            check("flush-change-event", changeEvents >= 1, "change events: " + changeEvents);
                             finish();
-                        }, 100);
+                        }, 150);
                     } catch (e) {
                         results.push("FAIL | exception: " + (e && e.stack ? e.stack : e));
                         finish();
@@ -224,18 +308,37 @@ function buildTestHtml() {
     created: ts,
     modified: ts
   };
-  // Idempotent: if the built wiki already carries the patch (e.g. injected or
-  // regenerated by CI), don't add a duplicate.
-  if (!store.some(t => t.title === patchTiddler.title)) {
-    // Insert the new tiddler just BEFORE the array's closing `]` (the store
-    // body ends with the `]`; appending after it would produce invalid JSON).
-    const lastBracket = html.lastIndexOf("]", storeBodyEnd);
-    html =
-      html.slice(0, lastBracket) +
-      (store.length > 1 ? "," : "") +
-      JSON.stringify(patchTiddler) +
-      html.slice(lastBracket);
+  // Patch the copy the artifact actually boots. Every build carries this patch
+  // inside $:/plugins/xyvir/lithic-patch-whiteboard, and a second tiddler with the
+  // same title does NOT replace it: the plugin's shadow module is the one that
+  // runs, so injecting would test whatever the artifact was built from instead of
+  // this source. Replacing the body inside the plugin is what keeps the run
+  // honest; the top-level fallback is for an artifact without the plugin.
+  let installed = false;
+  const pluginIndex = store.findIndex(t => t.title === "$:/plugins/xyvir/lithic-patch-whiteboard");
+  if (pluginIndex !== -1 && typeof store[pluginIndex].text === "string") {
+    let plugin = null;
+    try {
+      plugin = JSON.parse(store[pluginIndex].text);
+    } catch (e) {
+      plugin = null;
+    }
+    const entry = plugin && plugin.tiddlers && plugin.tiddlers[patchTiddler.title];
+    if (entry) {
+      entry.text = body;
+      store[pluginIndex].text = JSON.stringify(plugin);
+      installed = true;
+    }
   }
+  if (!installed && !store.some(t => t.title === patchTiddler.title)) {
+    store.push(patchTiddler);
+  }
+  // Rewrite the store with every `<` escaped: the JSON sits inside an HTML
+  // script element, so a tiddler body containing `</script>` would end it early.
+  html =
+    html.slice(0, storeBodyStart) +
+    JSON.stringify(store).replace(/</g, "\\u003c") +
+    html.slice(storeBodyEnd);
   if (!html.includes("</body>")) {
     throw new Error("no </body> in " + SRC);
   }

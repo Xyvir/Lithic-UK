@@ -2,7 +2,7 @@ title: $:/Lithic/Patches/Whiteboard/WriteBehind.js
 type: application/javascript
 module-type: startup
 
-/*\
+/*
 title: $:/Lithic/Patches/Whiteboard/WriteBehind.js
 type: application/javascript
 module-type: startup
@@ -27,12 +27,44 @@ on save) when the user actually saves the wiki or closes the board.
 3. The buffer is flushed on pagehide/beforeunload as a crash safety net (this
    also covers the board's final unmount write when the app closes).
 
+Camera moves are view state, not content (see "View state" below).
+
+View state:
+tldraw keeps the camera, the selection and the current page in `pageStates`,
+and bumps a top-level `updatedCount` on every store change, so panning a board,
+zooming it or flipping through an imported PDF looks exactly like drawing one
+to a text-level diff. Entering the layout is enough to produce such a write:
+the board normalizes its document on mount and the first-visit fit moves the
+camera. Those writes used to flush immediately (the widget dispatches
+tm-auto-save-wiki right after its own save), stamping `modified`, firing a
+change event and marking the whole wiki dirty, which is wrong for what is
+really a read: a board used as a picture viewer dirtied the wiki just by being
+looked at.
+
+`document.name` belongs in that set for the same reason, and it is what a fresh
+import hits: the widget sets it to the tiddler's title on every change, so a
+board whose document still carries the importer's name looked like an edit on
+its first open in the layout. The title is the name of record and the widget
+re-derives this one, so it is never authored, and it is written with the next
+real save like the camera.
+
+So a buffered write whose document is unchanged once `updatedCount`,
+`pageStates` and `document.name` are left out is held as view state instead.
+
+- A save that is happening anyway (the wiki is already dirty, or the reader
+  pressed Save) carries the camera along, so the board comes back where it was
+  left.
+- A save that has nothing else to write does not, so panning and zooming never
+  dirty the wiki by themselves.
+
 Trade-offs (strict mode):
 - Until the wiki is saved, other consumers of the board tiddler (<$wb-image>
    widgets, the comptext paste bridge, other open boards) see the last saved
    state, not live strokes. Use the whiteboard layout's Save button to commit.
 - A hard crash before a save loses strokes made since the last save.
-\*/
+- A view-only change (camera, selection, current page, the document's derived
+   name) is written on the next real save, not immediately.
+*/
 (function(){
 "use strict";
 
@@ -46,7 +78,10 @@ exports.startup = function() {
 		return;
 	}
 
+	// title -> the latest text the board asked us to write
 	var buffer = {};
+	// title -> true when that text differs from what was known only in view state
+	var viewOnly = {};
 	var originalSetText = $tw.wiki.setText.bind($tw.wiki);
 
 	function isWhiteboard(title) {
@@ -54,23 +89,93 @@ exports.startup = function() {
 		return !!(tiddler && tiddler.fields.type === "application/tldr");
 	}
 
-	function flushBuffer() {
+	function hasBuffered(title) {
+		return Object.prototype.hasOwnProperty.call(buffer,title);
+	}
+
+	// What the board was last seen holding, so a change can be judged against
+	// the latest one rather than against the store's older copy.
+	function knownText(title) {
+		return hasBuffered(title) ? buffer[title] : $tw.wiki.getTiddlerText(title,"");
+	}
+
+	// The document with everything that is not content left out: tldraw's own
+	// change counter, the per-page view state (camera, selection, current page)
+	// and `document.name`, which the widget re-derives from the tiddler title on
+	// every change. A replacer serializes the rest in one pass, so what is
+	// compared is exactly the board's content however the keys were ordered.
+	function contentOf(text) {
+		var parsed;
+		try {
+			parsed = JSON.parse(text);
+		} catch(e) {
+			return null;
+		}
+		if(!parsed || typeof parsed !== "object") {
+			return null;
+		}
+		return JSON.stringify(parsed,function(key,value) {
+			if(key === "updatedCount" || key === "pageStates") {
+				return undefined;
+			}
+			// `this` is the object holding the key, so this drops the document's own
+			// name and leaves every shape's and page's alone.
+			if(key === "name" && this === parsed.document) {
+				return undefined;
+			}
+			return value;
+		});
+	}
+
+	function isViewOnly(previous,next) {
+		if(!previous) {
+			return false;
+		}
+		var before = contentOf(previous),
+			after = contentOf(next);
+		return before !== null && after !== null && before === after;
+	}
+
+	// Is the wiki already carrying changes a save would write? A camera move is
+	// then free to ride along, because the file is being rewritten anyway.
+	function saveHasContent() {
+		return !$tw.saverHandler || typeof $tw.saverHandler.isDirty !== "function" || $tw.saverHandler.isDirty();
+	}
+
+	function flushBuffer(flushViewState) {
 		var titles = Object.keys(buffer);
 		if(titles.length === 0) {
 			return;
 		}
-		var pending = buffer;
-		buffer = {};
+		var heldText = {},
+			heldViewOnly = {};
 		for(var i = 0; i < titles.length; i++) {
 			var title = titles[i];
+			if(!flushViewState && viewOnly[title]) {
+				heldText[title] = buffer[title];
+				heldViewOnly[title] = true;
+				continue;
+			}
+			var text = buffer[title];
+			delete buffer[title];
+			delete viewOnly[title];
 			if(!$tw.wiki.tiddlerExists(title)) {
 				continue; // board was deleted before the flush
 			}
 			try {
-				originalSetText(title, undefined, undefined, pending[title]);
+				originalSetText(title, undefined, undefined, text);
 			} catch(e) {
 				console.error("[Lithic] Whiteboard write-behind flush failed for " + title, e);
 			}
+		}
+		// Put held view state back, unless a write landed on that board while we
+		// were flushing (it would already carry the newer document).
+		for(var heldTitle in heldText) {
+			if(hasBuffered(heldTitle)) {
+				continue;
+			}
+			buffer[heldTitle] = heldText[heldTitle];
+			viewOnly[heldTitle] = heldViewOnly[heldTitle];
 		}
 	}
 
@@ -84,6 +189,7 @@ exports.startup = function() {
 		}
 		// Text writes to a whiteboard are buffered (the heavy per-stroke path).
 		if(!field || field === "text") {
+			viewOnly[title] = isViewOnly(knownText(title),value);
 			buffer[title] = value;
 			return;
 		}
@@ -104,8 +210,12 @@ exports.startup = function() {
 		$tw.rootWidget.__lithicWriteBehindHooked = true;
 		var originalDispatch = $tw.rootWidget.dispatchEvent;
 		$tw.rootWidget.dispatchEvent = function(event) {
-			if(event && (event.type === "tm-save-wiki" || event.type === "tm-auto-save-wiki")) {
-				flushBuffer();
+			if(event && event.type === "tm-save-wiki") {
+				flushBuffer(true);
+			} else if(event && event.type === "tm-auto-save-wiki") {
+				// The board dispatches this after every camera move too, so only a
+				// save with something else to write carries the camera with it.
+				flushBuffer(saveHasContent());
 			}
 			return originalDispatch.call(this, event);
 		};
@@ -122,9 +232,10 @@ exports.startup = function() {
 		}, 50);
 	}
 
-	// 3. Crash safety net: flush on page teardown.
-	window.addEventListener("pagehide", flushBuffer);
-	window.addEventListener("beforeunload", flushBuffer);
+	// 3. Crash safety net: flush on page teardown, where the page is leaving and
+	// a held camera can no longer dirty anything the reader will see.
+	window.addEventListener("pagehide", function() { flushBuffer(true); });
+	window.addEventListener("beforeunload", function() { flushBuffer(true); });
 };
 
 })();
