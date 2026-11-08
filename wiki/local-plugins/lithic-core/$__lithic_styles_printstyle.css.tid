@@ -92,6 +92,12 @@ type: text/css
         display: none !important;
     }
 
+    /* Hide modal sheets (for example the standalone "unsaved edits" recovery
+       prompt), which are never part of the document being printed */
+    .tc-modal-wrapper {
+        display: none !important;
+    }
+
     /* =======================================================
        2. OPTIMIZE CONTENT DISPLAY & FRAME FIXES
        (Ensures text takes up full page width and removes outlines)
@@ -322,4 +328,18 @@ type: text/css
         -webkit-print-color-adjust: exact !important;
         print-color-adjust: exact !important;
     }
+
+    /* =======================================================
+       14. MINIMUM TOP MARGIN ABOVE THE FIRST LINE
+       (A heading brings its own top margin; plain text brings
+       none, so a page opening with an address or a bare
+       paragraph sat hard against the paper edge. This is the
+       floor for both, and it deliberately overrides the
+       padding shorthand in section 2.)
+       ======================================================= */
+
+    .tc-tiddler-frame {
+        padding-top: 0.75em !important;
+    }
+
 }
