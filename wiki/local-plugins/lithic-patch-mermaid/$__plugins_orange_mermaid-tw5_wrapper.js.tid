@@ -7,7 +7,7 @@ title: $:/plugins/orange/mermaid-tw5/wrapper.js
 type: application/javascript
 module-type: widget
 author: Nathaniel Jones 2017-05-26
-modified: Lithic 2026-10-19 (engine swap: diagrams render through the vendored pele engine instead of mermaid.js; pele owns layout, zoom controls and font-aware sizing; the Mermaid-only rocklib, d3 and render queue are gone; source handling and the self-heal ladder are unchanged)
+modified: Lithic 2026-11-08 (a diagram may declare width="100%" to take the width of its column, less a gutter; every other diagram keeps its natural size; earlier: engine swap: diagrams render through the vendored pele engine instead of mermaid.js; pele owns layout, zoom controls and font-aware sizing; the Mermaid-only rocklib, d3 and render queue are gone; source handling and the self-heal ladder are unchanged)
 */
 (function() {
     // jslint node: true, browser: true
@@ -207,6 +207,37 @@ modified: Lithic 2026-10-19 (engine swap: diagrams render through the vendored p
             '</div>';
     }
 
+    // ---- WIDTH: A DIAGRAM MAY ASK FOR A SHARE OF THE COLUMN ----------------
+    // pele lays a diagram out at its natural width, and only re-renders narrower
+    // when the column cannot hold it, so a chart in a wide river keeps its own
+    // size and leaves the rest of the line empty. Mermaid cannot ask for more:
+    // its useMaxWidth only switches the SVG's max-width style off, and a gantt's
+    // layout knobs move the drawing about inside the same width. So the request
+    // is made here instead, with width="100%" on the widget, and every diagram
+    // that does not ask keeps the size pele gave it. The percentage is a share
+    // of the column, and 100% is the column less a gutter, so the drawing never
+    // presses against the text.
+    var WIDTH_GUTTER = 8;
+
+    function parseDeclaredWidth(value) {
+        if (!value) return null;
+        var match = /^\s*(\d{1,3}(?:\.\d+)?)\s*%\s*$/.exec(String(value));
+        var percent = match ? parseFloat(match[1]) : 0;
+        return percent > 0 && percent <= 100 ? percent : null;
+    }
+
+    function applyDeclaredWidth(container, percent) {
+        var svg = container.querySelector('svg.pele'),
+            box = svg && svg.viewBox && svg.viewBox.baseVal,
+            column = container.clientWidth;
+        if (!box || !box.width || column <= 0) return;
+        // Never wider than the column, whatever the percentage says.
+        var width = Math.min(column * percent / 100, column - 2 * WIDTH_GUTTER);
+        if (width <= 0) return;
+        svg.style.width = Math.round(width) + 'px';
+        svg.style.height = 'auto';
+    }
+
     var MermaidWidget = function(parseTreeNode, options) {
         this.initialise(parseTreeNode, options);
     };
@@ -227,9 +258,11 @@ modified: Lithic 2026-10-19 (engine swap: diagrams render through the vendored p
 
         var divNode = this.document.createElement('div');
         divNode.id = 'mermaid_' + (uniqueID++) + '_' + Math.random().toString(36).slice(2, 7);
-        divNode.className = 'mm-themed' + (hasSelfStyling(source) ? ' mm-user' : '');
+        var declaredWidth = parseDeclaredWidth(this.getAttribute('width', ''));
+        divNode.className = 'mm-themed' + (hasSelfStyling(source) ? ' mm-user' : '') +
+            (declaredWidth === null ? '' : ' mm-sized');
         // Visible version stamp for debugging: which wrapper drew this diagram?
-        divNode.setAttribute('data-mmwrapver', '2026-10-19.pele');
+        divNode.setAttribute('data-mmwrapver', '2026-11-08.pele');
         parent.insertBefore(divNode, nextSibling);
         this.domNodes.push(divNode);
 
@@ -273,6 +306,13 @@ modified: Lithic 2026-10-19 (engine swap: diagrams render through the vendored p
                     fontFamily: fontFamily,
                     // Diagrams are static: no pele zoom buttons, and no wheel, pinch or keyboard zoom.
                     zoom: false,
+                    // Called for the first draw and for every redraw (resize, font
+                    // settle), and each of those mounts a new SVG, so a declared
+                    // width is reapplied here rather than set once at mount.
+                    onRender: function() {
+                        if (declaredWidth === null) return;
+                        applyDeclaredWidth(divNode, declaredWidth);
+                    },
                     onError: function(err) {
                         divNode.innerHTML = errorBox(source, err);
                     }

@@ -27,6 +27,14 @@ div.mm-themed {
     --pele-radius: 4px;
 }
 
+/* A diagram that declares width="100%" takes a share of its column and is
+   centred there; one that keeps its natural width stays where pele put it. */
+div.mm-themed.mm-sized > svg {
+    display: block;
+    margin-left: auto;
+    margin-right: auto;
+}
+
 /* =========================================================
    PRINT: greyscale for all mermaid diagrams
 
