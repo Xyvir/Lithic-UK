@@ -2,6 +2,11 @@ title: $:/plugins/xyvir/ephemeral-runner/codeblock-override
 tags: $:/tags/Global
 
 \widget $codeblock(code, language)
+<$set name="codeBlockRenderer" value={{{ [all[tiddlers+shadows]tag[$:/tags/Lithic/CodeBlockRenderer]field:language<language>first[]] }}}>
+<$list filter="[<codeBlockRenderer>!is[blank]]" variable="ignore">
+<$transclude $tiddler=<<codeBlockRenderer>>/>
+</$list>
+<$list filter="[<codeBlockRenderer>is[blank]]" variable="ignore">
 <div class="wilk-copy-code-button">
 	<$list filter="[<language>match[jspython]]" variable="ignore">
 		<$button tooltip="Run Code" class="tc-btn-invisible run-jspython-btn">&gt;_
@@ -28,4 +33,6 @@ tags: $:/tags/Global
 	</$button>
 	<$genesis $type="$codeblock" $remappable="no" code=<<code>> language=<<language>>/>
 </div>
+</$list>
+</$set>
 \end

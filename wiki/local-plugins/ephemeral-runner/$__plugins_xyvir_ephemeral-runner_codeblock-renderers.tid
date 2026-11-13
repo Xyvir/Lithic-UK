@@ -1,0 +1,7 @@
+title: $:/plugins/xyvir/ephemeral-runner/codeblock-renderers
+
+Implicit code block views. `$:/plugins/xyvir/ephemeral-runner/codeblock-override` draws the chrome and the code for every fenced block, and a language with a view of its own is served by a registry row instead, so adding one is a tiddler rather than another branch in that widget.
+
+Tag a tiddler `$:/tags/Lithic/CodeBlockRenderer`, give it a `language` field, and write its body the way that block should appear. The body is drawn in the block's place with `<<code>>` and `<<language>>` in scope. The first row whose language matches wins, and a language with no row keeps the default view, so an absent row degrades to ordinary code rather than to nothing.
+
+`$:/lithic/codeblock/mermaid` is the first row: a ```mermaid fence renders as `<$mermaid width="95%">`.

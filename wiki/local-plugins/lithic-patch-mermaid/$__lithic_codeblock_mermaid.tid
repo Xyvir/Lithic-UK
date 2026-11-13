@@ -1,0 +1,5 @@
+title: $:/lithic/codeblock/mermaid
+tags: $:/tags/Lithic/CodeBlockRenderer
+language: mermaid
+
+<$mermaid width="95%" text=<<code>>/>
