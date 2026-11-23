@@ -1,12 +1,12 @@
 {
   "jspython": {
-    "source": "jspython-interpreter@2.1.16 dist/jspython-interpreter.min.js",
-    "version": "2.1.16",
-    "url": "https://registry.npmjs.org/jspython-interpreter/-/jspython-interpreter-2.1.16.tgz",
+    "source": "jspython-interpreter@2.2.2 dist/jspython-interpreter.min.js",
+    "version": "2.2.2",
+    "url": "https://registry.npmjs.org/jspython-interpreter/-/jspython-interpreter-2.2.2.tgz",
     "target": "wiki/local-plugins/tw-jspython/jspython-interpreter.js.tid",
-    "upstreamSha256": "fe7149093995ec22cb2bda377bf2e577fc9105c7ecc9551c8526e7f4b9ad5698",
-    "bodySha256": "9f408bfa7546ffa8a47c491abc4b32628947f1f5733422ba8edd912a4d7c695e",
-    "fetchedAt": "2026-10-21T14:22:48.963Z"
+    "upstreamSha256": "2b13c9f8ebf20b5e193848881ce4c85344498e26d3b699507aa52e97c258b4aa",
+    "bodySha256": "904389bf807a564acf7445170bac41095c08db8915e1a72e53a39b5f8f3d0cf3",
+    "fetchedAt": "2026-11-23T16:02:57.418Z"
   },
   "pdfjs": {
     "source": "pdfjs-dist@3.11.174 build/pdf.min.js",
